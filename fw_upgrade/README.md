@@ -8,7 +8,7 @@ This module contains two events regarding firmware upgrade of the device.
 Since a fragment size varies, we have to use dynamic data storage in the events, hence struct dyndata is being used. The way to write a new fragment event can be seen below as an example:
 ```
 /* Allocate event. */
-struct dfu_fragment_event *event = dfu_fragment_event(fragment_size);
+struct dfu_fragment_event *event = new_dfu_fragment_event(fragment_size);
 
 /* Write data with variable size. */
 memcpy(event->dyndata.data, fragment, fragment_size);

@@ -17,7 +17,7 @@ struct dfu_fragment_event {
 	/* Fragment payload and metadata */
 	struct event_dyndata fragment;
 	enum dfu_trigger_type trigger_type;
-    size_t fragment_size;
+	size_t fragment_size;
 	size_t file_size;
 };
 

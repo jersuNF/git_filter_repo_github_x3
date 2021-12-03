@@ -22,7 +22,7 @@ static void reboot_device_fn(struct k_work* item) {
     sys_reboot(SYS_REBOOT_COLD);
 }
 
-int initialize_fw_upgrade_module() {
+int fw_upgrade_module_init() {
     /* Start by setting status event to idle, nothing in progress */  
     struct dfu_status_event *event = new_dfu_status_event();      
     event->trigger_type = DFU_TRIGGER_TYPE_IDLE;
@@ -46,6 +46,10 @@ int initialize_fw_upgrade_module() {
     return err;
 }
 
+/**
+ * @brief Callback function for device firmware upgrade during the process. 
+ * This function is called with a return value if something happens during the write
+ */
 static void dfu_apply_cb(enum dfu_target_evt_id evt) {
     switch (evt) {
         case DFU_TARGET_EVT_TIMEOUT:
@@ -57,6 +61,18 @@ static void dfu_apply_cb(enum dfu_target_evt_id evt) {
     }
 }
 
+/**
+ * @brief Main function for applying fragments to internal flash, and then performing a reboot
+ * by scheduling after N seconds and updating the event so we can shutdown modules if needed before
+ * the reboot.
+ * @param fragment pointer to first byte of the fragment chunk
+ * @param fragment_size size of the fragment received, this size can vary
+ * @param file_size size of the firmware file we want to upgrade, used to compare
+ * how far we've come in the process, so that we can initialize the first fragment correctly
+ * and finish the upgrade correctly.
+ * @param trigger_type what triggered the firmware upgrade, bluetooth or the modem?
+ * @return 0 on success, otherwise negative errno
+ */
 static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 			   size_t file_size,
 			   enum dfu_trigger_type trigger_type)
@@ -140,9 +156,8 @@ static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 }
 
 /**
- * @brief Main event handler function that handles all the events this module subscribes to,
- * basically a large *switch* case using if's and prefedined event triggers to check against given
- * event_header param.
+ * @brief Main event handler function. This simply checks if the firmware fragment received event
+ * is updated, in which case we just forward the fragment data to function above (apply_fragment).
  * @param eh event_header for the if-chain to use to recognize which event triggered
  */
 static bool event_handler(const struct event_header *eh)

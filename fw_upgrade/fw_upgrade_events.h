@@ -2,6 +2,7 @@
 #define _FW_UPGRADE_EVENTS_H_
 
 #include <event_manager.h>
+#include <zephyr.h>
 
 /* Enum for defining where the fragment came from, or more specifically what triggered the DFU process */
 enum dfu_trigger_type {

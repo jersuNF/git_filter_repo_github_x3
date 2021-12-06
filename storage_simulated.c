@@ -16,6 +16,9 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_STORAGE_MODULE_LOG_LEVEL);
 #define SENSOR_SIMULATED_THREAD_PRIORITY 1
 #define SENSOR_SIMULATED_THREAD_SLEEP 500
 
+
+bool initialized_module = false; 
+
 struct storage_msg_data {
 	union {
 		struct storage_event storage;
@@ -30,6 +33,12 @@ static enum state_type {
     STATE_READ,
 	STATE_ERROR
 } state;
+
+static struct module_data self = {
+	.name = "storage",
+	.msg_q = NULL,
+	.supports_shutdown = true,
+};
 
 /* Storage device. Used to identify the External Flash driver in the sensor API. */
 static const struct device *flash_dev;
@@ -119,6 +128,36 @@ static void state_set(enum state_type new_state)
 	state = new_state;
 }
 
+/* Message handler for all states. */
+static void on_all_states(struct storage_msg_data *msg)
+{
+	if (IS_EVENT(msg, app, APP_EVT_START)) {
+		int err;
+
+		err = module_start(&self);
+		if (err) {
+			LOG_ERR("Failed starting module, error: %d", err);
+			SEND_ERROR(gps, GPS_EVT_ERROR, err);
+		}
+
+		state_set(STATE_INIT);
+
+		err = setup();
+		if (err) {
+			LOG_ERR("setup, error: %d", err);
+			SEND_ERROR(gps, GPS_EVT_ERROR_CODE, err);
+		}
+	}
+
+	if (IS_EVENT(msg, util, UTIL_EVT_SHUTDOWN_REQUEST)) {
+		/* The module doesn't have anything to shut down and can
+		 * report back immediately.
+		 */
+		SEND_SHUTDOWN_ACK(gps, GPS_EVT_SHUTDOWN_READY, self.id);
+		state_set(STATE_SHUTDOWN);
+	}
+}
+
 /* Handlers */
 static bool event_handler(const struct event_header *eh)
 {
@@ -138,10 +177,25 @@ static bool event_handler(const struct event_header *eh)
     return false;
 	}
 
-	/* If event is unhandled, unsubscribe. */
-	__ASSERT_NO_MSG(false);
+}
 
-	return false;
+
+/* Message handler for STATE_INIT. */
+static void on_state_init(struct gps_msg_data *msg)
+{
+
+	/* This boolean shuld be passed from a separate event, ref asset tracker */
+	if (!initialized_module) {
+		gps_cfg.timeout = msg->module.data.data.cfg.gps_timeout;
+		state_set(STATE_IDLE);
+	}
+	initialized_module = true;
+}
+
+/* Message handler for STATE_RUNNING. */
+static void on_state_running(struct gps_msg_data *msg)
+{
+	
 }
 
 static void message_handler(struct gps_msg_data *msg)
@@ -154,8 +208,10 @@ static void message_handler(struct gps_msg_data *msg)
 		on_state_running(msg);
 		break;
     case STATE_READ:
+		/* Read from flash */
 		break;
     case STATE_WRITE:
+		/* Write to flash */
 		break;
 	case STATE_ERROR:
 		/* The error state has no transition. */
@@ -170,3 +226,4 @@ static void message_handler(struct gps_msg_data *msg)
 
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, config_event);
+EVENT_SUBSCRIBE(MODULE, storage_event);

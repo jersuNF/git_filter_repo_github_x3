@@ -131,30 +131,17 @@ static void state_set(enum state_type new_state)
 /* Message handler for all states. */
 static void on_all_states(struct storage_msg_data *msg)
 {
-	if (IS_EVENT(msg, app, APP_EVT_START)) {
+	if (IS_EVENT(msg, config, CONFIG_EVT_START)) {
 		int err;
 
 		err = module_start(&self);
 		if (err) {
 			LOG_ERR("Failed starting module, error: %d", err);
-			SEND_ERROR(gps, GPS_EVT_ERROR, err);
+			state_set(STATE_ERROR);
 		}
 
 		state_set(STATE_INIT);
 
-		err = setup();
-		if (err) {
-			LOG_ERR("setup, error: %d", err);
-			SEND_ERROR(gps, GPS_EVT_ERROR_CODE, err);
-		}
-	}
-
-	if (IS_EVENT(msg, util, UTIL_EVT_SHUTDOWN_REQUEST)) {
-		/* The module doesn't have anything to shut down and can
-		 * report back immediately.
-		 */
-		SEND_SHUTDOWN_ACK(gps, GPS_EVT_SHUTDOWN_READY, self.id);
-		state_set(STATE_SHUTDOWN);
 	}
 }
 
@@ -181,21 +168,26 @@ static bool event_handler(const struct event_header *eh)
 
 
 /* Message handler for STATE_INIT. */
-static void on_state_init(struct gps_msg_data *msg)
+static void on_state_init(struct storage_msg_data *msg)
 {
-
 	/* This boolean shuld be passed from a separate event, ref asset tracker */
 	if (!initialized_module) {
-		gps_cfg.timeout = msg->module.data.data.cfg.gps_timeout;
+		// Init flash module 
 		state_set(STATE_IDLE);
 	}
 	initialized_module = true;
 }
 
-/* Message handler for STATE_RUNNING. */
-static void on_state_running(struct gps_msg_data *msg)
+/* Message handler for STATE_IDLE. */
+static void on_state_idle(struct storage_msg_data *msg)
 {
-	
+	if(IS_EVENT(msg, storage, STORAGE_EVT_WRITE_SERIAL_NR)){
+		// Write serial number to flash
+	}
+
+	if(IS_EVENT(msg, storage, STORAGE_EVT_READ_SERIAL_NR)){
+		// Read serial number from flash
+	}
 }
 
 static void message_handler(struct gps_msg_data *msg)
@@ -205,13 +197,7 @@ static void message_handler(struct gps_msg_data *msg)
 		on_state_init(msg);
 		break;
 	case STATE_IDLE:
-		on_state_running(msg);
-		break;
-    case STATE_READ:
-		/* Read from flash */
-		break;
-    case STATE_WRITE:
-		/* Write to flash */
+		on_state_idle(msg);
 		break;
 	case STATE_ERROR:
 		/* The error state has no transition. */

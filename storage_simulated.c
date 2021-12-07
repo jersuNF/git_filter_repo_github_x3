@@ -5,8 +5,8 @@
 #include <zephyr.h>
 
 #include "storage_event.h"
-#include "ack_event.h"
 #include "config_event.h"
+#include "modules_common.h"
 #define MODULE storage_sim
 
 #include <logging/log.h>
@@ -22,6 +22,7 @@ bool initialized_module = false;
 struct storage_msg_data {
 	union {
 		struct storage_event storage;
+		struct config_event config;
 	} module;
 };
 
@@ -29,8 +30,6 @@ struct storage_msg_data {
 static enum state_type {
 	STATE_INIT,
 	STATE_IDLE,
-    STATE_WRITE,
-    STATE_READ,
 	STATE_ERROR
 } state;
 
@@ -54,29 +53,11 @@ static char *state2str(enum state_type new_state)
 		return "STATE_INIT";
 	case STATE_IDLE:
 		return "STATE_IDLE";
-	case STATE_WRITE:
-		return "STATE_WRITE";
-    case STATE_READ:
-		return "STATE_READ";
     case STATE_ERROR:
 		return "STATE_ERROR";
 	default:
 		return "Unknown";
 	}
-}
-
-static void state_set(enum state_type new_state)
-{
-	if (new_state == state) {
-		LOG_DBG("State: %s", state2str(state));
-		return;
-	}
-
-	LOG_DBG("State transition %s --> %s",
-		state2str(state),
-		state2str(new_state));
-
-	state = new_state;
 }
 
 static K_THREAD_STACK_DEFINE(sensor_simulated_thread_stack,
@@ -128,9 +109,17 @@ static void state_set(enum state_type new_state)
 	state = new_state;
 }
 
+/* Setup external flash driver */
+static int setup(void)
+{
+	int err;
+	return 0;
+}
+
 /* Message handler for all states. */
 static void on_all_states(struct storage_msg_data *msg)
 {
+	
 	if (IS_EVENT(msg, config, CONFIG_EVT_START)) {
 		int err;
 
@@ -141,6 +130,9 @@ static void on_all_states(struct storage_msg_data *msg)
 		}
 
 		state_set(STATE_INIT);
+
+		// Setup flash driver
+		err = setup();
 
 	}
 }
@@ -162,8 +154,6 @@ static bool event_handler(const struct event_header *eh)
     init();
 
     return false;
-	}
-
 }
 
 
@@ -182,15 +172,17 @@ static void on_state_init(struct storage_msg_data *msg)
 static void on_state_idle(struct storage_msg_data *msg)
 {
 	if(IS_EVENT(msg, storage, STORAGE_EVT_WRITE_SERIAL_NR)){
+		LOG_INF("Write serial number");
 		// Write serial number to flash
 	}
 
 	if(IS_EVENT(msg, storage, STORAGE_EVT_READ_SERIAL_NR)){
+		LOG_INF("Read serial number");
 		// Read serial number from flash
 	}
 }
 
-static void message_handler(struct gps_msg_data *msg)
+static void message_handler(struct storage_msg_data *msg)
 {
 	switch (state) {
 	case STATE_INIT:

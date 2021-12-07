@@ -3,6 +3,9 @@
  */
 
 #include <zephyr.h>
+#include <drivers/flash.h>
+#include <device.h>
+#include <devicetree.h>
 
 #include "storage_event.h"
 #include "config_event.h"
@@ -16,6 +19,9 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_STORAGE_MODULE_LOG_LEVEL);
 #define SENSOR_SIMULATED_THREAD_PRIORITY 1
 #define SENSOR_SIMULATED_THREAD_SLEEP 500
 
+#define FLASH_DEVICE DT_LABEL(DT_INST(0, nordic_qspi_nor))
+#define FLASH_NAME "JEDEC QSPI-NOR"
+#define FLASH_TEST_REGION_OFFSET 0x00000
 
 bool initialized_module = false; 
 
@@ -60,39 +66,39 @@ static char *state2str(enum state_type new_state)
 	}
 }
 
-static K_THREAD_STACK_DEFINE(sensor_simulated_thread_stack,
-			     SENSOR_SIMULATED_THREAD_STACK_SIZE);
-static struct k_thread sensor_simulated_thread;
+// static K_THREAD_STACK_DEFINE(sensor_simulated_thread_stack,
+// 			     SENSOR_SIMULATED_THREAD_STACK_SIZE);
+// static struct k_thread sensor_simulated_thread;
 
-static int32_t serial_number;
+// static int32_t serial_number = 12345;
 
-static void read_serial_number(void)
-{
+// static void read_serial_number(void)
+// {
 
-	struct storage_event *storage_event = new_storage_event();
+// 	struct storage_event *storage_event = new_storage_event();
 
-	storage_event->data.pvt.serial_number = serial_number;
-	EVENT_SUBMIT(storage_event);
-}
+// 	storage_event->data.pvt.serial_number = serial_number;
+// 	EVENT_SUBMIT(storage_event);
+// }
 
-static void sensor_simulated_thread_fn(void)
-{
-	while (true) {
-		read_serial_number();
-		k_sleep(K_MSEC(SENSOR_SIMULATED_THREAD_SLEEP));
-	}
-}
+// static void sensor_simulated_thread_fn(void)
+// {
+// 	while (true) {
+// 		read_serial_number();
+// 		k_sleep(K_MSEC(SENSOR_SIMULATED_THREAD_SLEEP));
+// 	}
+// }
 
-static void init(void)
-{
-	k_thread_create(&sensor_simulated_thread,
-			sensor_simulated_thread_stack,
-			SENSOR_SIMULATED_THREAD_STACK_SIZE,
-			(k_thread_entry_t)sensor_simulated_thread_fn,
-			NULL, NULL, NULL,
-			SENSOR_SIMULATED_THREAD_PRIORITY,
-			0, K_NO_WAIT);
-}
+// static void init(void)
+// {
+// 	k_thread_create(&sensor_simulated_thread,
+// 			sensor_simulated_thread_stack,
+// 			SENSOR_SIMULATED_THREAD_STACK_SIZE,
+// 			(k_thread_entry_t)sensor_simulated_thread_fn,
+// 			NULL, NULL, NULL,
+// 			SENSOR_SIMULATED_THREAD_PRIORITY,
+// 			0, K_NO_WAIT);
+// }
 
 /* Set state */
 static void state_set(enum state_type new_state)
@@ -110,9 +116,13 @@ static void state_set(enum state_type new_state)
 }
 
 /* Setup external flash driver */
-static int setup(void)
+static int setup_flash_driver(void)
 {
-	int err;
+	flash_dev = device_get_binding(FLASH_DEVICE);
+	if (flash_dev == NULL) {
+		LOG_ERR("Could not get  %s device!", log_strdup(FLASH_NAME));
+		return -ENODEV;
+	}
 	return 0;
 }
 
@@ -126,13 +136,17 @@ static void on_all_states(struct storage_msg_data *msg)
 		err = module_start(&self);
 		if (err) {
 			LOG_ERR("Failed starting module, error: %d", err);
-			state_set(STATE_ERROR);
+			SEND_ERROR(storage, STORAGE_EVT_ERROR_CODE, err);
 		}
 
 		state_set(STATE_INIT);
 
 		// Setup flash driver
-		err = setup();
+		err = setup_flash_driver();
+		if (err) {
+			LOG_ERR("setup flash driver error: %d", err);
+			SEND_ERROR(storage, STORAGE_EVT_ERROR_CODE, err);
+		}
 
 	}
 }
@@ -151,7 +165,7 @@ static bool event_handler(const struct event_header *eh)
 
     }
     /* Init thread to read serial number */
-    init();
+    //init();
 
     return false;
 }
@@ -171,9 +185,16 @@ static void on_state_init(struct storage_msg_data *msg)
 /* Message handler for STATE_IDLE. */
 static void on_state_idle(struct storage_msg_data *msg)
 {
+	int err;
 	if(IS_EVENT(msg, storage, STORAGE_EVT_WRITE_SERIAL_NR)){
-		LOG_INF("Write serial number");
 		// Write serial number to flash
+		uint32_t data = msg->module.storage.data.pvt.serial_number;
+		LOG_INF("Write serial number %d to flash", );
+		err = flash_write(flash_dev, FLASH_TEST_REGION_OFFSET, data, sizeof(data));
+		if (rc != 0) {
+			printf("Flash write failed! %d\n", rc);
+			return;
+		}
 	}
 
 	if(IS_EVENT(msg, storage, STORAGE_EVT_READ_SERIAL_NR)){

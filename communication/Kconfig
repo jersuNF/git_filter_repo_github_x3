@@ -1,0 +1,3 @@
+config NOFENCE_MESSAGE_EXPECTED_MAX_SIZE
+int "Expected maximum size of an encoded NofenceMessage byte array"
+default 723

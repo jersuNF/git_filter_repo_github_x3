@@ -10,6 +10,8 @@
 #include "storage_event.h"
 #include "config_event.h"
 #include "modules_common.h"
+#include <stdio.h>
+#include <string.h>
 #define MODULE storage_sim
 
 #include <logging/log.h>
@@ -21,7 +23,13 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_STORAGE_MODULE_LOG_LEVEL);
 
 #define FLASH_DEVICE DT_LABEL(DT_INST(0, nordic_qspi_nor))
 #define FLASH_NAME "JEDEC QSPI-NOR"
-#define FLASH_TEST_REGION_OFFSET 0x00000
+
+/* Since erase is performed sector-wise we offset settings to write by sector size 4096 */
+#define FLASH_DATA_SERIAL_NUMBER_REGION_OFFSET 	0x000000
+#define FLASH_DATA_FW_VERSION_REGION_OFFSET 	0x001000
+#define FLASH_DATA_IP_ADDRESS_REGION_OFFSET 	0x002000
+
+#define FLASH_SECTOR_SIZE        				4096
 
 bool initialized_module = false; 
 
@@ -65,41 +73,6 @@ static char *state2str(enum state_type new_state)
 		return "Unknown";
 	}
 }
-
-// static K_THREAD_STACK_DEFINE(sensor_simulated_thread_stack,
-// 			     SENSOR_SIMULATED_THREAD_STACK_SIZE);
-// static struct k_thread sensor_simulated_thread;
-
-// static int32_t serial_number = 12345;
-
-// static void read_serial_number(void)
-// {
-
-// 	struct storage_event *storage_event = new_storage_event();
-
-// 	storage_event->data.pvt.serial_number = serial_number;
-// 	EVENT_SUBMIT(storage_event);
-// }
-
-// static void sensor_simulated_thread_fn(void)
-// {
-// 	while (true) {
-// 		read_serial_number();
-// 		k_sleep(K_MSEC(SENSOR_SIMULATED_THREAD_SLEEP));
-// 	}
-// }
-
-// static void init(void)
-// {
-// 	k_thread_create(&sensor_simulated_thread,
-// 			sensor_simulated_thread_stack,
-// 			SENSOR_SIMULATED_THREAD_STACK_SIZE,
-// 			(k_thread_entry_t)sensor_simulated_thread_fn,
-// 			NULL, NULL, NULL,
-// 			SENSOR_SIMULATED_THREAD_PRIORITY,
-// 			0, K_NO_WAIT);
-// }
-
 /* Set state */
 static void state_set(enum state_type new_state)
 {
@@ -123,6 +96,7 @@ static int setup_flash_driver(void)
 		LOG_ERR("Could not get  %s device!", log_strdup(FLASH_NAME));
 		return -ENODEV;
 	}
+	LOG_DBG("Flash driver initialized");
 	return 0;
 }
 
@@ -139,7 +113,7 @@ static void on_all_states(struct storage_msg_data *msg)
 			SEND_ERROR(storage, STORAGE_EVT_ERROR_CODE, err);
 		}
 
-		state_set(STATE_INIT);
+		//state_set(STATE_IDLE);
 
 		// Setup flash driver
 		err = setup_flash_driver();
@@ -147,7 +121,6 @@ static void on_all_states(struct storage_msg_data *msg)
 			LOG_ERR("setup flash driver error: %d", err);
 			SEND_ERROR(storage, STORAGE_EVT_ERROR_CODE, err);
 		}
-
 	}
 }
 
@@ -155,7 +128,7 @@ static void on_all_states(struct storage_msg_data *msg)
 static bool event_handler(const struct event_header *eh)
 {
 
-    /* Receive a configuration event */
+    /* Receive a storage event */
 	if (is_storage_event(eh)) {
 		struct storage_event *event = cast_storage_event(eh);
         struct storage_msg_data msg = {
@@ -164,8 +137,15 @@ static bool event_handler(const struct event_header *eh)
         message_handler(&msg);
 
     }
-    /* Init thread to read serial number */
-    //init();
+	/* Receievd a configuration event */
+	if (is_config_event(eh)) {
+		struct config_event *event = cast_config_event(eh);
+		struct storage_msg_data msg = {
+			.module.config = *event
+		};
+
+		message_handler(&msg);
+	}
 
     return false;
 }
@@ -186,25 +166,114 @@ static void on_state_init(struct storage_msg_data *msg)
 static void on_state_idle(struct storage_msg_data *msg)
 {
 	int err;
+
+	// Write serial number to flash
 	if(IS_EVENT(msg, storage, STORAGE_EVT_WRITE_SERIAL_NR)){
-		// Write serial number to flash
+		LOG_DBG("Erase flash sector");
+		err = flash_erase(flash_dev, FLASH_DATA_SERIAL_NUMBER_REGION_OFFSET, FLASH_SECTOR_SIZE);
+		if (err != 0) {
+			LOG_ERR("Flash erase failed! %d", err);
+			SEND_ERROR(storage, STORAGE_EVT_ERROR_CODE, err);
+		}
+		
 		uint32_t data = msg->module.storage.data.pvt.serial_number;
-		LOG_INF("Write serial number %d to flash", );
-		err = flash_write(flash_dev, FLASH_TEST_REGION_OFFSET, data, sizeof(data));
-		if (rc != 0) {
-			printf("Flash write failed! %d\n", rc);
-			return;
+		LOG_DBG("Write serial number %d to flash", data);
+		err = flash_write(flash_dev, FLASH_DATA_SERIAL_NUMBER_REGION_OFFSET, &data, sizeof(data));
+		if (err != 0) {
+			LOG_ERR("Flash write failed! %d", err);
+			SEND_ERROR(storage, STORAGE_EVT_ERROR_CODE, err);
 		}
 	}
 
+	// Read serial number from flash
 	if(IS_EVENT(msg, storage, STORAGE_EVT_READ_SERIAL_NR)){
-		LOG_INF("Read serial number");
-		// Read serial number from flash
+		uint32_t serial_number;
+		err = flash_read(flash_dev, FLASH_DATA_SERIAL_NUMBER_REGION_OFFSET, &serial_number, sizeof(serial_number));
+		if (err != 0) {
+			LOG_ERR("Flash read failed! %d", err);
+			SEND_ERROR(storage, STORAGE_EVT_ERROR_CODE, err);
+		}
+		LOG_DBG("Read serial number from flash: %d", serial_number);
+		memcpy(&msg->module.storage.data.pvt.serial_number, &serial_number, sizeof(serial_number));
+	}
+
+	// Write fw version to flash
+	if(IS_EVENT(msg, storage, STORAGE_EVT_WRITE_FW_VERSION)){
+		LOG_DBG("Erase flash sector");
+		err = flash_erase(flash_dev, FLASH_DATA_FW_VERSION_REGION_OFFSET, FLASH_SECTOR_SIZE);
+		if (err != 0) {
+			LOG_ERR("Flash erase failed! %d", err);
+			SEND_ERROR(storage, STORAGE_EVT_ERROR_CODE, err);
+		}
+		LOG_DBG("Write fw_version %d-%d-%d to flash", 	msg->module.storage.data.pvt.firmware_version[0], 
+														msg->module.storage.data.pvt.firmware_version[1], 
+														msg->module.storage.data.pvt.firmware_version[2]);
+		err = flash_write(flash_dev, FLASH_DATA_FW_VERSION_REGION_OFFSET, msg->module.storage.data.pvt.firmware_version, 
+				sizeof(msg->module.storage.data.pvt.firmware_version));
+		if (err != 0) {
+			LOG_ERR("Flash write failed! %d", err);
+			SEND_ERROR(storage, STORAGE_EVT_ERROR_CODE, err);
+		}
+	}
+
+	// Read fw version from flash
+	if(IS_EVENT(msg, storage, STORAGE_EVT_READ_FW_VERSION)){
+		uint8_t fw_version[3];
+		err = flash_read(flash_dev, FLASH_DATA_FW_VERSION_REGION_OFFSET, fw_version, sizeof(fw_version));
+		if (err != 0) {
+			LOG_ERR("Flash read failed! %d", err);
+			SEND_ERROR(storage, STORAGE_EVT_ERROR_CODE, err);
+		}
+		LOG_DBG("Read fw_version from flash: %d-%d-%d", fw_version[0], fw_version[1], fw_version[2]);
+		memcpy(msg->module.storage.data.pvt.firmware_version, fw_version, sizeof(fw_version));
+	}
+
+	// Write IP-address to flash
+	if(IS_EVENT(msg, storage, STORAGE_EVT_WRITE_IP_ADDRESS)){
+		LOG_DBG("Erase flash sector");
+		err = flash_erase(flash_dev, FLASH_DATA_IP_ADDRESS_REGION_OFFSET, FLASH_SECTOR_SIZE);
+		if (err != 0) {
+			LOG_ERR("Flash erase failed! %d", err);
+			SEND_ERROR(storage, STORAGE_EVT_ERROR_CODE, err);
+		}
+		LOG_DBG("Write ip-address %d-%d-%d-%d to flash",msg->module.storage.data.pvt.server_ip_address[0], 
+														msg->module.storage.data.pvt.server_ip_address[1], 
+														msg->module.storage.data.pvt.server_ip_address[2],
+														msg->module.storage.data.pvt.server_ip_address[3]);
+		err = flash_write(flash_dev, FLASH_DATA_IP_ADDRESS_REGION_OFFSET, msg->module.storage.data.pvt.server_ip_address, 
+				sizeof(msg->module.storage.data.pvt.server_ip_address));
+		if (err != 0) {
+			LOG_ERR("Flash write failed! %d", err);
+			SEND_ERROR(storage, STORAGE_EVT_ERROR_CODE, err);
+		}
+	}
+
+	// Read IP-address from flash
+	if(IS_EVENT(msg, storage, STORAGE_EVT_READ_IP_ADDRESS)){
+		uint8_t ip_address[4];
+		err = flash_read(flash_dev, FLASH_DATA_IP_ADDRESS_REGION_OFFSET, ip_address, sizeof(ip_address));
+		if (err != 0) {
+			LOG_ERR("Flash read failed! %d", err);
+			SEND_ERROR(storage, STORAGE_EVT_ERROR_CODE, err);
+		}
+		LOG_DBG("Read ip-adderess from flash: [%d.%d.%d.%d]", ip_address[0], ip_address[1], ip_address[2], ip_address[3]);
+		memcpy(msg->module.storage.data.pvt.server_ip_address, ip_address, sizeof(ip_address));
+	}
+
+	// Erase entire 64MB external flash, this might take a while...
+	if(IS_EVENT(msg, storage, STORAGE_EVT_ERASE_FLASH)){
+		LOG_DBG("Erase external flash");
+		err = flash_erase(flash_dev, 0x00000, FLASH_SECTOR_SIZE*2046);
+		if (err != 0) {
+			LOG_ERR("Flash erase failed! %d", err);
+			SEND_ERROR(storage, STORAGE_EVT_ERROR_CODE, err);
+		}
 	}
 }
 
 static void message_handler(struct storage_msg_data *msg)
 {
+
 	switch (state) {
 	case STATE_INIT:
 		on_state_init(msg);
@@ -219,8 +288,9 @@ static void message_handler(struct storage_msg_data *msg)
 		LOG_ERR("Unknown storage module state.");
 		break;
 	}
-
+	
 	on_all_states(msg);
+
 }
 
 EVENT_LISTENER(MODULE, event_handler);

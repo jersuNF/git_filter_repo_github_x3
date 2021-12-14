@@ -174,8 +174,8 @@ static bool event_handler(const struct event_header *eh)
 		struct dfu_fragment_event *event = cast_dfu_fragment_event(eh);
 
 		/* Call function that writes given fragment to internal flash S1 */
-		err = apply_fragment((uint8_t *)&event->fragment,
-				     event->fragment_size, event->file_size,
+		err = apply_fragment((uint8_t *)&event->dyndata.data,
+				     event->dyndata.size, event->file_size,
 				     event->trigger_type);
 		// Error handling in the modules??
 

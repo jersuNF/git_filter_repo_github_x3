@@ -14,11 +14,10 @@ enum dfu_trigger_type {
 struct dfu_fragment_event {
 	struct event_header header;
 
-	/* Fragment payload and metadata */
-	struct event_dyndata fragment;
 	enum dfu_trigger_type trigger_type;
-	size_t fragment_size;
 	size_t file_size;
+	/* Fragment payload and size, is dynamic */
+	struct event_dyndata dyndata;
 };
 
 /* Enum for different dfu statuses, if we want modules to shutdown correctly etc...
@@ -38,7 +37,7 @@ struct dfu_status_event {
 	enum dfu_status_flag dfu_status;
 };
 
-EVENT_TYPE_DECLARE(dfu_fragment_event);
+EVENT_TYPE_DYNDATA_DECLARE(dfu_fragment_event);
 EVENT_TYPE_DECLARE(dfu_status_event);
 
 #endif /* _FW_UPGRADE_EVENTS_H_ */

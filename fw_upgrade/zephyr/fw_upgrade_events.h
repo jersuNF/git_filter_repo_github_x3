@@ -5,7 +5,7 @@
 #ifndef _FW_UPGRADE_EVENTS_H_
 #define _FW_UPGRADE_EVENTS_H_
 
-#include <event_manager.h>
+#include "event_manager.h"
 #include <zephyr.h>
 
 /** @brief Enum for defining where the fragment came from, 

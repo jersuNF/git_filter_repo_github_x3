@@ -10,6 +10,10 @@
 #include "fw_upgrade_events.h"
 #include "fw_upgrade.h"
 #include <power/reboot.h>
+#include <logging/log.h>
+
+#define LOG_MODULE_NAME fw_upgrade
+LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_FW_UPGRADE_LOG_LEVEL);
 
 /* Variable to store the current progress of DFU. Used by the
  *  module to determine if we want to initialize 
@@ -17,7 +21,7 @@
  *  or we want to schedule a reboot 
  *  since we're finished (dfu_bytes_written = file_size).
  */
-static uint64_t dfu_bytes_written = 0;
+static uint32_t dfu_bytes_written = 0;
 
 /* Buffer for mcuboot DFU. */
 static uint8_t mcuboot_buf[CONFIG_DFU_MCUBOOT_FLASH_BUF_SZ] __aligned(4);
@@ -49,7 +53,7 @@ int fw_upgrade_module_init()
 	int err = 0;
 	err = dfu_target_reset();
 	if (err) {
-		LOG_INF("dft_target_reset err: %d", err);
+		LOG_INF("dft_target_reset err: %i", err);
 	}
 	return err;
 }
@@ -100,14 +104,14 @@ static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 		/* Reset all DFU resources to start a clean upgrade. */
 		err = dfu_target_reset();
 		if (err) {
-			LOG_INF("dft_target_reset err: %d", err);
+			LOG_INF("dft_target_reset err: %i", err);
 		}
 
 		LOG_INF("Starting DFU procedure...");
 		err = dfu_target_mcuboot_set_buf(mcuboot_buf,
 						 sizeof(mcuboot_buf));
 		if (err) {
-			LOG_ERR("Failed to set MCUboot flash buffer %d", err);
+			LOG_ERR("Failed to set MCUboot flash buffer %i", err);
 			return err;
 		}
 		int result = dfu_target_img_type(fragment, fragment_size);
@@ -148,7 +152,7 @@ static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 		return err;
 	} else {
 		dfu_bytes_written += fragment_size;
-		LOG_INF("Wrote %d bytes of %d bytes for DFU process",
+		LOG_INF("Wrote %i bytes of %i bytes for DFU process",
 			dfu_bytes_written, file_size);
 	}
 

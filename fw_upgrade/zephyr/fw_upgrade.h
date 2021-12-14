@@ -3,6 +3,7 @@
  */
 
 #include <zephyr.h>
+#include "event_manager.h"
 
 /**
  * @brief Used to initilize the firmware upgrade module. 

@@ -3,6 +3,10 @@
  */
 
 #include "fw_upgrade_events.h"
+#include <logging/log.h>
+
+#define LOG_MODULE_NAME fw_upgrade_events
+LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_FW_UPGRADE_LOG_LEVEL);
 
 /**
  * @brief Fragment recieved event function for debugging/information. 

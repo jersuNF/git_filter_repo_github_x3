@@ -1,11 +1,18 @@
 menu "FW UPGRADE"
 	config SCHEDULE_REBOOT_SECONDS
-	int "How many seconds to wait before we reboot the device, must be high enough to ensure modules shut down correctly"
+	int "Schedule seconds after fw upgrade"
+	help 
+	  How many seconds to wait before we reboot the device, must
+	  be high enough to ensure modules shut down correctly
 	default 5
 
 	config DFU_MCUBOOT_FLASH_BUF_SZ
-        int "Size of buffer used for flash write operations during MCUboot updates"
+        int "Size of buffer used for flash write operations during upgrades"
         default 512
         depends on DFU_TARGET_MCUBOOT
 
+	config FW_UPGRADE_LOG_LEVEL
+		int "0 - 4 for logging. OFF -> ERR -> WRN -> INF -> DBG"
+		default 3
+		depends on LOG
 endmenu

@@ -21,7 +21,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_FW_UPGRADE_LOG_LEVEL);
  *  or we want to schedule a reboot 
  *  since we're finished (dfu_bytes_written = file_size).
  */
-static uint32_t dfu_bytes_written = 0;
+static volatile uint32_t dfu_bytes_written = 0;
 
 /* Buffer for mcuboot DFU. */
 static uint8_t mcuboot_buf[CONFIG_DFU_MCUBOOT_FLASH_BUF_SZ] __aligned(4);
@@ -112,12 +112,13 @@ static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 						 sizeof(mcuboot_buf));
 		if (err) {
 			LOG_ERR("Failed to set MCUboot flash buffer %i", err);
-			return err;
+			goto error_cleanup;
 		}
 		int result = dfu_target_img_type(fragment, fragment_size);
 		if (result < 0) {
 			LOG_ERR("Error selecting image type... %i", result);
-			return result;
+			err = result;
+			goto error_cleanup;
 		}
 		/* Initialize dfu target, by linking callback 
 		 * function for further error handling. 
@@ -125,7 +126,7 @@ static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 		err = dfu_target_init(result, file_size, dfu_apply_cb);
 		if (err) {
 			LOG_ERR("Error initing dfu target... %i", err);
-			return err;
+			goto error_cleanup;
 		};
 		LOG_INF("Selected image type %i", result);
 
@@ -149,7 +150,7 @@ static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 		LOG_ERR("Error writing dfu target... %i", err);
 		dfu_target_done(false);
 		dfu_bytes_written = 0;
-		return err;
+		goto error_cleanup;
 	} else {
 		dfu_bytes_written += fragment_size;
 		LOG_INF("Wrote %i bytes of %i bytes for DFU process",
@@ -157,7 +158,7 @@ static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 	}
 
 	/* Everything went through with the fragment, 
-	 * check if it was the last fragment.
+	 * and check if it was the last fragment.
 	 */
 	if (dfu_bytes_written == file_size) {
 		err = dfu_target_done(true);
@@ -165,7 +166,7 @@ static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 			LOG_ERR("Couldn't deinit dfu resources \
 			after succeeded dfu proccess.. %i",
 				err);
-			return err;
+			goto error_cleanup;
 		}
 
 		/* Will update status event that DFU finished, 
@@ -174,26 +175,32 @@ static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 		 */
 		struct dfu_status_event *dfu_event_done =
 			new_dfu_status_event();
+
 		dfu_event_done->trigger_type = trigger_type;
 		dfu_event_done->dfu_status =
 			DFU_STATUS_SUCCESS_REBOOT_SCHEDULED;
 
-		/* Submit event. */
 		EVENT_SUBMIT(dfu_event_done);
+
 		k_work_reschedule(&reboot_device_work,
 				  K_SECONDS(CONFIG_SCHEDULE_REBOOT_SECONDS));
 
-		/* Set bytes written to 0 if we need to 
-		 * restart upgrade if reboot failed. 
-		 */
+		/* Set to 0 so we're able to re-trigger upgrade if reboot failed. */
 		dfu_bytes_written = 0;
 	} else if (dfu_bytes_written > file_size) {
-		/* Something happened with the DFU process, 
-		 * cannot write more bytes than file_size; handle error accordingly.
-		 */
-		return -EMSGSIZE;
+		/* Received more fragment data than what the file_size told us. */
+		err = -EMSGSIZE;
+		goto error_cleanup;
 	}
 	return 0;
+error_cleanup:
+	/* Make sure that all errors reset the 
+	 * bytes-currently-written counter
+	 * so that we at any time can re-trigger firmware upgrade from
+	 * the start offset.
+	 */
+	dfu_bytes_written = 0;
+	return err;
 }
 
 /**

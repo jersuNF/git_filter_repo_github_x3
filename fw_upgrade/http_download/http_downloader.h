@@ -6,7 +6,6 @@
 #define _HTTP_DOWNLOADER_H_
 
 #include <zephyr.h>
-#include <net/fota_download.h>
 
 /**
  * @brief DL_FILE event IDs.
@@ -49,26 +48,14 @@ struct http_download_event {
 };
 
 /**
- * @brief DL_FILE download asynchronous callback function.
- *
- * @param event_id Event ID.
- *
- */
-typedef void (*http_download_cb)(struct http_download_event *evt);
-
-/**
  * @brief Initializes the dl_file module. 
  *        The passed function is a callback function
  *        in which we recieve raw fragments 
  *        and length of the file being processed.
  *
- * @param[in] cb Pointer to function we want to trigger when we receive
- *               new fragments and events from the download thread. This variable
- *               is overwritten on new initializations.
- *
  * @return 0 on success, otherwise negative error code.
  */
-int http_download_init(http_download_cb cb);
+int http_download_init(void);
 
 /**
  * @brief Cancels current download process.

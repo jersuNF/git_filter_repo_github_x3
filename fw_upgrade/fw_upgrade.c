@@ -11,6 +11,7 @@
 #include "fw_upgrade.h"
 #include <power/reboot.h>
 #include <logging/log.h>
+#include "http_downloader.h"
 
 #define LOG_MODULE_NAME fw_upgrade
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_FW_UPGRADE_LOG_LEVEL);
@@ -55,6 +56,9 @@ int fw_upgrade_module_init()
 	if (err) {
 		LOG_INF("dft_target_reset err: %i", err);
 	}
+
+	/* Initialize the downloader module. */
+	http_download_init();
 	return err;
 }
 

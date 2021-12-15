@@ -2,6 +2,9 @@
  * Copyright (c) 2021 Nofence AS
  */
 
+#ifndef _FW_UPGRADE_H_
+#define _FW_UPGRADE_H_
+
 #include <zephyr.h>
 #include "event_manager.h"
 
@@ -15,3 +18,5 @@
  * @return 0 on success, otherwise negative errno.
  */
 int fw_upgrade_module_init();
+
+#endif /* _FW_UPGRADE_H_ */

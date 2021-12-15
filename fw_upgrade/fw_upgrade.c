@@ -16,10 +16,10 @@
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_FW_UPGRADE_LOG_LEVEL);
 
 /* Variable to store the current progress of DFU. Used by the
- *  module to determine if we want to initialize 
- *  DFU library (dfu_bytes_written = 0), 
- *  or we want to schedule a reboot 
- *  since we're finished (dfu_bytes_written = file_size).
+ * module to determine if we want to initialize 
+ * DFU library (dfu_bytes_written = 0), 
+ * or we want to schedule a reboot 
+ * since we're finished (dfu_bytes_written = file_size).
  */
 static volatile uint32_t dfu_bytes_written = 0;
 
@@ -77,17 +77,17 @@ static void dfu_apply_cb(enum dfu_target_evt_id evt)
 
 /**
  * @brief Main function for applying fragments to internal flash, 
- * and then performing a reboot by scheduling after N seconds 
- * and updating the event to handle modules if needed before the reboot.
+ *        and then performing a reboot by scheduling after N seconds 
+ *        and updating the event to handle modules if needed before the reboot.
  * 
- * @param[in] fragment pointer to first byte of the fragment chunk.
- * @param[in] fragment_size size of the fragment received, this size can vary.
- * @param[in] file_size size of the firmware file we want to upgrade, 
- * 			  used to compare how far we've come in the process, 
- * 			  so that we can initialize the first fragment correctly
- * 			  and finish the upgrade.
- * @param[in] trigger_type what triggered the firmware upgrade, 
- * 			  bluetooth or modem.
+ * @param[in] fragment Pointer to first byte of the fragment chunk.
+ * @param[in] fragment_size Size of the fragment received, this size can vary.
+ * @param[in] file_size Size of the firmware file we want to upgrade, 
+ *                      used to compare how far we've come in the process, 
+ *                      so that we can initialize the first fragment correctly
+ *                      and finish the upgrade.
+ * @param[in] trigger_type What triggered the firmware upgrade, 
+ *                         bluetooth or modem.
  * 
  * @retval 0 on success. Otherwise a negative error code.
  */
@@ -185,10 +185,14 @@ static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 		k_work_reschedule(&reboot_device_work,
 				  K_SECONDS(CONFIG_SCHEDULE_REBOOT_SECONDS));
 
-		/* Set to 0 so we're able to re-trigger upgrade if reboot failed. */
+		/* Set to 0 so we're able to re-trigger 
+		 * upgrade if reboot failed. 
+		 */
 		dfu_bytes_written = 0;
 	} else if (dfu_bytes_written > file_size) {
-		/* Received more fragment data than what the file_size told us. */
+		/* Received more fragment data than 
+		 * what the file_size told us. 
+		 */
 		err = -EMSGSIZE;
 		goto error_cleanup;
 	}
@@ -205,12 +209,12 @@ error_cleanup:
 
 /**
  * @brief Main event handler function. 
- * 		  This simply checks if the firmware fragment received event
- * 		  is updated, in which case we just forward 
- * 		  the fragment data to function above (apply_fragment).
+ *        This simply checks if the firmware fragment received event
+ *        is updated, in which case we just forward 
+ *        the fragment data to function above (apply_fragment).
  * 
- * @param[in] eh event_header for the if-chain to 
- * 		  use to recognize which event triggered.
+ * @param[in] eh Event_header for the if-chain to 
+ *               use to recognize which event triggered.
  * 
  * @return True or false based on if we want to consume the event or not.
  */
@@ -220,7 +224,9 @@ static bool event_handler(const struct event_header *eh)
 	if (is_dfu_fragment_event(eh)) {
 		struct dfu_fragment_event *event = cast_dfu_fragment_event(eh);
 
-		/* Call function that writes given fragment to internal flash S1. */
+		/* Call function that writes 
+		 * given fragment to internal flash S1. 
+		 */
 		err = apply_fragment((uint8_t *)&event->dyndata.data,
 				     event->dyndata.size, event->file_size,
 				     event->trigger_type);

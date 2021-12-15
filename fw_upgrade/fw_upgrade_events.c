@@ -10,8 +10,8 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_FW_UPGRADE_LOG_LEVEL);
 
 /**
  * @brief Fragment recieved event function for debugging/information. 
- * 		  Uses the profiler tool to make it easier to
- * 		  debug what is happening on the event bus.
+ *        Uses the profiler tool to make it easier to
+ *        debug what is happening on the event bus.
  * 
  * @param[in] buf triggered event's log event buffer.
  * @param[in] ev event_header for given event.
@@ -28,8 +28,8 @@ EVENT_TYPE_DEFINE(dfu_fragment_event, true, NULL, &dfu_fragment_event_info);
 
 /**
  * @brief Status event profiler function for debugging/information. 
- * 		  Uses the profiler tool to make it easier to
- * 		  debug what is happening on the event bus.
+ *        Uses the profiler tool to make it easier to
+ *        debug what is happening on the event bus.
  * 
  * @param[in] buf triggered event's log event buffer.
  * @param[in] ev event_header for given event.

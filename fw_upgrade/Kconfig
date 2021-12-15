@@ -16,3 +16,9 @@ menu "FW UPGRADE"
 		default 3
 		depends on LOG
 endmenu
+
+menu "HTTP_DOWNLOADER"
+	config HTTP_DOWNLOAD_SOCKET_RETRIES
+	int "Number of retried is socket connection fails"
+	default 3
+endmenu

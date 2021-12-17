@@ -1,4 +1,4 @@
-# Kconfig options for logger 
+# Copyright (c) 2021 Nofence AS
 
 module = BLE
 module-str = BLE Service

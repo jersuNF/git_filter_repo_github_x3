@@ -1,0 +1,5 @@
+# Kconfig options for logger 
+
+module = BLE
+module-str = BLE Service
+source "subsys/logging/Kconfig.template.log_config"

@@ -38,7 +38,7 @@ int fw_upgrade_module_init()
 {
 	/* Start by setting status event to idle, nothing in progress. */
 	struct dfu_status_event *event = new_dfu_status_event();
-	event->trigger_type = DFU_TRIGGER_TYPE_IDLE;
+	//event->trigger_type = DFU_TRIGGER_TYPE_IDLE;
 	event->dfu_status = DFU_STATUS_IDLE;
 
 	/* Submit event. */
@@ -96,8 +96,7 @@ static void dfu_apply_cb(enum dfu_target_evt_id evt)
  * @retval 0 on success. Otherwise a negative error code.
  */
 static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
-				 size_t file_size,
-				 enum dfu_trigger_type trigger_type)
+				 size_t file_size)
 {
 	int err;
 
@@ -139,7 +138,6 @@ static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 		 */
 		struct dfu_status_event *dfu_event_in_progress =
 			new_dfu_status_event();
-		dfu_event_in_progress->trigger_type = trigger_type;
 		dfu_event_in_progress->dfu_status = DFU_STATUS_IN_PROGRESS;
 
 		/* Submit event. */
@@ -180,7 +178,6 @@ static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 		struct dfu_status_event *dfu_event_done =
 			new_dfu_status_event();
 
-		dfu_event_done->trigger_type = trigger_type;
 		dfu_event_done->dfu_status =
 			DFU_STATUS_SUCCESS_REBOOT_SCHEDULED;
 
@@ -232,8 +229,7 @@ static bool event_handler(const struct event_header *eh)
 		 * given fragment to internal flash S1. 
 		 */
 		err = apply_fragment((uint8_t *)&event->dyndata.data,
-				     event->dyndata.size, event->file_size,
-				     event->trigger_type);
+				     event->dyndata.size, event->file_size);
 		/* Handle errors. */
 		/* Consume event and wait for next update. */
 		return true;

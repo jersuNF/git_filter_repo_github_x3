@@ -98,7 +98,6 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 	event->peer_id = PEER_ID_BLE;
 	event->dev_idx = 0;
-	event->baudrate = 0; /* Don't care */
 	event->conn_state = PEER_STATE_CONNECTED;
 	EVENT_SUBMIT(event);
 }
@@ -119,7 +118,6 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	event->peer_id = PEER_ID_BLE;
 	event->dev_idx = 0;
-	event->baudrate = 0; /* Don't care */
 	event->conn_state = PEER_STATE_DISCONNECTED;
 	EVENT_SUBMIT(event);
 }
@@ -283,6 +281,10 @@ static void bt_ready(int err)
 	}
 }
 
+/** @brief Event handler function
+  * @param eh Pointer to event handler struct
+  * @return true to consume the event (event is not propagated to further listners), false otherwise
+  */
 static bool event_handler(const struct event_header *eh)
 {
 	/* Send debug data */

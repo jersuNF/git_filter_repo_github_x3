@@ -30,6 +30,21 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_LOG_LEVEL);
 
 #define BLE_AD_IDX_FLAGS 0
 #define BLE_AD_IDX_NAME 1
+#define BLE_AD_IDX_MANUFACTURER 2
+
+#define BLE_MFG_IDX_COMPANY_ID 0
+#define BLE_MFG_IDX_NRF_FW_VER 2
+#define BLE_MFG_IDX_SERIAL_NR 4
+#define BLE_MFG_IDX_BATTERY 8
+#define BLE_MFG_IDX_ERROR 9
+#define BLE_MFG_IDX_COLLAR_MODE 10
+#define BLE_MFG_IDX_COLLAR_STATUS 11
+#define BLE_MFG_IDX_FENCE_STATUS 12
+#define BLE_MFG_IDX_VALID_PASTURE 13
+#define BLE_MFG_IDX_FENCE_DEF_VER 14
+#define BLE_MFG_IDX_HW_VER 16
+
+#define NOFENCE_BLUETOOTH_SIG_COMPANY_ID 0x05AB
 
 #define ATT_MIN_PAYLOAD 20 /* Minimum L2CAP MTU minus ATT header */
 
@@ -53,11 +68,15 @@ static atomic_t active;
 
 static char bt_device_name[DEVICE_NAME_LEN + 1] = CONFIG_BT_DEVICE_NAME;
 
+static uint8_t mfg_data[17];
+
 static struct bt_data ad[] = {
 	[BLE_AD_IDX_FLAGS] = BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL |
 							   BT_LE_AD_NO_BREDR)),
 	[BLE_AD_IDX_NAME] = BT_DATA(BT_DATA_NAME_COMPLETE, bt_device_name,
 				    (sizeof(CONFIG_BT_DEVICE_NAME) - 1)),
+	[BLE_AD_IDX_MANUFACTURER] =
+		BT_DATA(BT_DATA_MANUFACTURER_DATA, mfg_data, sizeof(mfg_data)),
 };
 
 static const struct bt_data sd[] = {
@@ -259,6 +278,8 @@ static void name_update(const char *name)
 	}
 }
 
+//static void fw_version_update(uint8)
+
 static void bt_ready(int err)
 {
 	if (err) {
@@ -271,6 +292,30 @@ static void bt_ready(int err)
 		LOG_ERR("bt_nus_init: %d", err);
 		return;
 	}
+
+	// TODO: Fill MFG array with data from EEPROM?
+	mfg_data[BLE_MFG_IDX_COMPANY_ID] =
+		(NOFENCE_BLUETOOTH_SIG_COMPANY_ID & 0x00ff);
+	mfg_data[BLE_MFG_IDX_COMPANY_ID + 1] =
+		(NOFENCE_BLUETOOTH_SIG_COMPANY_ID & 0xff00) >> 8;
+	uint16_t fw_ver = 0x07F9; // NB: Dummy data
+	mfg_data[BLE_MFG_IDX_NRF_FW_VER] = (fw_ver & 0x00ff);
+	mfg_data[BLE_MFG_IDX_NRF_FW_VER + 1] = (fw_ver & 0xff00) >> 8;
+	uint32_t serial_numer = 0x00000001; // NB: Dummy data
+	mfg_data[BLE_MFG_IDX_SERIAL_NR] = (serial_numer & 0x000000ff);
+	mfg_data[BLE_MFG_IDX_SERIAL_NR + 1] = (serial_numer & 0x0000ff00) >> 8;
+	mfg_data[BLE_MFG_IDX_SERIAL_NR + 2] = (serial_numer & 0x00ff0000) >> 16;
+	mfg_data[BLE_MFG_IDX_SERIAL_NR + 3] = (serial_numer & 0xff000000) >> 24;
+	mfg_data[BLE_MFG_IDX_BATTERY] = 0x51; // NB: Dummy data
+	mfg_data[BLE_MFG_IDX_ERROR] = 0x00; // NB: Dummy data
+	mfg_data[BLE_MFG_IDX_COLLAR_MODE] = 0x01; // NB: Dummy data
+	mfg_data[BLE_MFG_IDX_COLLAR_STATUS] = 0x05; // NB: Dummy data
+	mfg_data[BLE_MFG_IDX_FENCE_STATUS] = 0x01; // NB: Dummy data
+	mfg_data[BLE_MFG_IDX_VALID_PASTURE] = 0x01; // NB: Dummy data
+	uint16_t fence_def_ver = 0x00A1; // NB: Dummy data
+	mfg_data[BLE_MFG_IDX_FENCE_DEF_VER] = (fence_def_ver & 0x00ff);
+	mfg_data[BLE_MFG_IDX_FENCE_DEF_VER + 1] = (fence_def_ver & 0xff00) >> 8;
+	mfg_data[BLE_MFG_IDX_HW_VER] = 0x0D; // NB: Dummy data
 
 	atomic_set(&ready, true);
 

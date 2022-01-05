@@ -73,13 +73,12 @@ int http_download_cancel(void);
  * @param[in] file Pointer file path of 
  *                 where we can find the file on given host.
  * @param[in] sec_tag Security tag for tls downloads.
- * @param[in] apn Network access point, NULL if not needed.
  * @param[in] fragment_size Fragment_size we want to download with. 
  *                          Set to 0 to use default (2048).
  * 
  * @return 0 on success, otherwise negative error code.
  */
 int http_download_start(const char *host, const char *file, int sec_tag,
-			const char *apn, size_t fragment_size);
+			size_t fragment_size);
 
 #endif /* _HTTP_DOWNLOADER_H_ */

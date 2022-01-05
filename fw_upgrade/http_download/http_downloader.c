@@ -122,7 +122,7 @@ cleanup_error:
 }
 
 int http_download_start(const char *host, const char *file, int sec_tag,
-			const char *apn, size_t fragment_size)
+			size_t fragment_size)
 {
 	/* We need a static file buffer since the download client structure
 	 * only keeps a pointer to the file buffer. This is problematic when
@@ -135,7 +135,6 @@ int http_download_start(const char *host, const char *file, int sec_tag,
 
 	struct download_client_cfg config = {
 		.sec_tag = sec_tag,
-		.apn = apn,
 		.frag_size_override = fragment_size,
 		.set_tls_hostname = (sec_tag != -1),
 	};

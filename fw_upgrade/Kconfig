@@ -1,4 +1,14 @@
-menu "FW UPGRADE"
+
+menuconfig FW_UPGRADE
+	bool "Firmware upgrade module"
+	default y
+
+menuconfig HTTP_DOWNLOADER
+	bool "Firmware upgrade module"
+	default y
+	depends on FW_UPGRADE
+
+if FW_UPGRADE
 	config SCHEDULE_REBOOT_SECONDS
 	int "Schedule seconds after fw upgrade"
 	help 
@@ -15,10 +25,10 @@ menu "FW UPGRADE"
 		int "0 - 4 for logging. OFF -> ERR -> WRN -> INF -> DBG"
 		default 3
 		depends on LOG
-endmenu
+endif
 
-menu "HTTP_DOWNLOADER"
+if HTTP_DOWNLOADER
 	config HTTP_DOWNLOAD_SOCKET_RETRIES
 	int "Number of retried is socket connection fails"
 	default 3
-endmenu
+endif

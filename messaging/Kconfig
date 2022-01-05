@@ -1,0 +1,14 @@
+
+menuconfig MESSAGING
+	bool "Messaging module"
+	select COLLAR_PROTOCOL
+	help
+	  Enable messaging module
+	default y
+
+
+if MESSAGING
+	config MESSAGING_LOG_LEVEL
+		int "Log level for the messaging module"
+		default 4
+endif

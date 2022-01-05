@@ -1,4 +1,3 @@
-
 menuconfig FW_UPGRADE
 	bool "Firmware upgrade module"
 	default y
@@ -19,7 +18,6 @@ if FW_UPGRADE
 	config DFU_MCUBOOT_FLASH_BUF_SZ
         int "Size of buffer used for flash write operations during upgrades"
         default 512
-        depends on DFU_TARGET_MCUBOOT
 
 	config FW_UPGRADE_LOG_LEVEL
 		int "0 - 4 for logging. OFF -> ERR -> WRN -> INF -> DBG"

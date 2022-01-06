@@ -48,10 +48,8 @@ struct http_download_event {
 };
 
 /**
- * @brief Initializes the dl_file module. 
- *        The passed function is a callback function
- *        in which we recieve raw fragments 
- *        and length of the file being processed.
+ * @brief Initializes the dl_file module. Typically we would pass a
+ *        callback function, but we're using events to send the fragment.
  *
  * @return 0 on success, otherwise negative error code.
  */

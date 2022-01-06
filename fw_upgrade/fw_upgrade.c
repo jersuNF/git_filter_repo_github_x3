@@ -90,10 +90,8 @@ static void dfu_apply_cb(enum dfu_target_evt_id evt)
  *                      used to compare how far we've come in the process, 
  *                      so that we can initialize the first fragment correctly
  *                      and finish the upgrade.
- * @param[in] trigger_type What triggered the firmware upgrade, 
- *                         bluetooth or modem.
  * 
- * @retval 0 on success. Otherwise a negative error code.
+ * @return 0 on success. Otherwise a negative error code.
  */
 static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 				 size_t file_size)
@@ -212,7 +210,7 @@ error_cleanup:
  * @brief Main event handler function. 
  *        This simply checks if the firmware fragment received event
  *        is updated, in which case we just forward 
- *        the fragment data to function above (apply_fragment).
+ *        the fragment data to function apply_fragment.
  * 
  * @param[in] eh Event_header for the if-chain to 
  *               use to recognize which event triggered.

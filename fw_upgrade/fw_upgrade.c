@@ -58,7 +58,7 @@ int fw_upgrade_module_init()
 	}
 
 	/* Initialize the downloader module. */
-	http_download_init();
+	err = http_download_init();
 	return err;
 }
 

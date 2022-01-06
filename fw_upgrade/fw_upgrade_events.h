@@ -62,6 +62,9 @@ struct dfu_status_event {
 
 	enum dfu_trigger_type trigger_type;
 	enum dfu_status_flag dfu_status;
+
+	/** If an error occurs this is not 0. */
+	int dfu_error;
 };
 
 EVENT_TYPE_DYNDATA_DECLARE(dfu_fragment_event);

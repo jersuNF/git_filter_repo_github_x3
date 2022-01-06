@@ -137,6 +137,7 @@ static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 		struct dfu_status_event *dfu_event_in_progress =
 			new_dfu_status_event();
 		dfu_event_in_progress->dfu_status = DFU_STATUS_IN_PROGRESS;
+		dfu_event_in_progress->dfu_error = 0;
 
 		/* Submit event. */
 		EVENT_SUBMIT(dfu_event_in_progress);
@@ -178,6 +179,7 @@ static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
 
 		dfu_event_done->dfu_status =
 			DFU_STATUS_SUCCESS_REBOOT_SCHEDULED;
+		dfu_event_done->dfu_error = 0;
 
 		EVENT_SUBMIT(dfu_event_done);
 
@@ -228,9 +230,17 @@ static bool event_handler(const struct event_header *eh)
 		 */
 		err = apply_fragment((uint8_t *)&event->dyndata.data,
 				     event->dyndata.size, event->file_size);
-		/* Handle errors. */
+		/* Handle errors on status event. */
+		if (err) {
+			struct dfu_status_event *dfu_event_error =
+				new_dfu_status_event();
+
+			dfu_event_error->dfu_error = err;
+
+			EVENT_SUBMIT(dfu_event_error);
+		}
 		/* Consume event and wait for next update. */
-		return true;
+		return false;
 	}
 	return false;
 }

@@ -2,7 +2,6 @@
 
 if (CONFIG_COLLAR_PROTOCOL)
     zephyr_include_directories(.)
-
     # Nanopb definitions
     list (APPEND CMAKE_MODULE_PATH
             "${ZEPHYR_BASE}/../modules/lib/nanopb/extra")

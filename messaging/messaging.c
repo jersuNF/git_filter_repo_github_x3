@@ -126,6 +126,32 @@ static inline void process_lte_proto_event(void)
 		return;
 	}
 	LOG_INF("Processed lte_proto_event.");
+	k_sem_give(&lte_proto_sem);
+
+	///* Decode protobuf message. */
+	//NofenceMessage proto;
+	//err = collar_protocol_decode(ev.buf, ev.len, &proto);
+	//if (err) {
+	//	LOG_ERR("Error decoding protobuf message.");
+	//	return;
+	//}
+	///* Compare firmware version. */
+	//if (proto.m.firmware_upgrade_req.ulVersion > NF_X25_VERSION_NUMBER) {
+	//	/* Start download, fill protobuf here. */
+	//	const char *host = "";
+	//	const char *file = "";
+	//	int sec_tag = 0;
+	//	size_t fragment_size = 512;
+	//	err = http_download_start(host, file, sec_tag, fragment_size);
+	//	if (err) {
+	//		LOG_ERR("Error starting HTTP download request.");
+	//		return;
+	//	}
+	//} else {
+	//	LOG_WRN("Requested firmware version is \
+	//		 same or older than current");
+	//	return;
+	//}
 }
 
 void messaging_thread_fn()

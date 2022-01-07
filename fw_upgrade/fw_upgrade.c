@@ -38,8 +38,8 @@ int fw_upgrade_module_init()
 {
 	/* Start by setting status event to idle, nothing in progress. */
 	struct dfu_status_event *event = new_dfu_status_event();
-	//event->trigger_type = DFU_TRIGGER_TYPE_IDLE;
 	event->dfu_status = DFU_STATUS_IDLE;
+	event->dfu_error = 0;
 
 	/* Submit event. */
 	EVENT_SUBMIT(event);
@@ -79,22 +79,8 @@ static void dfu_apply_cb(enum dfu_target_evt_id evt)
 	}
 }
 
-/**
- * @brief Main function for applying fragments to internal flash, 
- *        and then performing a reboot by scheduling after N seconds 
- *        and updating the event to handle modules if needed before the reboot.
- * 
- * @param[in] fragment Pointer to first byte of the fragment chunk.
- * @param[in] fragment_size Size of the fragment received, this size can vary.
- * @param[in] file_size Size of the firmware file we want to upgrade, 
- *                      used to compare how far we've come in the process, 
- *                      so that we can initialize the first fragment correctly
- *                      and finish the upgrade.
- * 
- * @return 0 on success. Otherwise a negative error code.
- */
-static inline int apply_fragment(uint8_t *fragment, size_t fragment_size,
-				 size_t file_size)
+int apply_fragment(const uint8_t *fragment, size_t fragment_size,
+		   size_t file_size)
 {
 	int err;
 
@@ -207,43 +193,3 @@ error_cleanup:
 	dfu_bytes_written = 0;
 	return err;
 }
-
-/**
- * @brief Main event handler function. 
- *        This simply checks if the firmware fragment received event
- *        is updated, in which case we just forward 
- *        the fragment data to function apply_fragment.
- * 
- * @param[in] eh Event_header for the if-chain to 
- *               use to recognize which event triggered.
- * 
- * @return True or false based on if we want to consume the event or not.
- */
-static bool event_handler(const struct event_header *eh)
-{
-	int err;
-	if (is_dfu_fragment_event(eh)) {
-		struct dfu_fragment_event *event = cast_dfu_fragment_event(eh);
-
-		/* Call function that writes 
-		 * given fragment to internal flash S1. 
-		 */
-		err = apply_fragment((uint8_t *)&event->dyndata.data,
-				     event->dyndata.size, event->file_size);
-		/* Handle errors on status event. */
-		if (err) {
-			struct dfu_status_event *dfu_event_error =
-				new_dfu_status_event();
-
-			dfu_event_error->dfu_error = err;
-
-			EVENT_SUBMIT(dfu_event_error);
-		}
-		/* Consume event and wait for next update. */
-		return false;
-	}
-	return false;
-}
-
-EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE(MODULE, dfu_fragment_event);

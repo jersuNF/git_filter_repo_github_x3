@@ -5,21 +5,23 @@
 #include <zephyr.h>
 #include "messaging.h"
 #include <logging/log.h>
-
+#include "ble_data_event.h"
 #include "collar_protocol.h"
+#include "http_downloader.h"
 
 #define MODULE messaging
 LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
 
-#define MESSAGING_THREAD_STACK_SIZE 800
-#define MESSAGING_THREAD_SLEEP 1000
-#define MESSAGING_THREAD_PRIORITY 1
-//
-//K_MSGQ_DEFINE(messaging_msgq, sizeof(struct dfu_fragment_event),
-//	      CONFIG_MSGQ_FRAGMENT_SIZE, 4);
-//
-//static atomic_t messaging_thread_active;
-//static K_SEM_DEFINE(messaging_thread_sem, 0, 1);
+/* 4 means 4-byte alignment. */
+K_MSGQ_DEFINE(messaging_msgq, sizeof(struct ble_data_event),
+	      CONFIG_MSGQ_BLE_DATA_SIZE, 4);
+
+static atomic_t messaging_thread_active;
+static K_SEM_DEFINE(messaging_thread_sem, 0, 1);
+
+struct k_poll_event events[1] = { K_POLL_EVENT_STATIC_INITIALIZER(
+	K_POLL_TYPE_FIFO_DATA_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY,
+	&messaging_msgq, 0) };
 
 /**
  * @brief Main event handler function. 
@@ -41,11 +43,10 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(MODULE, event_handler);
 
-//
-//void apply_fragment_thread_fn()
-//{
-//}
-//
-//K_THREAD_DEFINE(apply_fragment_thread, CONFIG_MSGQ_APPLY_FRAGMENT_THREAD_SIZE,
-//		apply_fragment_thread_fn, NULL, NULL, NULL,
-//		K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
+void messaging_thread_fn()
+{
+}
+
+K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_SIZE,
+		messaging_thread_fn, NULL, NULL, NULL,
+		CONFIG_MESSAGING_THREAD_PRIORITY, 0, 0);

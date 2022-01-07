@@ -6,6 +6,7 @@
 #include <logging/log.h>
 #include "http_downloader.h"
 #include "fw_upgrade_events.h"
+#include "fw_upgrade.h"
 
 #define LOG_MODULE_NAME http_downloader
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_FW_UPGRADE_LOG_LEVEL);
@@ -15,6 +16,8 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_FW_UPGRADE_LOG_LEVEL);
 
 static struct download_client dlc;
 static int socket_retries_left;
+
+static size_t file_size = 0;
 
 /* Global variable that is needed to keep track of 
  * how many bytes of firmware we've downloaded.
@@ -39,8 +42,6 @@ static int http_download_handler(const struct download_client_evt *event)
 		goto cleanup_error;
 	}
 
-	size_t file_size = 0;
-
 	switch (event->id) {
 	case DOWNLOAD_CLIENT_EVT_FRAGMENT: {
 		if (current_download_file_offset == 0) {
@@ -61,22 +62,15 @@ static int http_download_handler(const struct download_client_evt *event)
 				goto cleanup_error;
 			}
 		}
-		/* Increase the file_offset. */
-		current_download_file_offset += event->fragment.len;
-
-		/* Send fragment to firmware upgrade event handler. */
-		struct dfu_fragment_event *frag_event =
-			new_dfu_fragment_event(event->fragment.len);
-
-		/* Write data with variable size. */
-		memcpy(frag_event->dyndata.data, event->fragment.buf,
-		       event->fragment.len);
-
-		/* Store other variables such as file size etc... */
-		frag_event->file_size = file_size;
-
-		/* Submit event. */
-		EVENT_SUBMIT(frag_event);
+		/* Apply fragment and write to flash, starting the DFU procedure
+		 * if this is the first apply_fragment call. Blocks,
+		 * which stalls the download thread, which is what we want.
+		 */
+		err = apply_fragment(event->fragment.buf, event->fragment.len,
+				     file_size);
+		if (err) {
+			goto cleanup_error;
+		}
 		break;
 	}
 
@@ -116,8 +110,6 @@ static int http_download_handler(const struct download_client_evt *event)
 	}
 	return 0;
 cleanup_error:
-	/* Set file offset to 0 so we can re-trigger dl from scratch later. */
-	current_download_file_offset = 0;
 	return err;
 }
 

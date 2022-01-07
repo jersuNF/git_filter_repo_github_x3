@@ -13,7 +13,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/messaging.c
 ${CMAKE_CURRENT_SOURCE_DIR}/../fw_upgrade/http_download/http_downloader.c
 ${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/ble_data_event.c
 ${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/ble_ctrl_event.c
-${CMAKE_CURRENT_SOURCE_DIR}/../../events/lte/lte_data_event.c
+${CMAKE_CURRENT_SOURCE_DIR}/../../events/lte/lte_proto_event.c
 )
 
 add_dependencies(${ZEPHYR_CURRENT_LIBRARY}

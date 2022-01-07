@@ -5,7 +5,9 @@
 #include <zephyr.h>
 #include "messaging.h"
 #include <logging/log.h>
+#include "ble_ctrl_event.h"
 #include "ble_data_event.h"
+#include "lte_proto_event.h"
 #include "collar_protocol.h"
 #include "http_downloader.h"
 
@@ -13,15 +15,28 @@
 LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
 
 /* 4 means 4-byte alignment. */
-K_MSGQ_DEFINE(messaging_msgq, sizeof(struct ble_data_event),
+K_MSGQ_DEFINE(ble_ctrl_msgq, sizeof(struct ble_ctrl_event),
+	      CONFIG_MSGQ_BLE_CTRL_SIZE, 4);
+K_MSGQ_DEFINE(ble_data_msgq, sizeof(struct ble_data_event),
 	      CONFIG_MSGQ_BLE_DATA_SIZE, 4);
+K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct lte_proto_event),
+	      CONFIG_MSGQ_LTE_PROTO_SIZE, 4);
 
 //static atomic_t messaging_thread_active;
 //static K_SEM_DEFINE(messaging_thread_sem, 0, 1);
 
-struct k_poll_event events[1] = { K_POLL_EVENT_STATIC_INITIALIZER(
-	K_POLL_TYPE_FIFO_DATA_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY,
-	&messaging_msgq, 0) };
+#define NUM_MSGQ_EVENTS 3
+struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_FIFO_DATA_AVAILABLE,
+					K_POLL_MODE_NOTIFY_ONLY, &ble_ctrl_msgq,
+					0),
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_FIFO_DATA_AVAILABLE,
+					K_POLL_MODE_NOTIFY_ONLY, &ble_data_msgq,
+					0),
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_FIFO_DATA_AVAILABLE,
+					K_POLL_MODE_NOTIFY_ONLY,
+					&lte_proto_msgq, 0),
+};
 
 /**
  * @brief Main event handler function. 
@@ -34,7 +49,25 @@ struct k_poll_event events[1] = { K_POLL_EVENT_STATIC_INITIALIZER(
 static bool event_handler(const struct event_header *eh)
 {
 	//int err;
-
+	if (is_ble_ctrl_event(eh)) {
+		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
+		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
+			/* Message queue is full: purge old data & try again */
+			k_msgq_purge(&ble_ctrl_msgq);
+		}
+	}
+	if (is_ble_data_event(eh)) {
+		struct ble_data_event *ev = cast_ble_data_event(eh);
+		while (k_msgq_put(&ble_data_msgq, ev, K_NO_WAIT) != 0) {
+			k_msgq_purge(&ble_data_msgq);
+		}
+	}
+	if (is_lte_proto_event(eh)) {
+		struct lte_proto_event *ev = cast_lte_proto_event(eh);
+		while (k_msgq_put(&lte_proto_msgq, ev, K_NO_WAIT) != 0) {
+			k_msgq_purge(&lte_proto_msgq);
+		}
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -43,8 +76,59 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(MODULE, event_handler);
 
+static inline void process_ble_ctrl_event(void)
+{
+	struct ble_ctrl_event ev;
+
+	int err = k_msgq_get(&ble_ctrl_msgq, &ev, K_NO_WAIT);
+	if (err) {
+		LOG_ERR("Error getting ble_ctrl_event: %d", err);
+		return;
+	}
+	LOG_INF("Processed ble_ctrl_event.");
+}
+
+static inline void process_ble_data_event(void)
+{
+	struct ble_data_event ev;
+
+	int err = k_msgq_get(&ble_data_msgq, &ev, K_NO_WAIT);
+	if (err) {
+		LOG_ERR("Error getting ble_data_event: %d", err);
+		return;
+	}
+	LOG_INF("Processed ble_data_event.");
+}
+
+static inline void process_lte_proto_event(void)
+{
+	struct lte_proto_event ev;
+
+	int err = k_msgq_get(&lte_proto_msgq, &ev, K_NO_WAIT);
+	if (err) {
+		LOG_ERR("Error getting lte_proto_event: %d", err);
+		return;
+	}
+	LOG_INF("Processed lte_proto_event.");
+}
+
 void messaging_thread_fn()
 {
+	int rc = k_poll(msgq_events, NUM_MSGQ_EVENTS, K_FOREVER);
+
+	if (rc == 0) {
+		if (msgq_events[0].state == K_POLL_STATE_FIFO_DATA_AVAILABLE) {
+			process_ble_ctrl_event();
+
+		} else if (msgq_events[1].state ==
+			   K_POLL_STATE_FIFO_DATA_AVAILABLE) {
+			process_ble_data_event();
+
+		} else if (msgq_events[2].state ==
+			   K_POLL_STATE_FIFO_DATA_AVAILABLE) {
+			process_lte_proto_event();
+		}
+	}
 }
 
 K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_SIZE,

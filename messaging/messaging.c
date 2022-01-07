@@ -26,9 +26,6 @@ K_MSGQ_DEFINE(ble_data_msgq, sizeof(struct ble_data_event),
 K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct lte_proto_event),
 	      CONFIG_MSGQ_LTE_PROTO_SIZE, 4);
 
-//static atomic_t messaging_thread_active;
-//static K_SEM_DEFINE(messaging_thread_sem, 0, 1);
-
 #define NUM_MSGQ_EVENTS 3
 struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_FIFO_DATA_AVAILABLE,

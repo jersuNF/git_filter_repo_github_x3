@@ -16,8 +16,8 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
 K_MSGQ_DEFINE(messaging_msgq, sizeof(struct ble_data_event),
 	      CONFIG_MSGQ_BLE_DATA_SIZE, 4);
 
-static atomic_t messaging_thread_active;
-static K_SEM_DEFINE(messaging_thread_sem, 0, 1);
+//static atomic_t messaging_thread_active;
+//static K_SEM_DEFINE(messaging_thread_sem, 0, 1);
 
 struct k_poll_event events[1] = { K_POLL_EVENT_STATIC_INITIALIZER(
 	K_POLL_TYPE_FIFO_DATA_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY,

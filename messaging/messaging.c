@@ -102,6 +102,7 @@ static inline void process_ble_ctrl_event(void)
 		return;
 	}
 	LOG_INF("Processed ble_ctrl_event.");
+	k_sem_give(&ble_ctrl_sem);
 }
 
 static inline void process_ble_data_event(void)
@@ -114,6 +115,7 @@ static inline void process_ble_data_event(void)
 		return;
 	}
 	LOG_INF("Processed ble_data_event.");
+	k_sem_give(&ble_data_sem);
 }
 
 static inline void process_lte_proto_event(void)
@@ -125,7 +127,7 @@ static inline void process_lte_proto_event(void)
 		LOG_ERR("Error getting lte_proto_event: %d", err);
 		return;
 	}
-	LOG_INF("Processed lte_proto_event.");
+	LOG_INF("Processed lte_proto_msgq.");
 	k_sem_give(&lte_proto_sem);
 
 	///* Decode protobuf message. */

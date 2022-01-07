@@ -8,20 +8,18 @@
 
 #include "collar_protocol.h"
 
-#define LOG_MODULE_NAME messaging
-LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_MESSAGING_LOG_LEVEL);
+#define MODULE messaging
+LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
 
-#define MSG_SIMULATED_THREAD_STACK_SIZE 800
-#define MSG_SIMULATED_THREAD_SLEEP 1000
-#define MSG_SIMULATED_THREAD_PRIORITY 1
-
-/* Thread for handling various messages on that appear on the messsage queue. */
-static K_THREAD_STACK_DEFINE(msg_simulated_thread_stack,
-			     MSG_SIMULATED_THREAD_STACK_SIZE);
-
-static struct k_thread msg_simulated_thread;
-
-#define MSG_BUF_SIZE CONFIG_MSG_BUF_SIZE
+#define MESSAGING_THREAD_STACK_SIZE 800
+#define MESSAGING_THREAD_SLEEP 1000
+#define MESSAGING_THREAD_PRIORITY 1
+//
+//K_MSGQ_DEFINE(messaging_msgq, sizeof(struct dfu_fragment_event),
+//	      CONFIG_MSGQ_FRAGMENT_SIZE, 4);
+//
+//static atomic_t messaging_thread_active;
+//static K_SEM_DEFINE(messaging_thread_sem, 0, 1);
 
 /**
  * @brief Main event handler function. 
@@ -33,7 +31,7 @@ static struct k_thread msg_simulated_thread;
  */
 static bool event_handler(const struct event_header *eh)
 {
-	int err;
+	//int err;
 
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
@@ -42,3 +40,12 @@ static bool event_handler(const struct event_header *eh)
 }
 
 EVENT_LISTENER(MODULE, event_handler);
+
+//
+//void apply_fragment_thread_fn()
+//{
+//}
+//
+//K_THREAD_DEFINE(apply_fragment_thread, CONFIG_MSGQ_APPLY_FRAGMENT_THREAD_SIZE,
+//		apply_fragment_thread_fn, NULL, NULL, NULL,
+//		K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);

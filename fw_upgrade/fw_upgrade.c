@@ -13,8 +13,8 @@
 #include <logging/log.h>
 #include "http_downloader.h"
 
-#define LOG_MODULE_NAME fw_upgrade
-LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_FW_UPGRADE_LOG_LEVEL);
+#define MODULE fw_upgrade
+LOG_MODULE_REGISTER(MODULE, CONFIG_FW_UPGRADE_LOG_LEVEL);
 
 /* Variable to store the current progress of DFU. Used by the
  * module to determine if we want to initialize 

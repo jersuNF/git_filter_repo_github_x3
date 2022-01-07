@@ -1,7 +1,5 @@
 /*
- * Copyright (c) 2020 Nordic Semiconductor ASA
- *
- * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+ * Copyright (c) 2021 Nofence AS
  */
 
 #include <zephyr.h>
@@ -15,18 +13,18 @@
 #include "ble_data_event.h"
 #include "msg_data_event.h"
 
+#include "ble_ctrl_event.h"
+
 #include <logging/log.h>
 LOG_MODULE_REGISTER(MODULE, CONFIG_MSG_LOG_LEVEL);
 
-// static void update_counter_handler(struct k_work *work);
-// static struct k_work_delayable update_counter_work;
-
 #define MSG_SIMULATED_THREAD_STACK_SIZE 800
-#define MSG_SIMULATED_THREAD_SLEEP 1000
+#define MSG_SIMULATED_THREAD_SLEEP 2000
 #define MSG_SIMULATED_THREAD_PRIORITY 1
 
-uint16_t counter = 0;
+uint16_t uart_msg_counter = 0;
 
+/* Define thread stack used for message testing */
 static K_THREAD_STACK_DEFINE(msg_simulated_thread_stack,
 			     MSG_SIMULATED_THREAD_STACK_SIZE);
 static struct k_thread msg_simulated_thread;
@@ -49,33 +47,24 @@ static void msg_send(void)
 {
 	struct msg_data_event *event;
 	struct msg_rx_buf *buf;
-	int len = sprintf(&buf, "Message counter %d",
-			  ++counter); // Send dummy data for test
+	int len = sprintf(&buf, "Message counter %d", ++uart_msg_counter);
 	event = new_msg_data_event();
 	event->buf = &buf;
 	event->len = len;
-	EVENT_SUBMIT(event);
+	EVENT_SUBMIT(event); // Submit dummy data for event test
 }
 
 static void msg_simulated_thread_fn(void)
 {
-	while (true) {
+	// Start infinite message simulator
+	while (1) {
 		msg_send();
 		k_sleep(K_MSEC(MSG_SIMULATED_THREAD_SLEEP));
 	}
 }
 
-/** @brief Function called in a worker thread to simulate message send event */
-// static void update_counter_handler(struct k_work *work)
-// {
-// 	if (work) {
-// 		msg_send();
-// 		k_work_reschedule(&update_counter_work, K_SECONDS(1));
-// 	}
-// }
-
-/** @brief Initialize k_work thread. */
-static void init(void)
+/** @brief Initialize ble uart message simulator thread. */
+static void init_msg_uart_simulator(void)
 {
 	k_thread_create(&msg_simulated_thread, msg_simulated_thread_stack,
 			MSG_SIMULATED_THREAD_STACK_SIZE,
@@ -89,8 +78,6 @@ static void init(void)
   */
 static bool event_handler(const struct event_header *eh)
 {
-	int err;
-
 	if (is_msg_data_event(eh)) {
 		const struct msg_data_event *event = cast_msg_data_event(eh);
 		LOG_INF("MSG data event sent. Check data in nRF Connect App");
@@ -110,9 +97,9 @@ static bool event_handler(const struct event_header *eh)
 			cast_module_state_event(eh);
 
 		if (check_state(event, MODULE_ID(main), MODULE_STATE_READY)) {
-			// TODO: Initialize ring buffer here
-			// k_work_init_delayable(&update_counter_work,
-			// 		      update_counter_handler);
+			// TODO: DO initialization of module here.
+			// I.e initialize ring buffer etc.
+			init_msg_uart_simulator(); // Start bt message publish thread
 		}
 
 		return false;
@@ -122,10 +109,9 @@ static bool event_handler(const struct event_header *eh)
 		const struct peer_conn_event *event = cast_peer_conn_event(eh);
 
 		if (event->conn_state == PEER_STATE_CONNECTED) {
-			init(); // Start bt message publish thread
-			//k_work_reschedule(&update_counter_work, K_SECONDS(1));
+			// Bluetooth connected
 		} else {
-			//k_work_cancel(&update_counter_work);
+			// Bluetooth disconnected
 		}
 		return false;
 	}

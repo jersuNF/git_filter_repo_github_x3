@@ -62,6 +62,7 @@ static int http_download_handler(const struct download_client_evt *event)
 				goto cleanup_error;
 			}
 		}
+		current_download_file_offset += event->fragment.len;
 		/* Apply fragment and write to flash, starting the DFU procedure
 		 * if this is the first apply_fragment call. Blocks,
 		 * which stalls the download thread, which is what we want.
@@ -110,6 +111,7 @@ static int http_download_handler(const struct download_client_evt *event)
 	}
 	return 0;
 cleanup_error:
+	current_download_file_offset = 0;
 	return err;
 }
 

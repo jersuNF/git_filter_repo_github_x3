@@ -30,6 +30,10 @@ if MESSAGING
 		  may be supplanted at any time if a cooperative thread, 
 		  or a preemptible thread of higher or equal priority, 
 		  becomes ready.
+		  
+	config PROTO_POLLER_WORK_SEC
+		int "Seconds between modem poll"
+		default 900
 
 	menu "Message Queues"
 		config MSGQ_BLE_CTRL_SIZE

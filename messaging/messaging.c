@@ -38,6 +38,22 @@ struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
 					&lte_proto_msgq, 0),
 };
 
+static struct k_work_delayable modem_poll_work;
+
+void modem_poll_work_fn()
+{
+	/* Add logic for the periodic protobuf modem poller. */
+	k_work_reschedule(&modem_poll_work,
+			  K_SECONDS(CONFIG_PROTO_POLLER_WORK_SEC));
+}
+
+void messaging_module_init(void)
+{
+	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
+	k_work_reschedule(&modem_poll_work,
+			  K_SECONDS(CONFIG_PROTO_POLLER_WORK_SEC));
+}
+
 /**
  * @brief Main event handler function. 
  * 

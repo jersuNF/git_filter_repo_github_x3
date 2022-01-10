@@ -16,6 +16,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_FW_UPGRADE_LOG_LEVEL);
 
 static struct download_client dlc;
 static int socket_retries_left;
+static bool downloading;
 
 static size_t file_size = 0;
 
@@ -111,6 +112,7 @@ static int http_download_handler(const struct download_client_evt *event)
 	}
 	return 0;
 cleanup_error:
+	downloading = false;
 	current_download_file_offset = 0;
 	return err;
 }
@@ -137,6 +139,10 @@ int http_download_start(const char *host, const char *file, int sec_tag,
 		return -EINVAL;
 	}
 
+	if (downloading) {
+		return -EALREADY;
+	}
+
 	socket_retries_left = CONFIG_HTTP_DOWNLOAD_SOCKET_RETRIES;
 
 	strncpy(file_buf, file, sizeof(file_buf));
@@ -151,13 +157,14 @@ int http_download_start(const char *host, const char *file, int sec_tag,
 		download_client_disconnect(&dlc);
 		return err;
 	}
+	downloading = true;
 	return 0;
 }
 
 int http_download_init()
 {
 	current_download_file_offset = 0;
-
+	downloading = false;
 	int err = download_client_init(&dlc, http_download_handler);
 	if (err) {
 		return err;
@@ -183,5 +190,6 @@ int http_download_cancel(void)
 		LOG_ERR("Failed to disconnect: %d", err);
 		return err;
 	}
+	downloading = false;
 	return err;
 }

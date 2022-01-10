@@ -15,8 +15,6 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_ERROR_HANDLER_LOG_LEVEL);
  * @param[in] sender which module triggered the warning.
  * @param[in] code error code from the sender.
  * @param[in] msg custom user message attached to the message. Can be NULL.
- * 
- * @return True or false based on if we want to consume the event or not.
  */
 static inline void process_fatal(enum error_sender_module sender, int code,
 				 char *msg)
@@ -30,8 +28,6 @@ static inline void process_fatal(enum error_sender_module sender, int code,
  * @param[in] sender which module triggered the warning.
  * @param[in] code error code from the sender.
  * @param[in] msg custom user message attached to the message. Can be NULL.
- * 
- * @return True or false based on if we want to consume the event or not.
  */
 static inline void process_error(enum error_sender_module sender, int code,
 				 char *msg)
@@ -45,8 +41,6 @@ static inline void process_error(enum error_sender_module sender, int code,
  * @param[in] sender which module triggered the warning.
  * @param[in] code error code from the sender.
  * @param[in] msg custom user message attached to the message. Can be NULL.
- * 
- * @return True or false based on if we want to consume the event or not.
  */
 static inline void process_warning(enum error_sender_module sender, int code,
 				   char *msg)

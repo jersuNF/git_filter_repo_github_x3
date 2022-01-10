@@ -14,7 +14,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_ERROR_HANDLER_LOG_LEVEL);
  *        See error_event.h for param desc.
  */
 static inline void process_fatal(enum error_sender_module sender, int code,
-				 char *msg)
+				 char *msg, size_t msg_len)
 {
 	/* Process fatal errors here. */
 }
@@ -24,7 +24,7 @@ static inline void process_fatal(enum error_sender_module sender, int code,
  *        See error_event.h for param desc. 
  */
 static inline void process_error(enum error_sender_module sender, int code,
-				 char *msg)
+				 char *msg, size_t msg_len)
 {
 	/* Process normal errors here. */
 }
@@ -33,7 +33,7 @@ static inline void process_error(enum error_sender_module sender, int code,
  * @brief Processing function for warnings. See error_event.h for param desc. 
  */
 static inline void process_warning(enum error_sender_module sender, int code,
-				   char *msg)
+				   char *msg, size_t msg_len)
 {
 	/* Process warnings here. */
 }
@@ -53,13 +53,16 @@ static bool event_handler(const struct event_header *eh)
 		struct error_event *ev = cast_error_event(eh);
 		switch (ev->severity) {
 		case ERR_SEVERITY_FATAL:
-			process_fatal(ev->sender, ev->code, ev->user_message);
+			process_fatal(ev->sender, ev->code, ev->dyndata.data,
+				      ev->dyndata.size);
 			break;
 		case ERR_SEVERITY_ERROR:
-			process_error(ev->sender, ev->code, ev->user_message);
+			process_error(ev->sender, ev->code, ev->dyndata.data,
+				      ev->dyndata.size);
 			break;
 		case ERR_SEVERITY_WARNING:
-			process_warning(ev->sender, ev->code, ev->user_message);
+			process_warning(ev->sender, ev->code, ev->dyndata.data,
+					ev->dyndata.size);
 			break;
 		default:
 			LOG_ERR("Unknown error severity.");

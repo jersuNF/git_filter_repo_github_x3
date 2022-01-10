@@ -11,10 +11,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_ERROR_HANDLER_LOG_LEVEL);
 
 /**
  * @brief Processing function for fatal errors. 
- * 
- * @param[in] sender which module triggered the warning.
- * @param[in] code error code from the sender.
- * @param[in] msg custom user message attached to the message. Can be NULL.
+ *        See error_event.h for param desc.
  */
 static inline void process_fatal(enum error_sender_module sender, int code,
 				 char *msg)
@@ -24,10 +21,7 @@ static inline void process_fatal(enum error_sender_module sender, int code,
 
 /**
  * @brief Processing function for normal errors. 
- * 
- * @param[in] sender which module triggered the warning.
- * @param[in] code error code from the sender.
- * @param[in] msg custom user message attached to the message. Can be NULL.
+ *        See error_event.h for param desc. 
  */
 static inline void process_error(enum error_sender_module sender, int code,
 				 char *msg)
@@ -36,11 +30,7 @@ static inline void process_error(enum error_sender_module sender, int code,
 }
 
 /**
- * @brief Processing function for warnings. 
- * 
- * @param[in] sender which module triggered the warning.
- * @param[in] code error code from the sender.
- * @param[in] msg custom user message attached to the message. Can be NULL.
+ * @brief Processing function for warnings. See error_event.h for param desc. 
  */
 static inline void process_warning(enum error_sender_module sender, int code,
 				   char *msg)

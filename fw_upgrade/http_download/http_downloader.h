@@ -8,46 +8,6 @@
 #include <zephyr.h>
 
 /**
- * @brief DL_FILE event IDs.
- */
-enum http_download_event_id {
-	HTTP_DOWNLOAD_FIRST_FRAGMENT_RECEIVED,
-	HTTP_DOWNLOAD_FRAGMENT_RECEIVED,
-	HTTP_DOWNLOAD_FINISHED,
-	HTTP_DOWNLOAD_FAILED
-};
-
-struct http_download_fragment_payload {
-	/** Pointer to where we find the fragment data. */
-	const void *fragment;
-	/** Size of the fragment received. */
-	size_t fragment_len;
-	/** Start offset of where the fragment is located relative to
-     	* total file size.
-     	*/
-	int file_offset;
-};
-
-/**
- * @brief Download fragment event
- */
-struct http_download_event {
-	/** Event that triggered the callback and 
-	 *  error code from errno.h if event is
-	 *  of the type HTTP_DOWNLOAD_FAILED.
-	 */
-	enum http_download_event_id id;
-	int error_code;
-
-	/** Overall file_size. */
-	size_t file_size;
-	/** Data containing the fragment and fragment size. */
-	struct http_download_fragment_payload data;
-	/** Download progress %. */
-	int progress;
-};
-
-/**
  * @brief Initializes the dl_file module. Typically we would pass a
  *        callback function, but we're using events to send the fragment.
  *

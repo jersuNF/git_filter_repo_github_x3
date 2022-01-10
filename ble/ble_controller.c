@@ -12,7 +12,7 @@
 #include <bluetooth/hci.h>
 #include <bluetooth/services/nus.h>
 
-#define MODULE ble_handler
+#define MODULE ble_controller
 #include "module_state_event.h"
 #include "peer_conn_event.h"
 #include "ble_ctrl_event.h"
@@ -20,7 +20,7 @@
 #include "msg_data_event.h"
 
 #include <logging/log.h>
-LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_LOG_LEVEL);
+LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_CONTROLLER_LOG_LEVEL);
 
 #define BLE_RX_BLOCK_SIZE (CONFIG_BT_L2CAP_TX_MTU - 3)
 #define BLE_RX_BUF_COUNT 4

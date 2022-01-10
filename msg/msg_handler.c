@@ -80,7 +80,7 @@ static bool event_handler(const struct event_header *eh)
 {
 	if (is_msg_data_event(eh)) {
 		const struct msg_data_event *event = cast_msg_data_event(eh);
-		LOG_INF("MSG data event sent. Check data in nRF Connect App");
+		//LOG_INF("MSG data event sent. Check data in nRF Connect App");
 		return true;
 	}
 

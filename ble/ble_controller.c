@@ -43,6 +43,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_CONTROLLER_LOG_LEVEL);
 #define BLE_MFG_IDX_HW_VER 16
 #define BLE_MFG_IDX_ATMEGA_VER 17
 
+#define BLE_MFG_ARR_SIZE 19
 #define NOFENCE_BLUETOOTH_SIG_COMPANY_ID 0x05AB
 
 #define ATT_MIN_PAYLOAD 20 /* Minimum L2CAP MTU minus ATT header */
@@ -80,7 +81,7 @@ static uint16_t current_fence_def_ver = 0x00A1; // NB: Dummy data
 static uint8_t current_hw_ver = 0x0D; // NB: Dummy data
 static uint16_t atmega_ver = 0xFFFF; // NB: Not in use, needed for App to work.
 
-static uint8_t mfg_data[19];
+static uint8_t mfg_data[BLE_MFG_ARR_SIZE];
 
 static struct bt_data ad[] = {
 	[BLE_AD_IDX_FLAGS] = BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL |
@@ -482,7 +483,8 @@ static void bt_ready(int err)
 	}
 }
 
-/** @brief Event handler function
+/** 
+ * @brief Event handler function
  * @param[in] eh Pointer to event handler struct
  * @return true to consume the event (event is not propagated to further
  * listners), false otherwise

@@ -2,16 +2,16 @@
  * Copyright (c) 2021 Nofence AS
  */
 
+#include <kernel.h>
+#include <stdio.h>
+#include <sys/ring_buffer.h>
 #include <zephyr.h>
 #include <zephyr/types.h>
-#include <kernel.h>
-#include <sys/ring_buffer.h>
-
 #define MODULE msg_handler
-#include "module_state_event.h"
-#include "peer_conn_event.h"
 #include "ble_data_event.h"
+#include "module_state_event.h"
 #include "msg_data_event.h"
+#include "peer_conn_event.h"
 
 #include "ble_ctrl_event.h"
 
@@ -73,14 +73,15 @@ static void init_msg_uart_simulator(void)
 }
 
 /** @brief Event handler function
-  * @param eh Pointer to event handler struct
-  * @return true to consume the event (event is not propagated to further listners), false otherwise
-  */
+ * @param eh Pointer to event handler struct
+ * @return true to consume the event (event is not propagated to further
+ * listners), false otherwise
+ */
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_msg_data_event(eh)) {
 		const struct msg_data_event *event = cast_msg_data_event(eh);
-		//LOG_INF("MSG data event sent. Check data in nRF Connect App");
+		// LOG_INF("MSG data event sent. Check data in nRF Connect App");
 		return true;
 	}
 
@@ -99,7 +100,7 @@ static bool event_handler(const struct event_header *eh)
 		if (check_state(event, MODULE_ID(main), MODULE_STATE_READY)) {
 			// TODO: DO initialization of module here.
 			// I.e initialize ring buffer etc.
-			init_msg_uart_simulator(); // Start bt message publish thread
+			// init_msg_uart_simulator(); // Start bt message publish thread
 		}
 
 		return false;

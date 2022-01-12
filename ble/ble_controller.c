@@ -2,24 +2,23 @@
  * Copyright (c) 2021 Nofence AS
  */
 
-#include <zephyr.h>
-#include <zephyr/types.h>
-#include <sys/ring_buffer.h>
-
 #include <bluetooth/bluetooth.h>
-#include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
 #include <bluetooth/hci.h>
 #include <bluetooth/services/nus.h>
+#include <bluetooth/uuid.h>
+#include <sys/ring_buffer.h>
+#include <zephyr.h>
+#include <zephyr/types.h>
 
 #define MODULE ble_controller
-#include "module_state_event.h"
-#include "peer_conn_event.h"
+#include <logging/log.h>
+
 #include "ble_ctrl_event.h"
 #include "ble_data_event.h"
+#include "module_state_event.h"
 #include "msg_data_event.h"
-
-#include <logging/log.h>
+#include "peer_conn_event.h"
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_CONTROLLER_LOG_LEVEL);
 
 #define BLE_RX_BLOCK_SIZE (CONFIG_BT_L2CAP_TX_MTU - 3)
@@ -103,7 +102,7 @@ static const struct bt_data sd[] = {
  * @param[in] conn bluetooth connection object
  * @param[in] err Error
  * @param[in] params Pointer to GATT Exchange MTU parameters
- *                 
+ *
  */
 static void exchange_func(struct bt_conn *conn, uint8_t err,
 			  struct bt_gatt_exchange_params *params)
@@ -115,7 +114,7 @@ static void exchange_func(struct bt_conn *conn, uint8_t err,
 
 /**
  * @brief Callback function called when BT connection is established
- *           
+ *
  */
 static void connected(struct bt_conn *conn, uint8_t err)
 {
@@ -149,7 +148,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 /**
  * @brief Callback function when bluetooth is disconnected
- *           
+ *
  */
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
@@ -179,7 +178,7 @@ static struct bt_conn_cb conn_callbacks = {
 /**
  * @brief Work function to send data from rx ring buffer with bt nus
  * @param[in] work work item
- *                 
+ *
  */
 static void bt_send_work_handler(struct k_work *work)
 {
@@ -218,7 +217,7 @@ static void bt_send_work_handler(struct k_work *work)
  * @param[in] conn pointer to bt_conn object
  * @param[in] data pointer to data object
  * @param[in] len length of data received
- *                 
+ *
  */
 static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data,
 			  uint16_t len)
@@ -255,7 +254,7 @@ static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data,
  * @brief Callback on bluetooth send. Submit bt_send_work item to initiate
  * bt_send_work_handler
  * @param[in] conn pointer to bt_conn object
- *                 
+ *
  */
 static void bt_sent_cb(struct bt_conn *conn)
 {
@@ -273,7 +272,7 @@ static struct bt_nus_cb nus_cb = {
 
 /**
  * @brief Start bluetooth advertisement with configured parameters,
- * advertise response and scan response array.     
+ * advertise response and scan response array.
  */
 static void adv_start(void)
 {
@@ -298,7 +297,7 @@ static void adv_start(void)
 }
 
 /**
- * @brief Stop bluetooth advertisement. Set module state to standby.  
+ * @brief Stop bluetooth advertisement. Set module state to standby.
  */
 static void adv_stop(void)
 {
@@ -314,7 +313,7 @@ static void adv_stop(void)
 
 /**
  * @brief Function to update battery level in advertising array
- * @param[in] battery_precentage battery level          
+ * @param[in] battery_precentage battery level
  */
 static void battery_update(uint8_t battery_precentage)
 {
@@ -331,7 +330,7 @@ static void battery_update(uint8_t battery_precentage)
 
 /**
  * @brief Function to update error flag in advertising array
- * @param[in] error_flags 0 is no erros, 1 means error available          
+ * @param[in] error_flags 0 is no erros, 1 means error available
  */
 static void error_flag_update(uint8_t error_flags)
 {
@@ -348,7 +347,7 @@ static void error_flag_update(uint8_t error_flags)
 
 /**
  * @brief Function to update collar mode in advertising array
- * @param[in] collar_mode where 0 is normal mode, 1 is teach mode         
+ * @param[in] collar_mode where 0 is normal mode, 1 is teach mode
  */
 static void collar_mode_update(uint8_t collar_mode)
 {
@@ -365,7 +364,7 @@ static void collar_mode_update(uint8_t collar_mode)
 
 /**
  * @brief Function to update collar status in advertising array
- * @param[in] collar_status      
+ * @param[in] collar_status
  */
 static void collar_status_update(uint8_t collar_status)
 {
@@ -382,7 +381,7 @@ static void collar_status_update(uint8_t collar_status)
 
 /**
  * @brief Function to update fence status in advertising array
- * @param[in] fence_status where 1 is fence status normal         
+ * @param[in] fence_status where 1 is fence status normal
  */
 static void fence_status_update(uint8_t fence_status)
 {
@@ -399,7 +398,7 @@ static void fence_status_update(uint8_t fence_status)
 
 /**
  * @brief Function to update status of valid pasture in advertising array
- * @param[in] valid_pasture where 0 is false and 1 is true         
+ * @param[in] valid_pasture where 0 is false and 1 is true
  */
 static void pasture_update(uint8_t valid_pasture)
 {
@@ -416,7 +415,7 @@ static void pasture_update(uint8_t valid_pasture)
 
 /**
  * @brief Function to update fence definition version in advertising array
- * @param[in] fence_def_ver version number     
+ * @param[in] fence_def_ver version number
  */
 static void fence_def_ver_update(uint16_t fence_def_ver)
 {
@@ -433,7 +432,7 @@ static void fence_def_ver_update(uint16_t fence_def_ver)
 /**
  * @brief Function to initialize bt_nus and data in manufacture advertisement
  * array
- * @param[in] err error code      
+ * @param[in] err error code
  */
 static void bt_ready(int err)
 {
@@ -484,9 +483,10 @@ static void bt_ready(int err)
 }
 
 /** @brief Event handler function
-  * @param[in] eh Pointer to event handler struct
-  * @return true to consume the event (event is not propagated to further listners), false otherwise
-  */
+ * @param[in] eh Pointer to event handler struct
+ * @return true to consume the event (event is not propagated to further
+ * listners), false otherwise
+ */
 static bool event_handler(const struct event_header *eh)
 {
 	/* Send debug data */

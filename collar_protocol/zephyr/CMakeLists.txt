@@ -2,10 +2,9 @@
 
 if (CONFIG_COLLAR_PROTOCOL)
     zephyr_include_directories(.)
-
     # Nanopb definitions
     list (APPEND CMAKE_MODULE_PATH
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../modules/lib/nanopb/extra")
+            "${ZEPHYR_BASE}/../modules/lib/nanopb/extra")
 
     find_package(Nanopb REQUIRED)
     include_directories(${NANOPB_INCLUDE_DIRS})
@@ -16,7 +15,7 @@ if (CONFIG_COLLAR_PROTOCOL)
     
     # Pick up embedded protocol buffer files from external git project
     set(COLLAR_PROTOCOL_DIR
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../collar-protocol
+            ${ZEPHYR_BASE}/../collar-protocol
             )
 
     nanopb_generate_cpp(PROTO_SRCS PROTO_HDRS

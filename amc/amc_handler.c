@@ -40,7 +40,7 @@ static struct k_work calc_work;
  *        in which case speed does not matter, as well as not
  *        needing the continuity as the GNSS data does.
  */
-static inline void submit_request_fencedata(void)
+void submit_request_fencedata(void)
 {
 	struct request_fencedata_event *req_fd_e =
 		new_request_fencedata_event();
@@ -56,7 +56,7 @@ static inline void submit_request_fencedata(void)
  *        Up for discussion because it might be too slow, and perhaps could
  *        be better solutions for this continous/periodic data transfer.
  */
-static inline void submit_request_gnssdata(void)
+void submit_request_gnssdata(void)
 {
 	struct request_gnssdata_event *req_gd_e = new_request_gnssdata_event();
 
@@ -73,6 +73,44 @@ static inline void submit_request_gnssdata(void)
 void calculate_work_fn(struct k_work *item)
 {
 	LOG_INF("Compares fencedata and gnss data here.");
+
+	/* At the moment, we just play the welcome sound everytime we get GNSS
+	 * data, but this is just to test if everything is linked together.
+	 * In the future, this function will contain logic that compares the
+	 * cached fencedata, cached gnssdata and trigger sound events that our
+	 * unit test can subscribe to.
+	 */
+
+	/** @warning The below section MUST be removed and is 
+	 *           only correlated to current
+	 *           unit test to see that the shell work. Its a simple
+	 *           algorithm that checks if if every content of 
+	 *           both fencedata and gnss data is equal and 
+	 *           0xDE or 0xAE respectively. Plays a sound the unit test
+	 *           subscribes to if its correct.
+	 */
+	bool fencedata_correct = true;
+	for (int i = 0; i < CONFIG_STATIC_FENCEDATA_SIZE; i++) {
+		if (cached_fencedata[i] == 0xDE ||
+		    cached_fencedata[i] == 0xAE) {
+			continue;
+		}
+		fencedata_correct = false;
+	}
+
+	bool gnssdata_correct = true;
+	for (int i = 0; i < CONFIG_STATIC_GNSSDATA_SIZE; i++) {
+		if (cached_gnssdata[i] == 0xDE || cached_gnssdata[i] == 0xAE) {
+			continue;
+		}
+		gnssdata_correct = false;
+	}
+
+	if (fencedata_correct && gnssdata_correct) {
+		struct sound_event *s_ev = new_sound_event();
+		s_ev->type = SND_WELCOME;
+		EVENT_SUBMIT(s_ev);
+	}
 }
 
 void amc_module_init(void)

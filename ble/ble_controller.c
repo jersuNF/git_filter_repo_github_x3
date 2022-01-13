@@ -483,6 +483,23 @@ static void bt_ready(int err)
 	}
 }
 
+int ble_module_init()
+{
+	int err;
+
+	atomic_set(&active, false);
+
+	nus_max_send_len = ATT_MIN_PAYLOAD;
+
+	err = bt_enable(bt_ready);
+	if (err) {
+		LOG_ERR("bt_enable: %d", err);
+		return false;
+	}
+
+	bt_conn_cb_register(&conn_callbacks);
+}
+
 /** 
  * @brief Event handler function
  * @param[in] eh Pointer to event handler struct
@@ -575,28 +592,17 @@ static bool event_handler(const struct event_header *eh)
 	}
 
 	/* Reveived module state event */
-	if (is_module_state_event(eh)) {
-		const struct module_state_event *event =
-			cast_module_state_event(eh);
+	// TODO: This block could be reinitialized with a power manager module
+	// if (is_module_state_event(eh)) {
+	// 	const struct module_state_event *event =
+	// 		cast_module_state_event(eh);
 
-		if (check_state(event, MODULE_ID(main), MODULE_STATE_READY)) {
-			int err;
+	// 	if (check_state(event, MODULE_ID(main), MODULE_STATE_READY)) {
+	// 		ble_module_init();
+	// 	}
 
-			atomic_set(&active, false);
-
-			nus_max_send_len = ATT_MIN_PAYLOAD;
-
-			err = bt_enable(bt_ready);
-			if (err) {
-				LOG_ERR("bt_enable: %d", err);
-				return false;
-			}
-
-			bt_conn_cb_register(&conn_callbacks);
-		}
-
-		return false;
-	}
+	// 	return false;
+	// }
 
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);

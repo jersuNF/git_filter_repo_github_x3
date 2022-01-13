@@ -92,7 +92,7 @@ void calculate_work_fn(struct k_work *item)
 	bool fencedata_correct = true;
 	for (int i = 0; i < CONFIG_STATIC_FENCEDATA_SIZE; i++) {
 		if (cached_fencedata[i] == 0xDE ||
-		    cached_fencedata[i] == 0xAE) {
+		    cached_fencedata[i] == 0xAD) {
 			continue;
 		}
 		fencedata_correct = false;
@@ -100,7 +100,7 @@ void calculate_work_fn(struct k_work *item)
 
 	bool gnssdata_correct = true;
 	for (int i = 0; i < CONFIG_STATIC_GNSSDATA_SIZE; i++) {
-		if (cached_gnssdata[i] == 0xDE || cached_gnssdata[i] == 0xAE) {
+		if (cached_gnssdata[i] == 0xDE || cached_gnssdata[i] == 0xAD) {
 			continue;
 		}
 		gnssdata_correct = false;

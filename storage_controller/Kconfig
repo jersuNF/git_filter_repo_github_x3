@@ -1,0 +1,11 @@
+menuconfig STORAGE_CONTROLLER
+        bool "Enable storage controller module"
+        default y
+
+if STORAGE_CONTROLLER
+
+	config STORAGE_CONTROLLER_LOG_LEVEL
+		int "0 - 4 for logging. OFF -> ERR -> WRN -> INF -> DBG"
+		default 3
+		depends on LOG
+endif

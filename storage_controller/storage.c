@@ -15,7 +15,7 @@
 #define MODULE storage_sim
 
 #include <logging/log.h>
-LOG_MODULE_REGISTER(MODULE, CONFIG_STORAGE_MODULE_LOG_LEVEL);
+LOG_MODULE_REGISTER(MODULE, CONFIG_STORAGE_CONTROLLER_LOG_LEVEL);
 
 #define SENSOR_SIMULATED_THREAD_STACK_SIZE 800
 #define SENSOR_SIMULATED_THREAD_PRIORITY 1
@@ -133,11 +133,14 @@ static void on_all_states(struct storage_msg_data *msg)
 }
 
 /**
- * @brief Main event handler function that handles all the events this module subscribes to,
- * basically a large *switch* case using if's and prefedined event triggers to check against given
- * event_header param.
- * @param eh event_header for the if-chain to use to recognize which event triggered
+ * @brief Main event handler function. 
+ * 
+ * @param[in] eh Event_header for the if-chain to 
+ *               use to recognize which event triggered.
+ * 
+ * @return True or false based on if we want to consume the event or not.
  */
+
 static bool event_handler(const struct event_header *eh)
 {
 	/* Receive a storage event */

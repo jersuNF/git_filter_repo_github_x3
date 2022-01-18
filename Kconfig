@@ -1,9 +1,0 @@
-# Kconfig options for logger 
-
-module = STORAGE_MODULE
-module-str = STORAGE module
-source "subsys/logging/Kconfig.template.log_config"
-
-module = MODULES_COMMON
-module-str = Common modules
-source "subsys/logging/Kconfig.template.log_config"

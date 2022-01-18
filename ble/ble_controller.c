@@ -18,7 +18,9 @@
 #include "ble_data_event.h"
 #include "module_state_event.h"
 #include "msg_data_event.h"
-#include "peer_conn_event.h"
+#include "ble_conn_event.h"
+#include "ble_controller.h"
+
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_CONTROLLER_LOG_LEVEL);
 
 #define BLE_RX_BLOCK_SIZE (CONFIG_BT_L2CAP_TX_MTU - 3)
@@ -69,16 +71,16 @@ static atomic_t active;
 static char bt_device_name[DEVICE_NAME_LEN + 1] = CONFIG_BT_DEVICE_NAME;
 
 // Shaddow register. Should be initialized with data from EEPROM or FLASH
-static uint16_t current_fw_ver = 0x07F9; // NB: Dummy data
-static uint32_t current_serial_numer = 0x00000001; // NB: Dummy data
-static uint8_t current_battery_level = 0x81; // NB: Dummy data
-static uint8_t current_error_flags = 0x00; // NB: Dummy data
-static uint8_t current_collar_mode = 0x01; // NB: Dummy data
-static uint8_t current_collar_status = 0x05; // NB: Dummy data
-static uint8_t current_fence_status = 0x01; // NB: Dummy data
-static uint8_t current_valid_pasture = 0x01; // NB: Dummy data
-static uint16_t current_fence_def_ver = 0x00A1; // NB: Dummy data
-static uint8_t current_hw_ver = 0x0D; // NB: Dummy data
+static uint16_t current_fw_ver = CONFIG_NOFENCE_FIRMWARE_NUMBER;
+static uint32_t current_serial_numer = CONFIG_NOFENCE_SERIAL_NUMBER;
+static uint8_t current_battery_level;
+static uint8_t current_error_flags;
+static uint8_t current_collar_mode;
+static uint8_t current_collar_status;
+static uint8_t current_fence_status;
+static uint8_t current_valid_pasture;
+static uint16_t current_fence_def_ver;
+static uint8_t current_hw_ver;
 static uint16_t atmega_ver = 0xFFFF; // NB: Not in use, needed for App to work.
 
 static uint8_t mfg_data[BLE_MFG_ARR_SIZE];
@@ -139,11 +141,8 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 	ring_buf_reset(&ble_tx_ring_buf);
 
-	struct peer_conn_event *event = new_peer_conn_event();
-
-	event->peer_id = PEER_ID_BLE;
-	event->dev_idx = 0;
-	event->conn_state = PEER_STATE_CONNECTED;
+	struct ble_conn_event *event = new_ble_conn_event();
+	event->conn_state = BLE_STATE_CONNECTED;
 	EVENT_SUBMIT(event);
 }
 
@@ -163,11 +162,8 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 		current_conn = NULL;
 	}
 
-	struct peer_conn_event *event = new_peer_conn_event();
-
-	event->peer_id = PEER_ID_BLE;
-	event->dev_idx = 0;
-	event->conn_state = PEER_STATE_DISCONNECTED;
+	struct ble_conn_event *event = new_ble_conn_event();
+	event->conn_state = BLE_STATE_DISCONNECTED;
 	EVENT_SUBMIT(event);
 }
 
@@ -208,7 +204,7 @@ static void bt_send_work_handler(struct k_work *work)
 	} while (len != 0 && !ring_buf_is_empty(&ble_tx_ring_buf));
 
 	if (notif_disabled) {
-		/* Peer has not enabled notifications: don't accumulate data */
+		/* BLE has not enabled notifications: don't accumulate data */
 		ring_buf_reset(&ble_tx_ring_buf);
 	}
 }
@@ -448,6 +444,7 @@ static void bt_ready(int err)
 		return;
 	}
 
+	/* Convert data to uint_8 ad array format */
 	mfg_data[BLE_MFG_IDX_COMPANY_ID] =
 		(NOFENCE_BLUETOOTH_SIG_COMPANY_ID & 0x00ff);
 	mfg_data[BLE_MFG_IDX_COMPANY_ID + 1] =
@@ -494,10 +491,11 @@ int ble_module_init()
 	err = bt_enable(bt_ready);
 	if (err) {
 		LOG_ERR("bt_enable: %d", err);
-		return false;
+		return err;
 	}
 
 	bt_conn_cb_register(&conn_callbacks);
+	return err;
 }
 
 /** 
@@ -511,7 +509,6 @@ static bool event_handler(const struct event_header *eh)
 	/* Send debug data */
 	if (is_msg_data_event(eh)) {
 		const struct msg_data_event *event = cast_msg_data_event(eh);
-
 		if (current_conn == NULL) {
 			return false;
 		}
@@ -539,9 +536,12 @@ static bool event_handler(const struct event_header *eh)
 	if (is_ble_data_event(eh)) {
 		const struct ble_data_event *event = cast_ble_data_event(eh);
 
-		/* All subscribers have gotten a chance to copy data at this point */
-		k_mem_slab_free(&ble_rx_slab, (void **)&event->buf);
-
+		/* Check if memory is used */
+		int num = k_mem_slab_num_used_get(&ble_rx_slab);
+		if (num > 0) {
+			/* All subscribers have gotten a chance to copy data at this point */
+			k_mem_slab_free(&ble_rx_slab, (void *)&event->buf);
+		}
 		return false;
 	}
 
@@ -602,7 +602,7 @@ static bool event_handler(const struct event_header *eh)
 	// 	}
 
 	// 	return false;
-	// }
+	//}
 
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
@@ -611,7 +611,6 @@ static bool event_handler(const struct event_header *eh)
 }
 
 EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE(MODULE, module_state_event);
 EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
 EVENT_SUBSCRIBE(MODULE, msg_data_event);
 EVENT_SUBSCRIBE_FINAL(MODULE, ble_data_event);

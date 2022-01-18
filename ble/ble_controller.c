@@ -2,25 +2,25 @@
  * Copyright (c) 2021 Nofence AS
  */
 
-#include <zephyr.h>
-#include <zephyr/types.h>
-#include <sys/ring_buffer.h>
-
 #include <bluetooth/bluetooth.h>
-#include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
 #include <bluetooth/hci.h>
 #include <bluetooth/services/nus.h>
+#include <bluetooth/uuid.h>
+#include <sys/ring_buffer.h>
+#include <zephyr.h>
+#include <zephyr/types.h>
 
-#define MODULE ble_handler
-#include "module_state_event.h"
-#include "peer_conn_event.h"
+#define MODULE ble_controller
+#include <logging/log.h>
+
 #include "ble_ctrl_event.h"
 #include "ble_data_event.h"
+#include "ble_conn_event.h"
+#include "ble_controller.h"
 #include "msg_data_event.h"
 
-#include <logging/log.h>
-LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_LOG_LEVEL);
+LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_CONTROLLER_LOG_LEVEL);
 
 #define BLE_RX_BLOCK_SIZE (CONFIG_BT_L2CAP_TX_MTU - 3)
 #define BLE_RX_BUF_COUNT 4
@@ -44,6 +44,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_LOG_LEVEL);
 #define BLE_MFG_IDX_HW_VER 16
 #define BLE_MFG_IDX_ATMEGA_VER 17
 
+#define BLE_MFG_ARR_SIZE 19
 #define NOFENCE_BLUETOOTH_SIG_COMPANY_ID 0x05AB
 
 #define ATT_MIN_PAYLOAD 20 /* Minimum L2CAP MTU minus ATT header */
@@ -69,19 +70,19 @@ static atomic_t active;
 static char bt_device_name[DEVICE_NAME_LEN + 1] = CONFIG_BT_DEVICE_NAME;
 
 // Shaddow register. Should be initialized with data from EEPROM or FLASH
-static uint16_t current_fw_ver = 0x07F9; // NB: Dummy data
-static uint32_t current_serial_numer = 0x00000001; // NB: Dummy data
-static uint8_t current_battery_level = 0x81; // NB: Dummy data
-static uint8_t current_error_flags = 0x00; // NB: Dummy data
-static uint8_t current_collar_mode = 0x01; // NB: Dummy data
-static uint8_t current_collar_status = 0x05; // NB: Dummy data
-static uint8_t current_fence_status = 0x01; // NB: Dummy data
-static uint8_t current_valid_pasture = 0x01; // NB: Dummy data
-static uint16_t current_fence_def_ver = 0x00A1; // NB: Dummy data
-static uint8_t current_hw_ver = 0x0D; // NB: Dummy data
+static uint16_t current_fw_ver = CONFIG_NOFENCE_FIRMWARE_NUMBER;
+static uint32_t current_serial_numer = CONFIG_NOFENCE_SERIAL_NUMBER;
+static uint8_t current_battery_level;
+static uint8_t current_error_flags;
+static uint8_t current_collar_mode;
+static uint8_t current_collar_status;
+static uint8_t current_fence_status;
+static uint8_t current_valid_pasture;
+static uint16_t current_fence_def_ver;
+static uint8_t current_hw_ver;
 static uint16_t atmega_ver = 0xFFFF; // NB: Not in use, needed for App to work.
 
-static uint8_t mfg_data[19];
+static uint8_t mfg_data[BLE_MFG_ARR_SIZE];
 
 static struct bt_data ad[] = {
 	[BLE_AD_IDX_FLAGS] = BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL |
@@ -103,7 +104,7 @@ static const struct bt_data sd[] = {
  * @param[in] conn bluetooth connection object
  * @param[in] err Error
  * @param[in] params Pointer to GATT Exchange MTU parameters
- *                 
+ *
  */
 static void exchange_func(struct bt_conn *conn, uint8_t err,
 			  struct bt_gatt_exchange_params *params)
@@ -115,7 +116,7 @@ static void exchange_func(struct bt_conn *conn, uint8_t err,
 
 /**
  * @brief Callback function called when BT connection is established
- *           
+ *
  */
 static void connected(struct bt_conn *conn, uint8_t err)
 {
@@ -139,17 +140,14 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 	ring_buf_reset(&ble_tx_ring_buf);
 
-	struct peer_conn_event *event = new_peer_conn_event();
-
-	event->peer_id = PEER_ID_BLE;
-	event->dev_idx = 0;
-	event->conn_state = PEER_STATE_CONNECTED;
+	struct ble_conn_event *event = new_ble_conn_event();
+	event->conn_state = BLE_STATE_CONNECTED;
 	EVENT_SUBMIT(event);
 }
 
 /**
  * @brief Callback function when bluetooth is disconnected
- *           
+ *
  */
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
@@ -163,11 +161,8 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 		current_conn = NULL;
 	}
 
-	struct peer_conn_event *event = new_peer_conn_event();
-
-	event->peer_id = PEER_ID_BLE;
-	event->dev_idx = 0;
-	event->conn_state = PEER_STATE_DISCONNECTED;
+	struct ble_conn_event *event = new_ble_conn_event();
+	event->conn_state = BLE_STATE_DISCONNECTED;
 	EVENT_SUBMIT(event);
 }
 
@@ -179,7 +174,7 @@ static struct bt_conn_cb conn_callbacks = {
 /**
  * @brief Work function to send data from rx ring buffer with bt nus
  * @param[in] work work item
- *                 
+ *
  */
 static void bt_send_work_handler(struct k_work *work)
 {
@@ -208,7 +203,7 @@ static void bt_send_work_handler(struct k_work *work)
 	} while (len != 0 && !ring_buf_is_empty(&ble_tx_ring_buf));
 
 	if (notif_disabled) {
-		/* Peer has not enabled notifications: don't accumulate data */
+		/* BLE has not enabled notifications: don't accumulate data */
 		ring_buf_reset(&ble_tx_ring_buf);
 	}
 }
@@ -218,7 +213,7 @@ static void bt_send_work_handler(struct k_work *work)
  * @param[in] conn pointer to bt_conn object
  * @param[in] data pointer to data object
  * @param[in] len length of data received
- *                 
+ *
  */
 static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data,
 			  uint16_t len)
@@ -255,7 +250,7 @@ static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data,
  * @brief Callback on bluetooth send. Submit bt_send_work item to initiate
  * bt_send_work_handler
  * @param[in] conn pointer to bt_conn object
- *                 
+ *
  */
 static void bt_sent_cb(struct bt_conn *conn)
 {
@@ -273,7 +268,7 @@ static struct bt_nus_cb nus_cb = {
 
 /**
  * @brief Start bluetooth advertisement with configured parameters,
- * advertise response and scan response array.     
+ * advertise response and scan response array.
  */
 static void adv_start(void)
 {
@@ -292,13 +287,12 @@ static void adv_start(void)
 	if (err) {
 		LOG_ERR("bt_le_adv_start: %d", err);
 	} else {
-		module_set_state(MODULE_STATE_READY);
 		LOG_INF("Starting advertising");
 	}
 }
 
 /**
- * @brief Stop bluetooth advertisement. Set module state to standby.  
+ * @brief Stop bluetooth advertisement. Set module state to standby.
  */
 static void adv_stop(void)
 {
@@ -307,14 +301,12 @@ static void adv_stop(void)
 	err = bt_le_adv_stop();
 	if (err) {
 		LOG_ERR("bt_le_adv_stop: %d", err);
-	} else {
-		module_set_state(MODULE_STATE_STANDBY);
 	}
 }
 
 /**
  * @brief Function to update battery level in advertising array
- * @param[in] battery_precentage battery level          
+ * @param[in] battery_precentage battery level
  */
 static void battery_update(uint8_t battery_precentage)
 {
@@ -331,7 +323,7 @@ static void battery_update(uint8_t battery_precentage)
 
 /**
  * @brief Function to update error flag in advertising array
- * @param[in] error_flags 0 is no erros, 1 means error available          
+ * @param[in] error_flags 0 is no erros, 1 means error available
  */
 static void error_flag_update(uint8_t error_flags)
 {
@@ -348,7 +340,7 @@ static void error_flag_update(uint8_t error_flags)
 
 /**
  * @brief Function to update collar mode in advertising array
- * @param[in] collar_mode where 0 is normal mode, 1 is teach mode         
+ * @param[in] collar_mode where 0 is normal mode, 1 is teach mode
  */
 static void collar_mode_update(uint8_t collar_mode)
 {
@@ -365,7 +357,7 @@ static void collar_mode_update(uint8_t collar_mode)
 
 /**
  * @brief Function to update collar status in advertising array
- * @param[in] collar_status      
+ * @param[in] collar_status
  */
 static void collar_status_update(uint8_t collar_status)
 {
@@ -382,7 +374,7 @@ static void collar_status_update(uint8_t collar_status)
 
 /**
  * @brief Function to update fence status in advertising array
- * @param[in] fence_status where 1 is fence status normal         
+ * @param[in] fence_status where 1 is fence status normal
  */
 static void fence_status_update(uint8_t fence_status)
 {
@@ -399,7 +391,7 @@ static void fence_status_update(uint8_t fence_status)
 
 /**
  * @brief Function to update status of valid pasture in advertising array
- * @param[in] valid_pasture where 0 is false and 1 is true         
+ * @param[in] valid_pasture where 0 is false and 1 is true
  */
 static void pasture_update(uint8_t valid_pasture)
 {
@@ -416,7 +408,7 @@ static void pasture_update(uint8_t valid_pasture)
 
 /**
  * @brief Function to update fence definition version in advertising array
- * @param[in] fence_def_ver version number     
+ * @param[in] fence_def_ver version number
  */
 static void fence_def_ver_update(uint16_t fence_def_ver)
 {
@@ -433,7 +425,7 @@ static void fence_def_ver_update(uint16_t fence_def_ver)
 /**
  * @brief Function to initialize bt_nus and data in manufacture advertisement
  * array
- * @param[in] err error code      
+ * @param[in] err error code
  */
 static void bt_ready(int err)
 {
@@ -448,6 +440,7 @@ static void bt_ready(int err)
 		return;
 	}
 
+	/* Convert data to uint_8 ad array format */
 	mfg_data[BLE_MFG_IDX_COMPANY_ID] =
 		(NOFENCE_BLUETOOTH_SIG_COMPANY_ID & 0x00ff);
 	mfg_data[BLE_MFG_IDX_COMPANY_ID + 1] =
@@ -483,16 +476,35 @@ static void bt_ready(int err)
 	}
 }
 
-/** @brief Event handler function
-  * @param[in] eh Pointer to event handler struct
-  * @return true to consume the event (event is not propagated to further listners), false otherwise
-  */
+int ble_module_init()
+{
+	int err;
+
+	atomic_set(&active, false);
+
+	nus_max_send_len = ATT_MIN_PAYLOAD;
+
+	err = bt_enable(bt_ready);
+	if (err) {
+		LOG_ERR("bt_enable: %d", err);
+		return err;
+	}
+
+	bt_conn_cb_register(&conn_callbacks);
+	return err;
+}
+
+/** 
+ * @brief Event handler function
+ * @param[in] eh Pointer to event handler struct
+ * @return true to consume the event (event is not propagated to further
+ * listners), false otherwise
+ */
 static bool event_handler(const struct event_header *eh)
 {
 	/* Send debug data */
 	if (is_msg_data_event(eh)) {
 		const struct msg_data_event *event = cast_msg_data_event(eh);
-
 		if (current_conn == NULL) {
 			return false;
 		}
@@ -520,9 +532,12 @@ static bool event_handler(const struct event_header *eh)
 	if (is_ble_data_event(eh)) {
 		const struct ble_data_event *event = cast_ble_data_event(eh);
 
-		/* All subscribers have gotten a chance to copy data at this point */
-		k_mem_slab_free(&ble_rx_slab, (void **)&event->buf);
-
+		/* Check if memory is used */
+		int num = k_mem_slab_num_used_get(&ble_rx_slab);
+		if (num > 0) {
+			/* All subscribers have gotten a chance to copy data at this point */
+			k_mem_slab_free(&ble_rx_slab, (void *)&event->buf);
+		}
 		return false;
 	}
 
@@ -573,28 +588,17 @@ static bool event_handler(const struct event_header *eh)
 	}
 
 	/* Reveived module state event */
-	if (is_module_state_event(eh)) {
-		const struct module_state_event *event =
-			cast_module_state_event(eh);
+	// TODO: This block could be reinitialized with a power manager module
+	// if (is_module_state_event(eh)) {
+	// 	const struct module_state_event *event =
+	// 		cast_module_state_event(eh);
 
-		if (check_state(event, MODULE_ID(main), MODULE_STATE_READY)) {
-			int err;
+	// 	if (check_state(event, MODULE_ID(main), MODULE_STATE_READY)) {
+	// 		ble_module_init();
+	// 	}
 
-			atomic_set(&active, false);
-
-			nus_max_send_len = ATT_MIN_PAYLOAD;
-
-			err = bt_enable(bt_ready);
-			if (err) {
-				LOG_ERR("bt_enable: %d", err);
-				return false;
-			}
-
-			bt_conn_cb_register(&conn_callbacks);
-		}
-
-		return false;
-	}
+	// 	return false;
+	//}
 
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
@@ -603,7 +607,6 @@ static bool event_handler(const struct event_header *eh)
 }
 
 EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE(MODULE, module_state_event);
 EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
 EVENT_SUBSCRIBE(MODULE, msg_data_event);
 EVENT_SUBSCRIBE_FINAL(MODULE, ble_data_event);

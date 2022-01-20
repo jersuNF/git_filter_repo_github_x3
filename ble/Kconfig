@@ -16,3 +16,9 @@ config NOFENCE_SERIAL_NUMBER
 config NOFENCE_FIRMWARE_NUMBER
 	int "Nofence firmware number"
 	default 1
+
+config MSG_BUF_SIZE
+	int "Transport interface buffer size"
+	default 2048
+	help
+	  Size of transmit/receive buffer for transfer between interfaces.

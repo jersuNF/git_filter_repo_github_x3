@@ -16,10 +16,9 @@
 
 #include "ble_ctrl_event.h"
 #include "ble_data_event.h"
-#include "module_state_event.h"
-#include "msg_data_event.h"
 #include "ble_conn_event.h"
 #include "ble_controller.h"
+#include "msg_data_event.h"
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_CONTROLLER_LOG_LEVEL);
 
@@ -259,7 +258,6 @@ static void adv_start(void)
 	if (err) {
 		LOG_ERR("bt_le_adv_start: %d", err);
 	} else {
-		module_set_state(MODULE_STATE_READY);
 		LOG_INF("Starting advertising");
 	}
 }
@@ -274,8 +272,6 @@ static void adv_stop(void)
 	err = bt_le_adv_stop();
 	if (err) {
 		LOG_ERR("bt_le_adv_stop: %d", err);
-	} else {
-		module_set_state(MODULE_STATE_STANDBY);
 	}
 }
 

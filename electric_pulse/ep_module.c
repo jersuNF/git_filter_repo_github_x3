@@ -9,6 +9,7 @@
 #include <drivers/gpio.h>
 
 #include "ep_module.h"
+#include "ep_event.h"
 
 #define LOG_MODULE_NAME ep_module
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_EP_MODULE_LOG_LEVEL);
@@ -27,18 +28,25 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_EP_MODULE_LOG_LEVEL);
 #define ZAP_FREQ 8 //uS
 #endif
 
-#define ZAP_CTRL                                                               \
-	DT_GPIO_LABEL_BY_IDX(DT_NODELABEL(zap_ctrl), gpios, 0) // "GPIO_0"
+#if DT_NODE_HAS_STATUS(DT_ALIAS(led0), okay)
+#define ZAP_CTRL_NODE DT_ALIAS(led0)
+#define ZAP_CTRL_LABEL DT_GPIO_LABEL(ZAP_CTRL_NODE, gpios)
 #define ZAP_CTRL_PIN DT_GPIO_PIN(ZAP_CTRL_NODE, gpios)
 #define ZAP_CTRL_FLAGS DT_GPIO_FLAGS(ZAP_CTRL_NODE, gpios)
+#else
+#define ZAP_CTRL_NODE DT_PATH(zap_ctrl)
+#define ZAP_CTRL_LABEL DT_GPIO_LABEL(ZAP_CTRL_NODE, gpios)
+#define ZAP_CTRL_PIN DT_GPIO_PIN(ZAP_CTRL_NODE, gpios)
+#define ZAP_CTRL_FLAGS DT_GPIO_FLAGS(ZAP_CTRL_NODE, gpios)
+#endif
 
 const struct device *dev;
 
 int ep_module_init(void)
 {
-	dev = device_get_binding(ZAP_CTRL);
+	dev = device_get_binding(ZAP_CTRL_LABEL);
 	if (dev == NULL) {
-		return dev;
+		return -ENODEV;
 	}
 
 	int err = gpio_pin_configure(dev, ZAP_CTRL_PIN,
@@ -46,6 +54,7 @@ int ep_module_init(void)
 	if (err < 0) {
 		return err;
 	}
+	return err;
 }
 
 int ep_module_enable(bool active)

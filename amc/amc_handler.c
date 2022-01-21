@@ -134,7 +134,7 @@ void calculate_work_fn(struct k_work *item)
 	 *           unit test to see that the shell work. Its a simple
 	 *           algorithm that checks if if every content of 
 	 *           both fencedata and gnss data is equal to 
-	 *           0xDEAD respectively. Plays a sound the unit test
+	 *           1337 respectively. Plays a sound the unit test
 	 *           subscribes to if its correct.
 	 */
 	bool fencedata_correct = true;
@@ -156,6 +156,15 @@ void calculate_work_fn(struct k_work *item)
 		struct sound_event *s_ev = new_sound_event();
 		s_ev->type = SND_WELCOME;
 		EVENT_SUBMIT(s_ev);
+	}
+
+	if (!gnssdata_correct) {
+		if (current_gnssdata_area->lat == 123 &&
+		    current_gnssdata_area->lon == 123) {
+			struct sound_event *s_ev = new_sound_event();
+			s_ev->type = SND_FIND_ME;
+			EVENT_SUBMIT(s_ev);
+		}
 	}
 
 	/* Calculation finished, give semaphore so we can swap memory region

@@ -7,7 +7,7 @@
 
 #include <zephyr.h>
 
-/** @brief Struct containing GPS data. */
+/** @brief Struct containing GNSS data. */
 typedef struct {
 	int32_t lat;
 	int32_t lon;
@@ -77,7 +77,7 @@ typedef struct {
 	uint8_t gps_mode;
 } gnss_last_fix_struct_t;
 
-#define GNSS_DEFINITION_SIZE (FENCE_MAX * sizeof(gps_struct_t))
+#define GNSS_DEFINITION_SIZE (FENCE_MAX * sizeof(gnss_struct_t))
 
 /** @todo PSH, the structure is aligned to 32 bit unsigned 
  * as returned from server. However, y values are placed
@@ -132,8 +132,6 @@ void submit_request_fencedata(void);
 /**
  * @brief Function to request GNSS data on the event bus, in which case the
  *        GNSS module will memcpy its data to the passed address pointer.
- *        Up for discussion because it might be too slow, and perhaps could
- *        be better solutions for this continous/periodic data transfer.
  */
 void submit_request_gnssdata(void);
 

@@ -7,6 +7,9 @@
 #include "diagnostics.h"
 #include <logging/log.h>
 
+#include "nf_version.h"
+#include "version.h"
+
 #define LOG_MODULE_NAME diagnostics
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_DIAGNOSTICS_LOG_LEVEL);
 
@@ -26,6 +29,8 @@ static uint8_t diagnostics_down_data_buffer[CONFIG_DIAGNOSTICS_RTT_BUFFER_SIZE];
 static void diagnostics_rtt_set_active(void);
 static bool diagnostics_rtt_is_active(void);
 static void diagnostics_handler(void);
+
+static void diagnostics_parse_input(uint8_t* data, uint32_t size);
 static void diagnostics_send(uint8_t* data, uint32_t size);
 
 int diagnostics_module_init()
@@ -66,17 +71,26 @@ static void diagnostics_handler(void)
 		if (SEGGER_RTT_HASDATA(CONFIG_DIAGNOSTICS_RTT_DOWN_CHANNEL_INDEX)) {
 			diagnostics_rtt_set_active();
 
-			//size_t bytes_read = SEGGER_RTT_Read(CONFIG_DIAGNOSTICS_RTT_DOWN_CHANNEL_INDEX, buffer, 100);
+			size_t bytes_read = SEGGER_RTT_Read(CONFIG_DIAGNOSTICS_RTT_DOWN_CHANNEL_INDEX, buffer, 100);
 
-			// TODO - Parse ?
-
-			//diagnostics_send(buffer, bytes_read);
+			diagnostics_parse_input(buffer, bytes_read);
 		} else {
 			if (diagnostics_rtt_is_active()) {
 				k_msleep(10);
 			} else {
 				k_msleep(1000);
 			}
+		}
+	}
+}
+
+static void diagnostics_parse_input(uint8_t* data, uint32_t size)
+{
+	for (uint32_t i = 0; i < size; i++) {
+		if ((data[i] == '\n') || ((data[i] == '\r'))) {
+			diagnostics_send("Zephyr version is ", strlen("Zephyr version is "));
+			diagnostics_send(KERNEL_VERSION_STRING, strlen(KERNEL_VERSION_STRING));
+			diagnostics_send("\r\n", strlen("\r\n"));
 		}
 	}
 }
@@ -103,15 +117,15 @@ static void diagnostics_log(enum diagnostics_severity severity,
 {
 	uint32_t used_size = 0;
 	int64_t uptime = k_uptime_get();
-	char uptime_str[20];
-	used_size = snprintf(uptime_str, 20, "%u", uptime);
+	char uptime_str[13+1];
+	used_size = snprintf(uptime_str, 13+1, "%u", uptime);
 	if ((used_size < 0) || (used_size >= sizeof(uptime_str))) {
 		LOG_ERR("Uptime encoding error.");
 		return;
 	}
 
-	// Color code + bracket pair + max timestamp + color code + header_size + ": " + color code + msg_size + linefeed + color code
-	uint32_t bufsiz = 7 + 2 + 19 + 1 + 7 + strlen(header) + 2 + 7 + strlen(msg) + 2 + 7;
+	/* Color code + bracket pair + max timestamp + color code + header_size + ": " + color code + msg_size + linefeed + color code */
+	uint32_t bufsiz = 7 + 2 + 13 + 1 + 7 + strlen(header) + 2 + 7 + strlen(msg) + 2 + 7;
 	char* buf = k_malloc(bufsiz);
 	if (buf == NULL) {
 		LOG_ERR("Failed to allocated memory.");
@@ -124,7 +138,7 @@ static void diagnostics_log(enum diagnostics_severity severity,
 	} else if (severity == DIAGNOSTICS_ERROR) {
 		severity_color = RTT_CTRL_TEXT_BRIGHT_RED;
 	}
-	used_size = snprintf(buf, bufsiz, "%s[%19s] %s%s: %s%s%s\r\n", 
+	used_size = snprintf(buf, bufsiz, "%s[%13s] %s%s: %s%s%s\r\n", 
 							RTT_CTRL_TEXT_BRIGHT_GREEN, uptime_str, 
 							RTT_CTRL_TEXT_BRIGHT_YELLOW, header, 
 							severity_color, msg,

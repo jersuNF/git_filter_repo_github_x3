@@ -1,7 +1,10 @@
 import subprocess
 import time
 
-cmd = ['JLinkExe', '-device', 'nRF52840_xxAA', '-if', 'swd', '-speed', '8000', '-autoconnect', '1']
+JLINK_EXE = "JLinkExe"
+JLINK_EXE = "C:\\Program Files\\SEGGER\\JLink\\JLink.exe"
+
+cmd = [JLINK_EXE, '-device', 'nRF52840_xxAA', '-if', 'swd', '-speed', '8000', '-autoconnect', '1']
 jlink_proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
 time.sleep(1)
@@ -23,14 +26,15 @@ J-Link OB-SAM3U128-V2-NordicSemi compiled Dec  3 2021 15:41:28 V1.0, SN=68378578
 Process: JLinkExe
 """
 
-prev = time.time()
+import msvcrt
+
 while True:
-    #if time.time() > (prev+1):
-        #tn.write(b"Hello!")
-        #prev = time.time()
+    if msvcrt.kbhit():
+        down_data = msvcrt.getch()
+        tn.write(down_data)
 
     data = tn.read_eager()
     if len(data) > 0:
-        print(data.decode('utf-8'), end='', flush=True)
+        print(data.decode('utf-8', 'ignore'), end='', flush=True)
     else:
         time.sleep(0.01)

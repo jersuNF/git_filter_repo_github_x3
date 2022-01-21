@@ -1,0 +1,24 @@
+# Copyright (c) 2021 Nofence AS
+
+module = BLE_CONTROLLER
+module-str = BLE Controller
+source "subsys/logging/Kconfig.template.log_config"
+
+module = BLE_SERVICE
+module-str = BLE Service
+source "subsys/logging/Kconfig.template.log_config"
+
+config NOFENCE_SERIAL_NUMBER
+	int "Nofence serial number"
+	default 1
+
+
+config NOFENCE_FIRMWARE_NUMBER
+	int "Nofence firmware number"
+	default 1
+
+config MSG_BUF_SIZE
+	int "Transport interface buffer size"
+	default 2048
+	help
+	  Size of transmit/receive buffer for transfer between interfaces.

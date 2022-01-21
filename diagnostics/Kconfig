@@ -1,0 +1,36 @@
+menuconfig DIAGNOSTICS
+	bool "Diagnostics module"
+	default y
+	select USE_SEGGER_RTT
+
+if DIAGNOSTICS
+	config DIAGNOSTICS_RTT_DOWN_CHANNEL_INDEX
+		int "RTT Channel index to use for data down to device"
+		default 2
+	
+	config DIAGNOSTICS_RTT_UP_CHANNEL_INDEX
+		int "RTT Channel index to use for data up to host computer"
+		default 2
+
+	config DIAGNOSTICS_LOG_LEVEL
+		int "0 - 4 for logging. OFF -> ERR -> WRN -> INF -> DBG"
+		default 3
+		depends on LOG
+
+	config DIAGNOSTICS_RTT_TIMEOUT_MS
+		int "Activity timeout for RTT communication."
+		default 10000
+
+	config DIAGNOSTICS_RTT_BUFFER_SIZE
+		int "Memory to allocate for each down and up buffers (memory usage will therefore be 2x)."
+		default 1024
+
+	config DIAGNOSTICS_STACK_SIZE
+		int "Memory to allocate stack of handler."
+		default 1024
+	
+	config DIAGNOSTICS_PROFILE_EVENTS
+		bool "Use the diagnostics module to profile event manager event submits and execution start/stop."
+		default y
+	
+endif

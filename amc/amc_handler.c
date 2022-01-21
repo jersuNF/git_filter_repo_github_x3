@@ -12,11 +12,27 @@
 #define MODULE animal_monitor_control
 LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
 
-/* Cached data arrays for seeing position and fence data to determine which
-   sounds should be played.
+/* Cached fence data header and a max coordinate region. Links the coordinate
+ * region to the header.
  */
-static uint8_t cached_fencedata[CONFIG_STATIC_FENCEDATA_SIZE];
-static uint8_t cached_gnssdata[CONFIG_STATIC_GNSSDATA_SIZE];
+static fence_coordinate_t cached_fence_coordinates[FENCE_MAX_TOTAL_COORDINATES];
+static fence_header_t cached_fence_header = { .p_c = cached_fence_coordinates };
+
+K_SEM_DEFINE(fence_data_sem, 1, 1);
+
+/* Use two memory regions so we can swap the pointer between them
+ * so that instead of waiting for semaphore to be released, we schedule
+ * a pointer swap to the other region once we've read the data.
+ */
+static gnss_struct_t cached_gnssdata_area_1;
+static gnss_struct_t cached_gnssdata_area_2;
+static gnss_struct_t *current_gnssdata_area = &cached_gnssdata_area_1;
+
+/* Only swap the pointer in the request function
+ * if we're currently not doing a calculation.
+ */
+K_SEM_DEFINE(gnss_data_sem, 1, 1);
+#define REQUEST_DATA_SEM_TIMEOUT_SEC 5
 
 /* Thread stack area that we use for the calculation process. We add a work
  * item here when we have data available from GNSS as well as fencedata.
@@ -42,26 +58,41 @@ static struct k_work calc_work;
  */
 void submit_request_fencedata(void)
 {
+	int err = k_sem_take(&fence_data_sem,
+			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
+	if (err) {
+		LOG_ERR("Error waiting fence data semaphore to release.");
+	}
+
 	struct request_fencedata_event *req_fd_e =
 		new_request_fencedata_event();
-
-	req_fd_e->data = cached_fencedata;
-	req_fd_e->len = CONFIG_STATIC_FENCEDATA_SIZE;
+	req_fd_e->fence = &cached_fence_header;
 	EVENT_SUBMIT(req_fd_e);
 }
 
 /**
  * @brief Function to request GNSS data on the event bus, in which case the
  *        GNSS module will memcpy its data to the passed address.
- *        Up for discussion because it might be too slow, and perhaps could
- *        be better solutions for this continous/periodic data transfer.
  */
 void submit_request_gnssdata(void)
 {
-	struct request_gnssdata_event *req_gd_e = new_request_gnssdata_event();
+	/* Always write to the one that we're currently not reading from. 
+	 * We check the semaphore so we only request if we're not
+	 * doing a calculation and if we have done one calculation since the
+	 * previous request since it's free'd in the calculation function.
+	 */
+	int err = k_sem_take(&gnss_data_sem,
+			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
+	if (err) {
+		LOG_ERR("Error waiting for calculation to finish.");
+	}
 
-	req_gd_e->data = cached_gnssdata;
-	req_gd_e->len = CONFIG_STATIC_GNSSDATA_SIZE;
+	struct request_gnssdata_event *req_gd_e = new_request_gnssdata_event();
+	if (current_gnssdata_area == &cached_gnssdata_area_1) {
+		req_gd_e->gnss = &cached_gnssdata_area_2;
+	} else {
+		req_gd_e->gnss = &cached_gnssdata_area_1;
+	}
 
 	EVENT_SUBMIT(req_gd_e);
 }
@@ -72,6 +103,23 @@ void submit_request_gnssdata(void)
  */
 void calculate_work_fn(struct k_work *item)
 {
+	int err = k_sem_take(&fence_data_sem,
+			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
+	if (err) {
+		LOG_ERR("Error waiting fence data semaphore to release.");
+	}
+
+	/* We received new data, swap the pointer to point
+	 * at the newly written GNSS data area. This means that subsequent
+	 * calls to request_gnss_data function will pass a pointer to
+	 * the area not in use by this function.
+	 */
+	if (current_gnssdata_area == &cached_gnssdata_area_1) {
+		current_gnssdata_area = &cached_gnssdata_area_2;
+	} else {
+		current_gnssdata_area = &cached_gnssdata_area_1;
+	}
+
 	LOG_INF("Compares fencedata and gnss data here.");
 
 	/* At the moment, we just play the welcome sound everytime we get GNSS
@@ -85,32 +133,37 @@ void calculate_work_fn(struct k_work *item)
 	 *           only correlated to current
 	 *           unit test to see that the shell work. Its a simple
 	 *           algorithm that checks if if every content of 
-	 *           both fencedata and gnss data is equal and 
-	 *           0xDE or 0xAE respectively. Plays a sound the unit test
+	 *           both fencedata and gnss data is equal to 
+	 *           0xDEAD respectively. Plays a sound the unit test
 	 *           subscribes to if its correct.
 	 */
 	bool fencedata_correct = true;
-	for (int i = 0; i < CONFIG_STATIC_FENCEDATA_SIZE; i++) {
-		if (cached_fencedata[i] == 0xDE ||
-		    cached_fencedata[i] == 0xAD) {
+	if (cached_fence_header.n_points <= 0) {
+		fencedata_correct = false;
+	}
+	for (int i = 0; i < cached_fence_header.n_points; i++) {
+		if (cached_fence_header.p_c[i].s_x_dm == 1337 &&
+		    cached_fence_header.p_c[i].s_y_dm == 1337) {
 			continue;
 		}
 		fencedata_correct = false;
 	}
 
-	bool gnssdata_correct = true;
-	for (int i = 0; i < CONFIG_STATIC_GNSSDATA_SIZE; i++) {
-		if (cached_gnssdata[i] == 0xDE || cached_gnssdata[i] == 0xAD) {
-			continue;
-		}
-		gnssdata_correct = false;
-	}
+	bool gnssdata_correct = (current_gnssdata_area->lat == 1337 &&
+				 current_gnssdata_area->lon == 1337);
 
-	if (fencedata_correct && gnssdata_correct) {
+	if (gnssdata_correct && fencedata_correct) {
 		struct sound_event *s_ev = new_sound_event();
 		s_ev->type = SND_WELCOME;
 		EVENT_SUBMIT(s_ev);
 	}
+
+	/* Calculation finished, give semaphore so we can swap memory region
+	 * on next GNSS request. 
+	 * As well as notifying we're not using fence data area. 
+	 */
+	k_sem_give(&gnss_data_sem);
+	k_sem_give(&fence_data_sem);
 }
 
 void amc_module_init(void)
@@ -149,6 +202,8 @@ static bool event_handler(const struct event_header *eh)
 		/* If we received GNSS data, start the calculating function. */
 		if (event->type == AMC_REQ_GNSSDATA) {
 			k_work_submit_to_queue(&calc_work_q, &calc_work);
+		} else if (event->type == AMC_REQ_FENCEDATA) {
+			k_sem_give(&fence_data_sem);
 		}
 		return false;
 	}

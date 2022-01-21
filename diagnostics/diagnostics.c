@@ -12,6 +12,8 @@
 #include "nf_version.h"
 #include "version.h"
 
+#include "msg_data_event.h"
+
 #include "ble_ctrl_event.h"
 #include "ble_data_event.h"
 #include "ble_conn_event.h"
@@ -27,17 +29,26 @@ K_TIMER_DEFINE(rtt_activity_timer, NULL, NULL);
 extern const k_tid_t diag_handler_id; 
 
 atomic_t ble_is_connected = ATOMIC_INIT(0);
-RING_BUF_DECLARE(ble_receive_ring_buf,256);
+RING_BUF_DECLARE(ble_receive_ring_buf, CONFIG_DIAGNOSTICS_PARSE_BUFFER_LENGTH);
 
 static uint8_t diagnostics_up_data_buffer[CONFIG_DIAGNOSTICS_RTT_BUFFER_SIZE];
 static uint8_t diagnostics_down_data_buffer[CONFIG_DIAGNOSTICS_RTT_BUFFER_SIZE];
+
+static uint8_t rtt_parsing_buffer[CONFIG_DIAGNOSTICS_PARSE_BUFFER_LENGTH];
+static uint32_t rtt_parsing_count = 0;
 
 static void diagnostics_rtt_set_active(void);
 static bool diagnostics_rtt_is_active(void);
 static void diagnostics_handler(void);
 
-static void diagnostics_parse_input(uint8_t* data, uint32_t size);
-static void diagnostics_send(uint8_t* data, uint32_t size);
+static uint32_t diagnostics_parse_input(enum diagnostics_interface interface, 
+					uint8_t* data, uint32_t size);
+					
+static void diagnostics_send_rtt(uint8_t* data, uint32_t size);
+static void diagnostics_send_ble(uint8_t* data, uint32_t size);
+static void diagnostics_send(enum diagnostics_interface interface, 
+			     uint8_t* data, uint32_t size);
+
 static void diagnostics_log(enum diagnostics_severity severity, 
 						    char* header, char* msg);
 
@@ -79,17 +90,16 @@ static void diagnostics_handler(void)
 
 			size_t bytes_read = SEGGER_RTT_Read(CONFIG_DIAGNOSTICS_RTT_DOWN_CHANNEL_INDEX, buffer, 100);
 
-			diagnostics_parse_input(buffer, bytes_read);
+			diagnostics_parse_input(DIAGNOSTICS_RTT, buffer, bytes_read);
 		}
 		if (!ring_buf_is_empty(&ble_receive_ring_buf)) {
 			uint8_t* ble_data;
-			uint32_t size = ring_buf_get_claim(&ble_receive_ring_buf, &ble_data, 100);
+			uint32_t size = ring_buf_get_claim(
+						&ble_receive_ring_buf, 
+						&ble_data, 100);
 
-			//diagnostics_parse_input(ble_data, size);
-
-			memcpy(buffer, ble_data, size);
-			buffer[size] = '\0';
-			diagnostics_log(DIAGNOSTICS_WARNING, "BLE_DATA", buffer);
+			diagnostics_parse_input(DIAGNOSTICS_BLE, 
+						ble_data, size);
 
 			if (ring_buf_get_finish(&ble_receive_ring_buf, size) != 0) {
 				LOG_ERR("Failed to free ring buffer memory for BLE.");
@@ -106,35 +116,60 @@ static void diagnostics_handler(void)
 	}
 }
 
-static void diagnostics_parse_input(uint8_t* data, uint32_t size)
+static uint32_t diagnostics_parse_input(enum diagnostics_interface interface, 
+					uint8_t* data, uint32_t size)
 {
+	uint32_t bytes_parsed = 0;
 	for (uint32_t i = 0; i < size; i++) {
 		if ((data[i] == '\n') || (data[i] == '\r') || (data[i] == 'U')) {
-			diagnostics_send("Zephyr version is ", strlen("Zephyr version is "));
-			diagnostics_send(KERNEL_VERSION_STRING, strlen(KERNEL_VERSION_STRING));
-			diagnostics_send("\r\n", strlen("\r\n"));
+			diagnostics_send(interface, "Zephyr version is ", strlen("Zephyr version is "));
+			diagnostics_send(interface, KERNEL_VERSION_STRING, strlen(KERNEL_VERSION_STRING));
+			diagnostics_send(interface, "\r\n", strlen("\r\n"));
 		}
 	}
+	bytes_parsed = size;
+
+	return size;
 }
 
-static void diagnostics_send(uint8_t* data, uint32_t size)
+static void diagnostics_send_rtt(uint8_t* data, uint32_t size)
 {
-	if (k_mutex_lock(&rtt_send_mutex, K_MSEC(10)) == 0) {
-		if (diagnostics_rtt_is_active()) {
-			diagnostics_rtt_set_active();
-			uint32_t was_copied = SEGGER_RTT_WriteSkipNoLock(CONFIG_DIAGNOSTICS_RTT_UP_CHANNEL_INDEX, (const char*)data, size);
-			if (!was_copied) {
-				LOG_ERR("Failed to send diagnostics message.");
-			}
-		}
-
-		k_mutex_unlock(&rtt_send_mutex);
-	} else {
+	if (k_mutex_lock(&rtt_send_mutex, K_MSEC(10)) != 0) {
 		LOG_ERR("Failed to send diagnostics message to RTT.");
+		return;
+	}
+	
+	diagnostics_rtt_set_active();
+	uint32_t was_copied = SEGGER_RTT_WriteSkipNoLock(
+				CONFIG_DIAGNOSTICS_RTT_UP_CHANNEL_INDEX, 
+				(const char*)data, size);
+	if (!was_copied) {
+		LOG_ERR("Failed to send diagnostics message.");
 	}
 
-	if (atomic_test_bit(&ble_is_connected, 0)) {
+	k_mutex_unlock(&rtt_send_mutex);
+}
 
+static void diagnostics_send_ble(uint8_t* data, uint32_t size)
+{
+	struct msg_data_event *msg = new_msg_data_event(size);
+	memcpy(msg->dyndata.data, data, size);
+	EVENT_SUBMIT(msg);
+}
+
+static void diagnostics_send(enum diagnostics_interface interface, 
+			     uint8_t* data, uint32_t size)
+{
+	if ((interface == DIAGNOSTICS_RTT) || (interface == DIAGNOSTICS_ALL)) {
+		if (diagnostics_rtt_is_active()) {
+			diagnostics_send_rtt(data, size);
+		}
+	}
+
+	if ((interface == DIAGNOSTICS_BLE) || (interface == DIAGNOSTICS_ALL)) {
+		if (atomic_test_bit(&ble_is_connected, 0)) {
+			diagnostics_send_ble(data, size);
+		}
 	}
 }
 
@@ -142,16 +177,20 @@ static void diagnostics_log(enum diagnostics_severity severity,
 						    char* header, char* msg)
 {
 	uint32_t used_size = 0;
-	int64_t uptime = k_uptime_get();
-	char uptime_str[13+1];
-	used_size = snprintf(uptime_str, 13+1, "%llx", uptime);
+	uint32_t uptime = k_uptime_get_32();
+	if (uptime > 100*365*24*3600*1000) {
+		LOG_ERR("Uptime is more than 100 years.");
+		uptime = uptime % 100*365*24*3600*1000;
+	}
+	char uptime_str[13+2];
+	used_size = snprintf(uptime_str, 13+2, "%u.%03u", uptime/1000, uptime%1000);
 	if ((used_size < 0) || (used_size >= sizeof(uptime_str))) {
 		LOG_ERR("Uptime encoding error.");
 		return;
 	}
 
 	/* Color code + bracket pair + max timestamp + color code + header_size + ": " + color code + msg_size + linefeed + color code */
-	uint32_t bufsiz = 7 + 2 + 13 + 1 + 7 + strlen(header) + 2 + 7 + strlen(msg) + 2 + 7;
+	uint32_t bufsiz = 7 + 2 + 13 + 2 + 7 + strlen(header) + 2 + 7 + strlen(msg) + 2 + 7;
 	char* buf = k_malloc(bufsiz);
 	if (buf == NULL) {
 		LOG_ERR("Failed to allocated memory.");
@@ -164,7 +203,7 @@ static void diagnostics_log(enum diagnostics_severity severity,
 	} else if (severity == DIAGNOSTICS_ERROR) {
 		severity_color = RTT_CTRL_TEXT_BRIGHT_RED;
 	}
-	used_size = snprintf(buf, bufsiz, "%s[%13s] %s%s: %s%s%s\r\n", 
+	used_size = snprintf(buf, bufsiz, "%s[%14s] %s%s: %s%s%s\r\n", 
 							RTT_CTRL_TEXT_BRIGHT_GREEN, uptime_str, 
 							severity_color, header, 
 							RTT_CTRL_RESET, msg,
@@ -177,7 +216,7 @@ static void diagnostics_log(enum diagnostics_severity severity,
 		return;
 	}
 	
-	diagnostics_send(buf, strlen(buf));
+	diagnostics_send(DIAGNOSTICS_RTT, buf, strlen(buf));
 
 	k_free(buf);
 }
@@ -196,7 +235,6 @@ static bool event_handler(const struct event_header *eh)
 	if (is_ble_conn_event(eh)) {
 		const struct ble_conn_event *event = cast_ble_conn_event(eh);
 		if (event->conn_state == BLE_STATE_CONNECTED) {
-			LOG_ERR("BLE CONNECTED!");
 			atomic_set(&ble_is_connected, 1);
 		} else {
 			atomic_set(&ble_is_connected, 0);
@@ -236,12 +274,23 @@ int event_manager_trace_event_init(void)
 	return 0;
 }
 
+static void diagnostics_build_event_string(const struct event_header *eh, uint8_t* buffer, uint32_t size)
+{
+	/* Must have space for event name, 
+	parantheses, space and null-termination. */
+	if (size < (strlen(eh->type_id->name) + 4)) {
+		LOG_ERR("Too small buffer for diagnostics logging of event.");
+	}
+
+	uint32_t length = snprintf(buffer, size, "(%s) ", eh->type_id->name);
+	eh->type_id->log_event(eh, &buffer[length], size-length);
+}
+
 void event_manager_trace_event_execution(const struct event_header *eh,
 				  bool is_start)
 {
 	char buf[100];
-
-	eh->type_id->log_event(eh, buf, sizeof(buf));
+	diagnostics_build_event_string(eh, buf, sizeof(buf));
 	diagnostics_log(DIAGNOSTICS_INFO, is_start ? "EVENT_MANAGER_EXEC_START" : "EVENT_MANAGER_EXEC_STOP", buf);
 }
 
@@ -249,8 +298,7 @@ void event_manager_trace_event_submission(const struct event_header *eh,
 				const void *trace_info)
 {
 	char buf[100];
-
-	eh->type_id->log_event(eh, buf, sizeof(buf));
+	diagnostics_build_event_string(eh, buf, sizeof(buf));
 	diagnostics_log(DIAGNOSTICS_INFO, "EVENT_MANAGER_SUBMIT", buf);
 }
 

@@ -1,17 +1,18 @@
 import subprocess
 import time
 
+
+# TODO - Make this smarter with regards to existing jlink instances running
 JLINK_EXE = "JLinkExe"
 JLINK_EXE = "C:\\Program Files\\SEGGER\\JLink\\JLink.exe"
 
-cmd = [JLINK_EXE, '-device', 'nRF52840_xxAA', '-if', 'swd', '-speed', '8000', '-autoconnect', '1']
+cmd = [JLINK_EXE, '-device', 'nRF52840_xxAA', '-if', 'swd', '-speed', '20000', '-autoconnect', '1']
 jlink_proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
 time.sleep(1)
 
 from telnetlib import Telnet
 tn = Telnet('127.0.0.1', 19021)
-
 tn.write(b"$$SEGGER_TELNET_ConfigStr=RTTCh;2$$")
 
 time.sleep(1)

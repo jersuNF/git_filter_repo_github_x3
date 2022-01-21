@@ -20,9 +20,16 @@
 #endif
 
 enum diagnostics_severity {
-    DIAGNOSTICS_INFO,
-    DIAGNOSTICS_WARNING,
-    DIAGNOSTICS_ERROR,
+	DIAGNOSTICS_INFO,
+	DIAGNOSTICS_WARNING,
+	DIAGNOSTICS_ERROR,
+};
+
+enum diagnostics_interface {
+	DIAGNOSTICS_ALL,
+	DIAGNOSTICS_RTT,
+	DIAGNOSTICS_BLE
+	
 };
 
 /**

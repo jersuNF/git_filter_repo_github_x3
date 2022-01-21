@@ -19,11 +19,11 @@ if DIAGNOSTICS
 
 	config DIAGNOSTICS_RTT_TIMEOUT_MS
 		int "Activity timeout for RTT communication."
-		default 10000
+		default 30000
 
 	config DIAGNOSTICS_RTT_BUFFER_SIZE
 		int "Memory to allocate for each down and up buffers (memory usage will therefore be 2x)."
-		default 1024
+		default 2048
 
 	config DIAGNOSTICS_STACK_SIZE
 		int "Memory to allocate stack of handler."
@@ -32,5 +32,9 @@ if DIAGNOSTICS
 	config DIAGNOSTICS_PROFILE_EVENTS
 		bool "Use the diagnostics module to profile event manager event submits and execution start/stop."
 		default y
+	
+	config DIAGNOSTICS_PARSE_BUFFER_LENGTH
+		int "Maximum number of bytes in parse buffer. This sets a limits to how long each command and accompanying data can be."
+		default 128
 	
 endif

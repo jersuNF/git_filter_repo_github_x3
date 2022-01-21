@@ -1,42 +1,27 @@
-#include "cellular_helpers.h"
+#include <zephyr.h>
+#include "cellular_helpers_header.h"
 #include "cellular_controller_events.h"
-
-
-/*
- * Copyright (c) 2016 Intel Corporation
- * Copyright (c) 2020 Nordic Semiconductor ASA
- *
- * SPDX-License-Identifier: Apache-2.0
- */
-
-/**
- * @file Sample app to demonstrate cellular communication over Ublox SARA-R4(22) modem.
- */
-
 #include <autoconf.h>
 #include <device.h>
 #include <devicetree.h>
-#include <logging/log.h>
-#include <stdio.h>
 #include <sys/printk.h>
-#include <zephyr.h>
-
+#include "event_manager.h"
+#include <logging/log.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <errno.h>
 #include <net/net_if.h>
-#include <net/net_mgmt.h>
 #include <net/net_event.h>
-#include <net/net_conn_mgr.h>
 #include <net/socket.h>
 
-#include "cellular_helpers.h"
 
-//LOG_MODULE_REGISTER(main);
-LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
-#define GSM_DEVICE DT_LABEL(DT_INST(0, ublox_sara_r4))
-#define APP_BANNER "Starting cellular_controller"
+#define GSM_DEVICE DT_LABEL(DT_INST(0, u_blox_sara_r4))
 
 #define INVALID_SOCK (-1)
 #define MY_STACK_SIZE 1024
 #define MY_PRIORITY 5
+#define MODULE cellular_controller
+LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
 /******************************************************************************/
 /* Local Data Definitions                                                     */
@@ -46,7 +31,15 @@ static struct net_if_config *cfg;
 
 static bool ack = true;
 
-int lteInit(void)
+void submit_error(int8_t cause, int8_t err_code){
+    struct cellular_error_event *err =
+            new_cellular_error_event();
+    err->cause = cause;
+    err->err_code = err_code;
+    EVENT_SUBMIT(err);
+}
+
+int8_t lteInit(void)
 {
     int rc = 1;
 
@@ -72,20 +65,12 @@ int lteInit(void)
 
 bool lteIsReady(void)
 {
-#ifdef CONFIG_DNS_RESOLVER
-    struct sockaddr_in *dnsAddr;
-
-	if (iface != NULL && cfg != NULL && &dns->servers[0] != NULL) {
-		dnsAddr = net_sin(&dns->servers[0].dns_server);
-		return net_if_is_up(iface) && cfg->ip.ipv4 &&
-		       !net_ipv4_is_addr_unspecified(&dnsAddr->sin_addr);
-	}
-#else
     if (iface != NULL && cfg != NULL) {
-        return net_if_is_up(iface) && cfg->ip.ipv4;
+        return true;
     }
-#endif /* CONFIG_DNS_RESOLVER */
-    return false;
+    else{
+        return false;
+    }
 }
 
 APP_DMEM struct configs conf = {
@@ -98,48 +83,74 @@ APP_DMEM struct configs conf = {
 
 static APP_BMEM bool connected;
 
-void cellular_controller_init(void)
+uint8_t receive_tcp(struct data *data)
 {
-    int_least8_t ret;
-    printk("Cellular controller starting!, %p\n", k_current_get());
-    const struct device *gsm_dev = device_get_binding(GSM_DEVICE);
-    if (!gsm_dev) {
-        LOG_ERR("GSM driver %s was not found!\n", GSM_DEVICE);
-        return;
-    }
+    int err, received;
+    char buf[RECV_BUF_SIZE];
+    uint8_t *pMsgIn;
 
-    ret = lteInit();
-    if (ret == 1)
-    {
-        LOG_INF("Cellular network interface ready!\n");
-        connected = true;
-        if(lteIsReady) {
-            start_tcp();
+    do {
+        received = recv(data->tcp.sock, buf, sizeof(buf), MSG_DONTWAIT);
+        if (received > 0)
+        {
+            LOG_WRN("received %d bytes!\n", received);
+
+            if(!ack) {/* TODO: notify the error handler */
+                LOG_ERR("New message received while the messaging module "
+                        "hasn't consumed the previous one!\n");
+                err = -1;
+                submit_error(OTHER, err);
+                return err;
+            }
+            else{
+                if (pMsgIn != NULL) {
+                    free(pMsgIn);
+                    pMsgIn = NULL;
+                }
+
+                pMsgIn = (uint8_t *) malloc(received);
+                memcpy(pMsgIn, buf, received);
+                ack = false;
+
+                struct cellular_proto_in_event *msgIn =
+                        new_cellular_proto_in_event();
+                msgIn->buf = pMsgIn;
+                msgIn->len = received;
+                EVENT_SUBMIT(msgIn);
+            }
         }
-        else{
-            LOG_ERR("Check LTE network configuration!");
-            /* TODO: notify error handler! */
-            goto exit_cellular_controller;
+        else if (received < 0) {
+            LOG_ERR("Socket receive error!\n");
+            submit_error(SOCKET_RECV, received);
+            return received;
         }
-    }
-    else{
-        LOG_ERR("Failed to start LTE connection, check network interface!");
-        /* TODO: notify error handler! */
-        goto exit_cellular_controller;
-    }
-
-    /* start the receiving thread */
-    K_THREAD_DEFINE(rcv_tid, MY_STACK_SIZE,
-                    receive_tcp, &conf.ipv4,
-                    MY_PRIORITY, 0, 0);
-
-    EVENT_LISTENER(cellular_controller, cellular_controller_event_handler);
-    EVENT_SUBSCRIBE(cellular_controller, messaging_ack_event);
-    EVENT_SUBSCRIBE(cellular_controller, messaging_proto_out_event);
-
-    exit_cellular_controller;
+        else {
+            continue;
+        }
+    } while (lteIsReady());
 }
 
+int8_t start_tcp(void)
+{
+    int ret = 0;
+    struct sockaddr_in addr4;
+
+    if (IS_ENABLED(CONFIG_NET_IPV4)) {
+        addr4.sin_family = AF_INET;
+        addr4.sin_port = htons(PEER_PORT);
+        inet_pton(AF_INET, CONFIG_NET_CONFIG_PEER_IPV4_ADDR,
+                  &addr4.sin_addr);
+
+        ret = socket_connect(&conf.ipv4, (struct sockaddr *)&addr4,
+                             sizeof(addr4));
+        if (ret < 0) {
+            submit_error(SOCKET_CONNECT, ret);
+            return ret;
+        }
+        receive_tcp(&conf.ipv4);
+    }
+    return ret;
+}
 
 static bool cellular_controller_event_handler(const struct event_header *eh)
 {
@@ -167,77 +178,50 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
             return true;
         }
         else{ /* TODO: notify error handler! */
-            struct cellular_ack_event *err = new_cellular_sending_error_event();
-            EVENT_SUBMIT(err);
+            submit_error(SOCKET_SEND, err);
             free(CharMsgOut);
             return false;
         }
     }
-
     return false;
 }
 
-static int send_tcp(char* msg, size_t len){
-    uint8_t attempts = 0;
-    ret = sendall(data->tcp.sock, msg, len);
-    if (ret < 0) {
-        LOG_ERR("%s TCP: Failed to send data, errno %d", data->proto,
-                errno);
-    } else {
-        LOG_DBG("%s TCP: Sent %d bytes", data->proto,
-                ret);
-    }
-    /* TODO: how to handle partial sends? sendall() will keep retrying,
-     * this should be handled here as well.*/
-    return ret;
-}
-
-static int receive_tcp(struct data *data)
+int cellular_controller_init(void)
 {
-    int ret, received;
-    char buf[RECV_BUF_SIZE];
-    static int total_sends;
-    uint8_t *pMsgIn;
+    int8_t ret;
+    printk("Cellular controller starting!, %p\n", k_current_get());
+    const struct device *gsm_dev = device_get_binding(GSM_DEVICE);
+    if (!gsm_dev) {
+        LOG_ERR("GSM driver %s was not found!\n", GSM_DEVICE);
+        return -1;
+    }
 
-    do {
-        received = recv(data->tcp.sock, buf, sizeof(buf), MSG_DONTWAIT);
-        if (received > 0)
-        {
-            LOG_WRN("received %d bytes!\n", received);
-
-            if(!ack) {/* TODO: notify the error handler */
-                LOG_ERR("New message received while the messaging module "
-                        "hasn't consumed the previous one!\n");
-                ret = -1;
-                break;
-            }
-            else{
-                if (pMsgIn) {
-                    free(pMsgIn);
-                    pMsgIn = NULL;
-                }
-
-                pMsgIn = (uint8_t *) malloc(received);
-                memcpy(pMsgIn, buf, received);
-                ack = false;
-
-                struct cellular_proto_in_event *msgIn =
-                        new_cellular_proto_in_event();
-                msgIn->buf = pMsgIn;
-                msgIn->len = received;
-                EVENT_SUBMIT(msgIn);
-            }
+    ret = lteInit();
+    if (ret == 1)
+    {
+        LOG_INF("Cellular network interface ready!\n");
+        connected = true;
+        if(lteIsReady()) {
+            ret = start_tcp();
         }
-        else if (received < 0) {
-            LOG_ERR("Socket receive error!\n");
-            ret = -1;
-            break;
-            //TODO: handle the error (reset socket?)
+        else{
+            LOG_ERR("Check LTE network configuration!");
+            /* TODO: notify error handler! */
+            goto exit_cellular_controller;
         }
-        else {
-            continue;
-        }
-    } while (1);
+    }
+    else{
+        LOG_ERR("Failed to start LTE connection, check network interface!");
+        /* TODO: notify error handler! */
+        goto exit_cellular_controller;
+    }
 
-    return ret;
+
+    exit_cellular_controller:
+        stop_tcp();
+        return -1;
 }
+
+EVENT_LISTENER(MODULE, cellular_controller_event_handler);
+EVENT_SUBSCRIBE(MODULE, messaging_ack_event);
+EVENT_SUBSCRIBE(MODULE, messaging_proto_out_event);

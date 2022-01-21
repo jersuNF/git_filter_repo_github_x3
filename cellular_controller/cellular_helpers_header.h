@@ -1,11 +1,15 @@
-//common.h -begin
+#include <stdlib.h>
+#include <net/net_ip.h>
 
-#define MY_PORT 0
-#define CONFIG_NET_SAMPLE_SEND_ITERATIONS 100
 #define PEER_PORT CONFIG_SERVER_PORT
+#define RECV_BUF_SIZE 128
+
+#define SOCKS5_PROXY_V4_ADDR CONFIG_NET_CONFIG_PEER_IPV4_ADDR
+#define SOCKS5_PROXY_PORT 1080
 
 #if defined(CONFIG_USERSPACE)
 #include <app_memory/app_memdomain.h>
+
 extern struct k_mem_partition app_partition;
 extern struct k_mem_domain app_domain;
 #define APP_BMEM K_APP_BMEM(app_partition)
@@ -53,6 +57,8 @@ struct configs {
 
 extern struct configs conf;
 
-int start_tcp(void);
-int process_tcp(void);
+static int socket_connect(struct data *, struct sockaddr *,
+                          socklen_t);
+int8_t start_tcp(void);
 void stop_tcp(void);
+int8_t send_tcp(char*, size_t);

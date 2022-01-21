@@ -1,18 +1,6 @@
 #include <zephyr.h>
 #include "cellular_helpers_header.h"
 #include "cellular_controller_events.h"
-#include <autoconf.h>
-#include <device.h>
-#include <devicetree.h>
-#include <sys/printk.h>
-#include "event_manager.h"
-#include <logging/log.h>
-#include <stdbool.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <net/net_if.h>
-#include <net/net_event.h>
-#include <net/socket.h>
 
 
 #define GSM_DEVICE DT_LABEL(DT_INST(0, u_blox_sara_r4))
@@ -128,11 +116,14 @@ uint8_t receive_tcp(struct data *data)
             continue;
         }
     } while (lteIsReady());
+
+    submit_error(CONNECTION_LOST, -1);
+    return -1;
 }
 
 int8_t start_tcp(void)
 {
-    int ret = 0;
+    int8_t ret = 0;
     struct sockaddr_in addr4;
 
     if (IS_ENABLED(CONFIG_NET_IPV4)) {

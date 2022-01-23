@@ -5,6 +5,7 @@ import time
 # TODO - Make this smarter with regards to existing jlink instances running
 JLINK_EXE = "JLinkExe"
 JLINK_EXE = "C:\\Program Files\\SEGGER\\JLink\\JLink.exe"
+JLINK_EXE = "C:\\Program Files (x86)\\SEGGER\\JLink\\JLink.exe"
 
 cmd = [JLINK_EXE, '-device', 'nRF52840_xxAA', '-if', 'swd', '-speed', '20000', '-autoconnect', '1']
 jlink_proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -28,10 +29,21 @@ Process: JLinkExe
 """
 
 import msvcrt
+import signal
+import sys
+
+def signal_handler(sig, frame):
+    jlink_proc.communicate(input=b'exit\n')
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
 
 while True:
     if msvcrt.kbhit():
         down_data = msvcrt.getch()
+
+        print(down_data.decode("ascii"), end='', flush=True)
+
         tn.write(down_data)
 
     data = tn.read_eager()

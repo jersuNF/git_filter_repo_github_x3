@@ -28,7 +28,8 @@ enum diagnostics_severity {
 enum diagnostics_interface {
 	DIAGNOSTICS_ALL,
 	DIAGNOSTICS_RTT,
-	DIAGNOSTICS_BLE
+	DIAGNOSTICS_BLE,
+	DIAGNOSTICS_NONE
 	
 };
 

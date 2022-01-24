@@ -41,7 +41,9 @@ signal.signal(signal.SIGINT, signal_handler)
 while True:
     if msvcrt.kbhit():
         down_data = msvcrt.getch()
-
+        if down_data == b'\r':
+            down_data = b'\n'
+            
         print(down_data.decode("ascii"), end='', flush=True)
 
         tn.write(down_data)

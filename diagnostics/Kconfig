@@ -37,4 +37,8 @@ if DIAGNOSTICS
 		int "Maximum number of bytes in receive buffer. This sets a limits to how long each command and accompanying data can be."
 		default 128
 	
+	config DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE
+		int "Memory to allocate for passthrough buffering."
+		default 256
+	
 endif

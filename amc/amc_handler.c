@@ -18,24 +18,22 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
 static fence_coordinate_t cached_fence_coordinates[FENCE_MAX_TOTAL_COORDINATES];
 static fence_header_t cached_fence_header = { .p_c = cached_fence_coordinates };
 
+#define REQUEST_DATA_SEM_TIMEOUT_SEC 5
 K_SEM_DEFINE(fence_data_sem, 1, 1);
 
 /* Use two memory regions so we can swap the pointer between them
  * so that instead of waiting for semaphore to be released, we schedule
- * a pointer swap to the other region once we've read the data.
+ * a pointer swap to the other region once we've read the data. Use an
+ * atomic variable if both threads try to access and update that
+ * gnss data is available or consumed.
  */
 static gnss_struct_t cached_gnssdata_area_1;
 static gnss_struct_t cached_gnssdata_area_2;
 static gnss_struct_t *current_gnssdata_area = &cached_gnssdata_area_1;
-
-/* Only swap the pointer in the request function
- * if we're currently not doing a calculation.
- */
-K_SEM_DEFINE(gnss_data_sem, 1, 1);
-#define REQUEST_DATA_SEM_TIMEOUT_SEC 5
+atomic_t new_gnss_written = ATOMIC_INIT(false);
 
 /* Thread stack area that we use for the calculation process. We add a work
- * item here when we have data available from GNSS as well as fencedata.
+ * item here when we have data available from GNSS.
  * This thread can then use the calculation function algorithm to
  * determine what it needs to do in regards to sound and zap events that
  * this calculation function can submit to event handler.
@@ -50,51 +48,24 @@ static struct k_work_q calc_work_q;
 static struct k_work calc_work;
 
 /**
- * @brief Function to request fence data on the event bus, in which case the
+ * @brief Function to request pasture on the event bus, pressumably
+ *        from the storage controller, in which case the
  *        storage module will memcpy its data to the passed address. This is
  *        only done when we boot up/on initialization, and on user updates
  *        in which case speed does not matter, as well as not
  *        needing the continuity as the GNSS data does.
  */
-void submit_request_fencedata(void)
+static void submit_request_pasture(void)
 {
 	int err = k_sem_take(&fence_data_sem,
 			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
 	if (err) {
-		LOG_ERR("Error waiting fence data semaphore to release.");
+		LOG_ERR("Error waiting fencedata semaphore to release.");
 	}
 
-	struct request_fencedata_event *req_fd_e =
-		new_request_fencedata_event();
+	struct request_pasture_event *req_fd_e = new_request_pasture_event();
 	req_fd_e->fence = &cached_fence_header;
 	EVENT_SUBMIT(req_fd_e);
-}
-
-/**
- * @brief Function to request GNSS data on the event bus, in which case the
- *        GNSS module will memcpy its data to the passed address.
- */
-void submit_request_gnssdata(void)
-{
-	/* Always write to the one that we're currently not reading from. 
-	 * We check the semaphore so we only request if we're not
-	 * doing a calculation and if we have done one calculation since the
-	 * previous request since it's free'd in the calculation function.
-	 */
-	int err = k_sem_take(&gnss_data_sem,
-			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
-	if (err) {
-		LOG_ERR("Error waiting for calculation to finish.");
-	}
-
-	struct request_gnssdata_event *req_gd_e = new_request_gnssdata_event();
-	if (current_gnssdata_area == &cached_gnssdata_area_1) {
-		req_gd_e->gnss = &cached_gnssdata_area_2;
-	} else {
-		req_gd_e->gnss = &cached_gnssdata_area_1;
-	}
-
-	EVENT_SUBMIT(req_gd_e);
 }
 
 /**
@@ -106,21 +77,21 @@ void calculate_work_fn(struct k_work *item)
 	int err = k_sem_take(&fence_data_sem,
 			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
 	if (err) {
-		LOG_ERR("Error waiting fence data semaphore to release.");
+		LOG_ERR("Error waiting for fence data semaphore to release.");
+		return;
 	}
 
-	/* We received new data, swap the pointer to point
-	 * at the newly written GNSS data area. This means that subsequent
-	 * calls to request_gnss_data function will pass a pointer to
-	 * the area not in use by this function.
+	/* Check if we received new data, swap the pointer to point
+	 * at the newly written GNSS data area if we have.
 	 */
-	if (current_gnssdata_area == &cached_gnssdata_area_1) {
-		current_gnssdata_area = &cached_gnssdata_area_2;
-	} else {
-		current_gnssdata_area = &cached_gnssdata_area_1;
+	if (atomic_get(&new_gnss_written)) {
+		if (current_gnssdata_area == &cached_gnssdata_area_1) {
+			current_gnssdata_area = &cached_gnssdata_area_2;
+		} else {
+			current_gnssdata_area = &cached_gnssdata_area_1;
+		}
+		atomic_set(&new_gnss_written, false);
 	}
-
-	LOG_INF("Compares fencedata and gnss data here.");
 
 	/* At the moment, we just play the welcome sound everytime we get GNSS
 	 * data, but this is just to test if everything is linked together.
@@ -171,7 +142,6 @@ void calculate_work_fn(struct k_work *item)
 	 * on next GNSS request. 
 	 * As well as notifying we're not using fence data area. 
 	 */
-	k_sem_give(&gnss_data_sem);
 	k_sem_give(&fence_data_sem);
 }
 
@@ -186,13 +156,7 @@ void amc_module_init(void)
 			   CONFIG_AMC_CALCULATION_PRIORITY, NULL);
 	k_work_init(&calc_work, calculate_work_fn);
 
-	submit_request_fencedata();
-
-	/* We can assume that this function will be called periodically, 
-	 * in which case we need to discuss the best solution due to delay
-	 * on event bus, as well as tedious request/write/read/ack.
-	 */
-	submit_request_gnssdata();
+	submit_request_pasture();
 }
 
 /**
@@ -205,15 +169,33 @@ void amc_module_init(void)
  */
 static bool event_handler(const struct event_header *eh)
 {
-	if (is_amc_ack_event(eh)) {
-		struct amc_ack_event *event = cast_amc_ack_event(eh);
+	if (is_pasture_ready_event(eh)) {
+		submit_request_pasture();
+		return false;
+	}
+	if (is_ack_pasture_event(eh)) {
+		k_sem_give(&fence_data_sem);
+		return false;
+	}
+	if (is_gnssdata_event(eh)) {
+		struct gnssdata_event *event = cast_gnssdata_event(eh);
 
-		/* If we received GNSS data, start the calculating function. */
-		if (event->type == AMC_REQ_GNSSDATA) {
-			k_work_submit_to_queue(&calc_work_q, &calc_work);
-		} else if (event->type == AMC_REQ_FENCEDATA) {
-			k_sem_give(&fence_data_sem);
+		/* Copy GNSS data struct to area not being read from
+		 * and indicate that we have new data available. So the
+		 * calculation thread can swap pointers.
+		 */
+		if (current_gnssdata_area == &cached_gnssdata_area_1) {
+			memcpy(&cached_gnssdata_area_2, &event->gnss,
+			       sizeof(gnss_struct_t));
+		} else {
+			memcpy(&cached_gnssdata_area_1, &event->gnss,
+			       sizeof(gnss_struct_t));
 		}
+
+		atomic_set(&new_gnss_written, true);
+
+		/* Call the calculation thread. */
+		k_work_submit_to_queue(&calc_work_q, &calc_work);
 		return false;
 	}
 	/* If event is unhandled, unsubscribe. */
@@ -223,4 +205,6 @@ static bool event_handler(const struct event_header *eh)
 }
 
 EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE(MODULE, amc_ack_event);
+EVENT_SUBSCRIBE(MODULE, ack_pasture_event);
+EVENT_SUBSCRIBE(MODULE, gnssdata_event);
+EVENT_SUBSCRIBE(MODULE, pasture_ready_event);

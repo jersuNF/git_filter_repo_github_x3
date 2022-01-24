@@ -61,6 +61,7 @@ static void submit_request_pasture(void)
 			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
 	if (err) {
 		LOG_ERR("Error waiting fencedata semaphore to release.");
+		return;
 	}
 
 	struct request_pasture_event *req_fd_e = new_request_pasture_event();

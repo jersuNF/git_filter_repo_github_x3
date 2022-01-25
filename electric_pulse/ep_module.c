@@ -34,13 +34,15 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_EP_MODULE_LOG_LEVEL);
 #define ZAP_CTRL_PIN DT_GPIO_PIN(ZAP_CTRL_NODE, gpios)
 #define ZAP_CTRL_FLAGS DT_GPIO_FLAGS(ZAP_CTRL_NODE, gpios)
 #else
-#define ZAP_CTRL_NODE DT_PATH(zap_ctrl)
+#define ZAP_CTRL_NODE DT_ALIAS(ep_ctrl)
 #define ZAP_CTRL_LABEL DT_GPIO_LABEL(ZAP_CTRL_NODE, gpios)
 #define ZAP_CTRL_PIN DT_GPIO_PIN(ZAP_CTRL_NODE, gpios)
 #define ZAP_CTRL_FLAGS DT_GPIO_FLAGS(ZAP_CTRL_NODE, gpios)
 #endif
 
 const struct device *dev;
+
+//DT_INST_0_ST_LIS2DH_LABEL
 
 int ep_module_init(void)
 {

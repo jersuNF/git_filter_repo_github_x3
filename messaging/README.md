@@ -1,0 +1,2 @@
+# Messaging module
+This module currently contains a shell to support re-routing of messages, where the messages are stored on a message queue once they are collected in the event handler function. A thread then polls all the message queues and checks if any data has been picked up by it.

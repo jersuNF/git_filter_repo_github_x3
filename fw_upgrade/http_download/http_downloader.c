@@ -8,8 +8,8 @@
 #include "fw_upgrade_events.h"
 #include "fw_upgrade.h"
 
-#define LOG_MODULE_NAME http_downloader
-LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_FW_UPGRADE_LOG_LEVEL);
+#define MODULE http_downloader
+LOG_MODULE_REGISTER(MODULE, CONFIG_FW_UPGRADE_LOG_LEVEL);
 
 #define HTTP_DOWNLOAD_BUF_LEN                                                  \
 	((CONFIG_DOWNLOAD_CLIENT_MAX_FILENAME_SIZE * 2) + 1)

@@ -28,16 +28,17 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_EP_MODULE_LOG_LEVEL);
 #define ZAP_FREQ 8 //uS
 #endif
 
+/* Board with no supported hw, use LED as indicator */
 #if DT_NODE_HAS_STATUS(DT_ALIAS(led0), okay)
-#define ZAP_CTRL_NODE DT_ALIAS(led0)
-#define ZAP_CTRL_LABEL DT_GPIO_LABEL(ZAP_CTRL_NODE, gpios)
-#define ZAP_CTRL_PIN DT_GPIO_PIN(ZAP_CTRL_NODE, gpios)
-#define ZAP_CTRL_FLAGS DT_GPIO_FLAGS(ZAP_CTRL_NODE, gpios)
+#define EP_CTRL_NODE DT_ALIAS(led0)
+#define EP_CTRL_LABEL DT_GPIO_LABEL(EP_CTRL_NODE, gpios)
+#define EP_CTRL_PIN DT_GPIO_PIN(EP_CTRL_NODE, gpios)
+#define EP_CTRL_FLAGS DT_GPIO_FLAGS(EP_CTRL_NODE, gpios)
 #else
-#define ZAP_CTRL_NODE DT_ALIAS(ep_ctrl)
-#define ZAP_CTRL_LABEL DT_GPIO_LABEL(ZAP_CTRL_NODE, gpios)
-#define ZAP_CTRL_PIN DT_GPIO_PIN(ZAP_CTRL_NODE, gpios)
-#define ZAP_CTRL_FLAGS DT_GPIO_FLAGS(ZAP_CTRL_NODE, gpios)
+#define EP_CTRL_NODE DT_ALIAS(ep_ctrl)
+#define EP_CTRL_LABEL DT_GPIO_LABEL(EP_CTRL_NODE, gpios)
+#define EP_CTRL_PIN DT_GPIO_PIN(EP_CTRL_NODE, gpios)
+#define EP_CTRL_FLAGS DT_GPIO_FLAGS(EP_CTRL_NODE, gpios)
 #endif
 
 const struct device *dev;
@@ -46,13 +47,13 @@ const struct device *dev;
 
 int ep_module_init(void)
 {
-	dev = device_get_binding(ZAP_CTRL_LABEL);
+	dev = device_get_binding(EP_CTRL_LABEL);
 	if (dev == NULL) {
 		return -ENODEV;
 	}
 
-	int err = gpio_pin_configure(dev, ZAP_CTRL_PIN,
-				     GPIO_OUTPUT_ACTIVE | ZAP_CTRL_FLAGS);
+	int err = gpio_pin_configure(dev, EP_CTRL_PIN,
+				     GPIO_OUTPUT_ACTIVE | EP_CTRL_FLAGS);
 	if (err < 0) {
 		return err;
 	}

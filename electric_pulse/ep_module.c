@@ -14,19 +14,18 @@
 #define LOG_MODULE_NAME ep_module
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_EP_MODULE_LOG_LEVEL);
 
-#if defined(HW_M) || defined(HW_N) || defined(HW_N_02)
-#define ZAP_DURATION_CATTLE 1000000
-#define ZAP_DURATION_SHEEP 500000
-#define ZAP_ON_TIME 2
-#define ZAP_OFF_TIME 5
-#define ZAP_FREQ (ZAP_ON_TIME + ZAP_OFF_TIME) //uS
-#else
-#define ZAP_DURATION_CATTLE 1000000
-#define ZAP_DURATION_SHEEP 500000
-#define ZAP_ON_TIME 2
-#define ZAP_OFF_TIME 4
-#define ZAP_FREQ 8 //uS
-#endif
+// TODO: fetch this config value from EEPROM;
+#define CATTLE 1;
+
+#define PIN_HIGH 1
+#define PIN_LOW 0
+
+/* Match config values from HW_N */
+#define EP_DURATION_CATTLE 1000000
+#define EP_DURATION_SHEEP 500000
+#define EP_ON_TIME 2 // uS
+#define EP_OFF_TIME 5 // uS
+#define EP_FREQ (ZAP_ON_TIME + ZAP_OFF_TIME + 3) // extra delay for loop
 
 /* Board with no supported hw, use LED as indicator */
 #if DT_NODE_HAS_STATUS(DT_ALIAS(led0), okay)
@@ -43,8 +42,6 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_EP_MODULE_LOG_LEVEL);
 
 const struct device *dev;
 
-//DT_INST_0_ST_LIS2DH_LABEL
-
 int ep_module_init(void)
 {
 	dev = device_get_binding(EP_CTRL_LABEL);
@@ -60,9 +57,32 @@ int ep_module_init(void)
 	return err;
 }
 
-int ep_module_enable(bool active)
+int ep_module_release(void)
 {
-	int err = gpio_pin_set(dev, ZAP_CTRL_PIN, (int)active);
+	int err;
+	uint32_t i;
+	uint32_t EP_duration =
+		(uint32_t)(EP_DURATION_SHEEP / EP_FREQ); // in us for sheep
+
+	if (CATTLE) {
+		EP_duration = (uint32_t)(EP_DURATION_CATTLE /
+					 EP_FREQ); // in us for cattle
+	}
+
+	if (!device_is_ready(dev)) {
+		/* Not ready, do not use */
+		LOG_ERR("EP not ready or proper initialized")
+		return -ENODEV;
+	}
+
+	for (i = 0; i < EP_duration; i++) {
+		err = gpio_pin_set(dev, EP_CTRL_PIN, PIN_HIGH);
+		k_sleep(K_USEC(EP_ON_TIME));
+		err = gpio_pin_set(dev, EP_CTRL_PIN, PIN_LOW);
+		k_sleep(K_USEC(EP_OFF_TIME));
+	}
+
+	err = gpio_pin_set(dev, EP_CTRL_PIN, PIN_LOW);
 	return err;
 }
 
@@ -82,11 +102,8 @@ static bool event_handler(const struct event_header *eh)
 		case EP_INIT:
 			ep_module_init();
 			break;
-		case EP_ENABLE:
-			ep_module_enable(true);
-			break;
-		case EP_DISABLE:
-			ep_module_enable(false);
+		case EP_RELEASE:
+			ep_module_release();
 			break;
 		default:
 			/* Unhandled control message */

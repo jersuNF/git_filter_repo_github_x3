@@ -56,9 +56,11 @@ int ep_module_init(void)
 		LOG_ERR("Error get device %s", log_strdup(EP_CTRL_LABEL));
 		return -ENODEV;
 	}
-
+	/* Configure pin with flags */
 	err = gpio_pin_configure(ep_ctrl_dev, EP_CTRL_PIN,
 				 GPIO_OUTPUT_ACTIVE | EP_CTRL_FLAGS);
+	/* Set pin state to low */
+	err = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_LOW);
 
 // Detect pin is not in use. Set to disconnected
 #if DT_NODE_HAS_STATUS(DT_ALIAS(ep_detect), okay)

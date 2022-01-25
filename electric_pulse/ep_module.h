@@ -15,10 +15,4 @@
  */
 int ep_module_init(void);
 
-/**
- * @brief Function to release the electrical pulse
- * @return 0 on success. Otherwise a negative error code.
- */
-int ep_module_release(void);
-
 #endif /* _EP_MODULE_H_ */

@@ -7,4 +7,11 @@
 
 #include <zephyr.h>
 
+/** 
+ * @brief Setup external flash driver
+ * 
+ * @return 0 if successful, otherwise a negative error code.
+ */
+int initialize_flash_driver(void);
+
 #endif /* _STORAGE_H_ */

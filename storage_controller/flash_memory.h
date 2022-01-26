@@ -7,11 +7,9 @@
 
 #include <zephyr.h>
 
+#define MEM_REC_ENTRY_BUF_SIZE 256
 /**
  * This structure defines all messages stored in the external flash.
- * If you ever,ever change this structure 
- * you probably will CRASH a collar (or 10000)
- * Actual entry size is header.len + 8 bytes
  *
  * @param header Header of entry in flash
  * @param buf Actual data, size is header.len bytes
@@ -28,7 +26,7 @@ typedef struct {
 		/** Used on AnoData as AnoStartID otherwise UNUSED. */
 		uint32_t ID;
 	} header;
-	uint8_t buf[256];
+	uint8_t buf[MEM_REC_ENTRY_BUF_SIZE];
 } mem_rec;
 
 /**
@@ -37,10 +35,10 @@ typedef struct {
  */
 typedef struct {
 	/** Pointer to start of the buffer in the FLASH. */
-	uint32_t StartPtr;
+	uint32_t start_ptr;
 
 	/** Length of the sector. */
-	uint32_t Length;
+	uint32_t length;
 
 	void (*eepromWriteStart)(uint8_t addr[4]);
 	void (*eepromWriteEnd)(uint8_t addr[4]);
@@ -119,7 +117,5 @@ typedef struct {
 #define MEM_START_FENCE (MEM_START_FIRMWARE + MEM_MAX_SIZE_FIRMWARE)
 
 #define MEM_ID_EOF_MARKER ((uint32_t)0xAABBCCDD)
-
-typedef enum { FLASH_REGION_LOG = 0, FLASH_REGION_ANO = 1 } flash_regions_t;
 
 #endif /* _FLASH_MEMORY_H_ */

@@ -21,9 +21,21 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_STORAGE_CONTROLLER_LOG_LEVEL);
 K_THREAD_STACK_DEFINE(stg_thread_area, CONFIG_STORAGE_THREAD_SIZE);
 static struct k_work_q stg_work_q;
 
-/* Work items that are called from event handler. */
-static struct k_work read_memrec_work;
-static struct k_work write_memrec_work;
+/* Work items that are called from event handler. Currently stores
+ * data so we do not hang/slow the event bus with flash write/read.
+ */
+struct read_container {
+	struct k_work work;
+
+	mem_rec *new_rec;
+	flash_regions_t region;
+};
+struct write_container {
+	struct k_work work;
+
+	mem_rec *new_rec;
+	flash_regions_t region;
+};
 
 /* Storage device. Used to identify the 
  * External Flash driver in the sensor API. 
@@ -35,13 +47,11 @@ void stg_controller_init(void)
 	/* Init work item and start and init calculation 
 	 * work queue thread and item. 
 	 */
-	k_work_queue_init(&calc_work_q);
-	k_work_queue_start(&calc_work_q, amc_calculation_thread_area,
-			   K_THREAD_STACK_SIZEOF(amc_calculation_thread_area),
-			   CONFIG_AMC_CALCULATION_PRIORITY, NULL);
+	k_work_queue_init(&stg_work_q);
+	k_work_queue_start(&stg_work_q, stg_thread_area,
+			   K_THREAD_STACK_SIZEOF(stg_thread_area),
+			   CONFIG_STORAGE_THREAD_PRIORITY, NULL);
 	k_work_init(&calc_work, calculate_work_fn);
-
-	submit_request_pasture();
 }
 
 /* Regions of where the different data is stored on flash.
@@ -103,6 +113,10 @@ static bool event_handler(const struct event_header *eh)
 
 		return false;
 	}
+	if (is_stg_ack_read_memrec_event(eh)) {
+		/* Increment pointer to next area. */
+		return false;
+	}
 
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
@@ -114,3 +128,4 @@ EVENT_LISTENER(MODULE, event_handler);
 
 EVENT_SUBSCRIBE(MODULE, stg_write_memrec_event);
 EVENT_SUBSCRIBE(MODULE, stg_read_memrec_event);
+EVENT_SUBSCRIBE(MODULE, stg_ack_read_memrec_event);

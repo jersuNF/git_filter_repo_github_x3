@@ -10,6 +10,7 @@
 
 #include "ep_module.h"
 #include "ep_event.h"
+#include "error_event.h"
 
 #define LOG_MODULE_NAME ep_module
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_EP_MODULE_LOG_LEVEL);
@@ -26,6 +27,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_EP_MODULE_LOG_LEVEL);
 #define EP_ON_TIME 2 // uS
 #define EP_OFF_TIME 5 // uS
 #define EP_FREQ (EP_ON_TIME + EP_OFF_TIME + 3) // extra delay for loop
+#define MINIMUM_TIME_BETWEEN_BURST 5000 //mS
 
 /* Board with no supported hw, use LED as indicator */
 #if DT_NODE_HAS_STATUS(DT_ALIAS(led0), okay)
@@ -47,6 +49,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_EP_MODULE_LOG_LEVEL);
 
 const struct device *ep_ctrl_dev;
 const struct device *ep_detect_dev;
+static int64_t last_pulse_given = 0;
 
 int ep_module_init(void)
 {
@@ -96,14 +99,22 @@ static int ep_module_release(void)
 		LOG_ERR("EP not ready or proper initialized");
 		return -ENODEV;
 	}
-
+	/* Safety guard */
+	int64_t current_time = k_uptime_get();
+	int64_t elapsed_time = current_time - last_pulse_given;
+	if (elapsed_time < MINIMUM_TIME_BETWEEN_BURST) {
+		LOG_WRN("Time between EP is shorter than allowed");
+		return -EACCES;
+	}
 	for (i = 0; i < EP_duration; i++) {
 		err = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_HIGH);
 		k_busy_wait(EP_ON_TIME);
 		err = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_LOW);
 		k_busy_wait(EP_OFF_TIME);
 	}
-
+	/* Update timer */
+	last_pulse_given = current_time;
+	/* Done giving electic pulse. Set pin LOW */
 	err = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_LOW);
 	return err;
 }
@@ -119,10 +130,14 @@ static bool event_handler(const struct event_header *eh)
 	/* Received ep status event */
 	if (is_ep_status_event(eh)) {
 		const struct ep_status_event *event = cast_ep_status_event(eh);
-
+		int err;
 		switch (event->ep_status) {
 		case EP_RELEASE:
-			ep_module_release();
+			err = ep_module_release();
+			if (err < 0) {
+				char *e_msg = "Error in ep release";
+				nf_app_error(ERR_ELECTRIC_PULSE, err, e_msg, strlen(e_msg));
+			}
 			break;
 		default:
 			/* Unhandled control message */
@@ -140,3 +155,4 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, ep_status_event);
+// TODO: Subscribe to sound events?

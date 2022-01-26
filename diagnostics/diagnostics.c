@@ -15,6 +15,7 @@
 #include <drivers/uart.h>
 #include <drivers/eeprom.h>
 #include <drivers/sensor.h>
+#include <drivers/flash.h>
 
 #include "nf_version.h"
 #include "version.h"
@@ -53,6 +54,7 @@ uint32_t rtt_received_count = 0;
 atomic_t passthrough_tx_in_progress = ATOMIC_INIT(0);
 uint8_t passthrough_tx_buffer[CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE];
 uint32_t passthrough_tx_count = 0;
+uint32_t passthrough_tx_sent = 0;
 
 /* Passthrough variables for UART (GNSS and modem) */
 atomic_t passthrough_enabled = ATOMIC_INIT(0);
@@ -201,10 +203,16 @@ static uint32_t diagnostics_parse_input(enum diagnostics_interface interface,
 	uint32_t bytes_parsed = 0;
 	if (atomic_test_bit(&passthrough_enabled, 0) && (interface == passthrough_interface)) {
 		if (!atomic_test_bit(&passthrough_tx_in_progress, 0)) {
-			//bytes_parsed = min(DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE, size);
-			//memcpy(passthrough_tx_buffer, data, bytes_parsed;
+			bytes_parsed = size;
+			if (bytes_parsed > CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE) {
+				bytes_parsed = CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE;
+			}
+			memcpy(passthrough_tx_buffer, data, bytes_parsed);
+			passthrough_tx_count = bytes_parsed;
+			passthrough_tx_sent = 0;
 			
-			//uart_irq_tx_enable(passthrough_device);
+			atomic_set_bit(&passthrough_tx_in_progress, 0);
+			uart_irq_tx_enable(passthrough_device);
 		}
 	} else {
 		uint32_t newline_loc = 0;
@@ -521,6 +529,78 @@ static int parser_test(enum diagnostics_interface interface, char* arg)
 		      temp.val1, temp.val2, press.val1, press.val2,
 		      humidity.val1, humidity.val2);
 		diagnostics_send(interface, buf, strlen(buf));
+	} else if (parser_arg_is_matching("flash", arg, sub_arg_len)) {
+		const struct device *flash_dev = device_get_binding(DT_LABEL(DT_NODELABEL(mx25u64)));
+		
+		if (flash_dev == NULL) {
+			const char* nodev = "Flash - No device found.\r\n";
+			diagnostics_send(interface, nodev, strlen(nodev));
+		}
+		if (!device_is_ready(flash_dev)) {
+			const char* readydev = "Flash - Device is NOT ready.\r\n";
+			diagnostics_send(interface, readydev, strlen(readydev));
+		} else {
+			const char* readydev = "Flash - Device is ready.\r\n";
+			diagnostics_send(interface, readydev, strlen(readydev));
+		}
+
+		char buf[10];
+		uint8_t test_data[] = {0, 0};
+
+		if (flash_read(flash_dev, 0, test_data, 2) != 0) {
+			const char* nodev = "Flash - read failed.\r\n";
+			diagnostics_send(interface, nodev, strlen(nodev));
+		}
+
+		itoa(test_data[0], buf, 16);
+		uint32_t length = strlen(buf);
+		buf[length] = ' ';
+		itoa(test_data[1], &buf[length+1], 16);
+		diagnostics_send(interface, "Before write ", strlen("Before write "));
+		diagnostics_send(interface, buf, strlen(buf));
+		diagnostics_send(interface, "\r\n", strlen("\r\n"));
+
+		test_data[0] = 0x13;
+		test_data[1] = 0x37;
+		if (flash_write(flash_dev, 0, test_data, 2) != 0) {
+			const char* nodev = "Flash - write failed.\r\n";
+			diagnostics_send(interface, nodev, strlen(nodev));
+		}
+
+		memset(test_data, 0, 2);
+
+		if (flash_read(flash_dev, 0, test_data, 2) != 0) {
+			const char* nodev = "Flash - read failed.\r\n";
+			diagnostics_send(interface, nodev, strlen(nodev));
+		}
+
+		itoa(test_data[0], buf, 16);
+		length = strlen(buf);
+		buf[length] = ' ';
+		itoa(test_data[1], &buf[length+1], 16);
+		diagnostics_send(interface, "After write ", strlen("After write "));
+		diagnostics_send(interface, buf, strlen(buf));
+		diagnostics_send(interface, "\r\n", strlen("\r\n"));
+
+		if (flash_erase(flash_dev, 0, 4096) != 0) {
+			const char* nodev = "Flash - erase failed.\r\n";
+			diagnostics_send(interface, nodev, strlen(nodev));
+		}
+
+		memset(test_data, 0, 2);
+
+		if (flash_read(flash_dev, 0, test_data, 2) != 0) {
+			const char* nodev = "Flash - read failed.\r\n";
+			diagnostics_send(interface, nodev, strlen(nodev));
+		}
+
+		itoa(test_data[0], buf, 16);
+		length = strlen(buf);
+		buf[length] = ' ';
+		itoa(test_data[1], &buf[length+1], 16);
+		diagnostics_send(interface, "After erase ", strlen("After erase "));
+		diagnostics_send(interface, buf, strlen(buf));
+		diagnostics_send(interface, "\r\n", strlen("\r\n"));
 	} else {
 		const char* readydev = "Unknown test parameter\r\n";
 		diagnostics_send(interface, readydev, strlen(readydev));
@@ -549,33 +629,42 @@ static void passthrough_uart_isr(const struct device *uart_dev,
 	uart_irq_update(uart_dev);
 
 	while (uart_irq_update(uart_dev) &&
-	        uart_irq_rx_ready(uart_dev)) {
+	        uart_irq_is_pending(uart_dev)) {
 		
-		/*if (uart_irq_tx_ready(h4_dev)) {
-			bytes = uart_fifo_fill(h4_dev, &tx.type, 1);
-			uart_irq_tx_disable(h4_dev);
-		}*/
-
-		if (partial_size == 0) {
-			partial_size = 
-					ring_buf_put_claim(&passthrough_ring_buf, 
-									   &uart_data, 
-									   CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE);
+		if (uart_irq_tx_ready(uart_dev)) {
+			int bytes = uart_fifo_fill(uart_dev, &passthrough_tx_buffer[passthrough_tx_sent], passthrough_tx_count - passthrough_tx_sent);
+			passthrough_tx_sent += bytes;
+			
+			if (passthrough_tx_sent >= passthrough_tx_count) {
+				atomic_clear_bit(&passthrough_tx_in_progress, 0);
+				passthrough_tx_count = 0;
+				passthrough_tx_sent = 0;
+				uart_irq_tx_disable(uart_dev);
+			}
 		}
 
-		if (partial_size == 0) {
-			passthrough_flush(uart_dev);
-			break;
-		}
+		if (uart_irq_rx_ready(uart_dev)) {
+			if (partial_size == 0) {
+				partial_size = 
+						ring_buf_put_claim(&passthrough_ring_buf, 
+										&uart_data, 
+										CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE);
+			}
 
-		uint32_t received = uart_fifo_read(uart_dev, uart_data, partial_size);
-		if (received <= 0) {
-			continue;
-		}
+			if (partial_size == 0) {
+				passthrough_flush(uart_dev);
+				break;
+			}
 
-		uart_data += received;
-		total_received += received;
-		partial_size -= received;
+			uint32_t received = uart_fifo_read(uart_dev, uart_data, partial_size);
+			if (received <= 0) {
+				continue;
+			}
+
+			uart_data += received;
+			total_received += received;
+			partial_size -= received;
+		}
 	}
 		
 	int ret = ring_buf_put_finish(&passthrough_ring_buf, total_received);
@@ -644,6 +733,10 @@ static int parser_modem(enum diagnostics_interface interface, char* arg)
 {
 	passthrough_interface = interface;
 	const struct device *modem_device = device_get_binding(DT_LABEL(DT_NODELABEL(modem_uart)));
+
+	gpio_pin_configure(gpio0_dev, 2, GPIO_OUTPUT_HIGH);
+	k_msleep(1000);
+	gpio_pin_configure(gpio0_dev, 2, GPIO_OUTPUT_LOW);
 
 	return passthrough_initialize(modem_device);
 }

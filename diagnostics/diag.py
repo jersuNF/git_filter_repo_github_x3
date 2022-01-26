@@ -42,6 +42,7 @@ while True:
     if msvcrt.kbhit():
         down_data = msvcrt.getch()
         if down_data == b'\r':
+            tn.write(b'\r')
             down_data = b'\n'
             
         print(down_data.decode("ascii"), end='', flush=True)

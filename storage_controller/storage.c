@@ -23,11 +23,11 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_STORAGE_CONTROLLER_LOG_LEVEL);
 #define FLASH_LOG_NUM_SECTORS PM_LOG_PARTITION_SIZE / CONFIG_STORAGE_SECTOR_SIZE
 #define FLASH_ANO_NUM_SECTORS PM_ANO_PARTITION_SIZE / CONFIG_STORAGE_SECTOR_SIZE
 
-struct flash_area log_area;
+const struct flash_area *log_area;
 struct fcb log_fcb;
 struct flash_sector log_sectors[FLASH_LOG_NUM_SECTORS];
 
-struct flash_area ano_area;
+const struct flash_area *ano_area;
 struct fcb ano_fcb;
 struct flash_sector ano_sectors[FLASH_ANO_NUM_SECTORS];
 
@@ -44,114 +44,97 @@ struct read_container {
 	struct k_work work;
 
 	mem_rec *new_rec;
-	flash_regions_t region;
+	flash_partition_t region;
 };
 struct write_container {
 	struct k_work work;
 
 	mem_rec *new_rec;
-	flash_regions_t region;
+	flash_partition_t region;
 };
 
-int init_log_data_partition(void)
+static inline int init_fcb_on_partition(flash_partition_t partition)
 {
 	int err;
-	err = flash_area_has_driver(&log_area);
+	const struct device *dev;
+	struct fcb *fcb;
+	uint32_t sector_cnt;
+	int area_id;
+	const struct flash_area *area;
+	struct flash_sector *sector_ptr;
+
+	/* Based on parameter, setup variables required by FCB. */
+	if (partition == STG_PARTITION_LOG) {
+		fcb = &log_fcb;
+		sector_cnt = FLASH_LOG_NUM_SECTORS;
+		area_id = FLASH_AREA_ID(log_partition);
+		area = log_area;
+		sector_ptr = log_sectors;
+	} else if (partition == STG_PARTITION_ANO) {
+		fcb = &ano_fcb;
+		sector_cnt = FLASH_ANO_NUM_SECTORS;
+		area_id = FLASH_AREA_ID(ano_partition);
+		area = ano_area;
+		sector_ptr = ano_sectors;
+	} else {
+		LOG_ERR("Invalid partition given. %d", -EINVAL);
+		return -EINVAL;
+	}
+
+	err = flash_area_open(area_id, &area);
 	if (err) {
-		LOG_ERR("No device available for log area.");
+		LOG_ERR("Error opening flash area for partition %d, err %d",
+			partition, err);
 		return err;
 	}
-	const struct flash_area *area = &log_area;
-	err = flash_area_open(FLASH_AREA_ID(log_partition), &area);
-	if (err) {
-		LOG_ERR("Error opening flash area for log data.");
-		return err;
+
+	/* Check if area has a flash device available. */
+	dev = device_get_binding(area->fa_dev_name);
+	flash_area_close(area);
+
+	if (dev == NULL) {
+		LOG_ERR("Could not get device for partition %d.", partition);
+		return -ENODEV;
 	}
 
 	/* Used to get flash parameters and driver specific attributes. */
-	const struct device *dev;
 	const struct flash_parameters *fp;
-
-	dev = device_get_binding(log_area.fa_dev_name);
-	flash_area_close(&log_area);
-
-	if (dev == NULL) {
-		LOG_ERR("Could not get device for log area!");
-		return -ENODEV;
-	}
 	fp = flash_get_parameters(dev);
 
-	uint32_t sector_cnt = FLASH_LOG_NUM_SECTORS;
-	log_fcb.f_magic = 0U;
-	log_fcb.f_erase_value = fp->erase_value;
-	err = flash_area_get_sectors(FLASH_AREA_ID(log_partition), &sector_cnt,
-				     log_sectors);
-	if (err) {
-		LOG_ERR("Unable to setup log sectors %d", err);
-		return err;
-	}
-	if (sector_cnt > UINT8_MAX) {
-		LOG_ERR("Number of log sectors got out of FCB range of 255.");
-		return -ENOMEM;
-	}
-	log_fcb.f_sector_cnt = (uint8_t)sector_cnt;
+	/* Setup a fresh flash circular buffer, 
+	 * this does not EMPTY existing contents on flash, but is
+	 * required for fcb_init to work properly. 
+	 */
+	(void)memset(fcb, 0, sizeof(*fcb));
 
-	err = fcb_init(FLASH_AREA_ID(log_partition), &log_fcb);
-	if (err) {
-		LOG_ERR("Unable to initialize log flash circular buffer %d",
-			err);
-	}
-	return err;
-}
+	fcb->f_magic = 0U;
+	fcb->f_erase_value = fp->erase_value;
 
-int init_ano_data_partition(void)
-{
-	int err;
-	err = flash_area_has_driver(&ano_area);
+	/* Setup the sectors. We input sector_cnt to be MAX 255
+	 * since this is the limitation of FCB. Sector count is
+	 * IN,OUT parameter, in which case it retrieves the MAX
+	 * number of sectors, and outputs how many is available
+	 * based on partition size.
+	 */
+	err = flash_area_get_sectors(area_id, &sector_cnt, sector_ptr);
 	if (err) {
-		LOG_ERR("No device available for ano area.");
-		return err;
-	}
-	const struct flash_area *area = &ano_area;
-	err = flash_area_open(FLASH_AREA_ID(ano_partition), &area);
-	if (err) {
-		LOG_ERR("Error opening flash area for ano data.");
+		LOG_ERR("Unable to setup sectors for partition %d, err %d.",
+			partition, err);
 		return err;
 	}
 
-	/* Used to get flash parameters and driver specific attributes. */
-	const struct device *dev;
-	const struct flash_parameters *fp;
+	fcb->f_sector_cnt = (uint8_t)sector_cnt;
+	fcb->f_sectors = sector_ptr;
 
-	dev = device_get_binding(ano_area.fa_dev_name);
-	flash_area_close(&ano_area);
-
-	if (dev == NULL) {
-		LOG_ERR("Could not get device for ano area!");
-		return -ENODEV;
-	}
-	fp = flash_get_parameters(dev);
-
-	uint32_t sector_cnt = FLASH_ANO_NUM_SECTORS;
-	ano_fcb.f_magic = 0U;
-	ano_fcb.f_erase_value = fp->erase_value;
-	err = flash_area_get_sectors(FLASH_AREA_ID(ano_partition), &sector_cnt,
-				     ano_sectors);
+	err = fcb_init(area_id, fcb);
 	if (err) {
-		LOG_ERR("Unable to setup ano sectors %d", err);
+		LOG_ERR("Unable to initialize fcb for partition %d, err %d.",
+			partition, err);
 		return err;
 	}
-	if (sector_cnt > UINT8_MAX) {
-		LOG_ERR("Number of ano sectors got out of FCB range of 255.");
-		return -ENOMEM;
-	}
-	ano_fcb.f_sector_cnt = (uint8_t)sector_cnt;
 
-	err = fcb_init(FLASH_AREA_ID(ano_partition), &ano_fcb);
-	if (err) {
-		LOG_ERR("Unable to initialize ano flash circular buffer %d",
-			err);
-	}
+	LOG_INF("Setup FCB for partition %d: %d sectors with sizes %db.",
+		partition, fcb->f_sector_cnt, fcb->f_sectors[0].fs_size);
 	return err;
 }
 
@@ -166,18 +149,22 @@ int init_storage_controller(void)
 			   K_THREAD_STACK_SIZEOF(stg_thread_area),
 			   CONFIG_STORAGE_THREAD_PRIORITY, NULL);
 
-	err = init_ano_data_partition();
+	/* Initialize FCB on LOG and ANO partitions
+	 * based on pm_static.yml/.dts flash setup.
+	 */
+	err = init_fcb_on_partition(STG_PARTITION_LOG);
 	if (err) {
 		return err;
 	}
-	err = init_log_data_partition();
+
+	err = init_fcb_on_partition(STG_PARTITION_ANO);
 	if (err) {
 		return err;
 	}
 	return 0;
 }
 
-void fcb_write_entry(flash_regions_t region, uint8_t *data, size_t len)
+void fcb_write_entry(flash_partition_t region, uint8_t *data, size_t len)
 {
 	/*int rc;
 	struct fcb *fcb;

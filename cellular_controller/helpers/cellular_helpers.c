@@ -12,6 +12,44 @@
 
 #include <logging/log.h>
 LOG_MODULE_REGISTER(cellular_helpers, LOG_LEVEL_DBG);
+static struct net_if *iface;
+static struct net_if_config *cfg;
+
+
+
+int8_t lteInit(void)
+{
+    int rc = 1;
+
+    /* wait for network interface to be ready */
+    iface = net_if_get_default();
+    if (!iface) {
+        LOG_ERR("Could not get iface (network interface)!");
+        rc = -1;
+        goto exit;
+    }
+
+    cfg = net_if_get_config(iface);
+    if (!cfg) {
+        LOG_ERR("Could not get iface config!");
+        rc = -2;
+        goto exit;
+    }
+    return rc;
+
+    exit:
+    return rc;
+}
+
+bool lteIsReady(void)
+{
+    if (iface != NULL && cfg != NULL) {
+        return true;
+    }
+    else{
+        return false;
+    }
+}
 
 static size_t sendall(int sock, const void *buf, size_t len)
 {
@@ -78,6 +116,24 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
     }
 
     return ret;
+}
+
+int8_t socket_receive(struct data *data)
+{
+    int received;
+    char buf[RECV_BUF_SIZE];
+
+    received = recv(data->tcp.sock, buf, sizeof(buf), MSG_DONTWAIT);
+    if (received > 0)
+    {
+        LOG_WRN("received %d bytes!\n", received);
+    }
+    else if (received < 0) {
+        LOG_ERR("Socket receive error!\n");
+        return received;
+    }
+
+    return received;
 }
 
 void stop_tcp(void)

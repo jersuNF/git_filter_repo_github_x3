@@ -7,13 +7,12 @@
 #include "event_manager.h"
 #include <logging/log.h>
 #include <stdbool.h>
-#include <stdlib.h>
 #include <errno.h>
 #include <net/net_if.h>
 #include <net/net_event.h>
 #include <net/socket.h>
 
-
+#define INVALID_SOCK (-1)
 #define PEER_PORT CONFIG_SERVER_PORT
 #define RECV_BUF_SIZE 128
 
@@ -70,9 +69,4 @@ struct configs {
 
 extern struct configs conf;
 
-int8_t socket_connect(struct data *, struct sockaddr *,
-                          socklen_t);
-int8_t start_tcp(void);
 void stop_tcp(void);
-int8_t send_tcp(char*, size_t);
-uint8_t receive_tcp(struct data *);

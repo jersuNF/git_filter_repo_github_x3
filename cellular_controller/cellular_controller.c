@@ -2,64 +2,26 @@
 #include "cellular_helpers_header.h"
 #include "cellular_controller_events.h"
 
-
+#ifndef  CONFIG_ZTEST
 #define GSM_DEVICE DT_LABEL(DT_INST(0, u_blox_sara_r4))
+#endif
 
-#define INVALID_SOCK (-1)
+
 #define MY_STACK_SIZE 1024
 #define MY_PRIORITY 5
 #define MODULE cellular_controller
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
-/******************************************************************************/
-/* Local Data Definitions                                                     */
-/******************************************************************************/
-static struct net_if *iface;
-static struct net_if_config *cfg;
+static bool messaging_ack = true;
 
-static bool ack = true;
-
-void submit_error(int8_t cause, int8_t err_code){
-    struct cellular_error_event *err =
-            new_cellular_error_event();
-    err->cause = cause;
-    err->err_code = err_code;
-    EVENT_SUBMIT(err);
-}
-
-int8_t lteInit(void)
-{
-    int rc = 1;
-
-    /* wait for network interface to be ready */
-    iface = net_if_get_default();
-    if (!iface) {
-        LOG_ERR("Could not get iface (network interface)!");
-        rc = -1;
-        goto exit;
-    }
-
-    cfg = net_if_get_config(iface);
-    if (!cfg) {
-        LOG_ERR("Could not get iface config!");
-        rc = -2;
-        goto exit;
-    }
-    return rc;
-
-    exit:
-    return rc;
-}
-
-bool lteIsReady(void)
-{
-    if (iface != NULL && cfg != NULL) {
-        return true;
-    }
-    else{
-        return false;
-    }
-}
+int8_t socket_connect(struct data *, struct sockaddr *,
+                          socklen_t);
+//int8_t start_tcp(void);
+//void stop_tcp(void);
+int8_t send_tcp(char*, size_t);
+uint8_t socket_receive(struct data *);
+int8_t lteInit(void);
+bool lteIsReady(void);
 
 APP_DMEM struct configs conf = {
         .ipv4 = {
@@ -69,21 +31,29 @@ APP_DMEM struct configs conf = {
         },
 };
 
+void submit_error(int8_t cause, int8_t err_code){
+    struct cellular_error_event *err =
+            new_cellular_error_event();
+    err->cause = cause;
+    err->err_code = err_code;
+    EVENT_SUBMIT(err);
+}
+
 static APP_BMEM bool connected;
 
-uint8_t receive_tcp(struct data *data)
+int8_t receive_tcp(struct data *sock_data)
 {
     int err, received;
     char buf[RECV_BUF_SIZE];
-    uint8_t *pMsgIn;
+    uint8_t *pMsgIn = NULL;
 
-    do {
-        received = recv(data->tcp.sock, buf, sizeof(buf), MSG_DONTWAIT);
+//    do {
+        received = socket_receive(sock_data);
         if (received > 0)
         {
             LOG_WRN("received %d bytes!\n", received);
 
-            if(!ack) {/* TODO: notify the error handler */
+            if(messaging_ack == false) {/* TODO: notify the error handler */
                 LOG_ERR("New message received while the messaging module "
                         "hasn't consumed the previous one!\n");
                 err = -1;
@@ -98,13 +68,15 @@ uint8_t receive_tcp(struct data *data)
 
                 pMsgIn = (uint8_t *) malloc(received);
                 memcpy(pMsgIn, buf, received);
-                ack = false;
+                messaging_ack = false;
 
                 struct cellular_proto_in_event *msgIn =
                         new_cellular_proto_in_event();
                 msgIn->buf = pMsgIn;
                 msgIn->len = received;
+                LOG_INF("Submitting msgIn event!\n");
                 EVENT_SUBMIT(msgIn);
+                return 0;
             }
         }
         else if (received < 0) {
@@ -113,9 +85,9 @@ uint8_t receive_tcp(struct data *data)
             return received;
         }
         else {
-            continue;
+            return 0;
         }
-    } while (lteIsReady());
+//    } while (lteIsReady());
 
     submit_error(CONNECTION_LOST, -1);
     return -1;
@@ -125,8 +97,10 @@ int8_t start_tcp(void)
 {
     int8_t ret = 0;
     struct sockaddr_in addr4;
+    LOG_INF("start_tcp() begin!\n");
 
     if (IS_ENABLED(CONFIG_NET_IPV4)) {
+        LOG_INF("start_tcp() begin 2!\n");
         addr4.sin_family = AF_INET;
         addr4.sin_port = htons(PEER_PORT);
         inet_pton(AF_INET, CONFIG_NET_CONFIG_PEER_IPV4_ADDR,
@@ -138,7 +112,8 @@ int8_t start_tcp(void)
             submit_error(SOCKET_CONNECT, ret);
             return ret;
         }
-        receive_tcp(&conf.ipv4);
+        ret = receive_tcp(&conf.ipv4);
+        return ret;
     }
     return ret;
 }
@@ -146,7 +121,7 @@ int8_t start_tcp(void)
 static bool cellular_controller_event_handler(const struct event_header *eh)
 {
     if (is_messaging_ack_event(eh)) {
-        ack = true;
+        messaging_ack = true;
         return true;
     }
     else if(is_messaging_proto_out_event(eh)){
@@ -177,23 +152,33 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
     return false;
 }
 
-int cellular_controller_init(void)
+int8_t cellular_controller_init(void)
 {
     int8_t ret;
     printk("Cellular controller starting!, %p\n", k_current_get());
+    connected = false;
+#ifndef  CONFIG_ZTEST
     const struct device *gsm_dev = device_get_binding(GSM_DEVICE);
     if (!gsm_dev) {
         LOG_ERR("GSM driver %s was not found!\n", GSM_DEVICE);
         return -1;
     }
-
+#endif
     ret = lteInit();
     if (ret == 1)
     {
         LOG_INF("Cellular network interface ready!\n");
-        connected = true;
+
         if(lteIsReady()) {
             ret = start_tcp();
+            if (ret == 0){
+                LOG_INF("TCP connection started!\n");
+                connected = true;
+                return 0;
+            }
+            else{
+                goto exit_cellular_controller;
+            }
         }
         else{
             LOG_ERR("Check LTE network configuration!");
@@ -207,9 +192,9 @@ int cellular_controller_init(void)
         goto exit_cellular_controller;
     }
 
-
     exit_cellular_controller:
         stop_tcp();
+        LOG_ERR("Cellular controller initialization failure!");
         return -1;
 }
 

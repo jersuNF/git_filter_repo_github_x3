@@ -13,6 +13,6 @@
  * @return 0 on success, otherwise negative errno.
  */
 
-int cellular_controller_init(void);
+int8_t cellular_controller_init(void);
 
 #endif //X3_FW_CELLULAR_CONTROLLER_H

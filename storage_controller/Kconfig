@@ -27,4 +27,8 @@ if STORAGE_CONTROLLER
 		  or a preemptible thread of higher or equal priority, 
 		  becomes ready.
 
+	config STORAGE_SECTOR_SIZE
+		hex "Size of the sectors that FCB uses for log/ano data"
+		default 0x1000
+
 endif

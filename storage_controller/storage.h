@@ -12,6 +12,6 @@
  * 
  * @return 0 if successful, otherwise a negative error code.
  */
-int initialize_flash_driver(void);
+int init_storage_controller(void);
 
 #endif /* _STORAGE_H_ */

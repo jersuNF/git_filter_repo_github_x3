@@ -2,7 +2,11 @@
 # Copyright (c) 2021 Nofence
 #
 
-target_include_directories(app PRIVATE .)
+target_include_directories(app PRIVATE 
+			.
+			./../../events/storage_controller/)
+
 target_sources(app PRIVATE
-			${CMAKE_CURRENT_SOURCE_DIR}/storage.c
+			./storage.c
+			./../../events/storage_controller/storage_events.c
 )

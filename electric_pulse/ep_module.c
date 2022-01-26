@@ -15,19 +15,22 @@
 #define LOG_MODULE_NAME ep_module
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_EP_MODULE_LOG_LEVEL);
 
-// TODO: fetch this config value from EEPROM;
+/* TODO: fetch this config value from EEPROM. Store it here for now */
 #define CATTLE 0
 
 #define PIN_HIGH 1
 #define PIN_LOW 0
 
-/* Match config values from HW_N */
+/* Match config values from HW_N. Must be fine tuned for new hw. */
+/* Times are given in uS */
 #define EP_DURATION_CATTLE 1000000
 #define EP_DURATION_SHEEP 500000
-#define EP_ON_TIME 2 // uS
-#define EP_OFF_TIME 5 // uS
-#define EP_FREQ (EP_ON_TIME + EP_OFF_TIME + 3) // extra delay for loop
-#define MINIMUM_TIME_BETWEEN_BURST 5000 //mS
+#define EP_ON_TIME 2
+#define EP_OFF_TIME 5
+#define EP_FREQ (EP_ON_TIME + EP_OFF_TIME + 3)
+
+/* Safety timer. Given in mS */
+#define MINIMUM_TIME_BETWEEN_BURST 5000
 
 /* Board with no supported hw, use LED as indicator */
 #if DT_NODE_HAS_STATUS(DT_ALIAS(led0), okay)
@@ -65,7 +68,7 @@ int ep_module_init(void)
 	/* Set pin state to low */
 	err = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_LOW);
 
-// Detect pin is not in use. Set to disconnected
+/* EP Detect pin is not in use. Set to disconnected */
 #if DT_NODE_HAS_STATUS(DT_ALIAS(ep_detect), okay)
 	ep_detect_dev = device_get_binding(EP_DETECT_LABEL);
 	if (ep_detect_dev == NULL) {
@@ -86,12 +89,11 @@ static int ep_module_release(void)
 {
 	int err;
 	uint32_t i;
-	uint32_t EP_duration =
-		(uint32_t)(EP_DURATION_SHEEP / EP_FREQ); // in us for sheep
-
+	/* In uS for sheep */
+	uint32_t EP_duration = (uint32_t)(EP_DURATION_SHEEP / EP_FREQ);
 	if (CATTLE) {
-		EP_duration = (uint32_t)(EP_DURATION_CATTLE /
-					 EP_FREQ); // in us for cattle
+		/* In uS for Cattle */
+		EP_duration = (uint32_t)(EP_DURATION_CATTLE / EP_FREQ);
 	}
 
 	if (!device_is_ready(ep_ctrl_dev)) {
@@ -136,7 +138,8 @@ static bool event_handler(const struct event_header *eh)
 			err = ep_module_release();
 			if (err < 0) {
 				char *e_msg = "Error in ep release";
-				nf_app_error(ERR_ELECTRIC_PULSE, err, e_msg, strlen(e_msg));
+				nf_app_error(ERR_ELECTRIC_PULSE, err, e_msg,
+					     strlen(e_msg));
 			}
 			break;
 		default:
@@ -155,4 +158,4 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, ep_status_event);
-// TODO: Subscribe to sound events?
+/* TODO: Subscribe to buzzer and sound event here */

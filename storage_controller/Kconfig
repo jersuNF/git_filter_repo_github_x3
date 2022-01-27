@@ -1,5 +1,6 @@
 menuconfig STORAGE_CONTROLLER
         bool "Enable storage controller module"
+	select POLL
         default y
 
 if STORAGE_CONTROLLER
@@ -30,5 +31,13 @@ if STORAGE_CONTROLLER
 	config STORAGE_SECTOR_SIZE
 		hex "Size of the sectors that FCB uses for log/ano data"
 		default 0x1000
+
+	config MSGQ_WRITE_EVENT_SIZE
+		int "Size of write event message queue."
+		default 4
+
+	config MSGQ_READ_EVENT_SIZE
+		int "Size of read event message queue."
+		default 4
 
 endif

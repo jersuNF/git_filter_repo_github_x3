@@ -165,9 +165,9 @@ static inline void process_lte_proto_event(void)
 
 void messaging_thread_fn()
 {
-	int rc = k_poll(msgq_events, NUM_MSGQ_EVENTS, K_FOREVER);
+	int err = k_poll(msgq_events, NUM_MSGQ_EVENTS, K_FOREVER);
 
-	if (rc == 0) {
+	if (err == 0) {
 		if (msgq_events[0].state == K_POLL_STATE_FIFO_DATA_AVAILABLE) {
 			process_ble_ctrl_event();
 		}

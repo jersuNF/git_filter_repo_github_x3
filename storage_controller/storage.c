@@ -31,11 +31,21 @@ const struct flash_area *ano_area;
 struct fcb ano_fcb;
 struct flash_sector ano_sectors[FLASH_ANO_NUM_SECTORS];
 
-/* Thread stack area that we use for the storage controller operations 
- * such as read/write.
- */
-K_THREAD_STACK_DEFINE(stg_thread_area, CONFIG_STORAGE_THREAD_SIZE);
-static struct k_work_q stg_work_q;
+#define NUM_STG_MSGQ_EVENTS 2
+/* 4 means 4-byte alignment. */
+K_MSGQ_DEFINE(read_event_msgq, sizeof(struct stg_write_memrec_event),
+	      CONFIG_MSGQ_READ_EVENT_SIZE, 4);
+K_MSGQ_DEFINE(write_event_msgq, sizeof(struct stg_read_memrec_event),
+	      CONFIG_MSGQ_WRITE_EVENT_SIZE, 4);
+
+struct k_poll_event stg_msgq_events[NUM_STG_MSGQ_EVENTS] = {
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_FIFO_DATA_AVAILABLE,
+					K_POLL_MODE_NOTIFY_ONLY,
+					&read_event_msgq, 0),
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_FIFO_DATA_AVAILABLE,
+					K_POLL_MODE_NOTIFY_ONLY,
+					&write_event_msgq, 0),
+};
 
 /* Work items that are called from event handler. Currently stores
  * data so we do not hang/slow the event bus with flash write/read.
@@ -141,13 +151,6 @@ static inline int init_fcb_on_partition(flash_partition_t partition)
 int init_storage_controller(void)
 {
 	int err;
-	/* Init work item and start and init calculation 
-	 * work queue thread and item. 
-	 */
-	k_work_queue_init(&stg_work_q);
-	k_work_queue_start(&stg_work_q, stg_thread_area,
-			   K_THREAD_STACK_SIZEOF(stg_thread_area),
-			   CONFIG_STORAGE_THREAD_PRIORITY, NULL);
 
 	/* Initialize FCB on LOG and ANO partitions
 	 * based on pm_static.yml/.dts flash setup.
@@ -164,29 +167,110 @@ int init_storage_controller(void)
 	return 0;
 }
 
-void fcb_write_entry(flash_partition_t region, uint8_t *data, size_t len)
+int fcb_write_entry(flash_partition_t region, uint8_t *data, size_t len)
 {
-	/*int rc;
+	int err;
 	struct fcb *fcb;
 	struct fcb_entry loc;
 
-	if (region == FLASH_REGION_LOG) {
+	if (region == STG_PARTITION_LOG) {
 		fcb = &log_fcb;
-	} else if () {
+	} else if (region == STG_PARTITION_ANO) {
 		fcb = &ano_fcb;
+	} else {
+		return -EINVAL;
 	}
 
-	for (i = 0; i < sizeof(test_data); i++) {
-		rc = fcb_append(fcb, i, &loc);
-		if (rc == -ENOSPC) {
-			rc = fcb_rotate();
+	/* Appending a new entry, rotate(replaces) oldests if no space. */
+	err = fcb_append(fcb, len, &loc);
+	if (err == -ENOSPC) {
+		err = fcb_rotate(fcb);
+		if (err) {
+			LOG_ERR("Unable to rotate fcb from -ENOSPC, err %d",
+				err);
+			return err;
 		}
-		zassert_true(rc == 0, "fcb_append call failure");
-		rc = flash_area_write(fcb->fap, FCB_ENTRY_FA_DATA_OFF(loc),
-				      test_data, i);
-		zassert_true(rc == 0, "flash_area_write call failure");
-		rc = fcb_append_finish(fcb, &loc);
-	}*/
+	} else if (err) {
+		LOG_ERR("Error appending new fcb entry, err %d", err);
+		return err;
+	}
+
+	/* If ppsize-512 is not defined in 
+	 * .dts for flash device, 256 bytes is used for max page size. 
+	 */
+	int max_write_size = FLASH_PAGE_MAX_CNT;
+	int num_write_cycles =
+		(len / max_write_size) + (len % max_write_size != 0);
+	int last_write_size = len - ((num_write_cycles - 1) * max_write_size);
+
+	/* Writing data fragments. */
+	for (int i = 0; i < num_write_cycles; i++) {
+		off_t offset = i * max_write_size;
+		int write_size = max_write_size;
+
+		/* If we're on the last fragment, alter the buffer size to
+		 * remaining data of the container.
+		 */
+		if (i == num_write_cycles - 1) {
+			write_size = last_write_size;
+		}
+		err = flash_area_write(fcb->fap,
+				       FCB_ENTRY_FA_DATA_OFF(loc) + offset,
+				       data, write_size);
+		if (err) {
+			LOG_ERR("Error writing to flash area. err %d", err);
+			return err;
+		}
+	}
+
+	/* Finish entry. */
+	err = fcb_append_finish(fcb, &loc);
+	if (err) {
+		LOG_ERR("Error finishing new entry. err %d", err);
+		return err;
+	}
+	return 0;
+}
+
+static int fcb_walk_stg_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
+{
+	uint16_t len;
+	uint8_t *data = (uint8_t *)arg;
+	int err;
+
+	len = loc_ctx->loc.fe_data_len;
+
+	err = flash_area_read(loc_ctx->fap, FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc),
+			      data, len);
+	if (err) {
+		LOG_ERR("Error reading from flash area, err %d", err);
+		return err;
+	}
+
+	/* Notify data has been read and copied to given pointer location. */
+	struct stg_read_memrec_event *event = new_stg_read_memrec_event();
+	EVENT_SUBMIT(event);
+	return 0;
+}
+
+int fcb_read_entry(flash_partition_t region, uint8_t *data)
+{
+	struct fcb *fcb;
+
+	if (region == STG_PARTITION_ANO) {
+		fcb = &ano_fcb;
+	} else if (region == STG_PARTITION_LOG) {
+		fcb = &log_fcb;
+	} else {
+		return -EINVAL;
+	}
+
+	int err = fcb_walk(fcb, 0, fcb_walk_stg_cb, (void *)data);
+	if (err) {
+		LOG_ERR("Error walking over FCB storage, err %d", err);
+		return err;
+	}
+	return 0;
 }
 
 /**
@@ -201,12 +285,27 @@ void fcb_write_entry(flash_partition_t region, uint8_t *data, size_t len)
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_stg_read_memrec_event(eh)) {
+		struct stg_read_memrec_event *ev =
+			cast_stg_read_memrec_event(eh);
+		while (k_msgq_put(&read_event_msgq, ev, K_NO_WAIT) != 0) {
+			k_msgq_purge(&read_event_msgq);
+		}
 		return false;
 	}
 	if (is_stg_write_memrec_event(eh)) {
+		struct stg_write_memrec_event *ev =
+			cast_stg_write_memrec_event(eh);
+		while (k_msgq_put(&write_event_msgq, ev, K_NO_WAIT) != 0) {
+			k_msgq_purge(&write_event_msgq);
+		}
 		return false;
 	}
 	if (is_stg_ack_read_memrec_event(eh)) {
+		/*struct stg_ack_read_memrec_event *ev =
+			cast_stg_ack_read_memrec_event(eh);
+			if (ev->region == STG_PARTITION_LOG) {
+				err = fcb_getnext();
+			}*/
 		/* Increment pointer to next area. */
 		return false;
 	}
@@ -222,3 +321,49 @@ EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, stg_write_memrec_event);
 EVENT_SUBSCRIBE(MODULE, stg_read_memrec_event);
 EVENT_SUBSCRIBE(MODULE, stg_ack_read_memrec_event);
+
+void storage_thread_fn()
+{
+	int err = k_poll(stg_msgq_events, NUM_STG_MSGQ_EVENTS, K_FOREVER);
+	if (err == 0) {
+		if (stg_msgq_events[0].state ==
+		    K_POLL_STATE_FIFO_DATA_AVAILABLE) {
+			struct stg_read_memrec_event ev;
+			int err = k_msgq_get(&read_event_msgq, &ev, K_NO_WAIT);
+			if (err) {
+				LOG_ERR("Error getting read_event from msgq: %d",
+					err);
+				return;
+			}
+			err = fcb_read_entry(ev.partition,
+					     (uint8_t *)ev.new_rec);
+			if (err) {
+				LOG_ERR("Error reading FCB entry, %d", err);
+				return;
+			}
+		}
+		if (stg_msgq_events[1].state ==
+		    K_POLL_STATE_FIFO_DATA_AVAILABLE) {
+			struct stg_write_memrec_event ev;
+			int err = k_msgq_get(&write_event_msgq, &ev, K_NO_WAIT);
+			if (err) {
+				LOG_ERR("Error getting read_event from msgq: %d",
+					err);
+				return;
+			}
+			err = fcb_write_entry(ev.partition,
+					      (uint8_t *)ev.new_rec,
+					      sizeof(mem_rec));
+			if (err) {
+				LOG_ERR("Error writing FCB entry, %d", err);
+				return;
+			}
+		}
+	}
+}
+
+/* Thread stack area that we use for the storage controller operations 
+ * such as read/write.
+ */
+K_THREAD_DEFINE(storage_thread, CONFIG_STORAGE_THREAD_SIZE, storage_thread_fn,
+		NULL, NULL, NULL, CONFIG_STORAGE_THREAD_PRIORITY, 0, 0);

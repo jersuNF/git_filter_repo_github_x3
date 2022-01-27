@@ -6,7 +6,6 @@
 #define _STORAGE_H_
 
 #include <zephyr.h>
-
 /** 
  * @brief Setup external flash driver
  * 

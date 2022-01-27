@@ -31,6 +31,12 @@ const struct flash_area *ano_area;
 struct fcb ano_fcb;
 struct flash_sector ano_sectors[FLASH_ANO_NUM_SECTORS];
 
+/* Semaphore used by storage controller to continue the walk process only
+ * when this semaphore was given in the consumed event sent out by the
+ * consumer/requester.
+ */
+K_SEM_DEFINE(data_consumed_sem, 0, 1);
+
 #define NUM_STG_MSGQ_EVENTS 2
 /* 4 means 4-byte alignment. */
 K_MSGQ_DEFINE(read_event_msgq, sizeof(struct stg_read_memrec_event),
@@ -39,10 +45,10 @@ K_MSGQ_DEFINE(write_event_msgq, sizeof(struct stg_write_memrec_event),
 	      CONFIG_MSGQ_WRITE_EVENT_SIZE, 4);
 
 struct k_poll_event stg_msgq_events[NUM_STG_MSGQ_EVENTS] = {
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_FIFO_DATA_AVAILABLE,
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY,
 					&read_event_msgq, 0),
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_FIFO_DATA_AVAILABLE,
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY,
 					&write_event_msgq, 0),
 };
@@ -226,14 +232,17 @@ void stg_fcb_write_entry()
 	/* Notify data has been written. */
 	struct stg_ack_write_memrec_event *event =
 		new_stg_ack_write_memrec_event();
+	event->partition = ev.partition;
 	EVENT_SUBMIT(event);
 	return;
 }
-
+static int counter = 0;
 static int stg_fcb_walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 {
+	struct stg_read_memrec_event *ev = (struct stg_read_memrec_event *)arg;
+
 	uint16_t len;
-	uint8_t *data = (uint8_t *)arg;
+	uint8_t *data = (uint8_t *)ev->new_rec;
 	int err;
 
 	len = loc_ctx->loc.fe_data_len;
@@ -244,11 +253,27 @@ static int stg_fcb_walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 		LOG_ERR("Error reading from flash area, err %d", err);
 		return err;
 	}
+	mem_rec *mr = (mem_rec *)data;
+	printk("ITERATION %i :: HEADER %i :: ELEM_OFF %i :: SECTOR_OFF %i\n",
+	       counter, mr->header.len,
+	       (int)FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc),
+	       (int)loc_ctx->loc.fe_sector->fs_off);
+	counter++;
 
-	/* Notify data has been read and copied to given pointer location. */
+	/* Publish read ack event and wait for consumed ack, 
+	 * only then do we read the next entry in the walk process.
+	 */
 	struct stg_ack_read_memrec_event *event =
 		new_stg_ack_read_memrec_event();
+	event->partition = ev->partition;
 	EVENT_SUBMIT(event);
+
+	err = k_sem_take(&data_consumed_sem,
+			 K_SECONDS(CONFIG_WALK_CONSUME_TIMEOUT_SEC));
+	if (err) {
+		LOG_ERR("Failed to wait for requester to consume.");
+		return err;
+	}
 	return 0;
 }
 
@@ -271,11 +296,23 @@ void stg_fcb_read_entry()
 		return;
 	}
 
-	err = fcb_walk(fcb, 0, stg_fcb_walk_cb, (void *)ev.new_rec);
+	err = fcb_walk(fcb, fcb->f_oldest, stg_fcb_walk_cb, &ev);
 	if (err) {
 		LOG_ERR("Error walking over FCB storage, err %d", err);
 		return;
 	}
+	counter = 0;
+
+	/* Rotate, since the walk process went through with confirmed 
+	 * consumed acks from requester.
+	 */
+	err = fcb_rotate(fcb);
+	if (err) {
+		LOG_ERR("Error rotating circular buffer after read ack.");
+		return;
+	}
+	LOG_INF("Rotated the circular buffer, pointing at sector %i",
+		fcb->f_active_id);
 	return;
 }
 
@@ -291,16 +328,15 @@ void stg_fcb_read_entry()
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_stg_read_memrec_event(eh)) {
-		LOG_INF("Read event entry here.");
 		struct stg_read_memrec_event *ev =
 			cast_stg_read_memrec_event(eh);
+		printk("Header data is %i", ev->new_rec->header.ID);
 		while (k_msgq_put(&read_event_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&read_event_msgq);
 		}
 		return false;
 	}
 	if (is_stg_write_memrec_event(eh)) {
-		LOG_INF("Write event entry here.");
 		struct stg_write_memrec_event *ev =
 			cast_stg_write_memrec_event(eh);
 		while (k_msgq_put(&write_event_msgq, ev, K_NO_WAIT) != 0) {
@@ -308,13 +344,8 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-	if (is_stg_ack_read_memrec_event(eh)) {
-		/*struct stg_ack_read_memrec_event *ev =
-			cast_stg_ack_read_memrec_event(eh);
-			if (ev->region == STG_PARTITION_LOG) {
-				err = fcb_getnext();
-			}*/
-		/* Increment pointer to next area. */
+	if (is_stg_data_consumed_event(eh)) {
+		k_sem_give(&data_consumed_sem);
 		return false;
 	}
 
@@ -328,21 +359,25 @@ EVENT_LISTENER(MODULE, event_handler);
 
 EVENT_SUBSCRIBE(MODULE, stg_write_memrec_event);
 EVENT_SUBSCRIBE(MODULE, stg_read_memrec_event);
+EVENT_SUBSCRIBE(MODULE, stg_data_consumed_event);
 
 void storage_thread_fn()
 {
-	int err = k_poll(stg_msgq_events, NUM_STG_MSGQ_EVENTS, K_FOREVER);
-	if (err == 0) {
-		if (stg_msgq_events[0].state ==
-		    K_POLL_STATE_FIFO_DATA_AVAILABLE) {
-			LOG_INF("Read entry here.");
-			stg_fcb_read_entry();
+	while (true) {
+		int err =
+			k_poll(stg_msgq_events, NUM_STG_MSGQ_EVENTS, K_FOREVER);
+		if (err == 0) {
+			while (k_msgq_num_used_get(&read_event_msgq) > 0) {
+				stg_fcb_read_entry();
+			}
+			while (k_msgq_num_used_get(&write_event_msgq) > 0) {
+				stg_fcb_write_entry();
+			}
 		}
-		if (stg_msgq_events[1].state ==
-		    K_POLL_STATE_FIFO_DATA_AVAILABLE) {
-			LOG_INF("Write entry here.");
-			stg_fcb_write_entry();
-		}
+	}
+	/* Set all the events to not ready again. */
+	for (int i = 0; i < NUM_STG_MSGQ_EVENTS; i++) {
+		stg_msgq_events[i].state = K_POLL_STATE_NOT_READY;
 	}
 }
 

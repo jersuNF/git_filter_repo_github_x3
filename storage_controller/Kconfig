@@ -40,4 +40,16 @@ if STORAGE_CONTROLLER
 		int "Size of read event message queue."
 		default 4
 
+	config WALK_CONSUME_TIMEOUT_SEC
+		int "Seconds to wait before giving up during walk process."
+		default 5
+		help
+		  This configuration sets how long the storage controller
+		  waits before timing out durin the walk process. The walk
+		  process simply iterates all the new entires since
+		  the f_oldest entry and sends out read acks in the callback.
+		  It waits for the requester to consume the data before
+		  continuing, where this configuration decides how long to wait
+		  before giving up and returning an error, NOT rotating the FCB.
+
 endif

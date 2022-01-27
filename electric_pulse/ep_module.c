@@ -11,6 +11,7 @@
 #include "ep_module.h"
 #include "ep_event.h"
 #include "error_event.h"
+#include "sound_event.h"
 
 #define LOG_MODULE_NAME ep_module
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_EP_MODULE_LOG_LEVEL);
@@ -53,6 +54,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_EP_MODULE_LOG_LEVEL);
 const struct device *ep_ctrl_dev;
 const struct device *ep_detect_dev;
 static int64_t last_pulse_given = 0;
+volatile bool trigger_ready = false;
 
 int ep_module_init(void)
 {
@@ -135,10 +137,17 @@ static bool event_handler(const struct event_header *eh)
 		int err;
 		switch (event->ep_status) {
 		case EP_RELEASE:
-			err = ep_module_release();
-			if (err < 0) {
-				char *e_msg = "Error in ep release";
-				nf_app_error(ERR_ELECTRIC_PULSE, err, e_msg,
+			if (trigger_ready) {
+				err = ep_module_release();
+				if (err < 0) {
+					char *e_msg = "Error in ep release";
+					nf_app_error(ERR_ELECTRIC_PULSE, err,
+						     e_msg, strlen(e_msg));
+				}
+			} else {
+				char *e_msg =
+					"Try to give EP outside Sound Max event";
+				nf_app_error(ERR_ELECTRIC_PULSE, -EACCES, e_msg,
 					     strlen(e_msg));
 			}
 			break;
@@ -151,6 +160,16 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 
+	if (is_sound_event(eh)) {
+		const struct sound_event *event = cast_sound_event(eh);
+		if (event->type == SND_MAX) {
+			trigger_ready = true;
+		} else {
+			trigger_ready = false;
+		}
+		return false;
+	}
+
 	__ASSERT_NO_MSG(false);
 
 	return false;
@@ -158,4 +177,4 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, ep_status_event);
-/* TODO: Subscribe to buzzer and sound event here */
+EVENT_SUBSCRIBE(MODULE, sound_event);

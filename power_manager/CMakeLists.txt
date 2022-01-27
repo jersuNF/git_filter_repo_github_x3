@@ -1,0 +1,11 @@
+
+
+target_include_directories(app PRIVATE 
+	.
+	./../../events/error_handler/
+)
+
+target_sources(app PRIVATE
+		     ${CMAKE_CURRENT_SOURCE_DIR}/pwr_module.c
+		     ./../../events/error_handler/error_event.c
+)

@@ -33,9 +33,9 @@ struct flash_sector ano_sectors[FLASH_ANO_NUM_SECTORS];
 
 #define NUM_STG_MSGQ_EVENTS 2
 /* 4 means 4-byte alignment. */
-K_MSGQ_DEFINE(read_event_msgq, sizeof(struct stg_write_memrec_event),
+K_MSGQ_DEFINE(read_event_msgq, sizeof(struct stg_read_memrec_event),
 	      CONFIG_MSGQ_READ_EVENT_SIZE, 4);
-K_MSGQ_DEFINE(write_event_msgq, sizeof(struct stg_read_memrec_event),
+K_MSGQ_DEFINE(write_event_msgq, sizeof(struct stg_write_memrec_event),
 	      CONFIG_MSGQ_WRITE_EVENT_SIZE, 4);
 
 struct k_poll_event stg_msgq_events[NUM_STG_MSGQ_EVENTS] = {
@@ -45,22 +45,6 @@ struct k_poll_event stg_msgq_events[NUM_STG_MSGQ_EVENTS] = {
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_FIFO_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY,
 					&write_event_msgq, 0),
-};
-
-/* Work items that are called from event handler. Currently stores
- * data so we do not hang/slow the event bus with flash write/read.
- */
-struct read_container {
-	struct k_work work;
-
-	mem_rec *new_rec;
-	flash_partition_t region;
-};
-struct write_container {
-	struct k_work work;
-
-	mem_rec *new_rec;
-	flash_partition_t region;
 };
 
 static inline int init_fcb_on_partition(flash_partition_t partition)
@@ -167,18 +151,27 @@ int init_storage_controller(void)
 	return 0;
 }
 
-int fcb_write_entry(flash_partition_t region, uint8_t *data, size_t len)
+void stg_fcb_write_entry()
 {
-	int err;
+	struct stg_write_memrec_event ev;
+	int err = k_msgq_get(&write_event_msgq, &ev, K_NO_WAIT);
+	if (err) {
+		LOG_ERR("Error getting write_event from msgq: %d", err);
+		return;
+	}
+
 	struct fcb *fcb;
 	struct fcb_entry loc;
 
-	if (region == STG_PARTITION_LOG) {
+	uint8_t *data = (uint8_t *)ev.new_rec;
+	size_t len = sizeof(mem_rec);
+
+	if (ev.partition == STG_PARTITION_LOG) {
 		fcb = &log_fcb;
-	} else if (region == STG_PARTITION_ANO) {
+	} else if (ev.partition == STG_PARTITION_ANO) {
 		fcb = &ano_fcb;
 	} else {
-		return -EINVAL;
+		return;
 	}
 
 	/* Appending a new entry, rotate(replaces) oldests if no space. */
@@ -188,11 +181,11 @@ int fcb_write_entry(flash_partition_t region, uint8_t *data, size_t len)
 		if (err) {
 			LOG_ERR("Unable to rotate fcb from -ENOSPC, err %d",
 				err);
-			return err;
+			return;
 		}
 	} else if (err) {
 		LOG_ERR("Error appending new fcb entry, err %d", err);
-		return err;
+		return;
 	}
 
 	/* If ppsize-512 is not defined in 
@@ -219,7 +212,7 @@ int fcb_write_entry(flash_partition_t region, uint8_t *data, size_t len)
 				       data, write_size);
 		if (err) {
 			LOG_ERR("Error writing to flash area. err %d", err);
-			return err;
+			return;
 		}
 	}
 
@@ -227,12 +220,17 @@ int fcb_write_entry(flash_partition_t region, uint8_t *data, size_t len)
 	err = fcb_append_finish(fcb, &loc);
 	if (err) {
 		LOG_ERR("Error finishing new entry. err %d", err);
-		return err;
+		return;
 	}
-	return 0;
+
+	/* Notify data has been written. */
+	struct stg_ack_write_memrec_event *event =
+		new_stg_ack_write_memrec_event();
+	EVENT_SUBMIT(event);
+	return;
 }
 
-static int fcb_walk_stg_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
+static int stg_fcb_walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 {
 	uint16_t len;
 	uint8_t *data = (uint8_t *)arg;
@@ -248,29 +246,37 @@ static int fcb_walk_stg_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 	}
 
 	/* Notify data has been read and copied to given pointer location. */
-	struct stg_read_memrec_event *event = new_stg_read_memrec_event();
+	struct stg_ack_read_memrec_event *event =
+		new_stg_ack_read_memrec_event();
 	EVENT_SUBMIT(event);
 	return 0;
 }
 
-int fcb_read_entry(flash_partition_t region, uint8_t *data)
+void stg_fcb_read_entry()
 {
+	struct stg_read_memrec_event ev;
+	int err = k_msgq_get(&read_event_msgq, &ev, K_NO_WAIT);
+	if (err) {
+		LOG_ERR("Error getting read_event from msgq: %d", err);
+		return;
+	}
+
 	struct fcb *fcb;
 
-	if (region == STG_PARTITION_ANO) {
+	if (ev.partition == STG_PARTITION_ANO) {
 		fcb = &ano_fcb;
-	} else if (region == STG_PARTITION_LOG) {
+	} else if (ev.partition == STG_PARTITION_LOG) {
 		fcb = &log_fcb;
 	} else {
-		return -EINVAL;
+		return;
 	}
 
-	int err = fcb_walk(fcb, 0, fcb_walk_stg_cb, (void *)data);
+	err = fcb_walk(fcb, 0, stg_fcb_walk_cb, (void *)ev.new_rec);
 	if (err) {
 		LOG_ERR("Error walking over FCB storage, err %d", err);
-		return err;
+		return;
 	}
-	return 0;
+	return;
 }
 
 /**
@@ -285,6 +291,7 @@ int fcb_read_entry(flash_partition_t region, uint8_t *data)
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_stg_read_memrec_event(eh)) {
+		LOG_INF("Read event entry here.");
 		struct stg_read_memrec_event *ev =
 			cast_stg_read_memrec_event(eh);
 		while (k_msgq_put(&read_event_msgq, ev, K_NO_WAIT) != 0) {
@@ -293,6 +300,7 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_stg_write_memrec_event(eh)) {
+		LOG_INF("Write event entry here.");
 		struct stg_write_memrec_event *ev =
 			cast_stg_write_memrec_event(eh);
 		while (k_msgq_put(&write_event_msgq, ev, K_NO_WAIT) != 0) {
@@ -320,7 +328,6 @@ EVENT_LISTENER(MODULE, event_handler);
 
 EVENT_SUBSCRIBE(MODULE, stg_write_memrec_event);
 EVENT_SUBSCRIBE(MODULE, stg_read_memrec_event);
-EVENT_SUBSCRIBE(MODULE, stg_ack_read_memrec_event);
 
 void storage_thread_fn()
 {
@@ -328,36 +335,13 @@ void storage_thread_fn()
 	if (err == 0) {
 		if (stg_msgq_events[0].state ==
 		    K_POLL_STATE_FIFO_DATA_AVAILABLE) {
-			struct stg_read_memrec_event ev;
-			int err = k_msgq_get(&read_event_msgq, &ev, K_NO_WAIT);
-			if (err) {
-				LOG_ERR("Error getting read_event from msgq: %d",
-					err);
-				return;
-			}
-			err = fcb_read_entry(ev.partition,
-					     (uint8_t *)ev.new_rec);
-			if (err) {
-				LOG_ERR("Error reading FCB entry, %d", err);
-				return;
-			}
+			LOG_INF("Read entry here.");
+			stg_fcb_read_entry();
 		}
 		if (stg_msgq_events[1].state ==
 		    K_POLL_STATE_FIFO_DATA_AVAILABLE) {
-			struct stg_write_memrec_event ev;
-			int err = k_msgq_get(&write_event_msgq, &ev, K_NO_WAIT);
-			if (err) {
-				LOG_ERR("Error getting read_event from msgq: %d",
-					err);
-				return;
-			}
-			err = fcb_write_entry(ev.partition,
-					      (uint8_t *)ev.new_rec,
-					      sizeof(mem_rec));
-			if (err) {
-				LOG_ERR("Error writing FCB entry, %d", err);
-				return;
-			}
+			LOG_INF("Write entry here.");
+			stg_fcb_write_entry();
 		}
 	}
 }

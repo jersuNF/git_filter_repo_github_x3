@@ -189,38 +189,24 @@ void stg_fcb_write_entry()
 				err);
 			return;
 		}
+		/* Retry appending. */
+		err = fcb_append(fcb, len, &loc);
+		if (err) {
+			LOG_ERR("Unable to recover in appending function, err %d",
+				err);
+			return;
+		}
 	} else if (err) {
 		LOG_ERR("Error appending new fcb entry, err %d", err);
 		return;
 	}
 
-	/* If ppsize-512 is not defined in 
-	 * .dts for flash device, 256 bytes is used for max page size. 
-	 */
-	int max_write_size = FLASH_PAGE_MAX_CNT;
-	int num_write_cycles =
-		(len / max_write_size) + (len % max_write_size != 0);
-	int last_write_size = len - ((num_write_cycles - 1) * max_write_size);
-
-	/* Writing data fragments. */
-	for (int i = 0; i < num_write_cycles; i++) {
-		off_t offset = i * max_write_size;
-		int write_size = max_write_size;
-
-		/* If we're on the last fragment, alter the buffer size to
-		 * remaining data of the container.
-		 */
-		if (i == num_write_cycles - 1) {
-			write_size = last_write_size;
-		}
-		err = flash_area_write(fcb->fap,
-				       FCB_ENTRY_FA_DATA_OFF(loc) + offset,
-				       data, write_size);
-		if (err) {
-			LOG_ERR("Error writing to flash area. err %d", err);
-			return;
-		}
+	err = flash_area_write(fcb->fap, FCB_ENTRY_FA_DATA_OFF(loc), data, len);
+	if (err) {
+		LOG_ERR("Error writing to flash area. err %d", err);
+		return;
 	}
+	LOG_DBG("Wrote sector %i", (int)FCB_ENTRY_FA_DATA_OFF(loc));
 
 	/* Finish entry. */
 	err = fcb_append_finish(fcb, &loc);
@@ -236,28 +222,25 @@ void stg_fcb_write_entry()
 	EVENT_SUBMIT(event);
 	return;
 }
-static int counter = 0;
+
+/* Used to see how many sector reads was consumed correctly,
+	 * in order to know how many times we can rotate.
+	 */
+static int successful_entries;
+
 static int stg_fcb_walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 {
 	struct stg_read_memrec_event *ev = (struct stg_read_memrec_event *)arg;
 
-	uint16_t len;
 	uint8_t *data = (uint8_t *)ev->new_rec;
 	int err;
-
-	len = loc_ctx->loc.fe_data_len;
-
 	err = flash_area_read(loc_ctx->fap, FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc),
-			      data, len);
+			      data, loc_ctx->loc.fe_data_len);
 	if (err) {
 		LOG_ERR("Error reading from flash area, err %d", err);
 		return err;
 	}
-	mem_rec *mr = (mem_rec *)data;
-	printk("ITERATION %i :: HEADER %i :: ELEM_OFF %i :: SECTOR_OFF %i\n",
-	       counter, mr->header.ID, (int)FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc),
-	       (int)loc_ctx->loc.fe_sector->fs_off);
-	counter++;
+	LOG_DBG("Read sector %i", (int)FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc));
 
 	/* Publish read ack event and wait for consumed ack, 
 	 * only then do we read the next entry in the walk process.
@@ -273,7 +256,26 @@ static int stg_fcb_walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 		LOG_ERR("Failed to wait for requester to consume.");
 		return err;
 	}
+
+	/* Now its confirmed a valid, consumed sector, increment counter
+	 * which will determine how many times we'll rotate 
+	 * once we're finished with the walk. 
+	 */
+	successful_entries++;
 	return 0;
+}
+
+int clear_fcb_sectors(flash_partition_t partition)
+{
+	struct fcb *fcb;
+	if (partition == STG_PARTITION_ANO) {
+		fcb = &ano_fcb;
+	} else if (partition == STG_PARTITION_LOG) {
+		fcb = &log_fcb;
+	} else {
+		return -EINVAL;
+	}
+	return fcb_clear(fcb);
 }
 
 void stg_fcb_read_entry()
@@ -295,23 +297,23 @@ void stg_fcb_read_entry()
 		return;
 	}
 
-	err = fcb_walk(fcb, fcb->f_oldest, stg_fcb_walk_cb, &ev);
+	successful_entries = 0;
+	err = fcb_walk(fcb, NULL, stg_fcb_walk_cb, &ev);
 	if (err) {
 		LOG_ERR("Error walking over FCB storage, err %d", err);
 		return;
 	}
-	counter = 0;
 
-	/* Rotate, since the walk process went through with confirmed 
-	 * consumed acks from requester.
+	/* Rotate FCB based on successful entries consumed. We cannot
+	 * rotate in the callback, since that would mess up the fcb_walk logic.
 	 */
-	err = fcb_rotate(fcb);
-	if (err) {
-		LOG_ERR("Error rotating circular buffer after read ack.");
-		return;
+	for (int i = 0; i < successful_entries; i++) {
+		err = fcb_rotate(fcb);
+		if (err) {
+			LOG_ERR("Error rotating fcb after walk, err %i", err);
+			return;
+		}
 	}
-	LOG_INF("Rotated the circular buffer, pointing at sector %i",
-		fcb->f_active_id);
 	return;
 }
 

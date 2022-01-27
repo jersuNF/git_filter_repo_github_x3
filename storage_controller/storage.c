@@ -255,8 +255,7 @@ static int stg_fcb_walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 	}
 	mem_rec *mr = (mem_rec *)data;
 	printk("ITERATION %i :: HEADER %i :: ELEM_OFF %i :: SECTOR_OFF %i\n",
-	       counter, mr->header.len,
-	       (int)FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc),
+	       counter, mr->header.ID, (int)FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc),
 	       (int)loc_ctx->loc.fe_sector->fs_off);
 	counter++;
 
@@ -330,7 +329,6 @@ static bool event_handler(const struct event_header *eh)
 	if (is_stg_read_memrec_event(eh)) {
 		struct stg_read_memrec_event *ev =
 			cast_stg_read_memrec_event(eh);
-		printk("Header data is %i", ev->new_rec->header.ID);
 		while (k_msgq_put(&read_event_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&read_event_msgq);
 		}

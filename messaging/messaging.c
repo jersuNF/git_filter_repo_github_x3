@@ -8,6 +8,8 @@
 #include "ble_ctrl_event.h"
 #include "ble_data_event.h"
 #include "lte_proto_event.h"
+#include "cellular_controller_events.h"
+#include "messaging_module_events.h"
 #include "collar_protocol.h"
 #include "http_downloader.h"
 
@@ -97,7 +99,8 @@ static bool event_handler(const struct event_header *eh)
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
 EVENT_SUBSCRIBE(MODULE, ble_data_event);
-EVENT_SUBSCRIBE(MODULE, lte_proto_event);
+EVENT_SUBSCRIBE(MODULE, cellular_proto_in_event);
+EVENT_SUBSCRIBE(MODULE, cellular_ack_event);
 
 static inline void process_ble_ctrl_event(void)
 {

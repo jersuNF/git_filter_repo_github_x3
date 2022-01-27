@@ -69,4 +69,5 @@ struct configs {
 
 extern struct configs conf;
 
+int8_t send_tcp(char*, size_t);
 void stop_tcp(void);

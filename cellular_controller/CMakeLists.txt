@@ -1,7 +1,8 @@
 zephyr_include_directories(
         .
         ./helpers
-        ./../../events/cellular_controller/)
+        ./../../events/cellular_controller/
+        ./../../events/messaging/)
 
 target_sources(app PRIVATE
         cellular_controller.c

@@ -17,7 +17,7 @@ static struct net_if_config *cfg;
 
 
 
-int8_t lteInit(void)
+int8_t lte_init(void)
 {
     int rc = 1;
 
@@ -41,7 +41,7 @@ int8_t lteInit(void)
     return rc;
 }
 
-bool lteIsReady(void)
+bool lte_is_ready(void)
 {
     if (iface != NULL && cfg != NULL) {
         return true;

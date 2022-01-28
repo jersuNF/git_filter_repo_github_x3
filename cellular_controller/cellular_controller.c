@@ -21,8 +21,8 @@ int8_t socket_connect(struct data *, struct sockaddr *,
 //void stop_tcp(void);
 
 uint8_t socket_receive(struct data *);
-int8_t lteInit(void);
-bool lteIsReady(void);
+int8_t lte_init(void);
+bool lte_is_ready(void);
 
 APP_DMEM struct configs conf = {
         .ipv4 = {
@@ -178,12 +178,12 @@ int8_t cellular_controller_init(void)
         return -1;
     }
 #endif
-    ret = lteInit();
+    ret = lte_init();
     if (ret == 1)
     {
         LOG_INF("Cellular network interface ready!\n");
 
-        if(lteIsReady()) {
+        if(lte_is_ready()) {
             ret = start_tcp();
             if (ret == 0){
                 LOG_INF("TCP connection started!\n");

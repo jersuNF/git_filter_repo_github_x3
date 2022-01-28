@@ -236,7 +236,7 @@ void stg_fcb_write_entry()
 	uint8_t *data = (uint8_t *)ev.data;
 
 	/* If we want to only read the newest, clear all previous entries. */
-	if (ev.rotate) {
+	if (ev.rotate_to_this) {
 		err = fcb_clear(fcb);
 		if (err) {
 			return;
@@ -345,18 +345,7 @@ void stg_fcb_read_entry()
 
 	successful_entries = 0;
 
-	/* Walk all entries FROM second parameter given, if f_active,
-	 * only read the latest, if NULL, read entire FCB (all unread entries)
-	 */
-	struct flash_sector *fs_read;
-
-	if (ev.newest_entry_only) {
-		fs_read = fcb->f_active.fe_sector;
-	} else {
-		fs_read = NULL;
-	}
-
-	err = fcb_walk(fcb, fs_read, stg_fcb_walk_cb, &ev);
+	err = fcb_walk(fcb, NULL, stg_fcb_walk_cb, &ev);
 	if (err) {
 		LOG_ERR("Error walking over FCB storage, err %d", err);
 		return;

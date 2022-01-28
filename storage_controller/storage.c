@@ -9,9 +9,12 @@
 #include <devicetree.h>
 #include <stdio.h>
 #include <string.h>
-#include "flash_memory.h"
 #include "storage_events.h"
 #include <fs/fcb.h>
+
+#include "ano_structure.h"
+#include "log_structure.h"
+#include "pasture_structure.h"
 
 /* Get sizes and offset definitions from pm_static.yml. */
 #include <pm_config.h>
@@ -39,9 +42,9 @@ K_SEM_DEFINE(data_consumed_sem, 0, 1);
 
 #define NUM_STG_MSGQ_EVENTS 2
 /* 4 means 4-byte alignment. */
-K_MSGQ_DEFINE(read_event_msgq, sizeof(struct stg_read_memrec_event),
+K_MSGQ_DEFINE(read_event_msgq, sizeof(struct stg_read_event),
 	      CONFIG_MSGQ_READ_EVENT_SIZE, 4);
-K_MSGQ_DEFINE(write_event_msgq, sizeof(struct stg_write_memrec_event),
+K_MSGQ_DEFINE(write_event_msgq, sizeof(struct stg_write_event),
 	      CONFIG_MSGQ_WRITE_EVENT_SIZE, 4);
 
 struct k_poll_event stg_msgq_events[NUM_STG_MSGQ_EVENTS] = {
@@ -157,9 +160,37 @@ int init_storage_controller(void)
 	return 0;
 }
 
+static inline int rotate_to_newest_entry(flash_partition_t partition)
+{
+	struct fcb *fcb;
+	if (partition == STG_PARTITION_ANO) {
+		fcb = &ano_fcb;
+	} else if (partition == STG_PARTITION_LOG) {
+		fcb = &log_fcb;
+	} else {
+		return -EINVAL;
+	}
+	int err;
+	int entries_behind =
+		((fcb->f_active.fe_sector->fs_off - fcb->f_oldest->fs_off) /
+		 fcb->f_active.fe_sector->fs_size);
+
+	LOG_INF("Need to rotate %i times to catch up.", entries_behind);
+
+	for (int i = 0; i < entries_behind; i++) {
+		err = fcb_rotate(fcb);
+		if (err) {
+			LOG_ERR("Error rotating FCB to newest entry.");
+			return err;
+		}
+	}
+
+	return 0;
+}
+
 void stg_fcb_write_entry()
 {
-	struct stg_write_memrec_event ev;
+	struct stg_write_event ev;
 	int err = k_msgq_get(&write_event_msgq, &ev, K_NO_WAIT);
 	if (err) {
 		LOG_ERR("Error getting write_event from msgq: %d", err);
@@ -169,13 +200,15 @@ void stg_fcb_write_entry()
 	struct fcb *fcb;
 	struct fcb_entry loc;
 
-	uint8_t *data = (uint8_t *)ev.new_rec;
-	size_t len = sizeof(mem_rec);
+	uint8_t *data = (uint8_t *)ev.data;
+	size_t len;
 
 	if (ev.partition == STG_PARTITION_LOG) {
 		fcb = &log_fcb;
+		len = sizeof(log_rec);
 	} else if (ev.partition == STG_PARTITION_ANO) {
 		fcb = &ano_fcb;
+		len = sizeof(ano_rec);
 	} else {
 		return;
 	}
@@ -214,10 +247,15 @@ void stg_fcb_write_entry()
 		LOG_ERR("Error finishing new entry. err %d", err);
 		return;
 	}
+	if (ev.rotate) {
+		err = rotate_to_newest_entry(ev.partition);
+		if (err) {
+			return;
+		}
+	}
 
 	/* Notify data has been written. */
-	struct stg_ack_write_memrec_event *event =
-		new_stg_ack_write_memrec_event();
+	struct stg_ack_write_event *event = new_stg_ack_write_event();
 	event->partition = ev.partition;
 	EVENT_SUBMIT(event);
 	return;
@@ -230,9 +268,9 @@ static int successful_entries;
 
 static int stg_fcb_walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 {
-	struct stg_read_memrec_event *ev = (struct stg_read_memrec_event *)arg;
+	struct stg_read_event *ev = (struct stg_read_event *)arg;
 
-	uint8_t *data = (uint8_t *)ev->new_rec;
+	uint8_t *data = (uint8_t *)ev->data;
 	int err;
 	err = flash_area_read(loc_ctx->fap, FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc),
 			      data, loc_ctx->loc.fe_data_len);
@@ -245,8 +283,7 @@ static int stg_fcb_walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 	/* Publish read ack event and wait for consumed ack, 
 	 * only then do we read the next entry in the walk process.
 	 */
-	struct stg_ack_read_memrec_event *event =
-		new_stg_ack_read_memrec_event();
+	struct stg_ack_read_event *event = new_stg_ack_read_event();
 	event->partition = ev->partition;
 	EVENT_SUBMIT(event);
 
@@ -280,7 +317,7 @@ int clear_fcb_sectors(flash_partition_t partition)
 
 void stg_fcb_read_entry()
 {
-	struct stg_read_memrec_event ev;
+	struct stg_read_event ev;
 	int err = k_msgq_get(&read_event_msgq, &ev, K_NO_WAIT);
 	if (err) {
 		LOG_ERR("Error getting read_event from msgq: %d", err);
@@ -298,21 +335,38 @@ void stg_fcb_read_entry()
 	}
 
 	successful_entries = 0;
-	err = fcb_walk(fcb, NULL, stg_fcb_walk_cb, &ev);
+
+	/* Walk all entries FROM second parameter given, if f_active,
+	 * only read the latest, if NULL, read entire FCB (all unread entries)
+	 */
+	struct flash_sector *fs_read;
+
+	if (ev.newest_entry_only) {
+		fs_read = fcb->f_active.fe_sector;
+	} else {
+		fs_read = NULL;
+	}
+
+	err = fcb_walk(fcb, fs_read, stg_fcb_walk_cb, &ev);
 	if (err) {
 		LOG_ERR("Error walking over FCB storage, err %d", err);
 		return;
 	}
-
 	/* Rotate FCB based on successful entries consumed. We cannot
 	 * rotate in the callback, since that would mess up the fcb_walk logic.
+
+	 * However only rotate if the requester wanted to. I.e LOG data. 
 	 */
-	for (int i = 0; i < successful_entries; i++) {
-		err = fcb_rotate(fcb);
-		if (err) {
-			LOG_ERR("Error rotating fcb after walk, err %i", err);
-			return;
+	if (ev.rotate) {
+		for (int i = 0; i < successful_entries; i++) {
+			err = fcb_rotate(fcb);
+			if (err) {
+				LOG_ERR("Error rotating fcb after walk, err %i",
+					err);
+				return;
+			}
 		}
+		LOG_INF("Rotated %i entries", successful_entries);
 	}
 	return;
 }
@@ -328,23 +382,21 @@ void stg_fcb_read_entry()
 
 static bool event_handler(const struct event_header *eh)
 {
-	if (is_stg_read_memrec_event(eh)) {
-		struct stg_read_memrec_event *ev =
-			cast_stg_read_memrec_event(eh);
+	if (is_stg_read_event(eh)) {
+		struct stg_read_event *ev = cast_stg_read_event(eh);
 		while (k_msgq_put(&read_event_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&read_event_msgq);
 		}
 		return false;
 	}
-	if (is_stg_write_memrec_event(eh)) {
-		struct stg_write_memrec_event *ev =
-			cast_stg_write_memrec_event(eh);
+	if (is_stg_write_event(eh)) {
+		struct stg_write_event *ev = cast_stg_write_event(eh);
 		while (k_msgq_put(&write_event_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&write_event_msgq);
 		}
 		return false;
 	}
-	if (is_stg_data_consumed_event(eh)) {
+	if (is_stg_consumed_read_event(eh)) {
 		k_sem_give(&data_consumed_sem);
 		return false;
 	}
@@ -357,9 +409,9 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(MODULE, event_handler);
 
-EVENT_SUBSCRIBE(MODULE, stg_write_memrec_event);
-EVENT_SUBSCRIBE(MODULE, stg_read_memrec_event);
-EVENT_SUBSCRIBE(MODULE, stg_data_consumed_event);
+EVENT_SUBSCRIBE(MODULE, stg_write_event);
+EVENT_SUBSCRIBE(MODULE, stg_read_event);
+EVENT_SUBSCRIBE(MODULE, stg_consumed_read_event);
 
 void storage_thread_fn()
 {

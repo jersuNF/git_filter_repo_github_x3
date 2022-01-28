@@ -2,12 +2,13 @@
  * Copyright (c) 2022 Nofence AS
  */
 
-#ifndef _FLASH_MEMORY_H_
-#define _FLASH_MEMORY_H_
+#ifndef _ANO_DEF_H_
+#define _ANO_DEF_H_
 
 #include <zephyr.h>
 
-#define MEM_REC_ENTRY_BUF_SIZE 256
+#define ANO_ENTRY_BUF_SIZE 256
+
 /**
  * This structure defines all messages stored in the external flash.
  *
@@ -20,13 +21,14 @@ typedef struct {
 		/** Length of body. */
 		uint16_t len;
 
-		/** USED on AnoData as AnoID, otherwise UNUSED. */
+		/** USED as AnoID. */
 		uint16_t tag; //
 
-		/** Used on AnoData as AnoStartID otherwise UNUSED. */
+		/** Used as AnoStartID. */
 		uint32_t ID;
-	} header;
-	uint8_t buf[MEM_REC_ENTRY_BUF_SIZE];
-} mem_rec;
 
-#endif /* _FLASH_MEMORY_H_ */
+	} header;
+	uint8_t buf[ANO_ENTRY_BUF_SIZE];
+} ano_rec;
+
+#endif /* _ANO_DEF_H_ */

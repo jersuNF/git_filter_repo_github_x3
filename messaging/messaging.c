@@ -101,6 +101,7 @@ EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
 EVENT_SUBSCRIBE(MODULE, ble_data_event);
 EVENT_SUBSCRIBE(MODULE, cellular_proto_in_event);
 EVENT_SUBSCRIBE(MODULE, cellular_ack_event);
+EVENT_SUBSCRIBE(MODULE, lte_proto_event);
 
 static inline void process_ble_ctrl_event(void)
 {

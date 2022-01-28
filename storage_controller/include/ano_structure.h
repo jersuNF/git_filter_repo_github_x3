@@ -29,6 +29,6 @@ typedef struct {
 
 	} header;
 	uint8_t buf[ANO_ENTRY_BUF_SIZE];
-} ano_rec;
+} ano_rec_t;
 
 #endif /* _ANO_DEF_H_ */

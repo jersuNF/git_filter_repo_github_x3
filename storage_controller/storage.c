@@ -25,6 +25,8 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_STORAGE_CONTROLLER_LOG_LEVEL);
 
 #define FLASH_LOG_NUM_SECTORS PM_LOG_PARTITION_SIZE / CONFIG_STORAGE_SECTOR_SIZE
 #define FLASH_ANO_NUM_SECTORS PM_ANO_PARTITION_SIZE / CONFIG_STORAGE_SECTOR_SIZE
+#define FLASH_PASTURE_NUM_SECTORS                                              \
+	PM_PASTURE_PARTITION_SIZE / CONFIG_STORAGE_SECTOR_SIZE
 
 const struct flash_area *log_area;
 struct fcb log_fcb;
@@ -33,6 +35,10 @@ struct flash_sector log_sectors[FLASH_LOG_NUM_SECTORS];
 const struct flash_area *ano_area;
 struct fcb ano_fcb;
 struct flash_sector ano_sectors[FLASH_ANO_NUM_SECTORS];
+
+const struct flash_area *pasture_area;
+struct fcb pasture_fcb;
+struct flash_sector pasture_sectors[FLASH_PASTURE_NUM_SECTORS];
 
 /* Semaphore used by storage controller to continue the walk process only
  * when this semaphore was given in the consumed event sent out by the
@@ -56,29 +62,78 @@ struct k_poll_event stg_msgq_events[NUM_STG_MSGQ_EVENTS] = {
 					&write_event_msgq, 0),
 };
 
+/** @brief Gets length of data container based on partition.
+ * 
+ * @param partition which struct to sizeof
+ * 
+ * @return size of struct
+ */
+size_t get_len(flash_partition_t partition)
+{
+	size_t len;
+
+	if (partition == STG_PARTITION_LOG) {
+		len = sizeof(log_rec_t);
+	} else if (partition == STG_PARTITION_ANO) {
+		len = sizeof(ano_rec_t);
+	} else if (partition == STG_PARTITION_PASTURE) {
+		len = sizeof(fence_t);
+	} else {
+		LOG_ERR("Invalid partition given.");
+		len = 0;
+	}
+	return len;
+}
+
+/** @brief Gets fcb structure based on partition.
+ * 
+ * @param partition which partition to get fcb from
+ * 
+ * @return pointer to fcb structure
+ */
+struct fcb *get_fcb(flash_partition_t partition)
+{
+	struct fcb *fcb;
+
+	if (partition == STG_PARTITION_LOG) {
+		fcb = &log_fcb;
+	} else if (partition == STG_PARTITION_ANO) {
+		fcb = &ano_fcb;
+	} else if (partition == STG_PARTITION_PASTURE) {
+		fcb = &pasture_fcb;
+	} else {
+		LOG_ERR("Invalid partition given.");
+		return NULL;
+	}
+	return fcb;
+}
+
 static inline int init_fcb_on_partition(flash_partition_t partition)
 {
 	int err;
 	const struct device *dev;
-	struct fcb *fcb;
 	uint32_t sector_cnt;
 	int area_id;
 	const struct flash_area *area;
 	struct flash_sector *sector_ptr;
+	struct fcb *fcb = get_fcb(partition);
 
 	/* Based on parameter, setup variables required by FCB. */
 	if (partition == STG_PARTITION_LOG) {
-		fcb = &log_fcb;
 		sector_cnt = FLASH_LOG_NUM_SECTORS;
 		area_id = FLASH_AREA_ID(log_partition);
 		area = log_area;
 		sector_ptr = log_sectors;
 	} else if (partition == STG_PARTITION_ANO) {
-		fcb = &ano_fcb;
 		sector_cnt = FLASH_ANO_NUM_SECTORS;
 		area_id = FLASH_AREA_ID(ano_partition);
 		area = ano_area;
 		sector_ptr = ano_sectors;
+	} else if (partition == STG_PARTITION_PASTURE) {
+		sector_cnt = FLASH_PASTURE_NUM_SECTORS;
+		area_id = FLASH_AREA_ID(pasture_partition);
+		area = pasture_area;
+		sector_ptr = pasture_sectors;
 	} else {
 		LOG_ERR("Invalid partition given. %d", -EINVAL);
 		return -EINVAL;
@@ -157,19 +212,17 @@ int init_storage_controller(void)
 	if (err) {
 		return err;
 	}
+
+	err = init_fcb_on_partition(STG_PARTITION_PASTURE);
+	if (err) {
+		return err;
+	}
 	return 0;
 }
 
 static inline int rotate_to_newest_entry(flash_partition_t partition)
 {
-	struct fcb *fcb;
-	if (partition == STG_PARTITION_ANO) {
-		fcb = &ano_fcb;
-	} else if (partition == STG_PARTITION_LOG) {
-		fcb = &log_fcb;
-	} else {
-		return -EINVAL;
-	}
+	struct fcb *fcb = get_fcb(partition);
 	int err;
 	int entries_behind =
 		((fcb->f_active.fe_sector->fs_off - fcb->f_oldest->fs_off) /
@@ -197,21 +250,11 @@ void stg_fcb_write_entry()
 		return;
 	}
 
-	struct fcb *fcb;
 	struct fcb_entry loc;
+	struct fcb *fcb = get_fcb(ev.partition);
+	size_t len = get_len(ev.partition);
 
 	uint8_t *data = (uint8_t *)ev.data;
-	size_t len;
-
-	if (ev.partition == STG_PARTITION_LOG) {
-		fcb = &log_fcb;
-		len = sizeof(log_rec);
-	} else if (ev.partition == STG_PARTITION_ANO) {
-		fcb = &ano_fcb;
-		len = sizeof(ano_rec);
-	} else {
-		return;
-	}
 
 	/* Appending a new entry, rotate(replaces) oldests if no space. */
 	err = fcb_append(fcb, len, &loc);
@@ -304,14 +347,7 @@ static int stg_fcb_walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 
 int clear_fcb_sectors(flash_partition_t partition)
 {
-	struct fcb *fcb;
-	if (partition == STG_PARTITION_ANO) {
-		fcb = &ano_fcb;
-	} else if (partition == STG_PARTITION_LOG) {
-		fcb = &log_fcb;
-	} else {
-		return -EINVAL;
-	}
+	struct fcb *fcb = get_fcb(partition);
 	return fcb_clear(fcb);
 }
 
@@ -324,15 +360,7 @@ void stg_fcb_read_entry()
 		return;
 	}
 
-	struct fcb *fcb;
-
-	if (ev.partition == STG_PARTITION_ANO) {
-		fcb = &ano_fcb;
-	} else if (ev.partition == STG_PARTITION_LOG) {
-		fcb = &log_fcb;
-	} else {
-		return;
-	}
+	struct fcb *fcb = get_fcb(ev.partition);
 
 	successful_entries = 0;
 

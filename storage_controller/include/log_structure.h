@@ -8,7 +8,6 @@
 #include <zephyr.h>
 
 #define LOG_ENTRY_BUF_SIZE 256
-#define ANO_ENTRY_BUF_SIZE 256
 
 /**
  * This structure defines all messages stored in the external flash.
@@ -23,6 +22,6 @@ typedef struct {
 		uint16_t len;
 	} header;
 	uint8_t buf[LOG_ENTRY_BUF_SIZE];
-} log_rec;
+} log_rec_t;
 
 #endif /* _LOG_DEF_H_ */

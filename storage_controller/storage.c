@@ -220,27 +220,6 @@ int init_storage_controller(void)
 	return 0;
 }
 
-static inline int rotate_to_newest_entry(flash_partition_t partition)
-{
-	struct fcb *fcb = get_fcb(partition);
-	int err;
-	int entries_behind =
-		((fcb->f_active.fe_sector->fs_off - fcb->f_oldest->fs_off) /
-		 fcb->f_active.fe_sector->fs_size);
-
-	LOG_INF("Need to rotate %i times to catch up.", entries_behind);
-
-	for (int i = 0; i < entries_behind; i++) {
-		err = fcb_rotate(fcb);
-		if (err) {
-			LOG_ERR("Error rotating FCB to newest entry.");
-			return err;
-		}
-	}
-
-	return 0;
-}
-
 void stg_fcb_write_entry()
 {
 	struct stg_write_event ev;
@@ -255,6 +234,14 @@ void stg_fcb_write_entry()
 	size_t len = get_len(ev.partition);
 
 	uint8_t *data = (uint8_t *)ev.data;
+
+	/* If we want to only read the newest, clear all previous entries. */
+	if (ev.rotate) {
+		err = fcb_clear(fcb);
+		if (err) {
+			return;
+		}
+	}
 
 	/* Appending a new entry, rotate(replaces) oldests if no space. */
 	err = fcb_append(fcb, len, &loc);
@@ -289,12 +276,6 @@ void stg_fcb_write_entry()
 	if (err) {
 		LOG_ERR("Error finishing new entry. err %d", err);
 		return;
-	}
-	if (ev.rotate) {
-		err = rotate_to_newest_entry(ev.partition);
-		if (err) {
-			return;
-		}
 	}
 
 	/* Notify data has been written. */

@@ -15,4 +15,9 @@
  */
 int pwr_module_init(void);
 
+/**
+ * @brief Function to test the battery
+ */
+void fetch_periodic_battery_voltage(void);
+
 #endif /* _PWR_MODULE_H_ */

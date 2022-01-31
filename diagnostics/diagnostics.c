@@ -487,7 +487,7 @@ static int parser_test(enum diagnostics_interface interface, char* arg)
 		diagnostics_send(interface, buf, strlen(buf));
 		diagnostics_send(interface, "\r\n", strlen("\r\n"));
 
-		data = 0xFF;
+		data = 0x13;
 		if (eeprom_write(eeprom_dev, 0, &data, 1) != 0) {
 			const char* readydev = "EEPROM - Failed writing offset 0.\r\n";
 			diagnostics_send(interface, readydev, strlen(readydev));
@@ -502,6 +502,13 @@ static int parser_test(enum diagnostics_interface interface, char* arg)
 		itoa(data, buf, 10);
 		diagnostics_send(interface, buf, strlen(buf));
 		diagnostics_send(interface, "\r\n", strlen("\r\n"));
+
+		data = 0xFF;
+		if (eeprom_write(eeprom_dev, 0, &data, 1) != 0) {
+			const char* readydev = "EEPROM - Failed writing offset 0.\r\n";
+			diagnostics_send(interface, readydev, strlen(readydev));
+		}
+
 	} else if (parser_arg_is_matching("bme280", arg, sub_arg_len)) {
 		const struct device *bme_dev = device_get_binding(DT_LABEL(DT_NODELABEL(environment)));
 		
@@ -539,6 +546,7 @@ static int parser_test(enum diagnostics_interface interface, char* arg)
 		if (!device_is_ready(flash_dev)) {
 			const char* readydev = "Flash - Device is NOT ready.\r\n";
 			diagnostics_send(interface, readydev, strlen(readydev));
+			return -1;
 		} else {
 			const char* readydev = "Flash - Device is ready.\r\n";
 			diagnostics_send(interface, readydev, strlen(readydev));

@@ -7,6 +7,9 @@
 #include <logging/log.h>
 #include "sound_event.h"
 #include "request_events.h"
+#include "pasture_event.h"
+#include "storage_events.h"
+#include "pasture_structure.h"
 #include "event_manager.h"
 
 #define MODULE animal_monitor_control
@@ -15,8 +18,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
 /* Cached fence data header and a max coordinate region. Links the coordinate
  * region to the header.
  */
-static fence_coordinate_t cached_fence_coordinates[FENCE_MAX_TOTAL_COORDINATES];
-static fence_header_t cached_fence_header = { .p_c = cached_fence_coordinates };
+static fence_t cached_fence;
 
 #define REQUEST_DATA_SEM_TIMEOUT_SEC 5
 K_SEM_DEFINE(fence_data_sem, 1, 1);
@@ -48,12 +50,10 @@ static struct k_work_q calc_work_q;
 static struct k_work calc_work;
 
 /**
- * @brief Function to request pasture on the event bus, pressumably
+ * @brief Function to request pasture on the event bus
  *        from the storage controller, in which case the
  *        storage module will memcpy its data to the passed address. This is
- *        only done when we boot up/on initialization, and on user updates
- *        in which case speed does not matter, as well as not
- *        needing the continuity as the GNSS data does.
+ *        only done when we boot up/on initialization.
  */
 static void submit_request_pasture(void)
 {
@@ -64,9 +64,13 @@ static void submit_request_pasture(void)
 		return;
 	}
 
-	struct request_pasture_event *req_fd_e = new_request_pasture_event();
-	req_fd_e->fence = &cached_fence_header;
-	EVENT_SUBMIT(req_fd_e);
+	struct stg_read_event *ev = new_stg_read_event();
+
+	ev->data = (uint8_t *)&cached_fence;
+	ev->rotate = false;
+	ev->partition = STG_PARTITION_PASTURE;
+
+	EVENT_SUBMIT(ev);
 }
 
 /**
@@ -110,12 +114,12 @@ void calculate_work_fn(struct k_work *item)
 	 *           subscribes to if its correct.
 	 */
 	bool fencedata_correct = true;
-	if (cached_fence_header.n_points <= 0) {
+	if (cached_fence.header.n_points <= 0) {
 		fencedata_correct = false;
 	}
-	for (int i = 0; i < cached_fence_header.n_points; i++) {
-		if (cached_fence_header.p_c[i].s_x_dm == 1337 &&
-		    cached_fence_header.p_c[i].s_y_dm == 1337) {
+	for (int i = 0; i < cached_fence.header.n_points; i++) {
+		if (cached_fence.p_c[i].s_x_dm == 1337 &&
+		    cached_fence.p_c[i].s_y_dm == 1337) {
 			continue;
 		}
 		fencedata_correct = false;
@@ -174,8 +178,18 @@ static bool event_handler(const struct event_header *eh)
 		submit_request_pasture();
 		return false;
 	}
-	if (is_ack_pasture_event(eh)) {
+	if (is_stg_ack_read_event(eh)) {
 		k_sem_give(&fence_data_sem);
+
+		/* Indicate data has been acked so storage controller can
+		 * finish up it's resources.
+		 */
+		struct stg_consumed_read_event *ev =
+			new_stg_consumed_read_event();
+
+		ev->partition = STG_PARTITION_PASTURE;
+
+		EVENT_SUBMIT(ev);
 		return false;
 	}
 	if (is_gnssdata_event(eh)) {
@@ -209,3 +223,4 @@ EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, ack_pasture_event);
 EVENT_SUBSCRIBE(MODULE, gnssdata_event);
 EVENT_SUBSCRIBE(MODULE, pasture_ready_event);
+EVENT_SUBSCRIBE(MODULE, stg_ack_read_event);

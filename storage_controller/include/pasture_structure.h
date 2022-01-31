@@ -9,14 +9,11 @@
 
 #define FENCE_MAX 10
 #define FENCE_MAX_TOTAL_COORDINATES 300
-#define FENCE_MAX_DEFINITION_SIZE                                              \
-	(FENCE_MAX * sizeof(fence_header_t) +                                  \
-	 FENCE_MAX_TOTAL_COORDINATES * sizeof(fence_coordinate_t))
 
 /** @todo Currently, we must put Y before X.
  */
 typedef struct {
-	/** Relative coordinated of fence pole 
+	/** Relative coordinates of fence pole 
          *  in DECIMETERS from global origin.
          */
 
@@ -35,12 +32,14 @@ typedef struct {
 		/** Number of coordinates in polygon. */
 		uint8_t n_points;
 
-		/** Fece type. */
+		/** Fence type. */
 		uint8_t e_fence_type;
 	} header;
 
-	/** Coordinates pointer. */
-	fence_coordinate_t *p_c;
+	/** Coordinates. */
+	fence_coordinate_t p_c[FENCE_MAX_TOTAL_COORDINATES];
 } fence_t;
+
+#define FENCE_MAX_DEFINITION_SIZE FENCE_MAX * sizeof(fence_t)
 
 #endif /* _PASTURE_DEF_H_ */

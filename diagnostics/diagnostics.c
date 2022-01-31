@@ -29,6 +29,7 @@
 #define LOG_MODULE_NAME diagnostics
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_DIAGNOSTICS_LOG_LEVEL);
 
+#define PASSTHROUGH_IMPLICIT_NEWLINE
 #define MAX_ARG_LEN	20
 
 K_MUTEX_DEFINE(rtt_send_mutex);
@@ -207,6 +208,12 @@ static uint32_t diagnostics_parse_input(enum diagnostics_interface interface,
 			if (bytes_parsed > CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE) {
 				bytes_parsed = CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE;
 			}
+#ifdef PASSTHROUGH_IMPLICIT_NEWLINE
+			/* TODO - FIX THIS WORKAROUND! */
+			if (data[bytes_parsed-1] == '\n') {
+				data[bytes_parsed-1] = '\r';
+			}
+#endif
 			memcpy(passthrough_tx_buffer, data, bytes_parsed);
 			passthrough_tx_count = bytes_parsed;
 			passthrough_tx_sent = 0;
@@ -442,7 +449,7 @@ static int parser_test(enum diagnostics_interface interface, char* arg)
 	char* next_arg;
 	uint32_t sub_arg_len = parser_get_next(arg, &next_arg);
 	if (sub_arg_len == 0) {
-		const char* noargs = "Test requires an argument, e.g. test lis2dw\r\n";
+		const char* noargs = "Specify test: lis2dw, eeprom, bme280, flash\r\n";
 		diagnostics_send(interface, noargs, strlen(noargs));
 		return 0;
 	}
@@ -754,7 +761,7 @@ static int parser_gpio(enum diagnostics_interface interface, char* arg)
 	char* next_arg;
 	uint32_t sub_arg_len = parser_get_next(arg, &next_arg);
 	if (sub_arg_len == 0) {
-		const char* noargs = "GPIO requires arguments: gpio <port> <pin> <z/0/1/in/inpu/inpd/?> <val>\r\n";
+		const char* noargs = "GPIO requires arguments: gpio <port> <pin> <z/0/1/in/inpu/inpd/?>, e.g. gpio 0 8 1\r\n";
 		diagnostics_send(interface, noargs, strlen(noargs));
 		return 0;
 	}
@@ -838,7 +845,7 @@ static int parser_gpio(enum diagnostics_interface interface, char* arg)
 
 static int parser_help(enum diagnostics_interface interface, char* arg)
 {
-	const char* help = "Sorry.. No help yet.\r\n";
+	const char* help = "Commands: help, gpio, test, modem, gnss\r\n";
 	diagnostics_send(interface, help, strlen(help));
 
 	return 0;

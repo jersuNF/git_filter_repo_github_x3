@@ -5,7 +5,7 @@ import time
 # TODO - Make this smarter with regards to existing jlink instances running
 JLINK_EXE = "JLinkExe"
 JLINK_EXE = "C:\\Program Files\\SEGGER\\JLink\\JLink.exe"
-JLINK_EXE = "C:\\Program Files (x86)\\SEGGER\\JLink\\JLink.exe"
+#JLINK_EXE = "C:\\Program Files (x86)\\SEGGER\\JLink\\JLink.exe"
 
 cmd = [JLINK_EXE, '-device', 'nRF52840_xxAA', '-if', 'swd', '-speed', '20000', '-autoconnect', '1']
 jlink_proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -28,29 +28,35 @@ J-Link OB-SAM3U128-V2-NordicSemi compiled Dec  3 2021 15:41:28 V1.0, SN=68378578
 Process: JLinkExe
 """
 
-import msvcrt
-import signal
-import sys
+USE_INTERACT_MODE = True
 
-def signal_handler(sig, frame):
-    jlink_proc.communicate(input=b'exit\n')
-    sys.exit(0)
+if USE_INTERACT_MODE:
+    tn.interact()
+else:
 
-signal.signal(signal.SIGINT, signal_handler)
+    import msvcrt
+    import signal
+    import sys
 
-while True:
-    if msvcrt.kbhit():
-        down_data = msvcrt.getch()
-        if down_data == b'\r':
-            tn.write(b'\r')
-            down_data = b'\n'
+    def signal_handler(sig, frame):
+        jlink_proc.communicate(input=b'exit\n')
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+
+    while True:
+        if msvcrt.kbhit():
+            down_data = msvcrt.getch()
+            if down_data == b'\r':
+                tn.write(b'\r')
+                down_data = b'\n'
             
-        print(down_data.decode("ascii"), end='', flush=True)
+            print(down_data.decode("ascii"), end='', flush=True)
 
-        tn.write(down_data)
+            tn.write(down_data)
 
-    data = tn.read_eager()
-    if len(data) > 0:
-        print(data.decode('utf-8', 'ignore'), end='', flush=True)
-    else:
-        time.sleep(0.01)
+        data = tn.read_eager()
+        if len(data) > 0:
+            print(data.decode('utf-8', 'ignore'), end='', flush=True)
+        else:
+            time.sleep(0.01)

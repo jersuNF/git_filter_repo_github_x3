@@ -37,6 +37,10 @@ extern struct k_mem_domain app_domain;
 #define THREAD_PRIORITY K_PRIO_COOP(CONFIG_NUM_COOP_PRIORITIES - 1)
 #endif
 
+/**
+     * A structure for socket meta data in addition to work delayables for
+     * udp sockets -only TCP sockets are used for now
+     */
 struct data {
     const char *proto;
 
@@ -67,6 +71,9 @@ struct configs {
 #define CONFIG_NET_CONFIG_PEER_IPV4_ADDR ""
 #endif
 
+/**
+     * A structure for socket initialization
+     */
 extern struct configs conf;
 
 int8_t send_tcp(char*, size_t);

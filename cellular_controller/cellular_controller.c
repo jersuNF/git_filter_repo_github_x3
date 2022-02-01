@@ -3,11 +3,6 @@
 #include "cellular_controller_events.h"
 #include "messaging_module_events.h"
 
-#ifndef  CONFIG_ZTEST
-#define GSM_DEVICE DT_LABEL(DT_INST(0, u_blox_sara_r4))
-#endif
-
-
 #define MY_STACK_SIZE 1024
 #define MY_PRIORITY 5
 #define MODULE cellular_controller
@@ -49,7 +44,11 @@ int8_t receive_tcp(struct data *sock_data)
     uint8_t *pMsgIn = NULL;
 
     received = socket_receive(sock_data);
-    if (received > 0)
+    if (received == 0)
+    {
+        return 0;
+    }
+    else if (received > 0)
     {
         LOG_WRN("received %d bytes!\n", received);
 
@@ -57,7 +56,6 @@ int8_t receive_tcp(struct data *sock_data)
             LOG_ERR("New message received while the messaging module "
                     "hasn't consumed the previous one!\n");
             err = -1;
-            submit_error(OTHER, err);
             return err;
         }
         else{
@@ -65,11 +63,9 @@ int8_t receive_tcp(struct data *sock_data)
                 free(pMsgIn);
                 pMsgIn = NULL;
             }
-
             pMsgIn = (uint8_t *) malloc(received);
             memcpy(pMsgIn, buf, received);
             messaging_ack = false;
-
             struct cellular_proto_in_event *msgIn =
                     new_cellular_proto_in_event();
             msgIn->buf = pMsgIn;
@@ -79,15 +75,11 @@ int8_t receive_tcp(struct data *sock_data)
             return 0;
         }
     }
-    else if (received < 0) {
+    else {
         LOG_ERR("Socket receive error!\n");
         submit_error(SOCKET_RECV, received);
-        return received;
+        return -1;
     }
-    else {
-        return 0;
-    }
-    return -1;
 }
 
 int8_t start_tcp(void)
@@ -141,24 +133,27 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
         CharMsgOut = (char *) malloc(MsgOutLen);
         memcpy(CharMsgOut, pCharMsgOut, MsgOutLen);
 
+        if (CharMsgOut != NULL && CharMsgOut[0] != '\0')
+        {
+            struct cellular_ack_event *ack = new_cellular_ack_event();
+            EVENT_SUBMIT(ack);
+        }
+
         err = send_tcp(CharMsgOut, MsgOutLen);
-        if (err != 0){ /* TODO: notify error handler! */
+        if (err < 0){ /* TODO: notify error handler! */
             submit_error(SOCKET_SEND, err);
             free(CharMsgOut);
             return false;
         }
-
         free(CharMsgOut);
+
         err = receive_tcp(&conf.ipv4);
         if (err != 0){ /* TODO: notify error handler! */
             submit_error(SOCKET_RECV, err);
             return false;
         }
-
-        if(err == 0)
+        else if(err == 0)
         {
-            struct cellular_ack_event *ack = new_cellular_ack_event();
-            EVENT_SUBMIT(ack);
             return true;
         }
     }
@@ -171,13 +166,12 @@ int8_t cellular_controller_init(void)
     int8_t ret;
     printk("Cellular controller starting!, %p\n", k_current_get());
     connected = false;
-#ifndef  CONFIG_ZTEST
-    const struct device *gsm_dev = device_get_binding(GSM_DEVICE);
-    if (!gsm_dev) {
-        LOG_ERR("GSM driver %s was not found!\n", GSM_DEVICE);
+
+    const struct device *gsm_dev = bind_modem();
+    if (gsm_dev == NULL) {
+        LOG_ERR("GSM driver was not found!\n");
         return -1;
     }
-#endif
     ret = lte_init();
     if (ret == 1)
     {

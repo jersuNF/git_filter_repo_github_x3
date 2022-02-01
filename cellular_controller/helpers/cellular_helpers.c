@@ -14,7 +14,7 @@
 LOG_MODULE_REGISTER(cellular_helpers, LOG_LEVEL_DBG);
 static struct net_if *iface;
 static struct net_if_config *cfg;
-
+#define GSM_DEVICE DT_LABEL(DT_INST(0, u_blox_sara_r4))
 
 
 int8_t lte_init(void)
@@ -166,4 +166,9 @@ int8_t send_tcp(char* msg, size_t len){
     /* TODO: how to handle partial sends? sendall() will keep retrying,
      * this should be handled here as well.*/
     return ret;
+}
+
+const struct device* bind_modem(void)
+{
+    return device_get_binding(GSM_DEVICE);
 }

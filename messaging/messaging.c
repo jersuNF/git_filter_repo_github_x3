@@ -28,13 +28,13 @@ K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct lte_proto_event),
 
 #define NUM_MSGQ_EVENTS 3
 struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_FIFO_DATA_AVAILABLE,
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY, &ble_ctrl_msgq,
 					0),
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_FIFO_DATA_AVAILABLE,
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY, &ble_data_msgq,
 					0),
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_FIFO_DATA_AVAILABLE,
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY,
 					&lte_proto_msgq, 0),
 };
@@ -165,17 +165,22 @@ static inline void process_lte_proto_event(void)
 
 void messaging_thread_fn()
 {
-	int rc = k_poll(msgq_events, NUM_MSGQ_EVENTS, K_FOREVER);
-
-	if (rc == 0) {
-		if (msgq_events[0].state == K_POLL_STATE_FIFO_DATA_AVAILABLE) {
-			process_ble_ctrl_event();
+	while (true) {
+		int rc = k_poll(msgq_events, NUM_MSGQ_EVENTS, K_FOREVER);
+		if (rc == 0) {
+			while (k_msgq_num_used_get(&ble_ctrl_msgq) > 0) {
+				process_ble_ctrl_event();
+			}
+			while (k_msgq_num_used_get(&ble_data_msgq) > 0) {
+				process_ble_data_event();
+			}
+			while (k_msgq_num_used_get(&lte_proto_msgq) > 0) {
+				process_lte_proto_event();
+			}
 		}
-		if (msgq_events[1].state == K_POLL_STATE_FIFO_DATA_AVAILABLE) {
-			process_ble_data_event();
-		}
-		if (msgq_events[2].state == K_POLL_STATE_FIFO_DATA_AVAILABLE) {
-			process_lte_proto_event();
+		/* Set all the events to not ready again. */
+		for (int i = 0; i < NUM_MSGQ_EVENTS; i++) {
+			msgq_events[i].state = K_POLL_STATE_NOT_READY;
 		}
 	}
 }

@@ -1,0 +1,12 @@
+menuconfig BUZZER
+	bool "Buzzer module"
+	select PWM
+	help
+	  Buzzer module
+	default y
+
+if BUZZER
+	module = BUZZER
+	module-str = BUZZER Controller
+	source "subsys/logging/Kconfig.template.log_config"
+endif

@@ -28,4 +28,12 @@ int clear_fcb_sectors(flash_partition_t partition);
  */
 int stg_fcb_reset_and_init();
 
+#define SECTOR_SIZE                                                            \
+	MAX(CONFIG_NORDIC_QSPI_NOR_FLASH_LAYOUT_PAGE_SIZE,                     \
+	    CONFIG_STORAGE_SECTOR_SIZE)
+
+#define FLASH_LOG_NUM_SECTORS PM_LOG_PARTITION_SIZE / SECTOR_SIZE
+#define FLASH_ANO_NUM_SECTORS PM_ANO_PARTITION_SIZE / SECTOR_SIZE
+#define FLASH_PASTURE_NUM_SECTORS PM_PASTURE_PARTITION_SIZE / SECTOR_SIZE
+
 #endif /* _STORAGE_H_ */

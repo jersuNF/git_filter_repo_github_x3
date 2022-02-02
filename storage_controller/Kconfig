@@ -29,7 +29,7 @@ if STORAGE_CONTROLLER
 		  becomes ready.
 
 	config STORAGE_SECTOR_SIZE
-		hex "Size of the sectors that FCB uses for log/ano data"
+		hex "Size of the sectors that FCB uses for log/ano/pasture data"
 		default 0x1000
 
 	config MSGQ_WRITE_EVENT_SIZE

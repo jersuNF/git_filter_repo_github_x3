@@ -15,6 +15,7 @@
 #include "ano_structure.h"
 #include "log_structure.h"
 #include "pasture_structure.h"
+#include "storage.h"
 
 #include "error_event.h"
 
@@ -24,11 +25,6 @@
 #include <logging/log.h>
 #define MODULE storage_controller
 LOG_MODULE_REGISTER(MODULE, CONFIG_STORAGE_CONTROLLER_LOG_LEVEL);
-
-#define FLASH_LOG_NUM_SECTORS PM_LOG_PARTITION_SIZE / CONFIG_STORAGE_SECTOR_SIZE
-#define FLASH_ANO_NUM_SECTORS PM_ANO_PARTITION_SIZE / CONFIG_STORAGE_SECTOR_SIZE
-#define FLASH_PASTURE_NUM_SECTORS                                              \
-	PM_PASTURE_PARTITION_SIZE / CONFIG_STORAGE_SECTOR_SIZE
 
 const struct flash_area *log_area;
 struct fcb log_fcb;

@@ -212,6 +212,14 @@ void stg_fcb_write_entry()
 	struct fcb_entry loc;
 	struct fcb *fcb = get_fcb(ev.partition);
 
+	/* If we want to only read the newest, clear all previous entries. */
+	if (ev.rotate_to_this) {
+		err = fcb_clear(fcb);
+		if (err) {
+			return;
+		}
+	}
+
 	/* Appending a new entry, rotate(replaces) oldests if no space. */
 	err = fcb_append(fcb, ev.len, &loc);
 	if (err == -ENOSPC) {
@@ -339,25 +347,17 @@ void stg_fcb_read_entry()
 
 	struct fcb *fcb = get_fcb(ev.partition);
 
-	if (ev.walk_all_entries) {
-		err = fcb_walk(fcb, NULL, stg_fcb_walk_cb, &ev);
+	err = fcb_walk(fcb, NULL, stg_fcb_walk_cb, &ev);
+	if (err) {
+		LOG_ERR("Error walking over FCB storage, err %d", err);
+		return;
+	}
+
+	if (ev.rotate) {
+		err = fcb_clear(fcb);
 		if (err) {
-			LOG_ERR("Error walking over FCB storage, err %d", err);
+			LOG_ERR("Error clearing FCB after walk, err %d", err);
 			return;
-		}
-	} else {
-		struct fcb_entry loc;
-		err = fcb_offset_last_n(fcb, 1, &loc);
-		if (err) {
-			LOG_ERR("Error getting last entry. %i", err);
-		}
-
-		off_t offset = FCB_ENTRY_FA_DATA_OFF(loc);
-		size_t len = loc.fe_data_len;
-
-		err = stg_read_entry_raw(ev.partition, len, offset);
-		if (err) {
-			LOG_ERR("Error flash_write of last entry. %i", err);
 		}
 	}
 	return;

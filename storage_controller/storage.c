@@ -251,7 +251,7 @@ void stg_fcb_write_entry()
 		LOG_ERR("Error writing to flash area. err %d", err);
 		return;
 	}
-	LOG_DBG("Wrote sector %i", (int)FCB_ENTRY_FA_DATA_OFF(loc));
+	LOG_INF("Wrote sector %i", (int)FCB_ENTRY_FA_DATA_OFF(loc));
 
 	/* Finish entry. */
 	err = fcb_append_finish(fcb, &loc);
@@ -299,7 +299,7 @@ static int stg_fcb_walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 	}
 
 	/* Entry now read, tell requester the data is ready for consumption. */
-	LOG_DBG("Read entry at %d", (int)FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc));
+	LOG_INF("Read entry at %d", (int)FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc));
 
 	ev_ack->partition = ev_read->partition;
 	ev_ack->data = data;
@@ -365,6 +365,15 @@ void stg_fcb_read_entry()
 		LOG_INF("Rotated %i entries", successful_entries);
 	}
 	return;
+}
+
+int stg_fcb_reset_and_init()
+{
+	memset(&log_fcb, 0, sizeof(log_fcb));
+	memset(&ano_fcb, 0, sizeof(ano_fcb));
+	memset(&pasture_fcb, 0, sizeof(pasture_fcb));
+
+	return init_storage_controller();
 }
 
 /**

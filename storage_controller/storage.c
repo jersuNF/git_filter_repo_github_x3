@@ -201,6 +201,7 @@ int init_storage_controller(void)
 
 void stg_fcb_write_entry()
 {
+	bool rotated = false;
 	struct stg_write_event ev;
 	int err = k_msgq_get(&write_event_msgq, &ev, K_NO_WAIT);
 	if (err) {
@@ -222,7 +223,6 @@ void stg_fcb_write_entry()
 	/* Appending a new entry, rotate(replaces) oldests if no space. */
 	err = fcb_append(fcb, ev.len, &loc);
 	if (err == -ENOSPC) {
-		LOG_INF("Rotating FCB since it's full.");
 		err = fcb_rotate(fcb);
 		if (err) {
 			LOG_ERR("Unable to rotate fcb from -ENOSPC, err %d",
@@ -238,6 +238,8 @@ void stg_fcb_write_entry()
 				     -ENOTRECOVERABLE, NULL, 0);
 			return;
 		}
+		LOG_INF("Rotated FCB since it's full.");
+		rotated = true;
 	} else if (err) {
 		LOG_ERR("Error appending new fcb entry, err %d", err);
 		return;
@@ -261,6 +263,7 @@ void stg_fcb_write_entry()
 	/* Notify data has been written. */
 	struct stg_ack_write_event *event = new_stg_ack_write_event();
 	event->partition = ev.partition;
+	event->rotated = rotated;
 	EVENT_SUBMIT(event);
 	return;
 }

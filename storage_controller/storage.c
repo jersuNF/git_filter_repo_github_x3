@@ -212,14 +212,6 @@ void stg_fcb_write_entry()
 	struct fcb_entry loc;
 	struct fcb *fcb = get_fcb(ev.partition);
 
-	/* If we want to only read the newest, clear all previous entries. */
-	if (ev.rotate_to_this) {
-		err = fcb_clear(fcb);
-		if (err) {
-			return;
-		}
-	}
-
 	/* Appending a new entry, rotate(replaces) oldests if no space. */
 	err = fcb_append(fcb, ev.len, &loc);
 	if (err == -ENOSPC) {
@@ -251,7 +243,6 @@ void stg_fcb_write_entry()
 		LOG_ERR("Error writing to flash area. err %d", err);
 		return;
 	}
-	LOG_INF("Wrote sector %i", (int)FCB_ENTRY_FA_DATA_OFF(loc));
 
 	/* Finish entry. */
 	err = fcb_append_finish(fcb, &loc);
@@ -268,42 +259,45 @@ void stg_fcb_write_entry()
 	return;
 }
 
-/* Used to see how many sector reads was consumed correctly,
- * in order to know how many times we can rotate.
+/** @brief Helper function for reading entry from external flash and then
+ *         using malloc to cache the data and forward it to an output
+ *         data buffer and length. Free's the data when consume event
+ *         has been received by this module, or if it times out.
+ * 
+ * @param[in] partition which partition to target in the read_ack.
+ * @param[in] fa flash_area of which area on the flash is used. (partition)
+ * @param[in] loc fcb_entry which contains information of the contents on
+ *                external flash.
+ * 
+ * @return 0 on success, otherwise negative errno.
  */
-static int successful_entries;
-
-static int stg_fcb_walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
+static inline int stg_read_entry_raw(flash_partition_t partition, size_t len,
+				     off_t offset)
 {
-	/* Read ACK event that contains a pointer to allocated data on RAM
-	 * which will be de-allocated on consume_event (or timeout).
-	 */
 	struct stg_ack_read_event *ev_ack = new_stg_ack_read_event();
-	struct stg_read_event *ev_read = (struct stg_read_event *)arg;
+	struct fcb *fcb = get_fcb(partition);
 
 	int err = 0;
 
 	/* Allocate space so the requester can access this region. */
-	uint8_t *data = (uint8_t *)k_malloc(loc_ctx->loc.fe_data_len);
+	uint8_t *data = (uint8_t *)k_malloc(len);
 
 	if (data == NULL) {
 		LOG_ERR("No heap memory to allocate temporary data buffer.");
 		return -ENOMEM;
 	}
 
-	err = flash_area_read(loc_ctx->fap, FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc),
-			      data, loc_ctx->loc.fe_data_len);
+	err = flash_area_read(fcb->fap, offset, data, len);
 	if (err) {
 		LOG_ERR("Error reading from flash area, err %d", err);
 		goto cleanup;
 	}
 
 	/* Entry now read, tell requester the data is ready for consumption. */
-	LOG_INF("Read entry at %d", (int)FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc));
 
-	ev_ack->partition = ev_read->partition;
+	ev_ack->partition = partition;
 	ev_ack->data = data;
-	ev_ack->len = (size_t)loc_ctx->loc.fe_data_len;
+	ev_ack->len = len;
 
 	EVENT_SUBMIT(ev_ack);
 
@@ -313,15 +307,19 @@ static int stg_fcb_walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 		LOG_ERR("Failed to wait for requester to consume %d", err);
 		goto cleanup;
 	}
-
-	/* Now its confirmed a valid, consumed sector, increment counter
-	 * which will determine how many times we'll rotate 
-	 * once we're finished with the walk. 
-	 */
-	successful_entries++;
 cleanup:
 	k_free(data);
 	return err;
+}
+
+static int stg_fcb_walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
+{
+	struct stg_read_event *ev_read = (struct stg_read_event *)arg;
+
+	off_t offset = FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc);
+	size_t len = loc_ctx->loc.fe_data_len;
+
+	return stg_read_entry_raw(ev_read->partition, len, offset);
 }
 
 int clear_fcb_sectors(flash_partition_t partition)
@@ -341,28 +339,26 @@ void stg_fcb_read_entry()
 
 	struct fcb *fcb = get_fcb(ev.partition);
 
-	successful_entries = 0;
-
-	err = fcb_walk(fcb, NULL, stg_fcb_walk_cb, &ev);
-	if (err) {
-		LOG_ERR("Error walking over FCB storage, err %d", err);
-		return;
-	}
-	/* Rotate FCB based on successful entries consumed. We cannot
-	 * rotate in the callback, since that would mess up the fcb_walk logic.
-
-	 * However only rotate if the requester wanted to. I.e LOG data. 
-	 */
-	if (ev.rotate && successful_entries > 0) {
-		for (int i = 0; i < successful_entries; i++) {
-			err = fcb_rotate(fcb);
-			if (err) {
-				LOG_ERR("Error rotating fcb after walk, err %i",
-					err);
-				return;
-			}
+	if (ev.walk_all_entries) {
+		err = fcb_walk(fcb, NULL, stg_fcb_walk_cb, &ev);
+		if (err) {
+			LOG_ERR("Error walking over FCB storage, err %d", err);
+			return;
 		}
-		LOG_INF("Rotated %i entries", successful_entries);
+	} else {
+		struct fcb_entry loc;
+		err = fcb_offset_last_n(fcb, 1, &loc);
+		if (err) {
+			LOG_ERR("Error getting last entry. %i", err);
+		}
+
+		off_t offset = FCB_ENTRY_FA_DATA_OFF(loc);
+		size_t len = loc.fe_data_len;
+
+		err = stg_read_entry_raw(ev.partition, len, offset);
+		if (err) {
+			LOG_ERR("Error flash_write of last entry. %i", err);
+		}
 	}
 	return;
 }

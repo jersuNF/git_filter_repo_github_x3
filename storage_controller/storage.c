@@ -222,6 +222,7 @@ void stg_fcb_write_entry()
 	/* Appending a new entry, rotate(replaces) oldests if no space. */
 	err = fcb_append(fcb, ev.len, &loc);
 	if (err == -ENOSPC) {
+		LOG_INF("Rotating FCB since it's full.");
 		err = fcb_rotate(fcb);
 		if (err) {
 			LOG_ERR("Unable to rotate fcb from -ENOSPC, err %d",
@@ -349,7 +350,7 @@ void stg_fcb_read_entry()
 
 	 * However only rotate if the requester wanted to. I.e LOG data. 
 	 */
-	if (ev.rotate) {
+	if (ev.rotate && successful_entries > 0) {
 		for (int i = 0; i < successful_entries; i++) {
 			err = fcb_rotate(fcb);
 			if (err) {

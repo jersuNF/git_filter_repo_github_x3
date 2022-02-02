@@ -12,9 +12,6 @@ static bool messaging_ack = true;
 
 int8_t socket_connect(struct data *, struct sockaddr *,
                           socklen_t);
-//int8_t start_tcp(void);
-//void stop_tcp(void);
-
 uint8_t socket_receive(struct data *);
 int8_t lte_init(void);
 bool lte_is_ready(void);

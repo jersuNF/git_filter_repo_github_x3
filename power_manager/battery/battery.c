@@ -15,25 +15,20 @@
 #include <drivers/gpio.h>
 #include <drivers/adc.h>
 #include <drivers/sensor.h>
-#include <logging/log.h>
 
 #include "battery.h"
 
-LOG_MODULE_REGISTER(battery);
+#define MODULE battery
+#include <logging/log.h>
+
+LOG_MODULE_REGISTER(MODULE, CONFIG_BATTERY_LOG_LEVEL);
 
 #define VBATT DT_PATH(vbatt)
 
-#ifdef CONFIG_BOARD_THINGY52_NRF52832
-/* This board uses a divider that reduces max voltage to
- * reference voltage (600 mV).
- */
-#define BATTERY_ADC_GAIN ADC_GAIN_1
-#else
-/* Other boards may use dividers that only reduce battery voltage to
+/* Use divider that reduce battery voltage to
  * the maximum supported by the hardware (3.6 V)
  */
 #define BATTERY_ADC_GAIN ADC_GAIN_1_6
-#endif
 
 struct io_channel_config {
 	const char *label;
@@ -96,7 +91,7 @@ static int divider_setup(void)
 	struct divider_data *ddp = &divider_data;
 	struct adc_sequence *asp = &ddp->adc_seq;
 	struct adc_channel_cfg *accp = &ddp->adc_cfg;
-	int rc;
+	int err;
 
 	if (iocp->label == NULL) {
 		return -ENOTSUP;
@@ -114,12 +109,12 @@ static int divider_setup(void)
 			LOG_ERR("Failed to get GPIO %s", gcp->label);
 			return -ENOENT;
 		}
-		rc = gpio_pin_configure(ddp->gpio, gcp->pin,
-					GPIO_OUTPUT_INACTIVE | gcp->flags);
-		if (rc != 0) {
+		err = gpio_pin_configure(ddp->gpio, gcp->pin,
+					 GPIO_OUTPUT_INACTIVE | gcp->flags);
+		if (err != 0) {
 			LOG_ERR("Failed to control feed %s.%u: %d", gcp->label,
-				gcp->pin, rc);
-			return rc;
+				gcp->pin, err);
+			return err;
 		}
 	}
 
@@ -150,40 +145,38 @@ static int divider_setup(void)
 #error Unsupported ADC
 #endif /* CONFIG_ADC_var */
 
-	rc = adc_channel_setup(ddp->adc, accp);
-	LOG_INF("Setup AIN%u got %d", iocp->channel, rc);
+	err = adc_channel_setup(ddp->adc, accp);
+	LOG_INF("Setup battery sense on AIN_%u", iocp->channel);
 
-	return rc;
+	return err;
 }
 
 static bool battery_ok;
 
 static int battery_setup(const struct device *arg)
 {
-	int rc = divider_setup();
+	int err = divider_setup();
 
-	battery_ok = (rc == 0);
-	LOG_INF("Battery setup: %d %d", rc, battery_ok);
-	return rc;
+	battery_ok = (err == 0);
+	LOG_INF("Battery divider setup %s", battery_ok ? "complete" : "error");
+	return err;
 }
-
-SYS_INIT(battery_setup, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
 
 int battery_measure_enable(bool enable)
 {
-	int rc = -ENOENT;
+	int err = -ENOENT;
 
 	if (battery_ok) {
 		const struct divider_data *ddp = &divider_data;
 		const struct gpio_channel_config *gcp =
 			&divider_config.power_gpios;
 
-		rc = 0;
+		err = 0;
 		if (ddp->gpio) {
-			rc = gpio_pin_set(ddp->gpio, gcp->pin, enable);
+			err = gpio_pin_set(ddp->gpio, gcp->pin, enable);
 		}
 	}
-	return rc;
+	return err;
 }
 
 int battery_sample(void)
@@ -207,26 +200,24 @@ int battery_sample(void)
 			if (dcp->output_ohm != 0) {
 				rc = val * (uint64_t)dcp->full_ohm /
 				     dcp->output_ohm;
-				LOG_INF("raw %u ~ %u mV => %d mV", ddp->raw,
-					val, rc);
+
 			} else {
 				rc = val;
-				LOG_INF("raw %u ~ %u mV", ddp->raw, val);
 			}
 		}
 	}
-
+	/* Return battery voltage measured in mV */
 	return rc;
 }
 
-unsigned int battery_level_pptt(unsigned int batt_mV,
-				const struct battery_level_point *curve)
+unsigned int battery_level_soc(unsigned int batt_mV,
+			       const struct battery_level_point *curve)
 {
 	const struct battery_level_point *pb = curve;
 
 	if (batt_mV >= pb->lvl_mV) {
 		/* Measured voltage above highest point, cap at maximum. */
-		return pb->lvl_pptt;
+		return (pb->lvl_pptt / 100);
 	}
 	/* Go down to the last point at or below the measured voltage. */
 	while ((pb->lvl_pptt > 0) && (batt_mV < pb->lvl_mV)) {
@@ -239,8 +230,14 @@ unsigned int battery_level_pptt(unsigned int batt_mV,
 
 	/* Linear interpolation between below and above points. */
 	const struct battery_level_point *pa = pb - 1;
+	int batt_level_pptt = pb->lvl_pptt + ((pa->lvl_pptt - pb->lvl_pptt) *
+					      (batt_mV - pb->lvl_mV) /
+					      (pa->lvl_mV - pb->lvl_mV));
 
-	return pb->lvl_pptt +
-	       ((pa->lvl_pptt - pb->lvl_pptt) * (batt_mV - pb->lvl_mV) /
-		(pa->lvl_mV - pb->lvl_mV));
+	/* Return the battery State Of Charge (SOC) in % based on battery discharge curve */
+	unsigned int batt_level_precentage = (batt_level_pptt / 100);
+	return batt_level_precentage;
 }
+
+/* Initialze battery setup on startup */
+SYS_INIT(battery_setup, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

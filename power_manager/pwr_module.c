@@ -37,7 +37,7 @@ static const struct battery_level_point levels[] = {
 	 * and 3.1 V.
 	 */
 
-	{ 10000, 3950 },
+	{ 10000, 4200 },
 	{ 625, 3550 },
 	{ 0, 3100 },
 #else
@@ -47,38 +47,51 @@ static const struct battery_level_point levels[] = {
 #endif
 };
 
-static const char *now_str(void)
-{
-	static char buf[16]; /* ...HH:MM:SS.MMM */
-	uint32_t now = k_uptime_get_32();
-	unsigned int ms = now % MSEC_PER_SEC;
-	unsigned int s;
-	unsigned int min;
-	unsigned int h;
-
-	now /= MSEC_PER_SEC;
-	s = now % 60U;
-	now /= 60U;
-	min = now % 60U;
-	now /= 60U;
-	h = now;
-
-	snprintf(buf, sizeof(buf), "%u:%02u:%02u.%03u", h, min, s, ms);
-	return buf;
-}
-
 int pwr_module_init(void)
 {
-	// TODO: Implement initialization of the pwr module
+	/* NB: Battery is already initialized with SYS_INIT in battery.c */
+	int err = log_battery_voltage();
+
+	// TODO: Implement initialization of latch for GNSS and Flash
+
+	return err;
+}
+
+int log_battery_voltage(void)
+{
+	int err = battery_measure_enable(true);
+
+	if (err != 0) {
+		LOG_ERR("Failed initialize battery measurement: %d", err);
+		return err;
+	}
+
+	int batt_mV = battery_sample();
+	if (batt_mV < 0) {
+		LOG_ERR("Failed to read battery voltage: %d", batt_mV);
+		return err;
+	}
+
+	unsigned int batt_soc = battery_level_soc(batt_mV, levels);
+
+	LOG_INF("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
+		batt_soc);
+
+	/* Disable gipo pin to save power */
+	err = battery_measure_enable(false);
+	if (err != 0) {
+		LOG_ERR("Failed to disable battery measurement: %d", err);
+		return err;
+	}
 	return 0;
 }
 
 void fetch_periodic_battery_voltage(void)
 {
-	int rc = battery_measure_enable(true);
+	int err = battery_measure_enable(true);
 
-	if (rc != 0) {
-		LOG_ERR("Failed initialize battery measurement: %d", rc);
+	if (err != 0) {
+		LOG_ERR("Failed initialize battery measurement: %d", err);
 		return;
 	}
 
@@ -90,31 +103,22 @@ void fetch_periodic_battery_voltage(void)
 			break;
 		}
 
-		unsigned int batt_pptt = battery_level_pptt(batt_mV, levels);
+		unsigned int batt_soc = battery_level_soc(batt_mV, levels);
 
-		LOG_INF("[%s]: %d mV; %u pptt", log_strdup(now_str()), batt_mV,
-			batt_pptt);
+		LOG_INF("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
+			batt_soc);
 
 		k_busy_wait(5 * USEC_PER_SEC);
 	}
-	rc = battery_measure_enable(false);
-	LOG_INF("Disable measurement: %d", rc);
+
+	/* Disable gipo pin to save power */
+	err = battery_measure_enable(false);
+	if (err != 0) {
+		LOG_ERR("Failed to disable battery measurement: %d", err);
+		return;
+	}
+	LOG_INF("Disable measurement: %d", err);
 }
-
-/*
-TODO: NOTES from meeting 28.1:
-Read battery func()
-	IF battery level is low: {
-	Publish power state event -> LOW_PWR_MODE
-		inside cellular_handler:
-			Safely turn down modem, send goodbye to server
-
-		inside flash / GNSS module:
-			Turn down flash? Shared witch with GNSS
-
-	Publish error event -> WARNING LOW BATTERY
-}
-*/
 
 /** 
  * @brief Event handler function

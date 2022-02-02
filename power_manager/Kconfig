@@ -1,6 +1,17 @@
 # Copyright (c) 2021 Nofence AS
 
 
-module = PWR_MODULE
-module-str = PWR module
-source "subsys/logging/Kconfig.template.log_config"
+menuconfig POWER_MANAGER
+        bool "Enable Power Manager module"
+	select LOG
+        default y
+
+if POWER_MANAGER
+        module = PWR_MODULE
+        module-str = PWR module
+        source "subsys/logging/Kconfig.template.log_config"
+
+        module = BATTERY
+        module-str = Battery logging
+        source "subsys/logging/Kconfig.template.log_config"
+endif

@@ -37,7 +37,7 @@ typedef struct {
 	} header;
 
 	/** Coordinates. */
-	fence_coordinate_t p_c[FENCE_MAX_TOTAL_COORDINATES];
+	fence_coordinate_t p_c[];
 } fence_t;
 
 #define FENCE_MAX_DEFINITION_SIZE FENCE_MAX * sizeof(fence_t)

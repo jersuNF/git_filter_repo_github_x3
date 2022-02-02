@@ -16,6 +16,8 @@
 #include "log_structure.h"
 #include "pasture_structure.h"
 
+#include "error_event.h"
+
 /* Get sizes and offset definitions from pm_static.yml. */
 #include <pm_config.h>
 
@@ -61,29 +63,6 @@ struct k_poll_event stg_msgq_events[NUM_STG_MSGQ_EVENTS] = {
 					K_POLL_MODE_NOTIFY_ONLY,
 					&write_event_msgq, 0),
 };
-
-/** @brief Gets length of data container based on partition.
- * 
- * @param partition which struct to sizeof
- * 
- * @return size of struct
- */
-size_t get_len(flash_partition_t partition)
-{
-	size_t len;
-
-	if (partition == STG_PARTITION_LOG) {
-		len = sizeof(log_rec_t);
-	} else if (partition == STG_PARTITION_ANO) {
-		len = sizeof(ano_rec_t);
-	} else if (partition == STG_PARTITION_PASTURE) {
-		len = sizeof(fence_t);
-	} else {
-		LOG_ERR("Invalid partition given.");
-		len = 0;
-	}
-	return len;
-}
 
 /** @brief Gets fcb structure based on partition.
  * 
@@ -231,9 +210,6 @@ void stg_fcb_write_entry()
 
 	struct fcb_entry loc;
 	struct fcb *fcb = get_fcb(ev.partition);
-	size_t len = get_len(ev.partition);
-
-	uint8_t *data = (uint8_t *)ev.data;
 
 	/* If we want to only read the newest, clear all previous entries. */
 	if (ev.rotate_to_this) {
@@ -244,7 +220,7 @@ void stg_fcb_write_entry()
 	}
 
 	/* Appending a new entry, rotate(replaces) oldests if no space. */
-	err = fcb_append(fcb, len, &loc);
+	err = fcb_append(fcb, ev.len, &loc);
 	if (err == -ENOSPC) {
 		err = fcb_rotate(fcb);
 		if (err) {
@@ -253,10 +229,12 @@ void stg_fcb_write_entry()
 			return;
 		}
 		/* Retry appending. */
-		err = fcb_append(fcb, len, &loc);
+		err = fcb_append(fcb, ev.len, &loc);
 		if (err) {
 			LOG_ERR("Unable to recover in appending function, err %d",
 				err);
+			nf_app_error(ERR_SENDER_STORAGE_CONTROLLER,
+				     -ENOTRECOVERABLE, NULL, 0);
 			return;
 		}
 	} else if (err) {
@@ -264,7 +242,8 @@ void stg_fcb_write_entry()
 		return;
 	}
 
-	err = flash_area_write(fcb->fap, FCB_ENTRY_FA_DATA_OFF(loc), data, len);
+	err = flash_area_write(fcb->fap, FCB_ENTRY_FA_DATA_OFF(loc), ev.data,
+			       ev.len);
 	if (err) {
 		LOG_ERR("Error writing to flash area. err %d", err);
 		return;
@@ -286,36 +265,49 @@ void stg_fcb_write_entry()
 }
 
 /* Used to see how many sector reads was consumed correctly,
-	 * in order to know how many times we can rotate.
-	 */
+ * in order to know how many times we can rotate.
+ */
 static int successful_entries;
 
 static int stg_fcb_walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 {
-	struct stg_read_event *ev = (struct stg_read_event *)arg;
+	/* Read ACK event that contains a pointer to allocated data on RAM
+	 * which will be de-allocated on consume_event (or timeout).
+	 */
+	struct stg_ack_read_event *ev_ack = new_stg_ack_read_event();
+	struct stg_read_event *ev_read = (struct stg_read_event *)arg;
 
-	uint8_t *data = (uint8_t *)ev->data;
-	int err;
+	int err = 0;
+
+	/* Allocate space so the requester can access this region. */
+	uint8_t *data = (uint8_t *)k_malloc(loc_ctx->loc.fe_data_len);
+
+	if (data == NULL) {
+		LOG_ERR("No heap memory to allocate temporary data buffer.");
+		return -ENOMEM;
+	}
+
 	err = flash_area_read(loc_ctx->fap, FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc),
 			      data, loc_ctx->loc.fe_data_len);
 	if (err) {
 		LOG_ERR("Error reading from flash area, err %d", err);
-		return err;
+		goto cleanup;
 	}
-	LOG_DBG("Read sector %i", (int)FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc));
 
-	/* Publish read ack event and wait for consumed ack, 
-	 * only then do we read the next entry in the walk process.
-	 */
-	struct stg_ack_read_event *event = new_stg_ack_read_event();
-	event->partition = ev->partition;
-	EVENT_SUBMIT(event);
+	/* Entry now read, tell requester the data is ready for consumption. */
+	LOG_DBG("Read entry at %d", (int)FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc));
+
+	ev_ack->partition = ev_read->partition;
+	ev_ack->data = data;
+	ev_ack->len = (size_t)loc_ctx->loc.fe_data_len;
+
+	EVENT_SUBMIT(ev_ack);
 
 	err = k_sem_take(&data_consumed_sem,
 			 K_SECONDS(CONFIG_WALK_CONSUME_TIMEOUT_SEC));
 	if (err) {
-		LOG_ERR("Failed to wait for requester to consume.");
-		return err;
+		LOG_ERR("Failed to wait for requester to consume %d", err);
+		goto cleanup;
 	}
 
 	/* Now its confirmed a valid, consumed sector, increment counter
@@ -323,7 +315,9 @@ static int stg_fcb_walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 	 * once we're finished with the walk. 
 	 */
 	successful_entries++;
-	return 0;
+cleanup:
+	k_free(data);
+	return err;
 }
 
 int clear_fcb_sectors(flash_partition_t partition)

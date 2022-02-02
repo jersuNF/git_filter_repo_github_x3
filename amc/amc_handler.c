@@ -11,6 +11,7 @@
 #include "storage_events.h"
 #include "pasture_structure.h"
 #include "event_manager.h"
+#include "error_event.h"
 
 #define MODULE animal_monitor_control
 LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
@@ -18,7 +19,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
 /* Cached fence data header and a max coordinate region. Links the coordinate
  * region to the header.
  */
-static fence_t cached_fence;
+static fence_t *cached_fence;
 
 #define REQUEST_DATA_SEM_TIMEOUT_SEC 5
 K_SEM_DEFINE(fence_data_sem, 1, 1);
@@ -57,19 +58,8 @@ static struct k_work calc_work;
  */
 static void submit_request_pasture(void)
 {
-	int err = k_sem_take(&fence_data_sem,
-			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
-	if (err) {
-		LOG_ERR("Error waiting fencedata semaphore to release.");
-		return;
-	}
-
 	struct stg_read_event *ev = new_stg_read_event();
-
-	ev->data = (uint8_t *)&cached_fence;
-	ev->rotate = false;
 	ev->partition = STG_PARTITION_PASTURE;
-
 	EVENT_SUBMIT(ev);
 }
 
@@ -114,12 +104,12 @@ void calculate_work_fn(struct k_work *item)
 	 *           subscribes to if its correct.
 	 */
 	bool fencedata_correct = true;
-	if (cached_fence.header.n_points <= 0) {
+	if (cached_fence->header.n_points <= 0) {
 		fencedata_correct = false;
 	}
-	for (int i = 0; i < cached_fence.header.n_points; i++) {
-		if (cached_fence.p_c[i].s_x_dm == 1337 &&
-		    cached_fence.p_c[i].s_y_dm == 1337) {
+	for (int i = 0; i < cached_fence->header.n_points; i++) {
+		if (cached_fence->p_c[i].s_x_dm == 1337 &&
+		    cached_fence->p_c[i].s_y_dm == 1337) {
 			continue;
 		}
 		fencedata_correct = false;
@@ -164,6 +154,28 @@ void amc_module_init(void)
 	submit_request_pasture();
 }
 
+static inline fence_t *fence_malloc(int n_points)
+{
+	return k_malloc(sizeof(fence_t) +
+			(n_points * sizeof(fence_coordinate_t)));
+}
+
+static inline int update_pasture_cache(uint8_t *data, size_t len)
+{
+	/* Free previous fence. */
+	k_free(cached_fence);
+
+	cached_fence = k_malloc(len);
+
+	if (cached_fence == NULL) {
+		LOG_ERR("No memory left for caching the fence.");
+		return -ENOMEM;
+	}
+	/* Memcpy the flash contents. */
+	memcpy(cached_fence, data, len);
+	return 0;
+}
+
 /**
  * @brief Main event handler function. 
  * 
@@ -179,17 +191,31 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_stg_ack_read_event(eh)) {
+		int err = k_sem_take(&fence_data_sem,
+				     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
+		if (err) {
+			LOG_ERR("Error semaphore, retry pasture_ready here?");
+			return false;
+		}
+
+		/* Update fence cache by freeing previous fence, and copying
+		 * new one from storage controller.
+		 */
+		struct stg_ack_read_event *ev_ack = cast_stg_ack_read_event(eh);
+		err = update_pasture_cache(ev_ack->data, ev_ack->len);
+		if (err) {
+			char *err_msg = "Out of memory for pasture cache.";
+			nf_app_fatal(ERR_SENDER_AMC, -ENOMEM, err_msg,
+				     strlen(err_msg));
+		}
 		k_sem_give(&fence_data_sem);
 
-		/* Indicate data has been acked so storage controller can
+		/* Indicate data has been consumed, so storage controller can
 		 * finish up it's resources.
 		 */
-		struct stg_consumed_read_event *ev =
+		struct stg_consumed_read_event *ev_consume =
 			new_stg_consumed_read_event();
-
-		ev->partition = STG_PARTITION_PASTURE;
-
-		EVENT_SUBMIT(ev);
+		EVENT_SUBMIT(ev_consume);
 		return false;
 	}
 	if (is_gnssdata_event(eh)) {

@@ -3,7 +3,8 @@ zephyr_include_directories(
     ./../../events/amc/
     ./../../events/storage_controller/
     ./../../events/storage_controller/include
-    ./../../events/buzzer/)
+    ./../../events/buzzer/
+    ./../../events/error_handler/)
 
 target_sources(app PRIVATE 
 ./amc_handler.c
@@ -11,4 +12,5 @@ target_sources(app PRIVATE
 ./../../events/storage_controller/storage_events.c
 ./../../events/storage_controller/pasture_event.c
 ./../../events/buzzer/sound_event.c
+./../../events/error_handler/error_event.c
 )

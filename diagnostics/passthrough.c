@@ -8,6 +8,8 @@
 #include <sys/ring_buffer.h>
 #include <drivers/uart.h>
 
+#define PASSTHROUGH_IMPLICIT_NEWLINE
+
 static atomic_t passthrough_tx_in_progress = ATOMIC_INIT(0);
 static uint8_t passthrough_tx_buffer[CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE];
 static uint32_t passthrough_tx_count = 0;
@@ -120,6 +122,13 @@ uint32_t passthrough_write_data(uint8_t* data, uint32_t size)
 		if (bytes_parsed > CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE) {
 			bytes_parsed = CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE;
 		}
+#ifdef PASSTHROUGH_IMPLICIT_NEWLINE
+			/* TODO - FIX THIS WORKAROUND! */
+			if (data[bytes_parsed-1] == '\n') {
+				data[bytes_parsed-1] = '\r';
+			}
+#endif
+
 		memcpy(passthrough_tx_buffer, data, bytes_parsed);
 		passthrough_tx_count = bytes_parsed;
 		passthrough_tx_sent = 0;

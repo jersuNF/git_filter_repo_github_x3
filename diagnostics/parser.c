@@ -115,7 +115,7 @@ static int parser_test(enum diagnostics_interface interface, char* arg)
 	char* next_arg;
 	uint32_t sub_arg_len = parser_get_next(arg, &next_arg);
 	if (sub_arg_len == 0) {
-		const char* noargs = "Test requires an argument, e.g. test lis2dw\r\n";
+		const char* noargs = "Specify test: lis2dw, eeprom, bme280, flash\r\n";
 		parser_actions.send_resp(interface, noargs, strlen(noargs));
 		return 0;
 	}
@@ -160,7 +160,7 @@ static int parser_test(enum diagnostics_interface interface, char* arg)
 		parser_actions.send_resp(interface, buf, strlen(buf));
 		parser_actions.send_resp(interface, "\r\n", strlen("\r\n"));
 
-		data = 0xFF;
+		data = 0x13;
 		if (eeprom_write(eeprom_dev, 0, &data, 1) != 0) {
 			const char* readydev = "EEPROM - Failed writing offset 0.\r\n";
 			parser_actions.send_resp(interface, readydev, strlen(readydev));
@@ -175,6 +175,12 @@ static int parser_test(enum diagnostics_interface interface, char* arg)
 		snprintf(buf, 10, "%u", data);
 		parser_actions.send_resp(interface, buf, strlen(buf));
 		parser_actions.send_resp(interface, "\r\n", strlen("\r\n"));
+		
+		data = 0xFF;
+		if (eeprom_write(eeprom_dev, 0, &data, 1) != 0) {
+			const char* readydev = "EEPROM - Failed writing offset 0.\r\n";
+			parser_actions.send_resp(interface, readydev, strlen(readydev));
+		}
 	} else if (parser_arg_is_matching("bme280", arg, sub_arg_len)) {
 		const struct device *bme_dev = device_get_binding(DT_LABEL(DT_NODELABEL(environment)));
 		
@@ -212,6 +218,7 @@ static int parser_test(enum diagnostics_interface interface, char* arg)
 		if (!device_is_ready(flash_dev)) {
 			const char* readydev = "Flash - Device is NOT ready.\r\n";
 			parser_actions.send_resp(interface, readydev, strlen(readydev));
+			return -1;
 		} else {
 			const char* readydev = "Flash - Device is ready.\r\n";
 			parser_actions.send_resp(interface, readydev, strlen(readydev));
@@ -302,7 +309,7 @@ static int parser_gpio(enum diagnostics_interface interface, char* arg)
 	char* next_arg;
 	uint32_t sub_arg_len = parser_get_next(arg, &next_arg);
 	if (sub_arg_len == 0) {
-		const char* noargs = "GPIO requires arguments: gpio <port> <pin> <z/0/1/in/inpu/inpd/?> <val>\r\n";
+		const char* noargs = "GPIO requires arguments: gpio <port> <pin> <z/0/1/in/inpu/inpd/?>, e.g. gpio 0 8 1\r\n";
 		parser_actions.send_resp(interface, noargs, strlen(noargs));
 		return 0;
 	}
@@ -386,7 +393,7 @@ static int parser_gpio(enum diagnostics_interface interface, char* arg)
 
 static int parser_help(enum diagnostics_interface interface, char* arg)
 {
-	const char* help = "Sorry.. No help yet.\r\n";
+	const char* help = "Commands: help, gpio, test, modem, gnss\r\n";
 	parser_actions.send_resp(interface, help, strlen(help));
 
 	return 0;

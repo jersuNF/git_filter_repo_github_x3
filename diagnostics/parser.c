@@ -122,7 +122,7 @@ static int parser_test(enum diagnostics_interface interface, char* arg)
 
 	if (parser_arg_is_matching("lis2dw", arg, sub_arg_len)) {
 		//const struct device *sensor = device_get_binding(DT_LABEL(DT_INST(0, st_lis2dh)));
-		const struct device *sensor = device_get_binding(DT_LABEL(DT_NODELABEL(movement)));
+		const struct device *sensor = device_get_binding(DT_LABEL(DT_NODELABEL(movement_sensor)));
 
 		if (sensor == NULL) {
 			const char* nodev = "LIS2DH - No device found.\r\n";
@@ -182,7 +182,7 @@ static int parser_test(enum diagnostics_interface interface, char* arg)
 			parser_actions.send_resp(interface, readydev, strlen(readydev));
 		}
 	} else if (parser_arg_is_matching("bme280", arg, sub_arg_len)) {
-		const struct device *bme_dev = device_get_binding(DT_LABEL(DT_NODELABEL(environment)));
+		const struct device *bme_dev = device_get_binding(DT_LABEL(DT_NODELABEL(environment_sensor)));
 		
 		if (bme_dev == NULL) {
 			const char* nodev = "BME280 - No device found.\r\n";

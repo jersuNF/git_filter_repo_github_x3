@@ -45,7 +45,7 @@ int parser_init(struct parser_action* actions)
 	modem_device = device_get_binding(DT_LABEL(DT_NODELABEL(modem_uart)));
 	gnss_device = device_get_binding(DT_LABEL(DT_NODELABEL(modem_uart)));
 
-	if (actions == NULL) {
+	if (actions != NULL) {
 		parser_actions = *actions;
 	}
 

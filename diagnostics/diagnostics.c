@@ -151,9 +151,10 @@ static void diagnostics_handle_rtt_input(bool* got_data)
 		
 		if (parsed_bytes > 0)
 		{
-			diagnostics_buffer_consume(rtt_receive_buffer, 
-						   parsed_bytes, 
-						   rtt_received_count);
+			rtt_received_count = diagnostics_buffer_consume(
+							rtt_receive_buffer, 
+							parsed_bytes, 
+							rtt_received_count);
 		}
 	}
 }
@@ -217,7 +218,7 @@ static uint32_t diagnostics_process_input(enum diagnostics_interface interface,
 	if (passthrough_interface != DIAGNOSTICS_NONE) {
 		bytes_parsed = passthrough_write_data(data, size);
 	} else {
-		parser_handle(interface, data, size);
+		bytes_parsed = parser_handle(interface, data, size);
 	}
 	return bytes_parsed;
 }

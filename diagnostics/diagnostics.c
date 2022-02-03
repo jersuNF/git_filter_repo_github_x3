@@ -2,23 +2,16 @@
  * Copyright (c) 2022 Nofence AS
  */
 
-#include <zephyr.h>
-#include "diagnostics_events.h"
 #include "diagnostics.h"
+#include "diagnostics_events.h"
+#include "diagnostics_types.h"
+#include "parser.h"
+#include "passthrough.h"
+
+#include <zephyr.h>
 #include <logging/log.h>
-#include <sys/ring_buffer.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <device.h>
-#include <devicetree.h>
-#include <drivers/gpio.h>
-#include <drivers/uart.h>
-#include <drivers/eeprom.h>
-#include <drivers/sensor.h>
-#include <drivers/flash.h>
-
-#include "nf_version.h"
-#include "version.h"
 
 #include "msg_data_event.h"
 
@@ -29,18 +22,11 @@
 #define LOG_MODULE_NAME diagnostics
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_DIAGNOSTICS_LOG_LEVEL);
 
-#define MAX_ARG_LEN	20
-
-K_MUTEX_DEFINE(rtt_send_mutex);
-K_TIMER_DEFINE(rtt_activity_timer, NULL, NULL);
-
 #define THREAD_PRIORITY 7
 
 extern const k_tid_t diag_handler_id; 
 
-static uint8_t diagnostics_up_data_buffer[CONFIG_DIAGNOSTICS_RTT_BUFFER_SIZE];
-static uint8_t diagnostics_down_data_buffer[CONFIG_DIAGNOSTICS_RTT_BUFFER_SIZE];
-
+/* BLE variables */
 atomic_t ble_is_connected = ATOMIC_INIT(0);
 
 K_MUTEX_DEFINE(ble_receive_buffer_mutex);
@@ -48,72 +34,192 @@ uint8_t ble_receive_buffer[CONFIG_DIAGNOSTICS_RECEIVE_BUFFER_LENGTH];
 uint32_t ble_received_count = 0;
 atomic_t ble_has_new_data = ATOMIC_INIT(0);
 
+/* RTT variables */
+static uint8_t rtt_up_data_buffer[CONFIG_DIAGNOSTICS_RTT_BUFFER_SIZE];
+static uint8_t rtt_down_data_buffer[CONFIG_DIAGNOSTICS_RTT_BUFFER_SIZE];
+
 uint8_t rtt_receive_buffer[CONFIG_DIAGNOSTICS_RECEIVE_BUFFER_LENGTH];
 uint32_t rtt_received_count = 0;
 
-atomic_t passthrough_tx_in_progress = ATOMIC_INIT(0);
-uint8_t passthrough_tx_buffer[CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE];
-uint32_t passthrough_tx_count = 0;
-uint32_t passthrough_tx_sent = 0;
+K_MUTEX_DEFINE(rtt_send_mutex);
+K_TIMER_DEFINE(rtt_activity_timer, NULL, NULL);
 
-/* Passthrough variables for UART (GNSS and modem) */
-atomic_t passthrough_enabled = ATOMIC_INIT(0);
-enum diagnostics_interface passthrough_interface = DIAGNOSTICS_NONE;
-const struct device *passthrough_device = NULL;
-struct ring_buf passthrough_ring_buf;
-uint8_t* passthrough_buffer = NULL;
+/* Private function declarations */
+static void diagnostics_handler(void);
+
+static void diagnostics_handle_rtt_input(bool* got_data);
+static void diagnostics_handle_ble_input(bool* got_data);
+static void diagnostics_handle_passthrough_input(bool* got_data);
+
+static uint32_t diagnostics_buffer_consume(uint8_t* buffer, 
+					   uint32_t consumed, 
+					   uint32_t total_bytes);
 
 static void diagnostics_rtt_set_active(void);
 static bool diagnostics_rtt_is_active(void);
-static void diagnostics_handler(void);
 
-static uint32_t diagnostics_parse_input(enum diagnostics_interface interface, 
-					uint8_t* data, uint32_t size);
+static uint32_t diagnostics_process_input(enum diagnostics_interface interface,
+					  uint8_t* data, uint32_t size);
 					
-static void diagnostics_send_rtt(uint8_t* data, uint32_t size);
-static void diagnostics_send_ble(uint8_t* data, uint32_t size);
+static void diagnostics_send_rtt(const uint8_t* data, uint32_t size);
+static void diagnostics_send_ble(const uint8_t* data, uint32_t size);
 static void diagnostics_send(enum diagnostics_interface interface, 
-			     uint8_t* data, uint32_t size);
+			     const uint8_t* data, uint32_t size);
 
 static void diagnostics_log(enum diagnostics_severity severity, 
-						    char* header, char* msg);
+			    char* header, char* msg);
 
-static int parser_run(enum diagnostics_interface interface, char* cmd, uint32_t length);
-static uint32_t parser_get_next(char* arg, char** next_arg);
-static bool parser_arg_is_matching(char* arg, char* sub, uint32_t sub_len);
-static int parser_test(enum diagnostics_interface interface, char* arg);
-
-static const struct device *gpio0_dev;
-static const struct device *gpio1_dev;
-
+/* Public function implementations */
 int diagnostics_module_init()
 {
 	SEGGER_RTT_Init();
 
-	if (SEGGER_RTT_ConfigUpBuffer(CONFIG_DIAGNOSTICS_RTT_UP_CHANNEL_INDEX, "DIAG_UP", diagnostics_up_data_buffer, CONFIG_DIAGNOSTICS_RTT_BUFFER_SIZE, SEGGER_RTT_MODE_NO_BLOCK_SKIP) != 0) {
+	if (SEGGER_RTT_ConfigUpBuffer(CONFIG_DIAGNOSTICS_RTT_UP_CHANNEL_INDEX, 
+				      "DIAG_UP", 
+				      rtt_up_data_buffer, 
+				      CONFIG_DIAGNOSTICS_RTT_BUFFER_SIZE, 
+				      SEGGER_RTT_MODE_NO_BLOCK_SKIP) != 0) {
 		LOG_ERR("Diagnostics module failed to setup RTT up channel.");
 	}
-	if (SEGGER_RTT_ConfigDownBuffer(CONFIG_DIAGNOSTICS_RTT_DOWN_CHANNEL_INDEX, "DIAG_DOWN", diagnostics_down_data_buffer, CONFIG_DIAGNOSTICS_RTT_BUFFER_SIZE, SEGGER_RTT_MODE_NO_BLOCK_SKIP) != 0) {
+	if (SEGGER_RTT_ConfigDownBuffer(CONFIG_DIAGNOSTICS_RTT_DOWN_CHANNEL_INDEX, 
+					"DIAG_DOWN", 
+					rtt_down_data_buffer, 
+					CONFIG_DIAGNOSTICS_RTT_BUFFER_SIZE, 
+					SEGGER_RTT_MODE_NO_BLOCK_SKIP) != 0) {
 		LOG_ERR("Diagnostics module failed to setup RTT down channel.");
 	}
-	
-	gpio0_dev = device_get_binding(DT_LABEL(DT_NODELABEL(gpio0)));
-	gpio1_dev = device_get_binding(DT_LABEL(DT_NODELABEL(gpio1)));
 
 	diagnostics_rtt_set_active();
 	k_thread_start(diag_handler_id);
 
+
+	struct parser_action actions = {
+		.send_resp = diagnostics_send,
+		.thru_enable = passthrough_enable
+	};
+	parser_init(&actions);
+
 	return 0;
 }
 
-static void diagnostics_rtt_set_active(void)
+/* Private function implementations */
+static void diagnostics_handler(void)
 {
-	k_timer_start(&rtt_activity_timer, K_MSEC(CONFIG_DIAGNOSTICS_RTT_TIMEOUT_MS), K_NO_WAIT);
+	while (true) {
+		bool rtt_got_data = false;
+		diagnostics_handle_rtt_input(&rtt_got_data);
+
+		bool ble_got_data = false;
+		diagnostics_handle_ble_input(&ble_got_data);
+
+		bool passthrough_got_data = false;
+		diagnostics_handle_passthrough_input(&passthrough_got_data);
+
+		/* Only delay when no data was processed*/
+		if (!(rtt_got_data || ble_got_data || passthrough_got_data)) {
+			/* Sleep longer when RTT is inactive */
+			if (diagnostics_rtt_is_active()) {
+				k_msleep(10);
+			} else {
+				k_msleep(1000);
+			}
+		}
+	}
 }
 
-static bool diagnostics_rtt_is_active(void)
+static void diagnostics_handle_rtt_input(bool* got_data)
 {
-	return (k_timer_remaining_ticks(&rtt_activity_timer) != 0);
+	if (!SEGGER_RTT_HASDATA(CONFIG_DIAGNOSTICS_RTT_DOWN_CHANNEL_INDEX)) {
+		/* No new data */
+		return;
+	}
+	diagnostics_rtt_set_active();
+
+	size_t bytes_read = SEGGER_RTT_Read(
+				CONFIG_DIAGNOSTICS_RTT_DOWN_CHANNEL_INDEX, 
+				&rtt_receive_buffer[rtt_received_count], 
+				CONFIG_DIAGNOSTICS_RECEIVE_BUFFER_LENGTH - rtt_received_count);
+
+	if (bytes_read > 0) {
+		*got_data = true;
+
+		rtt_received_count += bytes_read;
+		uint32_t parsed_bytes = diagnostics_process_input(
+							DIAGNOSTICS_RTT, 
+							rtt_receive_buffer, 
+							rtt_received_count);
+		
+		if (parsed_bytes > 0)
+		{
+			diagnostics_buffer_consume(rtt_receive_buffer, 
+						   parsed_bytes, 
+						   rtt_received_count);
+		}
+	}
+}
+
+static void diagnostics_handle_ble_input(bool* got_data)
+{
+	if (!atomic_test_bit(&ble_has_new_data, 0)) {
+		/* No new data */
+		return;
+	}
+	if (k_mutex_lock(&ble_receive_buffer_mutex, K_MSEC(10)) == 0) {
+		uint32_t parsed_bytes = 
+			diagnostics_process_input(DIAGNOSTICS_BLE, 
+				ble_receive_buffer, ble_received_count);
+
+		if (parsed_bytes > 0)
+		{
+			*got_data = true;
+
+			ble_received_count = diagnostics_buffer_consume(
+							ble_receive_buffer, 
+							parsed_bytes, 
+							ble_received_count);
+		}
+
+		atomic_clear_bit(&ble_has_new_data, 0);
+
+		k_mutex_unlock(&ble_receive_buffer_mutex);
+	}
+}
+
+static void diagnostics_handle_passthrough_input(bool* got_data)
+{
+	uint8_t* data;
+	uint32_t size = 0;
+
+	enum diagnostics_interface passthrough_interface = DIAGNOSTICS_NONE;
+	passthrough_get_enabled_interface(&passthrough_interface);
+	if (passthrough_interface == DIAGNOSTICS_NONE) {
+		/* Passthrough not enabled */
+		return;
+	}
+
+	size = passthrough_claim_read_data(&data);
+
+	if (size > 0) {
+		*got_data = true;
+
+		diagnostics_send(passthrough_interface, data, size);
+		passthrough_finish_read_data(size);
+	}
+}
+
+static uint32_t diagnostics_process_input(enum diagnostics_interface interface, 
+					uint8_t* data, uint32_t size)
+{
+	uint32_t bytes_parsed = 0;
+	enum diagnostics_interface passthrough_interface = DIAGNOSTICS_NONE;
+	passthrough_get_enabled_interface(&passthrough_interface);
+
+	if (passthrough_interface != DIAGNOSTICS_NONE) {
+		bytes_parsed = passthrough_write_data(data, size);
+	} else {
+		parser_handle(interface, data, size);
+	}
+	return bytes_parsed;
 }
 
 static uint32_t diagnostics_buffer_consume(uint8_t* buffer, uint32_t consumed, uint32_t total_bytes)
@@ -127,111 +233,17 @@ static uint32_t diagnostics_buffer_consume(uint8_t* buffer, uint32_t consumed, u
 	return total_bytes - consumed;
 }
 
-static void diagnostics_handler(void)
+static void diagnostics_rtt_set_active(void)
 {
-	while (true) {
-		bool processed_data = false;
-		if (SEGGER_RTT_HASDATA(CONFIG_DIAGNOSTICS_RTT_DOWN_CHANNEL_INDEX)) {
-			diagnostics_rtt_set_active();
-
-			size_t bytes_read = SEGGER_RTT_Read(CONFIG_DIAGNOSTICS_RTT_DOWN_CHANNEL_INDEX, 
-												&rtt_receive_buffer[rtt_received_count], CONFIG_DIAGNOSTICS_RECEIVE_BUFFER_LENGTH - rtt_received_count);
-		
-			if (bytes_read > 0) {
-				rtt_received_count += bytes_read;
-				uint32_t parsed_bytes = diagnostics_parse_input(DIAGNOSTICS_RTT, rtt_receive_buffer, rtt_received_count);
-				
-				if (parsed_bytes > 0)
-				{
-					rtt_received_count = diagnostics_buffer_consume(rtt_receive_buffer, parsed_bytes, rtt_received_count);
-				}
-			}
-		}
-		if (atomic_test_bit(&ble_has_new_data, 0)) {
-			if (k_mutex_lock(&ble_receive_buffer_mutex, K_MSEC(10)) == 0) {
-
-				uint32_t parsed_bytes = diagnostics_parse_input(DIAGNOSTICS_BLE, 
-													ble_receive_buffer, ble_received_count);
-
-				if (parsed_bytes > 0)
-				{
-					ble_received_count = diagnostics_buffer_consume(ble_receive_buffer, parsed_bytes, ble_received_count);
-				}
-
-				atomic_clear_bit(&ble_has_new_data, 0);
-
-				k_mutex_unlock(&ble_receive_buffer_mutex);
-			}
-		}
-
-		if (atomic_test_bit(&passthrough_enabled, 0)) {
-			if (!ring_buf_is_empty(&passthrough_ring_buf)) {
-				uint8_t* pass_data;
-				uint32_t pass_size = ring_buf_get_claim(&passthrough_ring_buf, &pass_data, CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE);
-
-				diagnostics_send(passthrough_interface, pass_data, pass_size);
-
-				int err = ring_buf_get_finish(&passthrough_ring_buf, pass_size);
-			}
-		}
-
-		if (!processed_data) {
-			if (diagnostics_rtt_is_active()) {
-				k_msleep(10);
-			} else {
-				k_msleep(1000);
-			}
-		}
-	}
+	k_timer_start(&rtt_activity_timer, K_MSEC(CONFIG_DIAGNOSTICS_RTT_TIMEOUT_MS), K_NO_WAIT);
 }
 
-static bool diagnostics_find_newline_offset(char* str, uint32_t length, uint32_t* newline_offset) {
-	uint32_t offset = 0;
-	while (str[offset] != '\n') {
-		offset++;
-		if (offset == length) {
-			return false;
-		}
-	}
-	*newline_offset = offset;
-	return true;
-}
-
-static uint32_t diagnostics_parse_input(enum diagnostics_interface interface, 
-					uint8_t* data, uint32_t size)
+static bool diagnostics_rtt_is_active(void)
 {
-	uint32_t bytes_parsed = 0;
-	if (atomic_test_bit(&passthrough_enabled, 0) && (interface == passthrough_interface)) {
-		if (!atomic_test_bit(&passthrough_tx_in_progress, 0)) {
-			bytes_parsed = size;
-			if (bytes_parsed > CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE) {
-				bytes_parsed = CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE;
-			}
-			memcpy(passthrough_tx_buffer, data, bytes_parsed);
-			passthrough_tx_count = bytes_parsed;
-			passthrough_tx_sent = 0;
-			
-			atomic_set_bit(&passthrough_tx_in_progress, 0);
-			uart_irq_tx_enable(passthrough_device);
-		}
-	} else {
-		uint32_t newline_loc = 0;
-		if (diagnostics_find_newline_offset(data, size, &newline_loc)) {
-			bytes_parsed = newline_loc+1;
-			uint32_t cmd_length = newline_loc;
-			while ((cmd_length >= 1) && (data[cmd_length-1] == '\r'))
-			{
-				cmd_length--;
-			}
-
-			data[cmd_length] = '\0';
-			parser_run(interface, data, cmd_length);
-		}
-	}
-	return bytes_parsed;
+	return (k_timer_remaining_ticks(&rtt_activity_timer) != 0);
 }
 
-static void diagnostics_send_rtt(uint8_t* data, uint32_t size)
+static void diagnostics_send_rtt(const uint8_t* data, uint32_t size)
 {
 	if (k_mutex_lock(&rtt_send_mutex, K_MSEC(10)) != 0) {
 		LOG_ERR("Failed to send diagnostics message to RTT.");
@@ -249,7 +261,7 @@ static void diagnostics_send_rtt(uint8_t* data, uint32_t size)
 	k_mutex_unlock(&rtt_send_mutex);
 }
 
-static void diagnostics_send_ble(uint8_t* data, uint32_t size)
+static void diagnostics_send_ble(const uint8_t* data, uint32_t size)
 {
 	struct msg_data_event *msg = new_msg_data_event(size);
 	memcpy(msg->dyndata.data, data, size);
@@ -257,7 +269,7 @@ static void diagnostics_send_ble(uint8_t* data, uint32_t size)
 }
 
 static void diagnostics_send(enum diagnostics_interface interface, 
-			     uint8_t* data, uint32_t size)
+			     const uint8_t* data, uint32_t size)
 {
 	if ((interface == DIAGNOSTICS_RTT) || (interface == DIAGNOSTICS_ALL)) {
 		if (diagnostics_rtt_is_active()) {
@@ -410,458 +422,3 @@ void event_manager_trace_event_submission(const struct event_header *eh,
 }
 
 #endif
-
-static uint32_t parser_get_next(char* arg, char** next_arg)
-{
-	if (arg == NULL) {
-		*next_arg = NULL;
-		return 0;
-	}
-
-	uint32_t length = 0;
-	while ((arg[length] != '\0') && (arg[length] != ' ')) {
-		if (length >= MAX_ARG_LEN) {
-			*next_arg = NULL;
-			return 0;
-		}
-
-		length++;
-	}
-	/* Next argument is NULL when there are not more arguments */
-	*next_arg = arg[length] ? &arg[length + 1] : NULL;
-	return length;
-}
-
-static bool parser_arg_is_matching(char* arg, char* sub, uint32_t sub_len)
-{
-	return ((strlen(arg) == sub_len) && (strncmp(sub, arg, sub_len) == 0));
-}
-
-static int parser_test(enum diagnostics_interface interface, char* arg)
-{
-	char* next_arg;
-	uint32_t sub_arg_len = parser_get_next(arg, &next_arg);
-	if (sub_arg_len == 0) {
-		const char* noargs = "Test requires an argument, e.g. test lis2dw\r\n";
-		diagnostics_send(interface, noargs, strlen(noargs));
-		return 0;
-	}
-
-	if (parser_arg_is_matching("lis2dw", arg, sub_arg_len)) {
-		//const struct device *sensor = device_get_binding(DT_LABEL(DT_INST(0, st_lis2dh)));
-		const struct device *sensor = device_get_binding(DT_LABEL(DT_NODELABEL(movement)));
-
-		if (sensor == NULL) {
-			const char* nodev = "LIS2DH - No device found.\r\n";
-			diagnostics_send(interface, nodev, strlen(nodev));
-		}
-		if (!device_is_ready(sensor)) {
-			const char* readydev = "LIS2DH - Device is NOT ready.\r\n";
-			diagnostics_send(interface, readydev, strlen(readydev));
-		} else {
-			const char* readydev = "LIS2DH - Device is ready.\r\n";
-			diagnostics_send(interface, readydev, strlen(readydev));
-		}
-	} else if (parser_arg_is_matching("eeprom", arg, sub_arg_len)) {
-		const struct device *eeprom_dev = device_get_binding(DT_LABEL(DT_NODELABEL(eeprom0)));
-		
-		if (eeprom_dev == NULL) {
-			const char* nodev = "EEPROM - No device found.\r\n";
-			diagnostics_send(interface, nodev, strlen(nodev));
-		}
-		if (!device_is_ready(eeprom_dev)) {
-			const char* readydev = "EEPROM - Device is NOT ready.\r\n";
-			diagnostics_send(interface, readydev, strlen(readydev));
-		} else {
-			const char* readydev = "EEPROM - Device is ready.\r\n";
-			diagnostics_send(interface, readydev, strlen(readydev));
-		}
-
-		uint8_t data = 0;
-		if (eeprom_read(eeprom_dev, 0, &data, 1) != 0) {
-			const char* readydev = "EEPROM - Failed reading offset 0.\r\n";
-			diagnostics_send(interface, readydev, strlen(readydev));
-		}
-		char buf[10];
-		itoa(data, buf, 10);
-		diagnostics_send(interface, buf, strlen(buf));
-		diagnostics_send(interface, "\r\n", strlen("\r\n"));
-
-		data = 0xFF;
-		if (eeprom_write(eeprom_dev, 0, &data, 1) != 0) {
-			const char* readydev = "EEPROM - Failed writing offset 0.\r\n";
-			diagnostics_send(interface, readydev, strlen(readydev));
-		}
-
-		data = 0;
-		if (eeprom_read(eeprom_dev, 0, &data, 1) != 0) {
-			const char* readydev = "EEPROM - Failed reading offset 0.\r\n";
-			diagnostics_send(interface, readydev, strlen(readydev));
-		}
-
-		itoa(data, buf, 10);
-		diagnostics_send(interface, buf, strlen(buf));
-		diagnostics_send(interface, "\r\n", strlen("\r\n"));
-	} else if (parser_arg_is_matching("bme280", arg, sub_arg_len)) {
-		const struct device *bme_dev = device_get_binding(DT_LABEL(DT_NODELABEL(environment)));
-		
-		if (bme_dev == NULL) {
-			const char* nodev = "BME280 - No device found.\r\n";
-			diagnostics_send(interface, nodev, strlen(nodev));
-		}
-		if (!device_is_ready(bme_dev)) {
-			const char* readydev = "BME280 - Device is NOT ready.\r\n";
-			diagnostics_send(interface, readydev, strlen(readydev));
-		} else {
-			const char* readydev = "BME280 - Device is ready.\r\n";
-			diagnostics_send(interface, readydev, strlen(readydev));
-		}
-
-		struct sensor_value temp, press, humidity;
-
-		sensor_sample_fetch(bme_dev);
-		sensor_channel_get(bme_dev, SENSOR_CHAN_AMBIENT_TEMP, &temp);
-		sensor_channel_get(bme_dev, SENSOR_CHAN_PRESS, &press);
-		sensor_channel_get(bme_dev, SENSOR_CHAN_HUMIDITY, &humidity);
-
-		char buf[100];
-		snprintf(buf, 100, "temp: %d.%06d; press: %d.%06d; humidity: %d.%06d\r\n",
-		      temp.val1, temp.val2, press.val1, press.val2,
-		      humidity.val1, humidity.val2);
-		diagnostics_send(interface, buf, strlen(buf));
-	} else if (parser_arg_is_matching("flash", arg, sub_arg_len)) {
-		const struct device *flash_dev = device_get_binding(DT_LABEL(DT_NODELABEL(mx25u64)));
-		
-		if (flash_dev == NULL) {
-			const char* nodev = "Flash - No device found.\r\n";
-			diagnostics_send(interface, nodev, strlen(nodev));
-		}
-		if (!device_is_ready(flash_dev)) {
-			const char* readydev = "Flash - Device is NOT ready.\r\n";
-			diagnostics_send(interface, readydev, strlen(readydev));
-		} else {
-			const char* readydev = "Flash - Device is ready.\r\n";
-			diagnostics_send(interface, readydev, strlen(readydev));
-		}
-
-		char buf[10];
-		uint8_t test_data[] = {0, 0};
-
-		if (flash_read(flash_dev, 0, test_data, 2) != 0) {
-			const char* nodev = "Flash - read failed.\r\n";
-			diagnostics_send(interface, nodev, strlen(nodev));
-		}
-
-		itoa(test_data[0], buf, 16);
-		uint32_t length = strlen(buf);
-		buf[length] = ' ';
-		itoa(test_data[1], &buf[length+1], 16);
-		diagnostics_send(interface, "Before write ", strlen("Before write "));
-		diagnostics_send(interface, buf, strlen(buf));
-		diagnostics_send(interface, "\r\n", strlen("\r\n"));
-
-		test_data[0] = 0x13;
-		test_data[1] = 0x37;
-		if (flash_write(flash_dev, 0, test_data, 2) != 0) {
-			const char* nodev = "Flash - write failed.\r\n";
-			diagnostics_send(interface, nodev, strlen(nodev));
-		}
-
-		memset(test_data, 0, 2);
-
-		if (flash_read(flash_dev, 0, test_data, 2) != 0) {
-			const char* nodev = "Flash - read failed.\r\n";
-			diagnostics_send(interface, nodev, strlen(nodev));
-		}
-
-		itoa(test_data[0], buf, 16);
-		length = strlen(buf);
-		buf[length] = ' ';
-		itoa(test_data[1], &buf[length+1], 16);
-		diagnostics_send(interface, "After write ", strlen("After write "));
-		diagnostics_send(interface, buf, strlen(buf));
-		diagnostics_send(interface, "\r\n", strlen("\r\n"));
-
-		if (flash_erase(flash_dev, 0, 4096) != 0) {
-			const char* nodev = "Flash - erase failed.\r\n";
-			diagnostics_send(interface, nodev, strlen(nodev));
-		}
-
-		memset(test_data, 0, 2);
-
-		if (flash_read(flash_dev, 0, test_data, 2) != 0) {
-			const char* nodev = "Flash - read failed.\r\n";
-			diagnostics_send(interface, nodev, strlen(nodev));
-		}
-
-		itoa(test_data[0], buf, 16);
-		length = strlen(buf);
-		buf[length] = ' ';
-		itoa(test_data[1], &buf[length+1], 16);
-		diagnostics_send(interface, "After erase ", strlen("After erase "));
-		diagnostics_send(interface, buf, strlen(buf));
-		diagnostics_send(interface, "\r\n", strlen("\r\n"));
-	} else {
-		const char* readydev = "Unknown test parameter\r\n";
-		diagnostics_send(interface, readydev, strlen(readydev));
-	}
-
-	return 0;
-}
-
-static void passthrough_flush(const struct device *uart_dev)
-{
-	uint8_t c;
-
-	while (uart_fifo_read(uart_dev, &c, 1) > 0) {
-		continue;
-	}
-	
-}
-
-static void passthrough_uart_isr(const struct device *uart_dev,
-				 		  		 void *user_data)
-{
-	uint32_t total_received = 0;
-	uint32_t partial_size = 0;
-	uint8_t* uart_data;
-
-	uart_irq_update(uart_dev);
-
-	while (uart_irq_update(uart_dev) &&
-	        uart_irq_is_pending(uart_dev)) {
-		
-		if (uart_irq_tx_ready(uart_dev)) {
-			int bytes = uart_fifo_fill(uart_dev, &passthrough_tx_buffer[passthrough_tx_sent], passthrough_tx_count - passthrough_tx_sent);
-			passthrough_tx_sent += bytes;
-			
-			if (passthrough_tx_sent >= passthrough_tx_count) {
-				atomic_clear_bit(&passthrough_tx_in_progress, 0);
-				passthrough_tx_count = 0;
-				passthrough_tx_sent = 0;
-				uart_irq_tx_disable(uart_dev);
-			}
-		}
-
-		if (uart_irq_rx_ready(uart_dev)) {
-			if (partial_size == 0) {
-				partial_size = 
-						ring_buf_put_claim(&passthrough_ring_buf, 
-										&uart_data, 
-										CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE);
-			}
-
-			if (partial_size == 0) {
-				passthrough_flush(uart_dev);
-				break;
-			}
-
-			uint32_t received = uart_fifo_read(uart_dev, uart_data, partial_size);
-			if (received <= 0) {
-				continue;
-			}
-
-			uart_data += received;
-			total_received += received;
-			partial_size -= received;
-		}
-	}
-		
-	int ret = ring_buf_put_finish(&passthrough_ring_buf, total_received);
-	__ASSERT_NO_MSG(ret == 0);
-}
-
-static int passthrough_initialize(const struct device* dev)
-{
-	if (passthrough_device != NULL) {
-		uart_irq_rx_disable(passthrough_device);
-		uart_irq_tx_disable(passthrough_device);
-		passthrough_device = NULL;
-	}
-	
-	if (passthrough_buffer == NULL)
-	{
-		passthrough_buffer = 
-			k_malloc(CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE);
-
-		if (passthrough_buffer == NULL) {
-			return -ENOBUFS;
-		}
-    	ring_buf_init(&passthrough_ring_buf, 
-					  CONFIG_DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE, 
-					  passthrough_buffer);
-	}
-
-	passthrough_device = dev;
-	
-	if (passthrough_device == NULL) {
-		const char* readydev = "Passthrough UART not ready\r\n";
-		diagnostics_send(passthrough_interface, readydev, strlen(readydev));
-		return -EIO;
-	}
-	if (!device_is_ready(passthrough_device)) {
-		const char* readydev = "Passthrough UART not ready\r\n";
-		diagnostics_send(passthrough_interface, readydev, strlen(readydev));
-		return -EIO;
-	}
-	
-	uart_irq_rx_disable(passthrough_device);
-	uart_irq_tx_disable(passthrough_device);
-
-	passthrough_flush(passthrough_device);
-
-	uart_irq_callback_set(passthrough_device, passthrough_uart_isr);
-	uart_irq_rx_enable(passthrough_device);
-
-	const char* readydev = "Passthrough Starting...\r\n";
-	diagnostics_send(passthrough_interface, readydev, strlen(readydev));
-
-	atomic_set_bit(&passthrough_enabled, 0);
-
-	return 0;
-}
-
-static int parser_gnss(enum diagnostics_interface interface, char* arg)
-{
-	passthrough_interface = interface;
-	const struct device *gnss_device = device_get_binding(DT_LABEL(DT_NODELABEL(gnss_uart)));
-
-	return passthrough_initialize(gnss_device);
-}
-
-static int parser_modem(enum diagnostics_interface interface, char* arg)
-{
-	passthrough_interface = interface;
-	const struct device *modem_device = device_get_binding(DT_LABEL(DT_NODELABEL(modem_uart)));
-
-	gpio_pin_configure(gpio0_dev, 2, GPIO_OUTPUT_HIGH);
-	k_msleep(1000);
-	gpio_pin_configure(gpio0_dev, 2, GPIO_OUTPUT_LOW);
-
-	return passthrough_initialize(modem_device);
-}
-
-static int parser_gpio(enum diagnostics_interface interface, char* arg)
-{
-	char* next_arg;
-	uint32_t sub_arg_len = parser_get_next(arg, &next_arg);
-	if (sub_arg_len == 0) {
-		const char* noargs = "GPIO requires arguments: gpio <port> <pin> <z/0/1/in/inpu/inpd/?> <val>\r\n";
-		diagnostics_send(interface, noargs, strlen(noargs));
-		return 0;
-	}
-
-	/* Resolve port device */
-	struct device *gpio_dev = gpio0_dev;
-	if ((sub_arg_len == 1) && (arg[0] == '0')) {
-		gpio_dev = gpio0_dev;
-	} else if ((sub_arg_len == 1) && (arg[0] == '1')) {
-		gpio_dev = gpio1_dev;
-	} else {
-		const char* invargs = "Invalid port for GPIO\r\n";
-		diagnostics_send(interface, invargs, strlen(invargs));
-		return 0;
-	}
-
-	/* Resolve pin */
-	arg = next_arg;
-	sub_arg_len = parser_get_next(arg, &next_arg);
-
-	int pin = atoi(arg);
-	if ((pin < 0) || (pin >= 32)) {
-		const char* invargs = "Invalid pin for GPIO\r\n";
-		diagnostics_send(interface, invargs, strlen(invargs));
-		return 0;
-	}
-
-	/* Get operation argument location and size, store for later use */
-	char* operation_arg = next_arg;
-	uint32_t operation_arg_len = parser_get_next(operation_arg, &next_arg);
-
-	/* Perform operation with given arguments */
-	int err = -EPERM;
-	if (parser_arg_is_matching("z", operation_arg, operation_arg_len)) {
-		err = gpio_pin_configure(gpio_dev, pin, GPIO_DISCONNECTED);
-	} else if (parser_arg_is_matching("in", operation_arg, operation_arg_len)) {
-		err = gpio_pin_configure(gpio_dev, pin, GPIO_INPUT);
-	} else if (parser_arg_is_matching("inpu", operation_arg, operation_arg_len)) {
-		uint32_t in_flags = GPIO_INPUT | GPIO_PULL_UP;
-		err = gpio_pin_configure(gpio_dev, pin, in_flags);
-	} else if (parser_arg_is_matching("inpd", operation_arg, operation_arg_len)) {
-		uint32_t in_flags = GPIO_INPUT | GPIO_PULL_DOWN;
-		err = gpio_pin_configure(gpio_dev, pin, in_flags);
-	} else if (parser_arg_is_matching("0", operation_arg, operation_arg_len)) {
-		uint32_t out_flags = GPIO_OUTPUT_LOW;
-		err = gpio_pin_configure(gpio_dev, pin, out_flags);
-	} else if (parser_arg_is_matching("1", operation_arg, operation_arg_len)) {
-		uint32_t out_flags = GPIO_OUTPUT_HIGH;
-		err = gpio_pin_configure(gpio_dev, pin, out_flags);
-	} else if (parser_arg_is_matching("?", operation_arg, operation_arg_len)) {
-		uint32_t values = 0;
-		err = gpio_port_get_raw(gpio_dev, &values);
-		if (err == 0) {
-			const char* invargs = "GPIO pin values is ";
-			diagnostics_send(interface, invargs, strlen(invargs));
-			
-			if ((values & (1<<pin)) != 0) {
-				diagnostics_send(interface, "1", strlen("1"));
-			} else {
-				diagnostics_send(interface, "0", strlen("0"));
-			}
-			
-			diagnostics_send(interface, "\r\n", strlen("\r\n"));
-		}
-	} else {
-		const char* invargs = "Invalid operation for GPIO\r\n";
-		diagnostics_send(interface, invargs, strlen(invargs));
-		return 0;
-	}
-
-	if (err == 0) {
-		const char* okrsp = "GPIO ok\r\n";
-		diagnostics_send(interface, okrsp, strlen(okrsp));
-	} else {
-		const char* nokrsp = "GPIO failed\r\n";
-		diagnostics_send(interface, nokrsp, strlen(nokrsp));
-	}
-
-	return err;
-}
-
-static int parser_help(enum diagnostics_interface interface, char* arg)
-{
-	const char* help = "Sorry.. No help yet.\r\n";
-	diagnostics_send(interface, help, strlen(help));
-
-	return 0;
-}
-
-static int parser_run(enum diagnostics_interface interface, char* cmd, uint32_t length)
-{
-	char* next_arg;
-	uint32_t cmd_len = parser_get_next(cmd, &next_arg);
-	if (cmd_len == 0) {
-		const char* info = "-= Nofence collar diagnostics at your service =-\r\nType help for more information.\r\n";
-		diagnostics_send(interface, info, strlen(info));
-		diagnostics_send(interface, "Zephyr version is ", strlen("Zephyr version is "));
-		diagnostics_send(interface, KERNEL_VERSION_STRING, strlen(KERNEL_VERSION_STRING));
-		diagnostics_send(interface, "\r\n", strlen("\r\n"));
-		return 0;
-	}
-
-	if (parser_arg_is_matching("help", cmd, cmd_len)) {
-		parser_help(interface, next_arg);
-	} else if (parser_arg_is_matching("test", cmd, cmd_len)) {
-		parser_test(interface, next_arg);
-	} else if (parser_arg_is_matching("gnss", cmd, cmd_len)) {
-		parser_gnss(interface, next_arg);
-	} else if (parser_arg_is_matching("modem", cmd, cmd_len)) {
-		parser_modem(interface, next_arg);
-	} else if (parser_arg_is_matching("gpio", cmd, cmd_len)) {
-		parser_gpio(interface, next_arg);
-	} else {
-		diagnostics_send(interface, "Dunno\r\n", strlen("Dunno\r\n"));
-	}
-
-	return 0;
-}

@@ -25,14 +25,6 @@ enum diagnostics_severity {
 	DIAGNOSTICS_ERROR,
 };
 
-enum diagnostics_interface {
-	DIAGNOSTICS_ALL,
-	DIAGNOSTICS_RTT,
-	DIAGNOSTICS_BLE,
-	DIAGNOSTICS_NONE
-	
-};
-
 /**
  * @brief Used to initilize the diagnostics module. 
  *        TODO - Add more...

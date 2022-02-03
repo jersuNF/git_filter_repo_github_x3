@@ -51,8 +51,12 @@ int pwr_module_init(void)
 {
 	/* NB: Battery is already initialized with SYS_INIT in battery.c */
 	int err = log_battery_voltage();
+	/* Update advertising array in ble module */
+	/* Set up battery measurement timer */
 
-	// TODO: Implement initialization of latch for GNSS and Flash
+	struct pwr_status_event *event = new_pwr_status_event();
+	event->pwr_state = PWR_NORMAL;
+	EVENT_SUBMIT(event);
 
 	return err;
 }
@@ -130,16 +134,27 @@ static bool event_handler(const struct event_header *eh)
 {
 	/* Received ep status event */
 	if (is_pwr_status_event(eh)) {
+		int err;
 		const struct pwr_status_event *event =
 			cast_pwr_status_event(eh);
 		switch (event->pwr_state) {
-		case PWR_IDLE:
+		case PWR_NORMAL:
+			/* TODO: Implement normal pwr operation management */
 			break;
-		case PWR_ACTIVE:
+		case PWR_LOW:
+			/* TODO: Implement low pwr operation management */
 			break;
-		case PWR_SLEEP:
+		case PWR_CRITICAL:
+			/* TODO: Implement critical pwr operation management */
 			break;
-		case PWR_OFF:
+		case PWR_BATTERY:
+			err = log_battery_voltage();
+			if (err < 0) {
+				char *e_msg =
+					"Error in fetching battery voltage";
+				nf_app_error(ERR_PWR_MODULE, err, e_msg,
+					     strlen(e_msg));
+			}
 			break;
 		default:
 			/* Unhandled control message */

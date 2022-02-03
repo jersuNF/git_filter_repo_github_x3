@@ -141,8 +141,14 @@ static int divider_setup(void)
 	}
 
 	asp->resolution = 14;
-#else /* CONFIG_ADC_var */
-#error Unsupported ADC
+#else /* For native posix unit test */
+	*accp = (struct adc_channel_cfg){
+		.gain = BATTERY_ADC_GAIN,
+		.reference = ADC_REF_INTERNAL,
+		.acquisition_time = ADC_ACQ_TIME_DEFAULT,
+	};
+	asp->resolution = 10;
+
 #endif /* CONFIG_ADC_var */
 
 	err = adc_channel_setup(ddp->adc, accp);

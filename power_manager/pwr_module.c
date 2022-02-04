@@ -73,6 +73,8 @@ int pwr_module_init(void)
 	event->pwr_state = PWR_NORMAL;
 	EVENT_SUBMIT(event);
 	return err;
+
+	/* Below 3.4 V go into low_power state. Above 3.5 V enter normal mode */
 }
 
 int log_battery_voltage(void)

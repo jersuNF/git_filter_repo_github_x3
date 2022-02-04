@@ -145,9 +145,9 @@ static int divider_setup(void)
 	*accp = (struct adc_channel_cfg){
 		.gain = BATTERY_ADC_GAIN,
 		.reference = ADC_REF_INTERNAL,
-		.acquisition_time = ADC_ACQ_TIME_DEFAULT,
+		.acquisition_time = ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40),
 	};
-	asp->resolution = 10;
+	asp->resolution = 14;
 
 #endif /* CONFIG_ADC_var */
 

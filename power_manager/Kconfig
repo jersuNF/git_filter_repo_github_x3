@@ -14,4 +14,8 @@ if POWER_MANAGER
         module = BATTERY
         module-str = Battery logging
         source "subsys/logging/Kconfig.template.log_config"
+
+        config BATTRY_POLLER_WORK_SEC
+        int "Seconds between modem poll"
+        default 300
 endif

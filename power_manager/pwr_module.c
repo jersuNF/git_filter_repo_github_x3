@@ -24,8 +24,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_PWR_MODULE_LOG_LEVEL);
 
 /** A discharge curve specific to the power source. */
 static const struct battery_level_point levels[] = {
-#if DT_NODE_HAS_PROP(DT_INST(0, voltage_divider), io_channels)
-	/* "Curve" here eyeballed from captured data for the [Adafruit
+	/* "Curve" here eyeballed from captured data for example cell [Adafruit
 	 * 3.7v 2000 mAh](https://www.adafruit.com/product/2011) LIPO
 	 * under full load that started with a charge of 3.96 V and
 	 * dropped about linearly to 3.58 V over 15 hours.  It then
@@ -40,24 +39,39 @@ static const struct battery_level_point levels[] = {
 	{ 10000, 4200 },
 	{ 625, 3550 },
 	{ 0, 3100 },
-#else
-	/* Linear from maximum voltage to minimum voltage. */
-	{ 10000, 3600 },
-	{ 0, 1700 },
-#endif
+
 };
+
+static struct k_work_delayable battery_poll_work;
+
+void battery_poll_work_fn()
+{
+	/* Add logic for periodic update of ble adv array in ble module */
+	int err = log_battery_voltage();
+	if (err < 0) {
+		char *e_msg = "Error in fetching battery voltage";
+		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
+	}
+	k_work_reschedule(&battery_poll_work,
+			  K_SECONDS(CONFIG_BATTRY_POLLER_WORK_SEC));
+}
 
 int pwr_module_init(void)
 {
 	/* NB: Battery is already initialized with SYS_INIT in battery.c */
 	int err = log_battery_voltage();
-	/* Update advertising array in ble module */
-	/* Set up battery measurement timer */
+	if (err < 0) {
+		char *e_msg = "Error in fetching battery voltage";
+		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
+	}
+	k_work_init_delayable(&battery_poll_work, battery_poll_work_fn);
+	k_work_reschedule(&battery_poll_work,
+			  K_SECONDS(CONFIG_BATTRY_POLLER_WORK_SEC));
 
+	/* Set PWR state to NORMAL */
 	struct pwr_status_event *event = new_pwr_status_event();
 	event->pwr_state = PWR_NORMAL;
 	EVENT_SUBMIT(event);
-
 	return err;
 }
 
@@ -123,51 +137,3 @@ void fetch_periodic_battery_voltage(void)
 	}
 	LOG_INF("Disable measurement: %d", err);
 }
-
-/** 
- * @brief Event handler function
- * @param[in] eh Pointer to event handler struct
- * @return true to consume the event (event is not propagated to further
- * listners), false otherwise
- */
-static bool event_handler(const struct event_header *eh)
-{
-	/* Received ep status event */
-	if (is_pwr_status_event(eh)) {
-		int err;
-		const struct pwr_status_event *event =
-			cast_pwr_status_event(eh);
-		switch (event->pwr_state) {
-		case PWR_NORMAL:
-			/* TODO: Implement normal pwr operation management */
-			break;
-		case PWR_LOW:
-			/* TODO: Implement low pwr operation management */
-			break;
-		case PWR_CRITICAL:
-			/* TODO: Implement critical pwr operation management */
-			break;
-		case PWR_BATTERY:
-			err = log_battery_voltage();
-			if (err < 0) {
-				char *e_msg =
-					"Error in fetching battery voltage";
-				nf_app_error(ERR_PWR_MODULE, err, e_msg,
-					     strlen(e_msg));
-			}
-			break;
-		default:
-			/* Unhandled control message */
-			__ASSERT_NO_MSG(false);
-			break;
-		}
-
-		return false;
-	}
-
-	__ASSERT_NO_MSG(false);
-	return false;
-}
-
-EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE(MODULE, pwr_status_event);

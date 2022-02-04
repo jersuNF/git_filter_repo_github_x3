@@ -87,7 +87,7 @@ int8_t start_tcp(void)
     if (IS_ENABLED(CONFIG_NET_IPV4)) {
         addr4.sin_family = AF_INET;
         addr4.sin_port = htons(PEER_PORT);
-        inet_pton(AF_INET, CONFIG_NET_CONFIG_PEER_IPV4_ADDR,
+        inet_pton(AF_INET, CONFIG_SERVER_IP,
                   &addr4.sin_addr);
 
         ret = socket_connect(&conf.ipv4, (struct sockaddr *)&addr4,

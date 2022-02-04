@@ -16,7 +16,7 @@
 #define PEER_PORT CONFIG_SERVER_PORT
 #define RECV_BUF_SIZE 128
 
-#define SOCKS5_PROXY_V4_ADDR CONFIG_NET_CONFIG_PEER_IPV4_ADDR
+#define SOCKS5_PROXY_V4_ADDR CONFIG_SERVER_IP
 #define SOCKS5_PROXY_PORT 1080
 
 #if defined(CONFIG_USERSPACE)
@@ -67,9 +67,9 @@ struct configs {
     struct data ipv6;
 };
 
-#if !defined(CONFIG_NET_CONFIG_PEER_IPV4_ADDR)
-#define CONFIG_NET_CONFIG_PEER_IPV4_ADDR ""
-#endif
+//#if !defined(CONFIG_NET_CONFIG_PEER_IPV4_ADDR)
+//#define CONFIG_NET_CONFIG_PEER_IPV4_ADDR ""
+//#endif
 
 /**
      * A structure for socket initialization

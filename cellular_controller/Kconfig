@@ -9,3 +9,10 @@ if CELLULAR_CONTROLLER
         Listening port on the remote server.
 	default 0
 endif
+if CELLULAR_CONTROLLER
+    config SERVER_IP
+	string "remote server ip"
+	help
+        IP address for remote server.
+	default "0.0.0.0"
+endif

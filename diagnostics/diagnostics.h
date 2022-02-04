@@ -19,6 +19,7 @@
 #error "Diagnostics controller RTT up channel index is out of range."
 #endif
 
+/** @brief Enumeration used for setting severity of log entries. */
 enum diagnostics_severity {
 	DIAGNOSTICS_INFO,
 	DIAGNOSTICS_WARNING,
@@ -26,8 +27,7 @@ enum diagnostics_severity {
 };
 
 /**
- * @brief Used to initilize the diagnostics module. 
- *        TODO - Add more...
+ * @brief Used to initialize the diagnostics module. 
  * 
  * @return 0 on success, otherwise negative errno.
  */

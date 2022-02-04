@@ -1,6 +1,7 @@
 menuconfig DIAGNOSTICS
 	bool "Diagnostics module"
 	default y
+	depends on DEBUG
 	select USE_SEGGER_RTT
 
 if DIAGNOSTICS
@@ -29,6 +30,10 @@ if DIAGNOSTICS
 		int "Memory to allocate stack of handler."
 		default 1024
 	
+	config DIAGNOSTICS_THREAD_PRIORITY
+		int "Execution priority level for thread running diagnostics communication."
+		default 7
+	
 	config DIAGNOSTICS_PROFILE_EVENTS
 		bool "Use the diagnostics module to profile event manager event submits and execution start/stop."
 		default y
@@ -40,5 +45,9 @@ if DIAGNOSTICS
 	config DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE
 		int "Memory to allocate for passthrough buffering."
 		default 256
+	
+	config DIAGNOSTICS_PASSTHROUGH_IMPLICIT_NEWLINE
+		bool "Enabling this will cause the passthrough to convert any CR or LF into CRLF."
+		default y
 	
 endif

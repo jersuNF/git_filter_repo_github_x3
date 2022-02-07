@@ -14,8 +14,8 @@ if FW_UPGRADE
 		int "0 - 4 for logging. OFF -> ERR -> WRN -> INF -> DBG"
 		default 3
 		depends on LOG
-endif
 
-menu "FW_EVENTS"
-rsource "./../../events/fw_upgrade/Kconfig"
-endmenu # FW_EVENTS
+	menu "FW_EVENTS"
+	rsource "./../../events/fw_upgrade/Kconfig"
+	endmenu # FW_EVENTS
+endif

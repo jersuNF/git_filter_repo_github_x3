@@ -168,23 +168,6 @@ static int battery_setup(const struct device *arg)
 	return err;
 }
 
-int battery_measure_enable(bool enable)
-{
-	int err = -ENOENT;
-
-	if (battery_ok) {
-		const struct divider_data *ddp = &divider_data;
-		const struct gpio_channel_config *gcp =
-			&divider_config.power_gpios;
-
-		err = 0;
-		if (ddp->gpio) {
-			err = gpio_pin_set(ddp->gpio, gcp->pin, enable);
-		}
-	}
-	return err;
-}
-
 int battery_sample(void)
 {
 	int rc = -ENOENT;

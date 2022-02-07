@@ -16,6 +16,7 @@
 #include "pwr_event.h"
 #include "error_event.h"
 #include "battery.h"
+#include "ble_ctrl_event.h"
 
 #define MODULE pwr_module
 #include <logging/log.h>
@@ -44,9 +45,9 @@ static const struct battery_level_point levels[] = {
 
 static struct k_work_delayable battery_poll_work;
 
-void battery_poll_work_fn()
+static void battery_poll_work_fn()
 {
-	/* Add logic for periodic update of ble adv array in ble module */
+	/* Periodic log and update ble adv array */
 	int err = log_battery_voltage();
 	if (err < 0) {
 		char *e_msg = "Error in fetching battery voltage";
@@ -79,63 +80,21 @@ int pwr_module_init(void)
 
 int log_battery_voltage(void)
 {
-	int err = battery_measure_enable(true);
-
-	if (err != 0) {
-		LOG_ERR("Failed initialize battery measurement: %d", err);
-		return err;
-	}
-
 	int batt_mV = battery_sample();
 	if (batt_mV < 0) {
 		LOG_ERR("Failed to read battery voltage: %d", batt_mV);
-		return err;
+		return -ENOENT;
 	}
 
-	unsigned int batt_soc = battery_level_soc(batt_mV, levels);
+	uint8_t batt_soc = battery_level_soc(batt_mV, levels);
+
+	struct ble_ctrl_event *event = new_ble_ctrl_event();
+	event->cmd = BLE_CTRL_BATTERY_UPDATE;
+	event->param.battery = batt_soc;
+	EVENT_SUBMIT(event);
 
 	LOG_INF("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
 		batt_soc);
 
-	/* Disable gipo pin to save power */
-	err = battery_measure_enable(false);
-	if (err != 0) {
-		LOG_ERR("Failed to disable battery measurement: %d", err);
-		return err;
-	}
 	return 0;
-}
-
-void fetch_periodic_battery_voltage(void)
-{
-	int err = battery_measure_enable(true);
-
-	if (err != 0) {
-		LOG_ERR("Failed initialize battery measurement: %d", err);
-		return;
-	}
-
-	while (true) {
-		int batt_mV = battery_sample();
-
-		if (batt_mV < 0) {
-			LOG_ERR("Failed to read battery voltage: %d", batt_mV);
-			break;
-		}
-
-		unsigned int batt_soc = battery_level_soc(batt_mV, levels);
-
-		LOG_INF("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
-			batt_soc);
-
-		k_busy_wait(5 * USEC_PER_SEC);
-	}
-
-	/* Disable gipo pin to save power */
-	err = battery_measure_enable(false);
-	if (err != 0) {
-		LOG_ERR("Failed to disable battery measurement: %d", err);
-		return;
-	}
-	LOG_INF("Disable measurement: %d", err);
 }

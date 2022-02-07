@@ -10,13 +10,6 @@
 #define APPLICATION_BATTERY_H_
 
 /** 
- * @brief Enable or disable measurement of the battery voltage.
- * @param enable true to enable, false to disable
- * @return zero on success, or a negative error code.
- */
-int battery_measure_enable(bool enable);
-
-/** 
  * @brief Measure the battery voltage.
  * @return the battery voltage in millivolts, or a negative error
  * code.

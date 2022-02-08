@@ -72,7 +72,7 @@ static void battery_poll_work_fn()
 		EVENT_SUBMIT(event);
 		current_state = PWR_CRITICAL;
 
-	} else if (batt_voltage >= (BATTRY_NORMAL_THRESHOLD) &&
+	} else if (batt_voltage >= (CONFIG_BATTRY_NORMAL_THRESHOLD) &&
 		   current_state != PWR_NORMAL) {
 		/* Avoid sending state change if PWR state is normal */
 		struct pwr_status_event *event = new_pwr_status_event();

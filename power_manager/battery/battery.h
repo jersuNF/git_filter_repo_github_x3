@@ -42,4 +42,13 @@ struct battery_level_point {
 unsigned int battery_level_soc(unsigned int batt_mV,
 			       const struct battery_level_point *curve);
 
+/** 
+ * @brief Initialize moving average struct
+ */
+void init_moving_average(void);
+/** 
+ * @brief Calculate a moving average of the battery voltage
+ * @return averaged voltage in mV, or negative error code on error
+ */
+int battery_sample_averaged(void);
 #endif /* APPLICATION_BATTERY_H_ */

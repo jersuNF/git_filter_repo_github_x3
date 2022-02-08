@@ -18,7 +18,7 @@ if POWER_MANAGER
         config BATTRY_POLLER_WORK_SEC
         int "Seconds between modem poll"
         default 300
-        
+
         config BATTRY_NORMAL_THRESHOLD
         int "Battery threshold defined in mV to enter Normal state"
         default 3500

@@ -228,5 +228,49 @@ unsigned int battery_level_soc(unsigned int batt_mV,
 	return batt_level_precentage;
 }
 
+/** 
+ * @brief Moving average struct copied from old code 
+ */
+typedef struct {
+	uint32_t total;
+	uint16_t average;
+	uint16_t N; // working number of samples
+	uint16_t MAX_SAMPLES;
+} MovAvg;
+
+MovAvg VbattSMA;
+
+void init_moving_average(void)
+{
+	VbattSMA.average = 0;
+	VbattSMA.N = 0;
+	VbattSMA.total = 0;
+	VbattSMA.MAX_SAMPLES = 300; //one sample pr mainloop
+}
+
+uint16_t approx_moving_average(MovAvg *p, uint16_t val)
+{
+	p->total += (uint32_t)val; // add to total
+	if (p->N >= p->MAX_SAMPLES) {
+		p->total -= (uint32_t)p->average; // enough samples ? remove one
+	} else {
+		p->N++;
+	} //
+	p->average = (uint16_t)(p->total / (uint32_t)p->N); // integer
+
+	return p->average;
+}
+
+int battery_sample_averaged(void)
+{
+	int batt_mV = battery_sample();
+	if (batt_mV < 0) {
+		LOG_ERR("Failed to read battery voltage: %d", batt_mV);
+		return -ENOENT;
+	}
+	uint16_t approx_batt_value = approx_moving_average(&VbattSMA, batt_mV);
+	return approx_batt_value;
+}
+
 /* Initialze battery setup on startup */
 SYS_INIT(battery_setup, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

@@ -86,6 +86,8 @@ static void battery_poll_work_fn()
 
 int pwr_module_init(void)
 {
+	init_moving_average();
+
 	/* Set PWR state to NORMAL as initial state */
 	struct pwr_status_event *event = new_pwr_status_event();
 	event->pwr_state = PWR_NORMAL;
@@ -110,7 +112,7 @@ int pwr_module_init(void)
 
 int log_and_fetch_battery_voltage(void)
 {
-	int batt_mV = battery_sample();
+	int batt_mV = battery_sample_averaged();
 	if (batt_mV < 0) {
 		LOG_ERR("Failed to read battery voltage: %d", batt_mV);
 		return -ENOENT;

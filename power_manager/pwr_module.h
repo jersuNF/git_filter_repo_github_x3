@@ -17,9 +17,9 @@ int pwr_module_init(void);
 
 /**
  * @brief Log battery voltage and battery precentage once.
- * @return 0 on success. 
- * @return -ENOENT if no device is found, or battery not initialized.
+ * @return battery voltage in mV
+ * @return -ENOENT if no device is found, or if battery is not initialized.
  */
-int log_battery_voltage(void);
+int log_and_fetch_battery_voltage(void);
 
 #endif /* _PWR_MODULE_H_ */

@@ -23,6 +23,9 @@
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_PWR_MODULE_LOG_LEVEL);
 
+/** Variable to keep track of current power state */
+static int current_state = PWR_NORMAL;
+
 /** A discharge curve specific to the power source. */
 static const struct battery_level_point levels[] = {
 	/* "Curve" here eyeballed from captured data for example cell [Adafruit
@@ -45,13 +48,37 @@ static const struct battery_level_point levels[] = {
 
 static struct k_work_delayable battery_poll_work;
 
+/** @brief Periodic battery voltage work function */
 static void battery_poll_work_fn()
 {
 	/* Periodic log and update ble adv array */
-	int err = log_battery_voltage();
-	if (err < 0) {
+	int batt_voltage = log_and_fetch_battery_voltage();
+	if (batt_voltage < 0) {
 		char *e_msg = "Error in fetching battery voltage";
-		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
+		nf_app_error(ERR_PWR_MODULE, batt_voltage, e_msg,
+			     strlen(e_msg));
+		return;
+	}
+	if (batt_voltage < CONFIG_BATTRY_LOW_THRESHOLD &&
+	    batt_voltage > CONFIG_BATTRY_CRITICAL_THRESHOLD) {
+		struct pwr_status_event *event = new_pwr_status_event();
+		event->pwr_state = PWR_LOW;
+		EVENT_SUBMIT(event);
+		current_state = PWR_LOW;
+
+	} else if (batt_voltage < CONFIG_BATTRY_CRITICAL_THRESHOLD) {
+		struct pwr_status_event *event = new_pwr_status_event();
+		event->pwr_state = PWR_CRITICAL;
+		EVENT_SUBMIT(event);
+		current_state = PWR_CRITICAL;
+
+	} else if (batt_voltage >= (BATTRY_NORMAL_THRESHOLD) &&
+		   current_state != PWR_NORMAL) {
+		/* Avoid sending state change if PWR state is normal */
+		struct pwr_status_event *event = new_pwr_status_event();
+		event->pwr_state = PWR_NORMAL;
+		EVENT_SUBMIT(event);
+		current_state = PWR_NORMAL;
 	}
 	k_work_reschedule(&battery_poll_work,
 			  K_SECONDS(CONFIG_BATTRY_POLLER_WORK_SEC));
@@ -59,26 +86,29 @@ static void battery_poll_work_fn()
 
 int pwr_module_init(void)
 {
+	/* Set PWR state to NORMAL as initial state */
+	struct pwr_status_event *event = new_pwr_status_event();
+	event->pwr_state = PWR_NORMAL;
+	EVENT_SUBMIT(event);
+	current_state = PWR_NORMAL;
+
 	/* NB: Battery is already initialized with SYS_INIT in battery.c */
-	int err = log_battery_voltage();
+	int err = log_and_fetch_battery_voltage();
 	if (err < 0) {
 		char *e_msg = "Error in fetching battery voltage";
 		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
+		return err;
 	}
+
+	/* Initialize periodic battery poll function */
 	k_work_init_delayable(&battery_poll_work, battery_poll_work_fn);
 	k_work_reschedule(&battery_poll_work,
 			  K_SECONDS(CONFIG_BATTRY_POLLER_WORK_SEC));
 
-	/* Set PWR state to NORMAL */
-	struct pwr_status_event *event = new_pwr_status_event();
-	event->pwr_state = PWR_NORMAL;
-	EVENT_SUBMIT(event);
-	return err;
-
-	/* Below 3.4 V go into low_power state. Above 3.5 V enter normal mode */
+	return 0;
 }
 
-int log_battery_voltage(void)
+int log_and_fetch_battery_voltage(void)
 {
 	int batt_mV = battery_sample();
 	if (batt_mV < 0) {
@@ -96,5 +126,5 @@ int log_battery_voltage(void)
 	LOG_INF("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
 		batt_soc);
 
-	return 0;
+	return batt_mV;
 }

@@ -9,7 +9,6 @@
 
 #include "diagnostics_events.h"
 #include "msg_data_event.h"
-#include "ble_ctrl_event.h"
 #include "ble_data_event.h"
 #include "ble_conn_event.h"
 
@@ -21,6 +20,9 @@
 
 #define LOG_MODULE_NAME diagnostics
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_DIAGNOSTICS_LOG_LEVEL);
+
+/* Maximum supported uptime */
+#define DIAGNOSTICS_MAX_UPTIME_MS 100*365*24*3600*1000
 
 /* Id variable for diagnostics handler thread. */
 extern const k_tid_t diag_handler_id; 
@@ -362,9 +364,9 @@ static void diagnostics_log(enum diagnostics_severity severity,
 {
 	uint32_t used_size = 0;
 	uint32_t uptime = k_uptime_get_32();
-	if (uptime > ((uint32_t)100*365*24*3600*1000)) {
+	if (uptime > ((uint32_t)DIAGNOSTICS_MAX_UPTIME_MS)) {
 		LOG_ERR("Uptime is more than 100 years.");
-		uptime = uptime % ((uint32_t)100*365*24*3600*1000);
+		uptime = uptime % ((uint32_t)DIAGNOSTICS_MAX_UPTIME_MS);
 	}
 	char uptime_str[13+2];
 	used_size = snprintf(uptime_str, 13+2, "%u.%03u", 

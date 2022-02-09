@@ -28,6 +28,11 @@ J-Link OB-SAM3U128-V2-NordicSemi compiled Dec  3 2021 15:41:28 V1.0, SN=68378578
 Process: JLinkExe
 """
 
+# Interactive mode is a platform-independent mechanism for making a transparent 
+# connection between the keyboard/screen of the host computer and the Telnet session.
+# Note that pressing enter will only send \n in interactive mode, which might cause issues 
+# when used with the U-blox Sara R422S modem. Activate the Kconfig DIAGNOSTICS_PASSTHROUGH_IMPLICIT_NEWLINE workaround.
+# On Windows, it is best to not use interact mode. 
 USE_INTERACT_MODE = True
 
 if USE_INTERACT_MODE:

@@ -67,10 +67,6 @@ struct configs {
     struct data ipv6;
 };
 
-#if !defined(CONFIG_NET_CONFIG_PEER_IPV4_ADDR)
-#define CONFIG_NET_CONFIG_PEER_IPV4_ADDR ""
-#endif
-
 /**
      * A structure for socket initialization
      */

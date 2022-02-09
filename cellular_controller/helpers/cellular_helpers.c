@@ -11,6 +11,7 @@
 #include "cellular_helpers_header.h"
 
 #include <logging/log.h>
+
 LOG_MODULE_REGISTER(cellular_helpers, LOG_LEVEL_DBG);
 static struct net_if *iface;
 static struct net_if_config *cfg;

@@ -10,6 +10,10 @@ LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
 static bool messaging_ack = true;
 
+char server_address[EEP_HOST_PORT_BUF_SIZE];
+static int server_port;
+static char server_ip[15];
+
 int8_t socket_connect(struct data *, struct sockaddr *,
 					  socklen_t);
 uint8_t socket_receive(struct data *);

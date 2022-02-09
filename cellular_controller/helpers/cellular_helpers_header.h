@@ -72,10 +72,6 @@ struct configs {
      */
 extern struct configs conf;
 
-char server_address[EEP_HOST_PORT_BUF_SIZE];
-int server_port;
-char server_ip[15];
-
 int8_t send_tcp(char*, size_t);
 void stop_tcp(void);
 const struct device *bind_modem(void);

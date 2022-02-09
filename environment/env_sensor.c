@@ -8,8 +8,7 @@
 #include <logging/log.h>
 #include <drivers/sensor.h>
 
-#define LOG_MODULE_NAME env_sensor
-LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_ENV_SENSOR_LOG_LEVEL);
+LOG_MODULE_REGISTER(env_sensor, CONFIG_ENV_SENSOR_LOG_LEVEL);
 
 static inline int update_env_sensor_event_values(void)
 {
@@ -17,7 +16,8 @@ static inline int update_env_sensor_event_values(void)
 		device_get_binding(DT_LABEL(DT_NODELABEL(environment_sensor)));
 
 	if (bme_dev == NULL) {
-		LOG_ERR("BME280 - No device found");
+		LOG_ERR("%s - No device found",
+			log_strdup(DT_LABEL(DT_NODELABEL(environment_sensor))));
 		return -ENODEV;
 	}
 
@@ -84,5 +84,5 @@ static bool event_handler(const struct event_header *eh)
 	return false;
 }
 
-EVENT_LISTENER(LOG_MODULE_NAME, event_handler);
-EVENT_SUBSCRIBE(LOG_MODULE_NAME, request_env_sensor_event);
+EVENT_LISTENER(env_sensor, event_handler);
+EVENT_SUBSCRIBE(env_sensor, request_env_sensor_event);

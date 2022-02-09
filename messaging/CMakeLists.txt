@@ -6,8 +6,7 @@ zephyr_include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../fw_upgrade/http_download/
     ${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../events/lte/
-	${CMAKE_CURRENT_SOURCE_DIR}/../../events/cellular_controller/)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../events/lte/)
 
 target_sources(app PRIVATE 
 ${CMAKE_CURRENT_SOURCE_DIR}/messaging.c

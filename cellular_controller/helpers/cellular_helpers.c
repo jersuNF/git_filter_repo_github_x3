@@ -119,22 +119,23 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
     return ret;
 }
 
-int8_t socket_receive(struct data *data)
+int8_t socket_receive(struct data *data, char **msg)
 {
     int received;
     char buf[RECV_BUF_SIZE];
 
     received = recv(data->tcp.sock, buf, sizeof(buf), MSG_DONTWAIT);
+
     if (received > 0)
     {
-        LOG_WRN("received %d bytes!\n", received);
+        *msg = buf;
+        LOG_WRN("Socket received %d bytes!\n", received);
+        return received;
     }
     else if (received < 0) {
         LOG_ERR("Socket receive error!\n");
         return received;
     }
-
-    return received;
 }
 
 void stop_tcp(void)

@@ -16,7 +16,7 @@ static char server_ip[15];
 
 int8_t socket_connect(struct data *, struct sockaddr *,
 					  socklen_t);
-uint8_t socket_receive(struct data *);
+uint8_t socket_receive(struct data *, char **);
 int8_t lte_init(void);
 bool lte_is_ready(void);
 
@@ -40,10 +40,10 @@ static APP_BMEM bool connected;
 
 int8_t receive_tcp(struct data *sock_data) {
 	int8_t err, received;
-	char buf[RECV_BUF_SIZE];
+    char *buf = NULL;
 	uint8_t *pMsgIn = NULL;
 
-	received = socket_receive(sock_data);
+	received = socket_receive(sock_data, &buf);
 	if (received == 0) {
 		return 0;
 	} else if (received > 0) {

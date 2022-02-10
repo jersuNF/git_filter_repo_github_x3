@@ -7,16 +7,20 @@
 #include <logging/log.h>
 #include "sound_event.h"
 #include "request_events.h"
+#include "pasture_event.h"
+#include "storage_events.h"
+#include "pasture_structure.h"
 #include "event_manager.h"
+#include "error_event.h"
 
 #define MODULE animal_monitor_control
 LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
 
 /* Cached fence data header and a max coordinate region. Links the coordinate
- * region to the header.
+ * region to the header. Important! Is set to NULL everytime it's free'd
+ * to ensure that we're calculating with a valid cached fence.
  */
-static fence_coordinate_t cached_fence_coordinates[FENCE_MAX_TOTAL_COORDINATES];
-static fence_header_t cached_fence_header = { .p_c = cached_fence_coordinates };
+static fence_t *cached_fence = NULL;
 
 #define REQUEST_DATA_SEM_TIMEOUT_SEC 5
 K_SEM_DEFINE(fence_data_sem, 1, 1);
@@ -48,25 +52,17 @@ static struct k_work_q calc_work_q;
 static struct k_work calc_work;
 
 /**
- * @brief Function to request pasture on the event bus, pressumably
+ * @brief Function to request pasture on the event bus
  *        from the storage controller, in which case the
  *        storage module will memcpy its data to the passed address. This is
- *        only done when we boot up/on initialization, and on user updates
- *        in which case speed does not matter, as well as not
- *        needing the continuity as the GNSS data does.
+ *        only done when we boot up/on initialization.
  */
 static void submit_request_pasture(void)
 {
-	int err = k_sem_take(&fence_data_sem,
-			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
-	if (err) {
-		LOG_ERR("Error waiting fencedata semaphore to release.");
-		return;
-	}
-
-	struct request_pasture_event *req_fd_e = new_request_pasture_event();
-	req_fd_e->fence = &cached_fence_header;
-	EVENT_SUBMIT(req_fd_e);
+	struct stg_read_event *ev = new_stg_read_event();
+	ev->partition = STG_PARTITION_PASTURE;
+	ev->rotate = false;
+	EVENT_SUBMIT(ev);
 }
 
 /**
@@ -75,6 +71,12 @@ static void submit_request_pasture(void)
  */
 void calculate_work_fn(struct k_work *item)
 {
+	/* Check if cached fence is valid. */
+	if (cached_fence == NULL) {
+		LOG_ERR("No fence data available.");
+		return;
+	}
+
 	int err = k_sem_take(&fence_data_sem,
 			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
 	if (err) {
@@ -110,12 +112,12 @@ void calculate_work_fn(struct k_work *item)
 	 *           subscribes to if its correct.
 	 */
 	bool fencedata_correct = true;
-	if (cached_fence_header.n_points <= 0) {
+	if (cached_fence->header.n_points <= 0) {
 		fencedata_correct = false;
 	}
-	for (int i = 0; i < cached_fence_header.n_points; i++) {
-		if (cached_fence_header.p_c[i].s_x_dm == 1337 &&
-		    cached_fence_header.p_c[i].s_y_dm == 1337) {
+	for (int i = 0; i < cached_fence->header.n_points; i++) {
+		if (cached_fence->p_c[i].s_x_dm == 1337 &&
+		    cached_fence->p_c[i].s_y_dm == 1337) {
 			continue;
 		}
 		fencedata_correct = false;
@@ -138,7 +140,6 @@ void calculate_work_fn(struct k_work *item)
 			EVENT_SUBMIT(s_ev);
 		}
 	}
-
 	/* Calculation finished, give semaphore so we can swap memory region
 	 * on next GNSS request. 
 	 * As well as notifying we're not using fence data area. 
@@ -156,8 +157,39 @@ void amc_module_init(void)
 			   K_THREAD_STACK_SIZEOF(amc_calculation_thread_area),
 			   CONFIG_AMC_CALCULATION_PRIORITY, NULL);
 	k_work_init(&calc_work, calculate_work_fn);
-
 	submit_request_pasture();
+}
+
+static inline int update_pasture_cache(uint8_t *data, size_t len)
+{
+	int err = k_sem_take(&fence_data_sem,
+			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
+	if (err) {
+		LOG_ERR("Error semaphore, retry request pasture here?");
+		return err;
+	}
+	/* Free previous fence if any. */
+	if (cached_fence != NULL) {
+		k_free(cached_fence);
+		cached_fence = NULL;
+	}
+
+	cached_fence = k_malloc(len);
+
+	if (cached_fence == NULL) {
+		LOG_ERR("No memory left for caching the fence.");
+		k_sem_give(&fence_data_sem);
+		return -ENOMEM;
+	}
+	/* Memcpy the flash contents. */
+	memcpy(cached_fence, data, len);
+
+	/* Can add calculation check if fence is valid if we want here. */
+	LOG_INF("Updated pasture cache to US_ID: %d",
+		cached_fence->header.us_id);
+
+	k_sem_give(&fence_data_sem);
+	return 0;
 }
 
 /**
@@ -174,8 +206,28 @@ static bool event_handler(const struct event_header *eh)
 		submit_request_pasture();
 		return false;
 	}
-	if (is_ack_pasture_event(eh)) {
-		k_sem_give(&fence_data_sem);
+	if (is_stg_ack_read_event(eh)) {
+		struct stg_ack_read_event *ev_ack = cast_stg_ack_read_event(eh);
+		if (ev_ack->partition != STG_PARTITION_PASTURE) {
+			return false;
+		}
+
+		/* Update fence cache by freeing previous fence, and copying
+		 * new one from storage controller.
+		 */
+		int err = update_pasture_cache(ev_ack->data, ev_ack->len);
+		if (err) {
+			char *err_msg = "Out of memory for pasture cache.";
+			nf_app_fatal(ERR_SENDER_AMC, -ENOMEM, err_msg,
+				     strlen(err_msg));
+		}
+
+		/* Indicate data has been consumed, so storage controller can
+		 * finish up it's resources.
+		 */
+		struct stg_consumed_read_event *ev_consume =
+			new_stg_consumed_read_event();
+		EVENT_SUBMIT(ev_consume);
 		return false;
 	}
 	if (is_gnssdata_event(eh)) {
@@ -209,3 +261,4 @@ EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, ack_pasture_event);
 EVENT_SUBSCRIBE(MODULE, gnssdata_event);
 EVENT_SUBSCRIBE(MODULE, pasture_ready_event);
+EVENT_SUBSCRIBE(MODULE, stg_ack_read_event);

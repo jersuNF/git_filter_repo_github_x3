@@ -8,6 +8,8 @@
 #include <logging/log.h>
 #include <drivers/sensor.h>
 
+#include <stdio.h>
+
 LOG_MODULE_REGISTER(env_sensor, CONFIG_ENV_SENSOR_LOG_LEVEL);
 
 static inline int update_env_sensor_event_values(void)
@@ -49,14 +51,14 @@ static inline int update_env_sensor_event_values(void)
 
 	struct env_sensor_event *ev = new_env_sensor_event();
 
-	ev->temp_integer = temp.val1;
-	ev->temp_integer = temp.val2;
+	ev->temp.integer = temp.val1;
+	ev->temp.frac = temp.val2;
 
-	ev->press_integer = press.val1;
-	ev->press_integer = press.val2;
+	ev->press.integer = press.val1;
+	ev->press.frac = press.val2;
 
-	ev->humidity_integer = humidity.val1;
-	ev->humidity_integer = humidity.val2;
+	ev->humidity.integer = humidity.val1;
+	ev->humidity.frac = humidity.val2;
 
 	EVENT_SUBMIT(ev);
 

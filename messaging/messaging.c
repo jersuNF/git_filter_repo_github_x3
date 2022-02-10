@@ -9,7 +9,9 @@
 #include "ble_data_event.h"
 #include "lte_proto_event.h"
 #include "collar_protocol.h"
-#include "http_downloader.h"
+#include "fw_upgrade_events.h"
+
+#include "nf_version.h"
 
 K_SEM_DEFINE(ble_ctrl_sem, 0, 1);
 K_SEM_DEFINE(ble_data_sem, 0, 1);
@@ -137,30 +139,26 @@ static inline void process_lte_proto_event(void)
 	LOG_INF("Processed lte_proto_msgq.");
 	k_sem_give(&lte_proto_sem);
 
-	/* Decode protobuf message. 
+	/* Decode protobuf message and submit FOTA event if a new version
+	 * is available. 
+	 */
 	NofenceMessage proto;
 	err = collar_protocol_decode(ev.buf, ev.len, &proto);
 	if (err) {
 		LOG_ERR("Error decoding protobuf message.");
 		return;
 	}
-	Compare firmware version. 
+
 	if (proto.m.firmware_upgrade_req.ulVersion > NF_X25_VERSION_NUMBER) {
-		Start download, fill protobuf here.
-		const char *host = "";
-		const char *file = "";
-		int sec_tag = 0;
-		size_t fragment_size = 512;
-		err = http_download_start(host, file, sec_tag, fragment_size);
-		if (err) {
-			LOG_ERR("Error starting HTTP download request.");
-			return;
-		}
+		struct start_fota_event *ev = new_start_fota_event();
+		ev->override_default_host = false;
+		ev->version = proto.m.firmware_upgrade_req.ulVersion;
+		EVENT_SUBMIT(ev);
 	} else {
 		LOG_WRN("Requested firmware version is \
 			 same or older than current");
 		return;
-	}*/
+	}
 }
 
 void messaging_thread_fn()

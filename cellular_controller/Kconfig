@@ -1,11 +1,3 @@
 menuconfig CELLULAR_CONTROLLER
 	bool "Cellular controller module"
 	default y
-
-if CELLULAR_CONTROLLER
-    config SERVER_PORT
-	int "remote server port"
-	help
-        Listening port on the remote server.
-	default 0
-endif

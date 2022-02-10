@@ -44,6 +44,8 @@ struct flash_sector pasture_sectors[FLASH_PASTURE_NUM_SECTORS];
  */
 K_SEM_DEFINE(data_consumed_sem, 0, 1);
 
+static volatile bool has_inited = false;
+
 #define NUM_STG_MSGQ_EVENTS 2
 /* 4 means 4-byte alignment. */
 K_MSGQ_DEFINE(read_event_msgq, sizeof(struct stg_read_event),
@@ -168,6 +170,7 @@ static inline int init_fcb_on_partition(flash_partition_t partition)
 
 	LOG_INF("Setup FCB for partition %d: %d sectors with sizes %db.",
 		partition, fcb->f_sector_cnt, fcb->f_sectors[0].fs_size);
+	has_inited = true;
 	return err;
 }
 
@@ -379,6 +382,13 @@ int stg_fcb_reset_and_init()
 
 static bool event_handler(const struct event_header *eh)
 {
+	/* If storage module is not initialized and FCBs are not set up, just
+	 * consume event and let the requester hang to indicate that
+	 * they have to try again after this module is initialized.
+	 */
+	if (!has_inited) {
+		return false;
+	}
 	if (is_stg_read_event(eh)) {
 		struct stg_read_event *ev = cast_stg_read_event(eh);
 		while (k_msgq_put(&read_event_msgq, ev, K_NO_WAIT) != 0) {

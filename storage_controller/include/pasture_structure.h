@@ -36,7 +36,10 @@ typedef struct {
 		uint8_t e_fence_type;
 	} header;
 
-	/** Coordinates. */
+	/** Coordinates. An example of how to dynamically allocate 
+	 *  fence coordinates is found at tests/storage_controller and
+	 *  storage_helper.c and look for get_simulated_fence_data()
+	*/
 	fence_coordinate_t p_c[];
 } fence_t;
 

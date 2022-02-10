@@ -2,11 +2,6 @@ menuconfig FW_UPGRADE
 	bool "Firmware upgrade module"
 	default y
 
-menuconfig HTTP_DOWNLOADER
-	bool "Firmware upgrade module"
-	default y
-	depends on FW_UPGRADE
-
 if FW_UPGRADE
 	config SCHEDULE_REBOOT_SECONDS
 	int "Schedule seconds after fw upgrade"
@@ -15,18 +10,16 @@ if FW_UPGRADE
 	  be high enough to ensure modules shut down correctly
 	default 5
 
-	config DFU_MCUBOOT_FLASH_BUF_SZ
-        int "Size of buffer used for flash write operations during upgrades"
-        default 512
-
 	config FW_UPGRADE_LOG_LEVEL
 		int "0 - 4 for logging. OFF -> ERR -> WRN -> INF -> DBG"
 		default 3
 		depends on LOG
-endif
 
-if HTTP_DOWNLOADER
-	config HTTP_DOWNLOAD_SOCKET_RETRIES
-	int "Number of retried is socket connection fails"
-	default 3
+	menu "FW_EVENTS"
+	rsource "./../../events/fw_upgrade/Kconfig"
+	endmenu # FW_EVENTS
+
+	menu "ERROR_HANDLER"
+    	rsource "./../../modules/error_handler/Kconfig"
+	endmenu
 endif

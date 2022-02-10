@@ -136,6 +136,7 @@ int8_t socket_receive(struct data *data, char **msg)
         LOG_ERR("Socket receive error!\n");
         return received;
     }
+    return 0;
 }
 
 void stop_tcp(void)

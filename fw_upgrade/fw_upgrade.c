@@ -10,6 +10,8 @@
 #include <power/reboot.h>
 #include <logging/log.h>
 
+#include "error_event.h"
+
 #include <dfu/mcuboot.h>
 #include <dfu/dfu_target_mcuboot.h>
 #include <net/fota_download.h>
@@ -24,6 +26,8 @@ struct k_work_delayable reboot_device_work;
 
 static void reboot_device_fn(struct k_work *item)
 {
+	ARG_UNUSED(item);
+
 /* Add a check that we are using NRF board
  * since they are the ones supported by nordic's <power/reboot.h>
  */
@@ -48,7 +52,7 @@ static void fota_dl_handler(const struct fota_download_evt *evt)
 
 		break;
 	case FOTA_DOWNLOAD_EVT_FINISHED:
-		LOG_INF("Fota download finished, sending reboot event.");
+		LOG_INF("Fota download finished, scheduling reboot...");
 
 		event->dfu_status = DFU_STATUS_SUCCESS_REBOOT_SCHEDULED;
 		event->dfu_error = 0;
@@ -122,6 +126,9 @@ static bool event_handler(const struct event_header *eh)
 		err = fota_download_start(host_tmp, path_tmp, -1, 0, 0);
 		if (err) {
 			LOG_ERR("fota_download_start() failed, err %d", err);
+			char *msg = "Unable to start FOTA DL";
+			nf_app_error(ERR_SENDER_FW_UPGRADE, err, msg,
+				     strlen(msg));
 			return false;
 		}
 

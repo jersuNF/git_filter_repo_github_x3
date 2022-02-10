@@ -18,4 +18,8 @@ if FW_UPGRADE
 	menu "FW_EVENTS"
 	rsource "./../../events/fw_upgrade/Kconfig"
 	endmenu # FW_EVENTS
+
+	menu "ERROR_HANDLER"
+    	rsource "./../../modules/error_handler/Kconfig"
+	endmenu
 endif

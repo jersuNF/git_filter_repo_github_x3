@@ -10,6 +10,7 @@
 #include "lte_proto_event.h"
 #include "collar_protocol.h"
 #include "http_downloader.h"
+#include "messaging_module_events.h"
 
 K_SEM_DEFINE(ble_ctrl_sem, 0, 1);
 K_SEM_DEFINE(ble_data_sem, 0, 1);
@@ -66,7 +67,10 @@ void messaging_module_init(void)
 static bool event_handler(const struct event_header *eh)
 {
 	//int err;
-	if (is_ble_ctrl_event(eh)) {
+    char buf[RECV_BUF_SIZE];
+    uint8_t *pMsg = NULL;
+
+    if (is_ble_ctrl_event(eh)) {
 		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
 		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
 			/* Message queue is full: purge old data & try again */
@@ -83,6 +87,7 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_lte_proto_event(eh)) {
 		struct lte_proto_event *ev = cast_lte_proto_event(eh);
+
 		while (k_msgq_put(&lte_proto_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&lte_proto_msgq);
 		}

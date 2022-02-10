@@ -5,10 +5,10 @@ menuconfig STORAGE_CONTROLLER
 
 if STORAGE_CONTROLLER
 
-	config STORAGE_CONTROLLER_LOG_LEVEL
-		int "0 - 4 for logging. OFF -> ERR -> WRN -> INF -> DBG"
-		default 3
-		depends on LOG
+
+	module = STORAGE_CONTROLLER
+	module-str = STG module
+	source "subsys/logging/Kconfig.template.log_config"
 
 	config STORAGE_THREAD_SIZE
 		int "Size of thread stack size"

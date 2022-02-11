@@ -14,23 +14,22 @@ char server_address[EEP_HOST_PORT_BUF_SIZE];
 static int server_port;
 static char server_ip[15];
 
-int8_t socket_connect(struct data *, struct sockaddr *,
-					  socklen_t);
+int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
 uint8_t socket_receive(struct data *, char **);
 int8_t lte_init(void);
 bool lte_is_ready(void);
 
 APP_DMEM struct configs conf = {
-		.ipv4 = {
-				.proto = "IPv4",
-				.udp.sock = INVALID_SOCK,
-				.tcp.sock = INVALID_SOCK,
-		},
+	.ipv4 = {
+		.proto = "IPv4",
+		.udp.sock = INVALID_SOCK,
+		.tcp.sock = INVALID_SOCK,
+	},
 };
 
-void submit_error(int8_t cause, int8_t err_code) {
-	struct cellular_error_event *err =
-			new_cellular_error_event();
+void submit_error(int8_t cause, int8_t err_code)
+{
+	struct cellular_error_event *err = new_cellular_error_event();
 	err->cause = cause;
 	err->err_code = err_code;
 	EVENT_SUBMIT(err);
@@ -38,9 +37,10 @@ void submit_error(int8_t cause, int8_t err_code) {
 
 static APP_BMEM bool connected;
 
-int8_t receive_tcp(struct data *sock_data) {
+int8_t receive_tcp(struct data *sock_data)
+{
 	int8_t err, received;
-    char *buf = NULL;
+	char *buf = NULL;
 	uint8_t *pMsgIn = NULL;
 
 	received = socket_receive(sock_data, &buf);
@@ -49,9 +49,10 @@ int8_t receive_tcp(struct data *sock_data) {
 	} else if (received > 0) {
 		LOG_WRN("received %d bytes!\n", received);
 
-		if (messaging_ack == false) { /* TODO: notify the error handler */
+		if (messaging_ack ==
+		    false) { /* TODO: notify the error handler */
 			LOG_ERR("New message received while the messaging module "
-					"hasn't consumed the previous one!\n");
+				"hasn't consumed the previous one!\n");
 			err = -1;
 			return err;
 		} else {
@@ -59,11 +60,11 @@ int8_t receive_tcp(struct data *sock_data) {
 				free(pMsgIn);
 				pMsgIn = NULL;
 			}
-			pMsgIn = (uint8_t *) malloc(received);
+			pMsgIn = (uint8_t *)malloc(received);
 			memcpy(pMsgIn, buf, received);
 			messaging_ack = false;
 			struct cellular_proto_in_event *msgIn =
-					new_cellular_proto_in_event();
+				new_cellular_proto_in_event();
 			msgIn->buf = pMsgIn;
 			msgIn->len = received;
 			LOG_INF("Submitting msgIn event!\n");
@@ -77,18 +78,18 @@ int8_t receive_tcp(struct data *sock_data) {
 	}
 }
 
-int8_t start_tcp(void) {
+int8_t start_tcp(void)
+{
 	int8_t ret = -1;
 	struct sockaddr_in addr4;
 
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
 		addr4.sin_family = AF_INET;
 		addr4.sin_port = htons(server_port);
-		inet_pton(AF_INET, server_ip,
-				  &addr4.sin_addr);
+		inet_pton(AF_INET, server_ip, &addr4.sin_addr);
 
-		ret = socket_connect(&conf.ipv4, (struct sockaddr *) &addr4,
-							 sizeof(addr4));
+		ret = socket_connect(&conf.ipv4, (struct sockaddr *)&addr4,
+				     sizeof(addr4));
 		if (ret < 0) {
 			submit_error(SOCKET_CONNECT, ret);
 			return ret;
@@ -97,7 +98,8 @@ int8_t start_tcp(void) {
 	return ret;
 }
 
-static bool cellular_controller_event_handler(const struct event_header *eh) {
+static bool cellular_controller_event_handler(const struct event_header *eh)
+{
 	if (is_messaging_ack_event(eh)) {
 		messaging_ack = true;
 		return true;
@@ -106,7 +108,8 @@ static bool cellular_controller_event_handler(const struct event_header *eh) {
 		return true;
 	} else if (is_messaging_proto_out_event(eh)) {
 		/* Accessing event data. */
-		struct messaging_proto_out_event *event = cast_messaging_proto_out_event(eh);
+		struct messaging_proto_out_event *event =
+			cast_messaging_proto_out_event(eh);
 		uint8_t *pCharMsgOut = event->buf;
 		size_t MsgOutLen = event->len;
 
@@ -118,11 +121,12 @@ static bool cellular_controller_event_handler(const struct event_header *eh) {
 
 		/* make a local copy of the message to send.*/
 		char *CharMsgOut;
-		CharMsgOut = (char *) malloc(MsgOutLen);
+		CharMsgOut = (char *)malloc(MsgOutLen);
 		memcpy(CharMsgOut, pCharMsgOut, MsgOutLen);
 
 		if (CharMsgOut != NULL && CharMsgOut[0] != '\0') {
-			struct cellular_ack_event *ack = new_cellular_ack_event();
+			struct cellular_ack_event *ack =
+				new_cellular_ack_event();
 			EVENT_SUBMIT(ack);
 		}
 
@@ -150,31 +154,33 @@ static bool cellular_controller_event_handler(const struct event_header *eh) {
 	 * and the port as an unsigned int.
 	 * @return: 0 on success, -1 on failure
 	 */
-int8_t cache_server_address(void) {
-    int err = eep_read_host_port(&server_address[0], sizeof(server_address));
-    if (err != 0 || server_address[0] == '\0'){
-        return -1;
-    }
-    char *ptr_port;
-    ptr_port = strchr(server_address, ':') + 1;
-    server_port = atoi(ptr_port);
-    if (server_port <= 0){
-        return -1;
-    }
-    uint8_t ip_len;
-    ip_len = ptr_port-1 -&server_address[0];
-    memcpy(&server_ip[0], &server_address[0], ip_len);
-    if ( server_ip[0] != '\0') {
-        LOG_DBG("Host address read from eeprom: %s : %d", &server_ip[0],
-                server_port);
-        return 0;
-    }
-    else {
-        return -1;
-    }
+int8_t cache_server_address(void)
+{
+	int err =
+		eep_read_host_port(&server_address[0], sizeof(server_address));
+	if (err != 0 || server_address[0] == '\0') {
+		return -1;
+	}
+	char *ptr_port;
+	ptr_port = strchr(server_address, ':') + 1;
+	server_port = atoi(ptr_port);
+	if (server_port <= 0) {
+		return -1;
+	}
+	uint8_t ip_len;
+	ip_len = ptr_port - 1 - &server_address[0];
+	memcpy(&server_ip[0], &server_address[0], ip_len);
+	if (server_ip[0] != '\0') {
+		LOG_DBG("Host address read from eeprom: %s : %d", &server_ip[0],
+			server_port);
+		return 0;
+	} else {
+		return -1;
+	}
 }
 
-int8_t cellular_controller_init(void) {
+int8_t cellular_controller_init(void)
+{
 	messaging_ack = true;
 	int8_t ret;
 	printk("Cellular controller starting!, %p\n", k_current_get());
@@ -190,13 +196,13 @@ int8_t cellular_controller_init(void) {
 		LOG_INF("Cellular network interface ready!\n");
 
 		if (lte_is_ready()) {
-            ret = cache_server_address();
-            if (ret == 0) {
-                LOG_INF("Server ip address successfully cached from "
-                        "eeprom!\n");
-            } else {
-                goto exit_cellular_controller;
-            }
+			ret = cache_server_address();
+			if (ret == 0) {
+				LOG_INF("Server ip address successfully cached from "
+					"eeprom!\n");
+			} else {
+				goto exit_cellular_controller;
+			}
 			ret = start_tcp();
 			if (ret == 0) {
 				LOG_INF("TCP connection started!\n");

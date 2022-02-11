@@ -42,29 +42,29 @@ extern struct k_mem_domain app_domain;
      * udp sockets -only TCP sockets are used for now
      */
 struct data {
-    const char *proto;
+	const char *proto;
 
-    struct {
-        int sock;
-        /* Work controlling udp data sending */
-        struct k_work_delayable recv;
-        struct k_work_delayable transmit;
-        uint32_t expecting;
-        uint32_t counter;
-        uint32_t mtu;
-    } udp;
+	struct {
+		int sock;
+		/* Work controlling udp data sending */
+		struct k_work_delayable recv;
+		struct k_work_delayable transmit;
+		uint32_t expecting;
+		uint32_t counter;
+		uint32_t mtu;
+	} udp;
 
-    struct {
-        int sock;
-        uint32_t expecting;
-        uint32_t received;
-        uint32_t counter;
-    } tcp;
+	struct {
+		int sock;
+		uint32_t expecting;
+		uint32_t received;
+		uint32_t counter;
+	} tcp;
 };
 
 struct configs {
-    struct data ipv4;
-    struct data ipv6;
+	struct data ipv4;
+	struct data ipv6;
 };
 
 /**
@@ -72,6 +72,6 @@ struct configs {
      */
 extern struct configs conf;
 
-int8_t send_tcp(char*, size_t);
+int8_t send_tcp(char *, size_t);
 void stop_tcp(void);
 const struct device *bind_modem(void);

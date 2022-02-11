@@ -11,6 +11,7 @@
 #include "collar_protocol.h"
 #include "http_downloader.h"
 #include "messaging_module_events.h"
+#include "cellular_controller_events.h"
 
 K_SEM_DEFINE(ble_ctrl_sem, 0, 1);
 K_SEM_DEFINE(ble_data_sem, 0, 1);
@@ -66,9 +67,9 @@ void messaging_module_init(void)
  */
 static bool event_handler(const struct event_header *eh)
 {
-	//int err;
-    char buf[RECV_BUF_SIZE];
+    size_t len;
     uint8_t *pMsg = NULL;
+    uint8_t *buf = NULL;
 
     if (is_ble_ctrl_event(eh)) {
 		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
@@ -87,8 +88,15 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_lte_proto_event(eh)) {
 		struct lte_proto_event *ev = cast_lte_proto_event(eh);
+		len = ev->len;
+        pMsg = ev->buf;
+        buf = (uint8_t *) malloc(len);
+        memcpy(buf, pMsg, len);
 
-		while (k_msgq_put(&lte_proto_msgq, ev, K_NO_WAIT) != 0) {
+        struct messaging_ack_event *ack = new_messaging_ack_event();
+        EVENT_SUBMIT(ack);
+
+        while (k_msgq_put(&lte_proto_msgq, buf, K_NO_WAIT) != 0) {
 			k_msgq_purge(&lte_proto_msgq);
 		}
 		return false;

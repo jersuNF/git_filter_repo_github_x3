@@ -42,7 +42,6 @@ struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
 };
 
 static struct k_work_delayable modem_poll_work;
-
 void modem_poll_work_fn()
 {
 	/* Add logic for the periodic protobuf modem poller. */
@@ -88,15 +87,7 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_lte_proto_event(eh)) {
 		struct lte_proto_event *ev = cast_lte_proto_event(eh);
-		len = ev->len;
-        pMsg = ev->buf;
-        buf = (uint8_t *) malloc(len);
-        memcpy(buf, pMsg, len);
-
-        struct messaging_ack_event *ack = new_messaging_ack_event();
-        EVENT_SUBMIT(ack);
-
-        while (k_msgq_put(&lte_proto_msgq, buf, K_NO_WAIT) != 0) {
+		while (k_msgq_put(&lte_proto_msgq, buf, K_NO_WAIT) != 0) {
 			k_msgq_purge(&lte_proto_msgq);
 		}
 		return false;
@@ -150,30 +141,22 @@ static inline void process_lte_proto_event(void)
 	LOG_INF("Processed lte_proto_msgq.");
 	k_sem_give(&lte_proto_sem);
 
-	/* Decode protobuf message. 
 	NofenceMessage proto;
 	err = collar_protocol_decode(ev.buf, ev.len, &proto);
 	if (err) {
 		LOG_ERR("Error decoding protobuf message.");
 		return;
 	}
-	Compare firmware version. 
-	if (proto.m.firmware_upgrade_req.ulVersion > NF_X25_VERSION_NUMBER) {
-		Start download, fill protobuf here.
-		const char *host = "";
-		const char *file = "";
-		int sec_tag = 0;
-		size_t fragment_size = 512;
-		err = http_download_start(host, file, sec_tag, fragment_size);
-		if (err) {
-			LOG_ERR("Error starting HTTP download request.");
-			return;
-		}
-	} else {
-		LOG_WRN("Requested firmware version is \
-			 same or older than current");
-		return;
-	}*/
+	struct messaging_ack_event *ack = new_messaging_ack_event();
+	EVENT_SUBMIT(ack);
+	/* process poll response */
+	if (proto->which_m == NofenceMessage_poll_message_resp_tag) {
+		process_poll_response();
+	/* Compare firmware version. */
+		/* TODO: change to the new field with the x25-app version.*/
+	if (proto.m.poll_message_resp.versionInfo.ulNRF52AppVersion >
+		    NF_X25_VERSION_NUMBER) {
+		process_upgrade_request();
 }
 
 void messaging_thread_fn()

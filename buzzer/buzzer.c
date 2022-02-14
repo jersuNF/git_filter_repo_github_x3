@@ -25,25 +25,99 @@ K_MSGQ_DEFINE(msgq_sound_events, sizeof(struct sound_event),
 
 const struct device *buzzer_pwm;
 
-void play_sound(int freq, int dur)
+static const note_t m_geiterams[] = {
+	{ .t = tone_nothing, .s = d_16 },
+	{ .t = tone_e_6, .s = d_16 },
+	{ .t = tone_e_6, .s = d_16 },
+	{ .t = tone_e_6, .s = d_16 },
+	{ .t = tone_d_6, .s = d_16 },
+	{ .t = tone_c_6, .s = d_8 },
+	{ .t = tone_c_6, .s = d_8 },
+	/* .. */
+	{ .t = tone_e_6, .s = d_16 },
+	{ .t = tone_g_6, .s = d_16 },
+	{ .t = tone_c_7, .s = d_16 },
+	{ .t = tone_e_6, .s = d_16 },
+	{ .t = tone_g_6, .s = d_8 },
+	{ .t = tone_g_6, .s = d_8 },
+	/* .. */
+	{ .t = tone_b_6, .s = d_16 },
+	{ .t = tone_b_6, .s = d_16 },
+	{ .t = tone_b_6, .s = d_16 },
+	{ .t = tone_a_6, .s = d_16 },
+	{ .t = tone_f_6, .s = d_8 },
+	{ .t = tone_f_6, .s = d_8 },
+	/* .. */
+	{ .t = tone_a_6, .s = d_16 },
+	{ .t = tone_a_6, .s = d_16 },
+	{ .t = tone_a_6, .s = d_16 },
+	{ .t = tone_g_6, .s = d_16 },
+	{ .t = tone_e_6, .s = d_8 },
+	{ .t = tone_e_6, .s = d_8 },
+};
+
+static const note_t m_perspelmann[] = {
+	{ .t = tone_nothing, .s = d_16 },
+	{ .t = tone_c_7, .s = d_16 },
+	{ .t = tone_c_7, .s = d_8 },
+	{ .t = tone_g_6, .s = d_8 },
+	{ .t = tone_aiss_6, .s = d_16 },
+	{ .t = tone_a_6, .s = d_8 },
+	{ .t = tone_f_6, .s = d_8 },
+	{ .t = tone_f_7, .s = d_16 },
+	{ .t = tone_e_6, .s = d_8 },
+	/* .. */
+	{ .t = tone_f_6, .s = d_8 },
+	{ .t = tone_d_6, .s = d_16 },
+	{ .t = tone_c_6, .s = d_8 },
+};
+
+#define n_geiterams_notes (sizeof(m_geiterams) / sizeof(m_geiterams[0]))
+#define n_perspelmann_notes (sizeof(m_perspelmann) / sizeof(m_perspelmann[0]))
+
+/* Fix powermode for this function. */
+void set_pwm_to_idle(void)
 {
-	int err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, freq, freq / 2U, 0);
+	int err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, 0, 0, 0);
+	if (err) {
+		LOG_ERR("pwm off fails %i", err);
+		return;
+	}
+}
+
+void play_note(note_t note, bool pwm_off_after_played)
+{
+	int err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, note.t, note.t / 2U,
+				   0);
 	if (err) {
 		LOG_ERR("Error %d: failed to set pulse width", err);
 		return;
 	}
 
-	k_sleep(K_SECONDS(dur));
+	/* Play note for 'sustain (s)' milliseconds. */
+	k_sleep(K_MSEC(note.s));
 
-	// Disable
-	err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, 0, 0, 0);
-	if (err) {
-		LOG_ERR("pwm off fails %i", err);
-		return;
+	if (pwm_off_after_played) {
+		/* Fix powermode for this function. */
+		set_pwm_to_idle();
 	}
-	LOG_INF("Disabled buzzer again.");
 }
 
+void play_song(const note_t *song, const size_t num_notes)
+{
+	/* Play all the notes in the note array. Do not turn of PWM
+	 * between notes as that is just unecessary when we change the note
+	 * straight after. Turn off PWM (set to 0) when song is finished.
+	 */
+	for (int i = 0; i < num_notes; i++) {
+		play_note(song[i], false);
+	}
+
+	/* Fix powermode for this function. */
+	set_pwm_to_idle();
+}
+
+/* Work out a priority sound system. Solve multiple event submissions. */
 void play_type(enum sound_event_type type)
 {
 	LOG_INF("Received sound event %d", type);
@@ -53,7 +127,16 @@ void play_type(enum sound_event_type type)
 	}
 	switch (type) {
 	case SND_WELCOME: {
-		play_sound(2273, 5);
+		note_t c6 = { .t = tone_c_6, .s = d_8 };
+		play_note(c6, true);
+		break;
+	}
+	case SND_PERSPELMANN: {
+		play_song(m_perspelmann, n_perspelmann_notes);
+		break;
+	}
+	case SND_FIND_ME: {
+		play_song(m_geiterams, n_geiterams_notes);
 		break;
 	}
 	default: {
@@ -111,17 +194,13 @@ EVENT_SUBSCRIBE(MODULE, sound_event);
 void buzzer_thread_fn()
 {
 	while (true) {
-		struct sound_event *ev;
+		struct sound_event ev;
 		int err = k_msgq_get(&msgq_sound_events, &ev, K_FOREVER);
 		if (err) {
 			LOG_ERR("Error getting sound_event: %d", err);
 			return;
 		}
-		if (ev == NULL) {
-			LOG_ERR("No sound event available.");
-			continue;
-		}
-		play_type(ev->type);
+		play_type(ev.type);
 	}
 }
 

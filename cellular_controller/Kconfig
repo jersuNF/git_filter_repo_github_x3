@@ -1,0 +1,3 @@
+menuconfig CELLULAR_CONTROLLER
+	bool "Cellular controller module"
+	default y

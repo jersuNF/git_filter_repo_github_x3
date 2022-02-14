@@ -13,7 +13,8 @@
 LOG_MODULE_REGISTER(MODULE, CONFIG_BUZZER_LOG_LEVEL);
 
 #if DT_NODE_HAS_STATUS(DT_ALIAS(pwm_buzzer), okay)
-#define PWM_DRIVER DT_PWMS_LABEL(DT_ALIAS(pwm_buzzer))
+#define PWM_BUZZER_NODE DT_ALIAS(pwm_buzzer)
+#define PWM_BUZZER_LABEL DT_GPIO_LABEL(PWM_BUZZER_NODE, pwms)
 #define PWM_CHANNEL DT_PWMS_CHANNEL(DT_ALIAS(pwm_buzzer))
 #else
 #error "Choose a supported PWM driver"
@@ -26,8 +27,7 @@ const struct device *buzzer_pwm;
 
 void play_sound(int freq, int dur)
 {
-	int err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, freq, freq / 2U,
-				   PWM_CAPTURE_TYPE_BOTH);
+	int err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, freq, freq / 2U, 0);
 	if (err) {
 		LOG_ERR("Error %d: failed to set pulse width", err);
 		return;
@@ -36,20 +36,24 @@ void play_sound(int freq, int dur)
 	k_sleep(K_SECONDS(dur));
 
 	// Disable
-	err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, 0, 0,
-			       PWM_CAPTURE_TYPE_BOTH);
+	err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, 0, 0, 0);
 	if (err) {
 		LOG_ERR("pwm off fails %i", err);
 		return;
 	}
+	LOG_INF("Disabled buzzer again.");
 }
 
 void play_type(enum sound_event_type type)
 {
 	LOG_INF("Received sound event %d", type);
+	if (buzzer_pwm == NULL) {
+		LOG_ERR("Buzzer PWM not yet initialized.");
+		return;
+	}
 	switch (type) {
 	case SND_WELCOME: {
-		play_sound(2273, 1 * USEC_PER_SEC);
+		play_sound(2273, 5);
 		break;
 	}
 	default: {
@@ -61,7 +65,7 @@ void play_type(enum sound_event_type type)
 int buzzer_module_init(void)
 {
 	uint64_t cycles;
-	buzzer_pwm = device_get_binding(PWM_DRIVER);
+	buzzer_pwm = device_get_binding(PWM_BUZZER_LABEL);
 	if (!buzzer_pwm) {
 		LOG_ERR("Cannot find buzzer PWM device!");
 		return -ENODEV;
@@ -88,7 +92,6 @@ static bool event_handler(const struct event_header *eh)
 {
 	if (is_sound_event(eh)) {
 		struct sound_event *ev = cast_sound_event(eh);
-
 		while (k_msgq_put(&msgq_sound_events, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&msgq_sound_events);
 		}
@@ -107,16 +110,19 @@ EVENT_SUBSCRIBE(MODULE, sound_event);
 
 void buzzer_thread_fn()
 {
-	//while (true) {
-	//	struct sound_event *ev;
-	//	int err = k_msgq_get(&msgq_sound_events, &ev, K_FOREVER);
-	//	if (err) {
-	//		LOG_ERR("Error getting sound_event: %d", err);
-	//		return;
-	//	}
-	//	LOG_INF("Received sound event %d", ev->type);
-	//	play_type(ev->type);
-	//}
+	while (true) {
+		struct sound_event *ev;
+		int err = k_msgq_get(&msgq_sound_events, &ev, K_FOREVER);
+		if (err) {
+			LOG_ERR("Error getting sound_event: %d", err);
+			return;
+		}
+		if (ev == NULL) {
+			LOG_ERR("No sound event available.");
+			continue;
+		}
+		play_type(ev->type);
+	}
 }
 
 K_THREAD_DEFINE(buzzer_thread, CONFIG_BUZZER_THREAD_SIZE, buzzer_thread_fn,

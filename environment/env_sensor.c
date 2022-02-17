@@ -8,61 +8,129 @@
 #include <logging/log.h>
 #include <drivers/sensor.h>
 
+#include "error_event.h"
+
 #include <stdio.h>
+
+/* https://www.mouser.com/datasheet/2/783/BST-BME280-DS002-1509607.pdf */
+
+/* C. */
+#define SANITY_CHECK_TEMP_MAX 85
+#define SANITY_CHECK_TEMP_MIN -40
+
+/* kPa. */
+#define SANITY_CHECK_PRESSURE_MAX 110
+#define SANITY_CHECK_PRESSURE_MIN 30
+
+/* % */
+#define SANITY_CHECK_HUMIDITY_MAX 100
+#define SANITY_CHECK_HUMIDITY_MIN 0
 
 LOG_MODULE_REGISTER(env_sensor, CONFIG_ENV_SENSOR_LOG_LEVEL);
 
-static inline int update_env_sensor_event_values(void)
+static inline int sensor_sanity_check(enum sensor_channel sc, int32_t integer)
+{
+	int max = 0;
+	int min = 0;
+
+	switch (sc) {
+	case SENSOR_CHAN_AMBIENT_TEMP:
+		max = SANITY_CHECK_TEMP_MAX;
+		min = SANITY_CHECK_TEMP_MIN;
+		break;
+	case SENSOR_CHAN_PRESS:
+		max = SANITY_CHECK_PRESSURE_MAX;
+		min = SANITY_CHECK_PRESSURE_MIN;
+		break;
+	case SENSOR_CHAN_HUMIDITY:
+		max = SANITY_CHECK_HUMIDITY_MAX;
+		min = SANITY_CHECK_HUMIDITY_MIN;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	if (integer <= max && integer >= min) {
+		return 0;
+	} else {
+		return -ERANGE;
+	}
+}
+
+static inline void update_env_sensor_event_values(void)
 {
 	const struct device *bme_dev =
 		device_get_binding(DT_LABEL(DT_NODELABEL(environment_sensor)));
 
 	if (bme_dev == NULL) {
-		LOG_ERR("%s - No device found",
-			log_strdup(DT_LABEL(DT_NODELABEL(environment_sensor))));
-		return -ENODEV;
+		char *msg = "No BME device.";
+		nf_app_error(ERR_SENDER_ENV_SENSOR, -ENODEV, msg, strlen(msg));
+		return;
 	}
 
 	struct sensor_value temp, press, humidity;
 
 	int err = sensor_sample_fetch(bme_dev);
 	if (err) {
-		LOG_ERR("Error fetching BME sensor values, err %d", err);
-		return err;
+		char *msg = "Error fetching BME values.";
+		nf_app_error(ERR_SENDER_ENV_SENSOR, err, msg, strlen(msg));
+		return;
 	}
 
 	err = sensor_channel_get(bme_dev, SENSOR_CHAN_AMBIENT_TEMP, &temp);
 	if (err) {
-		LOG_ERR("Error fetching TEMP BME value, err %d", err);
-		return err;
+		char *msg = "Error fetching temperature value.";
+		nf_app_error(ERR_SENDER_ENV_SENSOR, err, msg, strlen(msg));
+		return;
 	}
 
 	err = sensor_channel_get(bme_dev, SENSOR_CHAN_PRESS, &press);
 	if (err) {
-		LOG_ERR("Error fetching PRESSURE BME value, err %d", err);
-		return err;
+		char *msg = "Error fetching pressure value.";
+		nf_app_error(ERR_SENDER_ENV_SENSOR, err, msg, strlen(msg));
+		return;
 	}
 
 	err = sensor_channel_get(bme_dev, SENSOR_CHAN_HUMIDITY, &humidity);
 	if (err) {
-		LOG_ERR("Error fetching HUMIDITY BME value, err %d", err);
-		return err;
+		char *msg = "Error fetching humidity value.";
+		nf_app_error(ERR_SENDER_ENV_SENSOR, err, msg, strlen(msg));
+		return;
 	}
 
 	struct env_sensor_event *ev = new_env_sensor_event();
 
 	ev->temp.integer = temp.val1;
 	ev->temp.frac = temp.val2;
+	err = sensor_sanity_check(SENSOR_CHAN_AMBIENT_TEMP, ev->temp.integer);
+
+	if (err) {
+		char *msg = "Sanity check failed for temperature.";
+		nf_app_error(ERR_SENDER_ENV_SENSOR, -ERANGE, msg, strlen(msg));
+		return;
+	}
 
 	ev->press.integer = press.val1;
 	ev->press.frac = press.val2;
+	err = sensor_sanity_check(SENSOR_CHAN_PRESS, ev->press.integer);
+
+	if (err) {
+		char *msg = "Sanity check failed for pressure.";
+		nf_app_error(ERR_SENDER_ENV_SENSOR, -ERANGE, msg, strlen(msg));
+		return;
+	}
 
 	ev->humidity.integer = humidity.val1;
 	ev->humidity.frac = humidity.val2;
+	err = sensor_sanity_check(SENSOR_CHAN_HUMIDITY, ev->humidity.integer);
+
+	if (err) {
+		char *msg = "Sanity check failed for humidity.";
+		nf_app_error(ERR_SENDER_ENV_SENSOR, -ERANGE, msg, strlen(msg));
+		return;
+	}
 
 	EVENT_SUBMIT(ev);
-
-	return 0;
 }
 
 /**

@@ -53,15 +53,19 @@ static void battery_poll_work_fn()
 {
 	/* Periodic log and update ble adv array */
 	int batt_voltage = log_and_fetch_battery_voltage();
-
-	/* Publish battery voltage event here */
-
 	if (batt_voltage < 0) {
 		char *e_msg = "Error in fetching battery voltage";
 		nf_app_error(ERR_PWR_MODULE, batt_voltage, e_msg,
 			     strlen(e_msg));
 		return;
 	}
+
+	/* Publish battery event with averaged voltage */
+	struct pwr_status_event *event = new_pwr_status_event();
+	event->pwr_state = PWR_BATTERY;
+	event->battery_mv = batt_voltage;
+	EVENT_SUBMIT(event);
+
 	if (batt_voltage < CONFIG_BATTRY_LOW_THRESHOLD &&
 	    batt_voltage > CONFIG_BATTRY_CRITICAL_THRESHOLD) {
 		struct pwr_status_event *event = new_pwr_status_event();

@@ -108,16 +108,16 @@ https://github.com/RadiusNetworks/android-ibeacon-service/blob/4185a5bd0c657acaf
 static double calculateAccuracy(int8_t txPower, int8_t rssi)
 {
 	if (rssi == 0) {
-		LOG_ERR("Cannot detirmine rssi");
+		//LOG_ERR("Cannot detirmine rssi");
 		return DBL_MAX; // if we cannot determine accuracy, return
 	}
 	double ratio = rssi / (double)txPower;
-	LOG_INF("Ratio: %f", ratio);
+	//LOG_INF("Ratio: %f", ratio);
 	if (ratio < 1.0) {
 		return pow(ratio, 10.0);
 	} else {
 		double accuracy = (0.89976) * pow(ratio, 7.7095) + 0.111;
-		LOG_INF("Accuracy: %f", accuracy);
+		//LOG_INF("Accuracy: %f", accuracy);
 		return accuracy;
 	}
 }
@@ -125,7 +125,7 @@ static double calculateAccuracy(int8_t txPower, int8_t rssi)
 static uint8_t get_median_dist(SingleBeaconInfo_t *pB, uint32_t now)
 {
 	uint32_t delta = now - pB->prevMeasureTime;
-	LOG_INF("prev measure time: %u, delta: %u", pB->prevMeasureTime, delta);
+	//LOG_INF("prev measure time: %u, delta: %u", pB->prevMeasureTime, delta);
 	BeaconHistory hist;
 	pB->calculated_dist = BEACON_DIST_INFINITY;
 
@@ -134,13 +134,13 @@ static uint8_t get_median_dist(SingleBeaconInfo_t *pB, uint32_t now)
 	       ring_buffer_peek(&pB->beacon_hist_fifo, &hist, fifo_index)) {
 		fifo_index--;
 		delta += hist.time_diff;
-		LOG_INF("hist.beacon_dist: %u", hist.time_diff);
+		//LOG_INF("hist.beacon_dist: %u", hist.time_diff);
 
 		if (hist.beacon_dist < pB->calculated_dist) {
 			pB->calculated_dist = hist.beacon_dist;
 		}
 	}
-	LOG_INF("pb->calculated_dist %u", pB->calculated_dist);
+	//LOG_INF("pb->calculated_dist %u", pB->calculated_dist);
 	return pB->calculated_dist;
 }
 
@@ -164,7 +164,7 @@ SingleBeaconInfo_t *beac_get_nearest_beacon(uint32_t now)
 	for (uint8_t i = 0; i < MAX_BEACONS; i++) {
 		uint8_t dist = get_median_dist(
 			&m_beaconsInfo.single_beacon_infos[i], now);
-		LOG_INF("Dist: %u", dist);
+		//LOG_INF("Dist: %u", dist);
 		if (dist < minDist) {
 			minDist = dist;
 			ind = i;
@@ -187,12 +187,12 @@ queue_beacon_info_head(const bt_addr_le_t *p_mac_addr, uint8_t m, uint32_t now)
 			    &m_beaconsInfo.single_beacon_infos[i].mac_address,
 			    p_mac_addr)) {
 			index = i;
-			LOG_INF("MAC address is equal, index is %u ", index);
+			//LOG_INF("MAC address is equal, index is %u ", index);
 			foundExisting = true;
 			break;
 		}
 	}
-	LOG_INF("index is %u ", index);
+	//LOG_INF("index is %u ", index);
 	// New beacon, replace the beacon with worst measurements and worse than m. In this case
 	// we must update the cached distances
 	if (index == UINT8_MAX) {
@@ -201,13 +201,13 @@ queue_beacon_info_head(const bt_addr_le_t *p_mac_addr, uint8_t m, uint32_t now)
 		// Update distances
 		(void)beac_get_nearest_beacon(now);
 		for (uint8_t i = 0; i < MAX_BEACONS; i++) {
-			LOG_ERR("%d MAC=%s dist=%d\n", i,
-				log_strdup(mac2string(
-					mac_s, sizeof(mac_s),
-					&m_beaconsInfo.single_beacon_infos[i]
-						 .mac_address)),
-				m_beaconsInfo.single_beacon_infos[i]
-					.calculated_dist);
+			//LOG_ERR("%d MAC=%s dist=%d\n", i,
+			// log_strdup(mac2string(
+			// 	mac_s, sizeof(mac_s),
+			// 	&m_beaconsInfo.single_beacon_infos[i]
+			// 		 .mac_address)),
+			// m_beaconsInfo.single_beacon_infos[i]
+			// 	.calculated_dist);
 
 			if (m_beaconsInfo.single_beacon_infos[i]
 				    .calculated_dist > worstDistance) {
@@ -225,14 +225,14 @@ queue_beacon_info_head(const bt_addr_le_t *p_mac_addr, uint8_t m, uint32_t now)
 	if (!foundExisting) {
 		char mac_s[MAC_CHARBUF_SIZE];
 		char mac_s1[MAC_CHARBUF_SIZE];
-		LOG_INF("RESETS beacon info %s replaces %s (%d)\n",
-			log_strdup(
-				mac2string(mac_s, sizeof(mac_s), p_mac_addr)),
-			log_strdup(mac2string(
-				mac_s1, sizeof(mac_s1),
-				&m_beaconsInfo.single_beacon_infos[index]
-					 .mac_address)),
-			index);
+		// LOG_INF("RESETS beacon info %s replaces %s (%d)\n",
+		// 	log_strdup(
+		// 		mac2string(mac_s, sizeof(mac_s), p_mac_addr)),
+		// 	log_strdup(mac2string(
+		// 		mac_s1, sizeof(mac_s1),
+		// 		&m_beaconsInfo.single_beacon_infos[index]
+		// 			 .mac_address)),
+		// 	index);
 
 		reset_beacon_info(&m_beaconsInfo.single_beacon_infos[index]);
 		memcpy(&(m_beaconsInfo.single_beacon_infos[index].mac_address),
@@ -261,7 +261,7 @@ bool beac_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 	if (m > BEACON_DIST_MAX_M) {
 		return false;
 	}
-	LOG_INF("calculate accuyracy: %f, %u", m, (uint8_t)m);
+	//LOG_INF("calculate accuyracy: %f, %u", m, (uint8_t)m);
 	SingleBeaconInfo_t *pBeaconInfo =
 		queue_beacon_info_head(addr, (uint8_t)m, now_ms);
 	if (pBeaconInfo == NULL) {
@@ -276,7 +276,7 @@ bool beac_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 	pBeaconInfo->prevMeasureTime = now_ms;
 
 	if (ring_buffer_is_full(&pBeaconInfo->beacon_hist_fifo)) {
-		LOG_INF("Ringbuffer is full");
+		LOG_WRN("Ringbuffer is full");
 		ring_buffer_dequeue(&pBeaconInfo->beacon_hist_fifo,
 				    &beacon_history);
 	}
@@ -287,7 +287,7 @@ bool beac_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 
 	char mac_s[MAC_CHARBUF_SIZE];
 
-	LOG_INF("MAC=%s  RSSI=%d reported =%d  m=%d calc=%d\n",
+	LOG_INF("Device=%s  RX_RSSI=%d TX_RSSI=%d  m=%d calc=%d\n",
 		log_strdup(mac2string(mac_s, sizeof(mac_s), addr)),
 		(int)rssi_sample_value, (int)beacon_adv_rssi, (int)m,
 		pBeaconInfo->calculated_dist);

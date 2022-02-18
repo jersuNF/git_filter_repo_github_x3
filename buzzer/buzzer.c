@@ -16,8 +16,6 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BUZZER_LOG_LEVEL);
 #define PWM_BUZZER_NODE DT_ALIAS(pwm_buzzer)
 #define PWM_BUZZER_LABEL DT_GPIO_LABEL(PWM_BUZZER_NODE, pwms)
 #define PWM_CHANNEL DT_PWMS_CHANNEL(DT_ALIAS(pwm_buzzer))
-#else
-#error "Choose a supported PWM driver"
 #endif
 
 const struct device *buzzer_pwm;
@@ -183,7 +181,8 @@ int buzzer_module_init(void)
 	uint64_t cycles;
 	buzzer_pwm = device_get_binding(PWM_BUZZER_LABEL);
 	if (!buzzer_pwm) {
-		LOG_ERR("Cannot find buzzer PWM device!");
+		LOG_ERR("Cannot find buzzer PWM device! %s",
+			log_strdup(PWM_BUZZER_LABEL));
 		return -ENODEV;
 	}
 
@@ -192,6 +191,12 @@ int buzzer_module_init(void)
 		LOG_ERR("Error getting clock cycles for PWM %d", err);
 		return err;
 	}
+
+	k_work_queue_init(&sound_q);
+	k_work_queue_start(&sound_q, sound_buzzer_area,
+			   K_THREAD_STACK_SIZEOF(sound_buzzer_area),
+			   CONFIG_BUZZER_THREAD_PRIORITY, NULL);
+	k_work_init(&sound_work, play);
 
 	return 0;
 }
@@ -232,12 +237,3 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, sound_event);
-
-void init_sound_controller(void)
-{
-	k_work_queue_init(&sound_q);
-	k_work_queue_start(&sound_q, sound_buzzer_area,
-			   K_THREAD_STACK_SIZEOF(sound_buzzer_area),
-			   CONFIG_BUZZER_THREAD_PRIORITY, NULL);
-	k_work_init(&sound_work, play);
-}

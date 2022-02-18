@@ -27,7 +27,7 @@ static struct k_work_q sound_q;
 static struct k_work sound_work;
 K_THREAD_STACK_DEFINE(sound_buzzer_area, CONFIG_BUZZER_THREAD_SIZE);
 
-/* Fix powermode for this function. */
+/* Check power consumption for this PWM set. */
 int set_pwm_to_idle(void)
 {
 	int err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, 0, 0, 0);
@@ -42,11 +42,9 @@ int set_pwm_to_idle(void)
  * 
  * @param note note to be played, contains freq and sustain
  * 
- * @param pwm_off_after_played sets the pwm off if true
- * 
  * @return true if ready for next note, false if we want to terminate sequence
  */
-int play_note(note_t note, bool pwm_off_after_played)
+int play_note(note_t note)
 {
 	/* Check variable set by event_handler thread when we
 	 * receive new events with higher priority, terminate if true.
@@ -65,12 +63,9 @@ int play_note(note_t note, bool pwm_off_after_played)
 	/* Play note for 'sustain (s)' milliseconds. */
 	k_sleep(K_MSEC(note.s));
 
-	if (pwm_off_after_played) {
-		/* Fix powermode for this function. */
-		err = set_pwm_to_idle();
-		if (err) {
-			return false;
-		}
+	err = set_pwm_to_idle();
+	if (err) {
+		return false;
 	}
 	return true;
 }
@@ -82,7 +77,7 @@ void play_song(const note_t *song, const size_t num_notes)
 	 * straight after. Turn off PWM (set to 0) when song is finished.
 	 */
 	for (int i = 0; i < num_notes; i++) {
-		if (!play_note(song[i], false)) {
+		if (!play_note(song[i])) {
 			/* Exit if function returns false, this means
 			 * the atomic variable set by event handler
 			 * is true and we have a higher priority sound
@@ -91,9 +86,6 @@ void play_song(const note_t *song, const size_t num_notes)
 			return;
 		}
 	}
-
-	/* Fix powermode for this function. */
-	set_pwm_to_idle();
 }
 
 void play()
@@ -114,7 +106,7 @@ void play()
 		EVENT_SUBMIT(ev_playing);
 
 		note_t c6 = { .t = tone_c_6, .s = d_8 };
-		play_note(c6, true);
+		play_note(c6);
 		break;
 	}
 	case SND_PERSPELMANN: {

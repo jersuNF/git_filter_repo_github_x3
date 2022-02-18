@@ -8,6 +8,7 @@
 #include "buzzer.h"
 #include <device.h>
 #include <drivers/pwm.h>
+#include "melodies.h"
 
 #define MODULE buzzer
 LOG_MODULE_REGISTER(MODULE, CONFIG_BUZZER_LOG_LEVEL);
@@ -25,56 +26,6 @@ atomic_t stop_current_sound = ATOMIC_INIT(false);
 static struct k_work_q sound_q;
 static struct k_work sound_work;
 K_THREAD_STACK_DEFINE(sound_buzzer_area, CONFIG_BUZZER_THREAD_SIZE);
-
-static const note_t m_geiterams[] = {
-	{ .t = tone_nothing, .s = d_16 },
-	{ .t = tone_e_6, .s = d_16 },
-	{ .t = tone_e_6, .s = d_16 },
-	{ .t = tone_e_6, .s = d_16 },
-	{ .t = tone_d_6, .s = d_16 },
-	{ .t = tone_c_6, .s = d_8 },
-	{ .t = tone_c_6, .s = d_8 },
-	/* .. */
-	{ .t = tone_e_6, .s = d_16 },
-	{ .t = tone_g_6, .s = d_16 },
-	{ .t = tone_c_7, .s = d_16 },
-	{ .t = tone_e_6, .s = d_16 },
-	{ .t = tone_g_6, .s = d_8 },
-	{ .t = tone_g_6, .s = d_8 },
-	/* .. */
-	{ .t = tone_b_6, .s = d_16 },
-	{ .t = tone_b_6, .s = d_16 },
-	{ .t = tone_b_6, .s = d_16 },
-	{ .t = tone_a_6, .s = d_16 },
-	{ .t = tone_f_6, .s = d_8 },
-	{ .t = tone_f_6, .s = d_8 },
-	/* .. */
-	{ .t = tone_a_6, .s = d_16 },
-	{ .t = tone_a_6, .s = d_16 },
-	{ .t = tone_a_6, .s = d_16 },
-	{ .t = tone_g_6, .s = d_16 },
-	{ .t = tone_e_6, .s = d_8 },
-	{ .t = tone_e_6, .s = d_8 },
-};
-
-static const note_t m_perspelmann[] = {
-	{ .t = tone_nothing, .s = d_16 },
-	{ .t = tone_c_7, .s = d_16 },
-	{ .t = tone_c_7, .s = d_8 },
-	{ .t = tone_g_6, .s = d_8 },
-	{ .t = tone_aiss_6, .s = d_16 },
-	{ .t = tone_a_6, .s = d_8 },
-	{ .t = tone_f_6, .s = d_8 },
-	{ .t = tone_f_7, .s = d_16 },
-	{ .t = tone_e_6, .s = d_8 },
-	/* .. */
-	{ .t = tone_f_6, .s = d_8 },
-	{ .t = tone_d_6, .s = d_16 },
-	{ .t = tone_c_6, .s = d_8 },
-};
-
-#define n_geiterams_notes (sizeof(m_geiterams) / sizeof(m_geiterams[0]))
-#define n_perspelmann_notes (sizeof(m_perspelmann) / sizeof(m_perspelmann[0]))
 
 /* Fix powermode for this function. */
 int set_pwm_to_idle(void)
@@ -155,24 +106,47 @@ void play()
 	/* Starting a new sound type, set atomic to false. */
 	atomic_set(&stop_current_sound, false);
 
+	struct sound_status_event *ev_playing = new_sound_status_event();
+
 	switch (current_type) {
 	case SND_WELCOME: {
+		ev_playing->status = SND_STATUS_PLAYING;
+		EVENT_SUBMIT(ev_playing);
+
 		note_t c6 = { .t = tone_c_6, .s = d_8 };
 		play_note(c6, true);
 		break;
 	}
 	case SND_PERSPELMANN: {
+		ev_playing->status = SND_STATUS_PLAYING;
+		EVENT_SUBMIT(ev_playing);
+
 		play_song(m_perspelmann, n_perspelmann_notes);
 		break;
 	}
 	case SND_FIND_ME: {
+		ev_playing->status = SND_STATUS_PLAYING;
+		EVENT_SUBMIT(ev_playing);
+
 		play_song(m_geiterams, n_geiterams_notes);
+		break;
+	}
+	case SND_MAX: {
+		ev_playing->status = SND_STATUS_PLAYING_MAX;
+		EVENT_SUBMIT(ev_playing);
+
+		/* Play max freq here. */
 		break;
 	}
 	default: {
 		break;
 	}
 	}
+
+	struct sound_status_event *ev_idle = new_sound_status_event();
+	ev_idle->status = SND_STATUS_IDLE;
+	EVENT_SUBMIT(ev_idle);
+
 	current_type = SND_READY_FOR_NEXT_TYPE;
 }
 
@@ -197,6 +171,10 @@ int buzzer_module_init(void)
 			   K_THREAD_STACK_SIZEOF(sound_buzzer_area),
 			   CONFIG_BUZZER_THREAD_PRIORITY, NULL);
 	k_work_init(&sound_work, play);
+
+	struct sound_status_event *ev = new_sound_status_event();
+	ev->status = SND_STATUS_IDLE;
+	EVENT_SUBMIT(ev);
 
 	return 0;
 }

@@ -10,6 +10,7 @@ zephyr_include_directories(.
 target_sources(app PRIVATE
 			${CMAKE_CURRENT_SOURCE_DIR}/ble_controller.c
 			${CMAKE_CURRENT_SOURCE_DIR}/ble_dfu.c
+			${CMAKE_CURRENT_SOURCE_DIR}/beacon_processor.c
 			${CMAKE_CURRENT_SOURCE_DIR}/services/nofence_service.c
 			${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/ble_conn_event.c
 			${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/ble_ctrl_event.c

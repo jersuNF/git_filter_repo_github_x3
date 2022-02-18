@@ -39,7 +39,6 @@ typedef struct {
 	duration_t s;
 } note_t;
 
-int buzzer_module_init(void);
-void play_type(enum sound_event_type type);
+void init_sound_controller(void);
 
 #endif /* _BUZZER_H_ */

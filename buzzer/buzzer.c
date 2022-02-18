@@ -20,10 +20,13 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BUZZER_LOG_LEVEL);
 #error "Choose a supported PWM driver"
 #endif
 
-K_MSGQ_DEFINE(msgq_sound_events, sizeof(struct sound_event),
-	      CONFIG_MSGQ_SOUND_EVENT_SIZE, 4);
-
 const struct device *buzzer_pwm;
+
+static volatile enum sound_event_type current_type = SND_READY_FOR_NEXT_TYPE;
+atomic_t stop_current_sound = ATOMIC_INIT(false);
+static struct k_work_q sound_q;
+static struct k_work sound_work;
+K_THREAD_STACK_DEFINE(sound_buzzer_area, CONFIG_BUZZER_THREAD_SIZE);
 
 static const note_t m_geiterams[] = {
 	{ .t = tone_nothing, .s = d_16 },
@@ -76,22 +79,38 @@ static const note_t m_perspelmann[] = {
 #define n_perspelmann_notes (sizeof(m_perspelmann) / sizeof(m_perspelmann[0]))
 
 /* Fix powermode for this function. */
-void set_pwm_to_idle(void)
+int set_pwm_to_idle(void)
 {
 	int err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, 0, 0, 0);
 	if (err) {
 		LOG_ERR("pwm off fails %i", err);
-		return;
+		return err;
 	}
+	return 0;
 }
 
-void play_note(note_t note, bool pwm_off_after_played)
+/** @brief Plays a note.
+ * 
+ * @param note note to be played, contains freq and sustain
+ * 
+ * @param pwm_off_after_played sets the pwm off if true
+ * 
+ * @return true if ready for next note, false if we want to terminate sequence
+ */
+int play_note(note_t note, bool pwm_off_after_played)
 {
+	/* Check variable set by event_handler thread when we
+	 * receive new events with higher priority, terminate if true.
+	 */
+	if (atomic_get(&stop_current_sound)) {
+		return false;
+	}
+
 	int err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, note.t, note.t / 2U,
 				   0);
 	if (err) {
 		LOG_ERR("Error %d: failed to set pulse width", err);
-		return;
+		return false;
 	}
 
 	/* Play note for 'sustain (s)' milliseconds. */
@@ -99,8 +118,12 @@ void play_note(note_t note, bool pwm_off_after_played)
 
 	if (pwm_off_after_played) {
 		/* Fix powermode for this function. */
-		set_pwm_to_idle();
+		err = set_pwm_to_idle();
+		if (err) {
+			return false;
+		}
 	}
+	return true;
 }
 
 void play_song(const note_t *song, const size_t num_notes)
@@ -110,22 +133,31 @@ void play_song(const note_t *song, const size_t num_notes)
 	 * straight after. Turn off PWM (set to 0) when song is finished.
 	 */
 	for (int i = 0; i < num_notes; i++) {
-		play_note(song[i], false);
+		if (!play_note(song[i], false)) {
+			/* Exit if function returns false, this means
+			 * the atomic variable set by event handler
+			 * is true and we have a higher priority sound
+			 * incomming.
+			 */
+			return;
+		}
 	}
 
 	/* Fix powermode for this function. */
 	set_pwm_to_idle();
 }
 
-/* Work out a priority sound system. Solve multiple event submissions. */
-void play_type(enum sound_event_type type)
+void play()
 {
-	LOG_INF("Received sound event %d", type);
 	if (buzzer_pwm == NULL) {
 		LOG_ERR("Buzzer PWM not yet initialized.");
 		return;
 	}
-	switch (type) {
+
+	/* Starting a new sound type, set atomic to false. */
+	atomic_set(&stop_current_sound, false);
+
+	switch (current_type) {
 	case SND_WELCOME: {
 		note_t c6 = { .t = tone_c_6, .s = d_8 };
 		play_note(c6, true);
@@ -143,6 +175,7 @@ void play_type(enum sound_event_type type)
 		break;
 	}
 	}
+	current_type = SND_READY_FOR_NEXT_TYPE;
 }
 
 int buzzer_module_init(void)
@@ -175,10 +208,19 @@ static bool event_handler(const struct event_header *eh)
 {
 	if (is_sound_event(eh)) {
 		struct sound_event *ev = cast_sound_event(eh);
-		while (k_msgq_put(&msgq_sound_events, ev, K_NO_WAIT) != 0) {
-			k_msgq_purge(&msgq_sound_events);
-		}
 
+		/* Check if we want to process or not. Must be done here
+		 * since sound thread is busy playing. Notify sound thread
+		 * with atomic variable whether it should stop playing or
+		 * continue.
+		 */
+		if (ev->type > current_type) {
+			return false;
+		} else {
+			atomic_set(&stop_current_sound, true);
+			current_type = ev->type;
+			k_work_submit_to_queue(&sound_q, &sound_work);
+		}
 		return false;
 	}
 
@@ -191,18 +233,11 @@ static bool event_handler(const struct event_header *eh)
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, sound_event);
 
-void buzzer_thread_fn()
+void init_sound_controller(void)
 {
-	while (true) {
-		struct sound_event ev;
-		int err = k_msgq_get(&msgq_sound_events, &ev, K_FOREVER);
-		if (err) {
-			LOG_ERR("Error getting sound_event: %d", err);
-			return;
-		}
-		play_type(ev.type);
-	}
+	k_work_queue_init(&sound_q);
+	k_work_queue_start(&sound_q, sound_buzzer_area,
+			   K_THREAD_STACK_SIZEOF(sound_buzzer_area),
+			   CONFIG_BUZZER_THREAD_PRIORITY, NULL);
+	k_work_init(&sound_work, play);
 }
-
-K_THREAD_DEFINE(buzzer_thread, CONFIG_BUZZER_THREAD_SIZE, buzzer_thread_fn,
-		NULL, NULL, NULL, CONFIG_BUZZER_THREAD_PRIORITY, 0, 0);

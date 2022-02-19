@@ -52,6 +52,7 @@ bool lte_is_ready(void)
 
 static size_t sendall(int sock, const void *buf, size_t len)
 {
+	size_t to_send = len;
 	while (len) {
 		size_t out_len = send(sock, buf, len, 0);
 
@@ -61,8 +62,7 @@ static size_t sendall(int sock, const void *buf, size_t len)
 		buf = (const char *)buf + out_len;
 		len -= out_len;
 	}
-
-	return 0;
+	return to_send;
 }
 
 int8_t socket_connect(struct data *data, struct sockaddr *addr,
@@ -115,7 +115,7 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 	return ret;
 }
 
-int8_t socket_receive(struct data *data, char **msg)
+int8_t socket_receive(struct data *data, char *msg)
 {
 	int received;
 	char buf[RECV_BUF_SIZE];
@@ -123,11 +123,11 @@ int8_t socket_receive(struct data *data, char **msg)
 	received = recv(data->tcp.sock, buf, sizeof(buf), MSG_DONTWAIT);
 
 	if (received > 0) {
-		*msg = buf;
+		msg = &buf[0];
 		LOG_WRN("Socket received %d bytes!\n", received);
 		return received;
 	} else if (received < 0) {
-		LOG_ERR("Socket receive error!\n");
+		LOG_ERR("Socket receive error!%d\n", received);
 		return received;
 	}
 	return 0;

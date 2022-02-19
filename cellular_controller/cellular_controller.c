@@ -15,7 +15,7 @@ static int server_port;
 static char server_ip[15];
 
 int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
-uint8_t socket_receive(struct data *, char **);
+uint8_t socket_receive(struct data *, char *);
 int8_t lte_init(void);
 bool lte_is_ready(void);
 
@@ -43,7 +43,7 @@ int8_t receive_tcp(struct data *sock_data)
 	char *buf = NULL;
 	uint8_t *pMsgIn = NULL;
 
-	received = socket_receive(sock_data, &buf);
+	received = socket_receive(sock_data, buf);
 	if (received == 0) {
 		return 0;
 	} else if (received > 0) {
@@ -74,7 +74,7 @@ int8_t receive_tcp(struct data *sock_data)
 	} else {
 		LOG_ERR("Socket receive error!\n");
 		submit_error(SOCKET_RECV, received);
-		return -1;
+		return received;
 	}
 }
 
@@ -105,6 +105,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return true;
 	} else if (is_messaging_stop_connection_event(eh)) {
 		stop_tcp();
+		connected = false;
 		return true;
 	} else if (is_messaging_proto_out_event(eh)) {
 		/* Accessing event data. */
@@ -208,7 +209,7 @@ int8_t cellular_controller_init(void)
 					"used. \n");
 //				goto exit_cellular_controller;
 			}
-			ret = start_tcp();
+			ret = 0;
 			if (ret == 0) {
 				LOG_INF("TCP connection started!\n");
 				connected = true;
@@ -229,6 +230,7 @@ int8_t cellular_controller_init(void)
 
 exit_cellular_controller:
 	stop_tcp();
+	connected = false;
 	LOG_ERR("Cellular controller initialization failure!");
 	return -1;
 }

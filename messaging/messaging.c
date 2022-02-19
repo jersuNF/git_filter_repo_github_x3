@@ -18,9 +18,11 @@
 #include "collar_protocol.h"
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK  0x20
 
+#define BYTESWAP16(x)  (   ( (x) <<  8) | ( (x) >>  8)    )
+
 uint32_t time_from_server;
 
-K_SEM_DEFINE(cache_lock_sem, 0, 1);
+K_SEM_DEFINE(cache_lock_sem, 1, 1);
 
 collar_state_struct_t current_state;
 gps_last_fix_struct_t cached_fix;
@@ -28,6 +30,7 @@ uint8_t poll_period_minutes = 15;
 void build_poll_request(NofenceMessage *);
 void proto_InitHeader(NofenceMessage *);
 void process_poll_response(NofenceMessage *);
+int send_message(NofenceMessage *);
 
 _DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *);
 bool proto_hasLastKnownDatePos(const gps_last_fix_struct_t *);
@@ -68,10 +71,13 @@ void modem_poll_work_fn()
 {
 	/* Add logic for the periodic protobuf modem poller. */
 	NofenceMessage new_msg;
+	memset(&new_msg,0,sizeof(new_msg));
 	if (!k_sem_take(&cache_lock_sem, K_SECONDS(1))) {
+		LOG_DBG("Building pull request!\n");
 		build_poll_request(&new_msg);
 		k_sem_give(&cache_lock_sem);
 	}
+	LOG_WRN("Messaging - Sending new message!\n");
 	send_message(&new_msg);
 
 //	k_work_reschedule(&modem_poll_work,
@@ -82,6 +88,7 @@ void modem_poll_work_fn()
 
 void messaging_module_init(void)
 {
+	LOG_INF("Inintializing messaging module!\n");
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
 	modem_poll_work_fn();
 //	k_work_reschedule(&modem_poll_work,
@@ -346,28 +353,57 @@ void build_poll_request(NofenceMessage *poll_req)
 //			NF_X25_VERSION_NUMBER;
 	}
 }
-uint32_t dummy_timestamp = 1644913291;
+
 void proto_InitHeader(NofenceMessage * msg) {
 	msg->header.ulId = 11500; //TODO: read from eeprom
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
-	msg->header.ulUnixTimestamp = dummy_timestamp;
+	msg->header.ulUnixTimestamp = 1644913291;
 }
 
 int send_message(NofenceMessage *msg_proto){
 	uint8_t encoded_msg[NofenceMessage_size];
-	size_t *encoded_size = NULL;
+	memset(encoded_msg, 0, sizeof(encoded_msg));
+	LOG_DBG("Byte array !400%0x\n", encoded_msg);
+	size_t encoded_size = 0;
+	LOG_DBG("Start message encoding!, size: %d, version: %u\n", sizeof
+		(*msg_proto),
+		msg_proto->header.ulVersion);
 
-	int ret = collar_protocol_encode(msg_proto, encoded_msg,
-					 sizeof(encoded_msg), encoded_size);
+	LOG_WRN("Input to proto encode: %p,%p,%lu,%p\n", msg_proto,
+		&encoded_msg[0],sizeof(encoded_msg), &encoded_size);
+
+	int ret = collar_protocol_encode(msg_proto, &encoded_msg[0],
+					 sizeof(encoded_msg), &encoded_size);
+	for (int i = 0; i<encoded_size; i++){
+		printk("\\x%02x",encoded_msg[i]);
+	}
+	printk("\n");
+	/* add 16-bit uint size of encodede message. */
+	char  *tmp;
+	tmp = (char *) malloc(encoded_size+2);
+	uint16_t size = BYTESWAP16(encoded_size+2);
+	memcpy(tmp, &size, 2);
+	memcpy(tmp+2, &encoded_msg[0], encoded_size);
+	for (int i = 0; i<encoded_size+2; i++){
+		printk("\\x%02x",tmp[i]);
+	}
+	printk("\n");
+	LOG_DBG("Finished message encoding, %d\n", ret);
 	struct messaging_proto_out_event *msg2send =
 		new_messaging_proto_out_event();
-	msg2send->buf = &encoded_msg[0];
-	msg2send->len = *encoded_size;
+	LOG_DBG("Declared message event!\n");
+	//msg2send->buf = &encoded_msg[0];
+	msg2send->buf = tmp;
+	LOG_DBG("Message length = %u!\n", encoded_size + 2);
+	msg2send->len = encoded_size + 2;
+	LOG_DBG("Finished building message event\n!\n");
 	EVENT_SUBMIT(msg2send);
+	LOG_DBG("Submitted message event\n!\n");
 	while(!send_out_ack){
 		k_sleep(K_SECONDS(0.1));
 	}
+	free(tmp);
 	send_out_ack = false;
 	return 0;
 }

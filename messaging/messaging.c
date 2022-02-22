@@ -3,6 +3,7 @@
  */
 
 #include <zephyr.h>
+#include <stdlib.h>
 #include "messaging_module_events.h"
 #include "messaging.h"
 #include <logging/log.h>
@@ -16,6 +17,7 @@
 #include "request_events.h"
 #include "nf_version.h"
 #include "collar_protocol.h"
+
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK  0x20
 
 #define BYTESWAP16(x)  (   ( (x) <<  8) | ( (x) >>  8)    )
@@ -124,9 +126,9 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-	if (is_lte_proto_event(eh)) {
-		struct lte_proto_event *ev = cast_lte_proto_event(eh);
-		while (k_msgq_put(&lte_proto_msgq, buf, K_NO_WAIT) != 0) {
+	if (is_cellular_proto_in_event(eh)) {
+		struct lte_proto_event *ev = cast_cellular_proto_in_event(eh);
+		while (k_msgq_put(&lte_proto_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&lte_proto_msgq);
 		}
 		return false;
@@ -184,6 +186,7 @@ EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
 EVENT_SUBSCRIBE(MODULE, ble_data_event);
 EVENT_SUBSCRIBE(MODULE, lte_proto_event);
 EVENT_SUBSCRIBE(MODULE,cellular_ack_event);
+EVENT_SUBSCRIBE(MODULE,cellular_proto_in_event);
 EVENT_SUBSCRIBE(MODULE, update_collar_mode);
 EVENT_SUBSCRIBE(MODULE, update_collar_status);
 EVENT_SUBSCRIBE(MODULE, update_fence_status);
@@ -220,7 +223,7 @@ static inline void process_ble_data_event(void)
 
 static inline void process_lte_proto_event(void)
 {
-	struct lte_proto_event ev;
+	struct cellular_proto_in_event ev;
 
 	int err = k_msgq_get(&lte_proto_msgq, &ev, K_NO_WAIT);
 	if (err) {
@@ -231,7 +234,15 @@ static inline void process_lte_proto_event(void)
 	k_sem_give(&lte_proto_sem);
 
 	NofenceMessage proto;
-	err = collar_protocol_decode(ev.buf, ev.len, &proto);
+	err = collar_protocol_decode(ev.buf+2, ev.len-2, &proto);
+	LOG_WRN("Number of received bytes = %d\n", ev.len);
+
+	char *buf = ev.buf;
+	for (int i = 0; i<ev.len; i++){
+		printk("\\x%02x", *buf);
+		buf++;
+	}
+	printk("\n");
 	if (err) {
 		LOG_ERR("Error decoding protobuf message.");
 		return;
@@ -382,7 +393,7 @@ int send_message(NofenceMessage *msg_proto){
 	/* add 16-bit uint size of encodede message. */
 	char  *tmp;
 	tmp = (char *) malloc(encoded_size+2);
-	uint16_t size = BYTESWAP16(encoded_size+2);
+	uint16_t size = BYTESWAP16(encoded_size);
 	memcpy(tmp, &size, 2);
 	memcpy(tmp+2, &encoded_msg[0], encoded_size);
 	for (int i = 0; i<encoded_size+2; i++){
@@ -432,6 +443,7 @@ void process_poll_response(NofenceMessage *proto){
 		/* TODO: publish enable ANO event to GPS controller */
 	}
 	if (pResp->has_bUseServerTime && pResp->bUseServerTime) {
+		LOG_WRN("Server time will be used!\n");
 		time_from_server = proto->header.ulUnixTimestamp;
 	}
 	if (pResp->has_usPollConnectIntervalSec) {

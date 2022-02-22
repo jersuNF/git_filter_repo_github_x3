@@ -15,7 +15,7 @@ static int server_port;
 static char server_ip[15];
 
 int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
-uint8_t socket_receive(struct data *, char *);
+uint8_t socket_receive(struct data *, char **);
 int8_t lte_init(void);
 bool lte_is_ready(void);
 
@@ -35,46 +35,55 @@ void submit_error(int8_t cause, int8_t err_code)
 	EVENT_SUBMIT(err);
 }
 
+void receive_tcp(struct data *);
+K_THREAD_DEFINE(my_tid, MY_STACK_SIZE,
+		receive_tcp, &conf.ipv4, NULL, NULL,
+		MY_PRIORITY, 0, 0);
+
 static APP_BMEM bool connected;
 
-int8_t receive_tcp(struct data *sock_data)
+void receive_tcp(struct data *sock_data)
 {
 	int8_t err, received;
 	char *buf = NULL;
 	uint8_t *pMsgIn = NULL;
+	while(1){
+		k_sleep(K_SECONDS(0.5));
+		if(connected){
+			received = socket_receive(sock_data, &buf);
+			if (received == 0) {
+//				return 0;
+			} else if (received > 0) {
+				LOG_WRN("received %d bytes!\n", received);
 
-	received = socket_receive(sock_data, buf);
-	if (received == 0) {
-		return 0;
-	} else if (received > 0) {
-		LOG_WRN("received %d bytes!\n", received);
-
-		if (messaging_ack ==
-		    false) { /* TODO: notify the error handler */
-			LOG_ERR("New message received while the messaging module "
-				"hasn't consumed the previous one!\n");
-			err = -1;
-			return err;
-		} else {
-			if (pMsgIn != NULL) {
-				free(pMsgIn);
-				pMsgIn = NULL;
+				if (messaging_ack ==
+				    false) { /* TODO: notify the error handler */
+					LOG_ERR("New message received while the messaging module "
+						"hasn't consumed the previous one!\n");
+					err = -1;
+//					return err;
+				} else {
+					if (pMsgIn != NULL) {
+						free(pMsgIn);
+						pMsgIn = NULL;
+					}
+					pMsgIn = (uint8_t *)malloc(received);
+					memcpy(pMsgIn, buf, received);
+					messaging_ack = false;
+					struct cellular_proto_in_event *msgIn =
+						new_cellular_proto_in_event();
+					msgIn->buf = pMsgIn;
+					msgIn->len = received;
+					LOG_INF("Submitting msgIn event!\n");
+					EVENT_SUBMIT(msgIn);
+//					return 0;
+				}
+			} else {
+				LOG_ERR("Socket receive error!\n");
+				submit_error(SOCKET_RECV, received);
+//				return received;
 			}
-			pMsgIn = (uint8_t *)malloc(received);
-			memcpy(pMsgIn, buf, received);
-			messaging_ack = false;
-			struct cellular_proto_in_event *msgIn =
-				new_cellular_proto_in_event();
-			msgIn->buf = pMsgIn;
-			msgIn->len = received;
-			LOG_INF("Submitting msgIn event!\n");
-			EVENT_SUBMIT(msgIn);
-			return 0;
 		}
-	} else {
-		LOG_ERR("Socket receive error!\n");
-		submit_error(SOCKET_RECV, received);
-		return received;
 	}
 }
 
@@ -102,6 +111,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 {
 	if (is_messaging_ack_event(eh)) {
 		messaging_ack = true;
+		LOG_WRN("ACK received!\n");
 		return true;
 	} else if (is_messaging_stop_connection_event(eh)) {
 		stop_tcp();
@@ -138,14 +148,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			return false;
 		}
 		free(CharMsgOut);
-
-		err = receive_tcp(&conf.ipv4);
-		if (err != 0) { /* TODO: notify error handler! */
-			submit_error(SOCKET_RECV, err);
-			return false;
-		} else if (err == 0) {
-			return true;
-		}
+		return true;
 	}
 	return false;
 }

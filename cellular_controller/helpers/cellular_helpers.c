@@ -115,20 +115,26 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 	return ret;
 }
 
-int8_t socket_receive(struct data *data, char *msg)
+int8_t socket_receive(struct data *data, char **msg)
 {
 	int received;
-	char buf[RECV_BUF_SIZE];
-
+	static char buf[RECV_BUF_SIZE];
 	received = recv(data->tcp.sock, buf, sizeof(buf), MSG_DONTWAIT);
 
 	if (received > 0) {
-		msg = &buf[0];
+		*msg = buf;
 		LOG_WRN("Socket received %d bytes!\n", received);
+		for (int i = 0; i<received; i++){
+			printk("\\x%02x",buf[i]);
+		}
+		printk("\n");
 		return received;
 	} else if (received < 0) {
-		LOG_ERR("Socket receive error!%d\n", received);
-		return received;
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			return 0;
+		} else {
+			return -errno;
+		}
 	}
 	return 0;
 }

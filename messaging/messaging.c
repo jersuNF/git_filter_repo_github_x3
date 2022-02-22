@@ -283,6 +283,7 @@ K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_SIZE,
 void messaging_module_init(void)
 {
 	LOG_INF("Inintializing messaging module!\n");
+	k_work_queue_init(&poll_q);
 	k_work_queue_start(&poll_q, messaging_thread,
 			   K_THREAD_STACK_SIZEOF(messaging_thread),
 			   CONFIG_MESSAGING_THREAD_PRIORITY, NULL);

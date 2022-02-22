@@ -129,7 +129,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			submit_error(SOCKET_CONNECT, err);
 			return false;
 		}
-
+		connected = true;
 		/* make a local copy of the message to send.*/
 		char *CharMsgOut;
 		CharMsgOut = (char *)malloc(MsgOutLen);

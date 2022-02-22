@@ -28,7 +28,7 @@ K_SEM_DEFINE(cache_lock_sem, 1, 1);
 
 collar_state_struct_t current_state;
 gps_last_fix_struct_t cached_fix;
-uint8_t poll_period_minutes = 15;
+uint8_t poll_period_minutes = 2;
 void build_poll_request(NofenceMessage *);
 void proto_InitHeader(NofenceMessage *);
 void process_poll_response(NofenceMessage *);
@@ -68,6 +68,10 @@ struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
 					&lte_proto_msgq, 0),
 };
 
+#define MY_STACK_SIZE 512
+#define MY_PRIORITY 5
+K_THREAD_STACK_DEFINE(my_stack_area, MY_STACK_SIZE);
+
 static struct k_work_delayable modem_poll_work;
 void modem_poll_work_fn()
 {
@@ -93,6 +97,10 @@ void messaging_module_init(void)
 	LOG_INF("Inintializing messaging module!\n");
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
 	modem_poll_work_fn();
+	k_work_queue_start(&modem_poll_work, my_stack_area,
+			   K_THREAD_STACK_SIZEOF(my_stack_area), MY_PRIORITY,
+			   NULL);
+
 //	k_work_reschedule(&modem_poll_work,
 //			  K_SECONDS(poll_period_minutes*60));
 }

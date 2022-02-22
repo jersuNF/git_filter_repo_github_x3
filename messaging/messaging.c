@@ -280,13 +280,15 @@ K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_SIZE,
 		messaging_thread_fn, NULL, NULL, NULL,
 		CONFIG_MESSAGING_THREAD_PRIORITY, 0, 0);
 
+K_THREAD_STACK_DEFINE(messaging_poll_thread, CONFIG_MESSAGING_POLL_THREAD_SIZE);
+
 void messaging_module_init(void)
 {
 	LOG_INF("Inintializing messaging module!\n");
 	k_work_queue_init(&poll_q);
-	k_work_queue_start(&poll_q, messaging_thread,
-			   K_THREAD_STACK_SIZEOF(messaging_thread),
-			   CONFIG_MESSAGING_THREAD_PRIORITY, NULL);
+	k_work_queue_start(&poll_q, messaging_poll_thread,
+			   K_THREAD_STACK_SIZEOF(messaging_poll_thread),
+			   CONFIG_MESSAGING_POLL_THREAD_PRIORITY, NULL);
 
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
 	k_work_reschedule_for_queue(&poll_q, &modem_poll_work, K_NO_WAIT);

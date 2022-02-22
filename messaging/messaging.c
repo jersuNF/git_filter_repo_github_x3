@@ -18,9 +18,9 @@
 #include "nf_version.h"
 #include "collar_protocol.h"
 
-#define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK  0x20
+#define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
 
-#define BYTESWAP16(x)  (   ( (x) <<  8) | ( (x) >>  8)    )
+#define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
 
 uint32_t time_from_server;
 
@@ -68,16 +68,14 @@ struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
 					&lte_proto_msgq, 0),
 };
 
-#define MY_STACK_SIZE 512
-#define MY_PRIORITY 5
-K_THREAD_STACK_DEFINE(my_stack_area, MY_STACK_SIZE);
-
+struct k_work_q poll_q;
 static struct k_work_delayable modem_poll_work;
+
 void modem_poll_work_fn()
 {
 	/* Add logic for the periodic protobuf modem poller. */
 	NofenceMessage new_msg;
-	memset(&new_msg,0,sizeof(new_msg));
+	memset(&new_msg, 0, sizeof(new_msg));
 	if (!k_sem_take(&cache_lock_sem, K_SECONDS(1))) {
 		LOG_DBG("Building pull request!\n");
 		build_poll_request(&new_msg);
@@ -86,23 +84,8 @@ void modem_poll_work_fn()
 	LOG_WRN("Messaging - Sending new message!\n");
 	send_message(&new_msg);
 
-//	k_work_reschedule(&modem_poll_work,
-//			  K_SECONDS(CONFIG_PROTO_POLLER_WORK_SEC));
-	k_work_reschedule(&modem_poll_work,
-			  K_SECONDS(poll_period_minutes*60));
-}
-
-void messaging_module_init(void)
-{
-	LOG_INF("Inintializing messaging module!\n");
-	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
-	modem_poll_work_fn();
-	k_work_queue_start(&modem_poll_work, my_stack_area,
-			   K_THREAD_STACK_SIZEOF(my_stack_area), MY_PRIORITY,
-			   NULL);
-
-//	k_work_reschedule(&modem_poll_work,
-//			  K_SECONDS(poll_period_minutes*60));
+	k_work_reschedule_for_queue(&poll_q, &modem_poll_work,
+				    K_SECONDS(poll_period_minutes * 60));
 }
 
 /**
@@ -115,11 +98,11 @@ void messaging_module_init(void)
  */
 static bool event_handler(const struct event_header *eh)
 {
-    size_t len;
-    uint8_t *pMsg = NULL;
-    uint8_t *buf = NULL;
+	size_t len;
+	uint8_t *pMsg = NULL;
+	uint8_t *buf = NULL;
 
-    if (is_ble_ctrl_event(eh)) {
+	if (is_ble_ctrl_event(eh)) {
 		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
 		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
 			/* Message queue is full: purge old data & try again */
@@ -162,7 +145,7 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_update_flash_erase(eh)) {
-		current_state.flash_erase_count ++;
+		current_state.flash_erase_count++;
 		return false;
 	}
 	if (is_update_zap_count(eh)) {
@@ -170,11 +153,11 @@ static bool event_handler(const struct event_header *eh)
 		current_state.zap_count = ev->count;
 		return false;
 	}
-	if (is_cellular_ack_event(eh)){
+	if (is_cellular_ack_event(eh)) {
 		send_out_ack = true;
 		return false;
 	}
-	if (is_new_gps_fix(eh)){
+	if (is_new_gps_fix(eh)) {
 		struct new_gps_fix *ev = cast_new_gps_fix(eh);
 		if (!k_sem_take(&cache_lock_sem, K_SECONDS(0.1))) {
 			cached_fix = ev->fix;
@@ -193,8 +176,8 @@ EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
 EVENT_SUBSCRIBE(MODULE, ble_data_event);
 EVENT_SUBSCRIBE(MODULE, lte_proto_event);
-EVENT_SUBSCRIBE(MODULE,cellular_ack_event);
-EVENT_SUBSCRIBE(MODULE,cellular_proto_in_event);
+EVENT_SUBSCRIBE(MODULE, cellular_ack_event);
+EVENT_SUBSCRIBE(MODULE, cellular_proto_in_event);
 EVENT_SUBSCRIBE(MODULE, update_collar_mode);
 EVENT_SUBSCRIBE(MODULE, update_collar_status);
 EVENT_SUBSCRIBE(MODULE, update_fence_status);
@@ -242,11 +225,11 @@ static inline void process_lte_proto_event(void)
 	k_sem_give(&lte_proto_sem);
 
 	NofenceMessage proto;
-	err = collar_protocol_decode(ev.buf+2, ev.len-2, &proto);
+	err = collar_protocol_decode(ev.buf + 2, ev.len - 2, &proto);
 	LOG_WRN("Number of received bytes = %d\n", ev.len);
 
 	char *buf = ev.buf;
-	for (int i = 0; i<ev.len; i++){
+	for (int i = 0; i < ev.len; i++) {
 		printk("\\x%02x", *buf);
 		buf++;
 	}
@@ -261,16 +244,13 @@ static inline void process_lte_proto_event(void)
 	if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
 		process_poll_response(&proto);
 		return;
-	}
-	else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
+	} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
 		process_fence_msg();
 		return;
-	}
-	else if (proto.which_m == NofenceMessage_ubx_ano_reply_tag) {
+	} else if (proto.which_m == NofenceMessage_ubx_ano_reply_tag) {
 		process_ano_msg();
 		return;
-	}
-	else{
+	} else {
 		return;
 	}
 }
@@ -300,27 +280,40 @@ K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_SIZE,
 		messaging_thread_fn, NULL, NULL, NULL,
 		CONFIG_MESSAGING_THREAD_PRIORITY, 0, 0);
 
+void messaging_module_init(void)
+{
+	LOG_INF("Inintializing messaging module!\n");
+	k_work_queue_start(&poll_q, messaging_thread,
+			   K_THREAD_STACK_SIZEOF(messaging_thread),
+			   CONFIG_MESSAGING_THREAD_PRIORITY, NULL);
+
+	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
+	k_work_reschedule_for_queue(&poll_q, &modem_poll_work, K_NO_WAIT);
+}
+
 void build_poll_request(NofenceMessage *poll_req)
 {
 	proto_InitHeader(poll_req); /* fill up message header. */
 	poll_req->which_m = NofenceMessage_poll_message_req_tag;
-	poll_req->m.poll_message_req.datePos = proto_getLastKnownDatePos(&cached_fix);
+	poll_req->m.poll_message_req.datePos =
+		proto_getLastKnownDatePos(&cached_fix);
 	poll_req->m.poll_message_req.has_datePos =
 		proto_hasLastKnownDatePos(&cached_fix);
 	poll_req->m.poll_message_req.eMode = current_state.collar_mode;
 	poll_req->m.poll_message_req.usZapCount = current_state.zap_count;
-	poll_req->m.poll_message_req.eCollarStatus = current_state.collar_status;
+	poll_req->m.poll_message_req.eCollarStatus =
+		current_state.collar_status;
 	poll_req->m.poll_message_req.eFenceStatus = current_state.fence_status;
-	poll_req->m.poll_message_req.ulFenceDefVersion = current_state
-								.fence_version;
+	poll_req->m.poll_message_req.ulFenceDefVersion =
+		current_state.fence_version;
 	poll_req->m.poll_message_req.usBatteryVoltage = 378; /* TODO: get
  * value from battery voltage event.*/
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
 	/* TODO: get gsm info from modem driver */
-//	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
-//	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
-//	poll_req->m.poll_message_req.has_xGsmInfo = false;
+	//	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
+	//	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
+	//	poll_req->m.poll_message_req.has_xGsmInfo = false;
 
 	if (current_state.flash_erase_count) {
 		// m_flash_erase_count is reset when we receive a poll reply
@@ -329,83 +322,84 @@ void build_poll_request(NofenceMessage *poll_req)
 			current_state.flash_erase_count;
 	}
 	if (m_confirm_acc_limits) {
-//		poll_req.m.poll_message_req.has_usAccSigmaSleepLimit = true;
-//		poll_req.m.poll_message_req.usAccSigmaSleepLimit =
-//			EEPROM_GetAccSigmaSleepLimit();
-//		poll_req.m.poll_message_req.has_usAccSigmaNoActivityLimit = true;
-//		poll_req.m.poll_message_req.usAccSigmaNoActivityLimit =
-//			EEPROM_GetAccSigmaNoActivityLimit();
-//		poll_req.m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
-//		poll_req.m.poll_message_req.usOffAnimalTimeLimitSec =
-//			EEPROM_GetOffAnimalTimeLimitSec();
+		//		poll_req.m.poll_message_req.has_usAccSigmaSleepLimit = true;
+		//		poll_req.m.poll_message_req.usAccSigmaSleepLimit =
+		//			EEPROM_GetAccSigmaSleepLimit();
+		//		poll_req.m.poll_message_req.has_usAccSigmaNoActivityLimit = true;
+		//		poll_req.m.poll_message_req.usAccSigmaNoActivityLimit =
+		//			EEPROM_GetAccSigmaNoActivityLimit();
+		//		poll_req.m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
+		//		poll_req.m.poll_message_req.usOffAnimalTimeLimitSec =
+		//			EEPROM_GetOffAnimalTimeLimitSec();
 	}
 	if (m_confirm_ble_key) {
-//		poll_req.m.poll_message_req.has_rgubcBleKey = true;
-//		poll_req.m.poll_message_req.rgubcBleKey.size = EEP_BLE_SEC_KEY_LEN;
-//		EEPROM_ReadBleSecKey(poll_req.m.poll_message_req.rgubcBleKey.bytes,
-//				     EEP_BLE_SEC_KEY_LEN);
+		//		poll_req.m.poll_message_req.has_rgubcBleKey = true;
+		//		poll_req.m.poll_message_req.rgubcBleKey.size = EEP_BLE_SEC_KEY_LEN;
+		//		EEPROM_ReadBleSecKey(poll_req.m.poll_message_req.rgubcBleKey.bytes,
+		//				     EEP_BLE_SEC_KEY_LEN);
 	}
 	poll_req->m.poll_message_req.usGnssOnFixAgeSec = 123;
 	poll_req->m.poll_message_req.usGnssTTFFSec = 12;
 
 	if (m_transfer_boot_params) {
-//		poll_req.m.poll_message_req.has_versionInfo = true;
-//		uint16_t xbootVersion;
-//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
-//			poll_req.m.poll_message_req.versionInfo
-//				.usATmegaBootloaderVersion =
-//				xbootVersion;
-//			poll_req.m.poll_message_req.versionInfo
-//				.has_usATmegaBootloaderVersion = true;
-//		}
-//		poll_req.m.poll_message_req.has_versionInfoHW = true;
-//		poll_req.m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
-//			EEPROM_GetHwVersion();
-//		poll_req.m.poll_message_req.versionInfoHW.usPCB_Product_Type =
-//			(uint8_t)EEPROM_GetProductType();
-//		poll_req.m.poll_message_req.has_xSimCardId = true;
-//		memcpy(poll_req.m.poll_message_req.xSimCardId, BGS_SCID(),
-//		       sizeof(poll_req.m.poll_message_req.xSimCardId));
-//		poll_req.m.poll_message_req.versionInfo.has_ulATmegaVersion =
-//			true;
-//		poll_req.m.poll_message_req.versionInfo.ulATmegaVersion =
-//			NF_X25_VERSION_NUMBER;
+		//		poll_req.m.poll_message_req.has_versionInfo = true;
+		//		uint16_t xbootVersion;
+		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
+		//			poll_req.m.poll_message_req.versionInfo
+		//				.usATmegaBootloaderVersion =
+		//				xbootVersion;
+		//			poll_req.m.poll_message_req.versionInfo
+		//				.has_usATmegaBootloaderVersion = true;
+		//		}
+		//		poll_req.m.poll_message_req.has_versionInfoHW = true;
+		//		poll_req.m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
+		//			EEPROM_GetHwVersion();
+		//		poll_req.m.poll_message_req.versionInfoHW.usPCB_Product_Type =
+		//			(uint8_t)EEPROM_GetProductType();
+		//		poll_req.m.poll_message_req.has_xSimCardId = true;
+		//		memcpy(poll_req.m.poll_message_req.xSimCardId, BGS_SCID(),
+		//		       sizeof(poll_req.m.poll_message_req.xSimCardId));
+		//		poll_req.m.poll_message_req.versionInfo.has_ulATmegaVersion =
+		//			true;
+		//		poll_req.m.poll_message_req.versionInfo.ulATmegaVersion =
+		//			NF_X25_VERSION_NUMBER;
 	}
 }
 
-void proto_InitHeader(NofenceMessage * msg) {
+void proto_InitHeader(NofenceMessage *msg)
+{
 	msg->header.ulId = 11500; //TODO: read from eeprom
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
 	msg->header.ulUnixTimestamp = 1644913291;
 }
 
-int send_message(NofenceMessage *msg_proto){
+int send_message(NofenceMessage *msg_proto)
+{
 	uint8_t encoded_msg[NofenceMessage_size];
 	memset(encoded_msg, 0, sizeof(encoded_msg));
 	LOG_DBG("Byte array !400%0x\n", encoded_msg);
 	size_t encoded_size = 0;
-	LOG_DBG("Start message encoding!, size: %d, version: %u\n", sizeof
-		(*msg_proto),
-		msg_proto->header.ulVersion);
+	LOG_DBG("Start message encoding!, size: %d, version: %u\n",
+		sizeof(*msg_proto), msg_proto->header.ulVersion);
 
 	LOG_WRN("Input to proto encode: %p,%p,%lu,%p\n", msg_proto,
-		&encoded_msg[0],sizeof(encoded_msg), &encoded_size);
+		&encoded_msg[0], sizeof(encoded_msg), &encoded_size);
 
 	int ret = collar_protocol_encode(msg_proto, &encoded_msg[0],
 					 sizeof(encoded_msg), &encoded_size);
-	for (int i = 0; i<encoded_size; i++){
-		printk("\\x%02x",encoded_msg[i]);
+	for (int i = 0; i < encoded_size; i++) {
+		printk("\\x%02x", encoded_msg[i]);
 	}
 	printk("\n");
 	/* add 16-bit uint size of encodede message. */
-	char  *tmp;
-	tmp = (char *) malloc(encoded_size+2);
+	char *tmp;
+	tmp = (char *)malloc(encoded_size + 2);
 	uint16_t size = BYTESWAP16(encoded_size);
 	memcpy(tmp, &size, 2);
-	memcpy(tmp+2, &encoded_msg[0], encoded_size);
-	for (int i = 0; i<encoded_size+2; i++){
-		printk("\\x%02x",tmp[i]);
+	memcpy(tmp + 2, &encoded_msg[0], encoded_size);
+	for (int i = 0; i < encoded_size + 2; i++) {
+		printk("\\x%02x", tmp[i]);
 	}
 	printk("\n");
 	LOG_DBG("Finished message encoding, %d\n", ret);
@@ -419,7 +413,7 @@ int send_message(NofenceMessage *msg_proto){
 	LOG_DBG("Finished building message event\n!\n");
 	EVENT_SUBMIT(msg2send);
 	LOG_DBG("Submitted message event\n!\n");
-	while(!send_out_ack){
+	while (!send_out_ack) {
 		k_sleep(K_SECONDS(0.1));
 	}
 	free(tmp);
@@ -427,14 +421,15 @@ int send_message(NofenceMessage *msg_proto){
 	return 0;
 }
 
-void process_poll_response(NofenceMessage *proto){
-	PollMessageResponse *pResp = &proto-> m.poll_message_resp;
+void process_poll_response(NofenceMessage *proto)
+{
+	PollMessageResponse *pResp = &proto->m.poll_message_resp;
 	if (pResp->has_xServerIp && strlen(pResp->xServerIp) > 0) {
 		struct messaging_host_address_event *host_add_event =
 			new_messaging_host_address_event();
-//		strcpy(host_add_event.address, pResp->xServerIp, sizeof(pResp->xServerIp));
-		strncpy(host_add_event->address, pResp->xServerIp, sizeof
-			(pResp->xServerIp));
+		//		strcpy(host_add_event.address, pResp->xServerIp, sizeof(pResp->xServerIp));
+		strncpy(host_add_event->address, pResp->xServerIp,
+			sizeof(pResp->xServerIp));
 		EVENT_SUBMIT(host_add_event); /*cellular controller writes it
  * to eeprom if it is different from the previously stored address.*/
 	}
@@ -482,23 +477,27 @@ void process_poll_response(NofenceMessage *proto){
 }
 
 /* @brief: starts a firmware download if a new version exists on the server. */
-void process_upgrade_request(VersionInfoFW *fw_ver_from_server){
+void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
+{
 	// compare versions and start update when needed.//
 	return;
 }
 
-void process_fence_msg(void){
+void process_fence_msg(void)
+{
 	return;
 }
 
-void process_ano_msg(void){
+void process_ano_msg(void)
+{
 	return;
 }
 
-_DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *gpsLastFix) {
-
-	bool valid_headVeh = (bool) (gpsLastFix->pvt_flags & GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK);
-	_DatePos a =  {
+_DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *gpsLastFix)
+{
+	bool valid_headVeh = (bool)(gpsLastFix->pvt_flags &
+				    GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK);
+	_DatePos a = {
 		.lLat = gpsLastFix->Lat,
 		.lLon = gpsLastFix->Lon,
 		.usHorizontalAccDm = gpsLastFix->hAccDm,
@@ -513,9 +512,9 @@ _DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *gpsLastFix) {
 		.usHDOP = gpsLastFix->hdop,
 		.has_lHeight = true,
 		.lHeight = gpsLastFix->Height,
-#if defined (HW_BAROMETER)
+#if defined(HW_BAROMETER)
 		.has_usHeight = true,
-				.usHeight = gpsLastFix->baro_Height,
+		.usHeight = gpsLastFix->baro_Height,
 #endif
 		.has_ucGpsMode = true,
 		.ucGpsMode = gpsLastFix->gps_mode
@@ -523,7 +522,7 @@ _DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *gpsLastFix) {
 	return a;
 }
 
-bool proto_hasLastKnownDatePos(const gps_last_fix_struct_t * gps) {
+bool proto_hasLastKnownDatePos(const gps_last_fix_struct_t *gps)
+{
 	return gps->unixTimestamp != 0;
-
 }

@@ -15,7 +15,7 @@ if MESSAGING
 
 	config MESSAGING_THREAD_SIZE
 		int "Size of the poller thread"
-		default 8192
+		default 2048
 
 	config MESSAGING_THREAD_PRIORITY
 		int "Priority of the poller thread"

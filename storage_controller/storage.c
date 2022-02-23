@@ -253,6 +253,8 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 
 	/* Publish pastrure ready event for those who need. */
 	if (partition == STG_PARTITION_PASTURE) {
+		fence_t *f = (fence_t *)data;
+		LOG_INF("wrote points %d", f->header.n_points);
 		struct pasture_ready_event *ev = new_pasture_ready_event();
 		EVENT_SUBMIT(ev);
 	}
@@ -321,6 +323,12 @@ static int walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 static inline int read_fcb_partition(flash_partition_t partition,
 				     stg_read_log_cb cb)
 {
+	/* Check if we have any data available. */
+	struct fcb *fcb = get_fcb(partition);
+	if (fcb_is_empty(fcb)) {
+		return -ENODATA;
+	}
+
 	/* Length location used to store the entry location used
 	 * filled in later by the storage controller and then given in
 	 * the callback to the caller.
@@ -348,8 +356,6 @@ static inline int read_fcb_partition(flash_partition_t partition,
 		return -EINVAL;
 	}
 	config.cb = cb;
-
-	struct fcb *fcb = get_fcb(partition);
 
 	int err = fcb_walk(fcb, NULL, walk_cb, &config);
 	if (err) {

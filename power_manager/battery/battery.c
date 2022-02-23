@@ -24,17 +24,24 @@
 LOG_MODULE_REGISTER(MODULE, CONFIG_BATTERY_LOG_LEVEL);
 
 #define VBATT DT_PATH(vbatt)
+#define ADC_DEVICE_EMUL DT_LABEL(DT_INST(0, zephyr_adc_emul))
 
 /* Use divider that reduce battery voltage to
  * the maximum supported by the hardware (3.6 V)
  */
 #define BATTERY_ADC_GAIN ADC_GAIN_1_6
 
+#if DT_NODE_HAS_STATUS(VBATT, okay)
+struct io_channel_config {
+	uint8_t channel;
+};
+#else
+/* Keep this for Twister */
 struct io_channel_config {
 	const char *label;
 	uint8_t channel;
 };
-
+#endif
 struct gpio_channel_config {
 	const char *label;
 	uint8_t pin;
@@ -55,7 +62,6 @@ struct divider_config {
 static const struct divider_config divider_config = {
 #if DT_NODE_HAS_STATUS(VBATT, okay)
 	.io_channel = {
-		DT_IO_CHANNELS_LABEL(VBATT),
 		DT_IO_CHANNELS_INPUT(VBATT),
 	},
 #if DT_NODE_HAS_PROP(VBATT, power_gpios)
@@ -68,6 +74,7 @@ static const struct divider_config divider_config = {
 	.output_ohm = DT_PROP(VBATT, output_ohms),
 	.full_ohm = DT_PROP(VBATT, full_ohms),
 #else /* /vbatt exists */
+/* Keep this for Twister */
 	.io_channel = {
 		DT_LABEL(DT_ALIAS(adc_0)),
 	},
@@ -81,7 +88,15 @@ struct divider_data {
 	struct adc_sequence adc_seq;
 	int16_t raw;
 };
+
+#if DT_NODE_HAS_STATUS(VBATT, okay)
+static struct divider_data divider_data = {
+	.adc = DEVICE_DT_GET(DT_IO_CHANNELS_CTLR(VBATT)),
+};
+#else
+/* Keep this for Twister */
 static struct divider_data divider_data;
+#endif
 
 static int divider_setup(void)
 {
@@ -93,6 +108,13 @@ static int divider_setup(void)
 	struct adc_channel_cfg *accp = &ddp->adc_cfg;
 	int err;
 
+#if DT_NODE_HAS_STATUS(VBATT, okay)
+	if (!device_is_ready(ddp->adc)) {
+		LOG_ERR("ADC device is not ready %s", ddp->adc->name);
+		return -ENOENT;
+	}
+#else
+	/* Keep this for Twister */
 	if (iocp->label == NULL) {
 		return -ENOTSUP;
 	}
@@ -103,6 +125,7 @@ static int divider_setup(void)
 		return -ENOENT;
 	}
 
+#endif
 	if (gcp->label) {
 		ddp->gpio = device_get_binding(gcp->label);
 		if (ddp->gpio == NULL) {

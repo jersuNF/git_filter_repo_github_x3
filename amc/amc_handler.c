@@ -62,7 +62,9 @@ void calculate_work_fn(struct k_work *item)
 {
 	/* Check if cached fence is valid. */
 	if (cached_fence == NULL) {
-		LOG_ERR("No fence data available.");
+		char *err_msg = "No fence data available during calculation.";
+		nf_app_fatal(ERR_SENDER_AMC, -ENODATA, err_msg,
+			     strlen(err_msg));
 		return;
 	}
 
@@ -101,6 +103,21 @@ void calculate_work_fn(struct k_work *item)
 	k_sem_give(&fence_data_sem);
 }
 
+static inline int update_pasture(void)
+{
+	int err = stg_read_pasture_data(update_pasture_cache);
+	if (err == -ENODATA) {
+		char *err_msg = "No pasture found on external flash.";
+		nf_app_warning(ERR_SENDER_AMC, err, err_msg, strlen(err_msg));
+		return 0;
+	} else if (err) {
+		char *err_msg = "Couldn't update pasture cache in AMC.";
+		nf_app_fatal(ERR_SENDER_AMC, err, err_msg, strlen(err_msg));
+		return err;
+	}
+	return 0;
+}
+
 int amc_module_init(void)
 {
 	/* Init work item and start and init calculation 
@@ -112,12 +129,7 @@ int amc_module_init(void)
 			   CONFIG_AMC_CALCULATION_PRIORITY, NULL);
 	k_work_init(&calc_work, calculate_work_fn);
 
-	int err = stg_read_pasture_data(update_pasture_cache);
-	if (err) {
-		char *err_msg = "Cannot update pasture cache on AMC.";
-		nf_app_fatal(ERR_SENDER_AMC, -ENOMEM, err_msg, strlen(err_msg));
-	}
-	return err;
+	return update_pasture();
 }
 
 static inline int update_pasture_cache(uint8_t *data, size_t len)
@@ -172,12 +184,7 @@ static bool event_handler(const struct event_header *eh)
 		 * Once the data has been copied, the storage controller
 		 * frees and handles everything with the buffered data.
 		 */
-		int err = stg_read_pasture_data(update_pasture_cache);
-		if (err) {
-			char *err_msg = "Cannot update pasture cache on AMC.";
-			nf_app_fatal(ERR_SENDER_AMC, err, err_msg,
-				     strlen(err_msg));
-		}
+		update_pasture();
 		return false;
 	}
 	if (is_gnssdata_event(eh)) {

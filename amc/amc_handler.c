@@ -8,10 +8,11 @@
 #include "sound_event.h"
 #include "request_events.h"
 #include "pasture_event.h"
-#include "storage_events.h"
 #include "pasture_structure.h"
 #include "event_manager.h"
 #include "error_event.h"
+
+#include "storage.h"
 
 #define MODULE animal_monitor_control
 LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
@@ -21,9 +22,11 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
  * to ensure that we're calculating with a valid cached fence.
  */
 static fence_t *cached_fence = NULL;
+static size_t cached_fence_size = 0;
 
 #define REQUEST_DATA_SEM_TIMEOUT_SEC 5
 K_SEM_DEFINE(fence_data_sem, 1, 1);
+static inline int update_pasture_cache(uint8_t *data, size_t len);
 
 /* Use two memory regions so we can swap the pointer between them
  * so that instead of waiting for semaphore to be released, we schedule
@@ -50,20 +53,6 @@ static struct k_work_q calc_work_q;
  * calculation algorithm.
  */
 static struct k_work calc_work;
-
-/**
- * @brief Function to request pasture on the event bus
- *        from the storage controller, in which case the
- *        storage module will memcpy its data to the passed address. This is
- *        only done when we boot up/on initialization.
- */
-static void submit_request_pasture(void)
-{
-	struct stg_read_event *ev = new_stg_read_event();
-	ev->partition = STG_PARTITION_PASTURE;
-	ev->rotate = false;
-	EVENT_SUBMIT(ev);
-}
 
 /**
  * @brief Work function for calculating the distance etc using fence and gnss
@@ -96,50 +85,15 @@ void calculate_work_fn(struct k_work *item)
 		atomic_set(&new_gnss_written, false);
 	}
 
-	/* At the moment, we just play the welcome sound everytime we get GNSS
-	 * data, but this is just to test if everything is linked together.
-	 * In the future, this function will contain logic that compares the
-	 * cached fencedata, cached gnssdata and trigger sound events that our
-	 * unit test can subscribe to.
-	 */
-
-	/** @warning The below section MUST be removed and is 
-	 *           only correlated to current
-	 *           unit test to see that the shell work. Its a simple
-	 *           algorithm that checks if if every content of 
-	 *           both fencedata and gnss data is equal to 
-	 *           1337 respectively. Plays a sound the unit test
-	 *           subscribes to if its correct.
-	 */
-	bool fencedata_correct = true;
-	if (cached_fence->header.n_points <= 0) {
-		fencedata_correct = false;
-	}
-	for (int i = 0; i < cached_fence->header.n_points; i++) {
-		if (cached_fence->p_c[i].s_x_dm == 1337 &&
-		    cached_fence->p_c[i].s_y_dm == 1337) {
-			continue;
-		}
-		fencedata_correct = false;
-	}
-
-	bool gnssdata_correct = (current_gnssdata_area->lat == 1337 &&
-				 current_gnssdata_area->lon == 1337);
-
-	if (gnssdata_correct && fencedata_correct) {
-		struct sound_event *s_ev = new_sound_event();
-		s_ev->type = SND_WELCOME;
-		EVENT_SUBMIT(s_ev);
-	}
-
-	if (!gnssdata_correct) {
-		if (current_gnssdata_area->lat == 123 &&
-		    current_gnssdata_area->lon == 123) {
-			struct sound_event *s_ev = new_sound_event();
-			s_ev->type = SND_FIND_ME;
-			EVENT_SUBMIT(s_ev);
+	/* Calculations here, REMOVE BELOW CODE. */
+	if (cached_fence->p_c[0].s_x_dm == 0xDE) {
+		if (current_gnssdata_area->lat == 1337) {
+			struct sound_event *ev = new_sound_event();
+			ev->type = SND_WELCOME;
+			EVENT_SUBMIT(ev);
 		}
 	}
+
 	/* Calculation finished, give semaphore so we can swap memory region
 	 * on next GNSS request. 
 	 * As well as notifying we're not using fence data area. 
@@ -147,7 +101,7 @@ void calculate_work_fn(struct k_work *item)
 	k_sem_give(&fence_data_sem);
 }
 
-void amc_module_init(void)
+int amc_module_init(void)
 {
 	/* Init work item and start and init calculation 
 	 * work queue thread and item. 
@@ -157,7 +111,13 @@ void amc_module_init(void)
 			   K_THREAD_STACK_SIZEOF(amc_calculation_thread_area),
 			   CONFIG_AMC_CALCULATION_PRIORITY, NULL);
 	k_work_init(&calc_work, calculate_work_fn);
-	submit_request_pasture();
+
+	int err = stg_read_pasture_data(update_pasture_cache);
+	if (err) {
+		char *err_msg = "Cannot update pasture cache on AMC.";
+		nf_app_fatal(ERR_SENDER_AMC, -ENOMEM, err_msg, strlen(err_msg));
+	}
+	return err;
 }
 
 static inline int update_pasture_cache(uint8_t *data, size_t len)
@@ -168,13 +128,16 @@ static inline int update_pasture_cache(uint8_t *data, size_t len)
 		LOG_ERR("Error semaphore, retry request pasture here?");
 		return err;
 	}
+
 	/* Free previous fence if any. */
 	if (cached_fence != NULL) {
 		k_free(cached_fence);
 		cached_fence = NULL;
+		cached_fence_size = 0;
 	}
 
 	cached_fence = k_malloc(len);
+	cached_fence_size = len;
 
 	if (cached_fence == NULL) {
 		LOG_ERR("No memory left for caching the fence.");
@@ -203,31 +166,18 @@ static inline int update_pasture_cache(uint8_t *data, size_t len)
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_pasture_ready_event(eh)) {
-		submit_request_pasture();
-		return false;
-	}
-	if (is_stg_ack_read_event(eh)) {
-		struct stg_ack_read_event *ev_ack = cast_stg_ack_read_event(eh);
-		if (ev_ack->partition != STG_PARTITION_PASTURE) {
-			return false;
-		}
-
 		/* Update fence cache by freeing previous fence, and copying
-		 * new one from storage controller.
+		 * new one from storage controller. Takes a callback function
+		 * that is called when the storage controller reads the data.
+		 * Once the data has been copied, the storage controller
+		 * frees and handles everything with the buffered data.
 		 */
-		int err = update_pasture_cache(ev_ack->data, ev_ack->len);
+		int err = stg_read_pasture_data(update_pasture_cache);
 		if (err) {
-			char *err_msg = "Out of memory for pasture cache.";
-			nf_app_fatal(ERR_SENDER_AMC, -ENOMEM, err_msg,
+			char *err_msg = "Cannot update pasture cache on AMC.";
+			nf_app_fatal(ERR_SENDER_AMC, err, err_msg,
 				     strlen(err_msg));
 		}
-
-		/* Indicate data has been consumed, so storage controller can
-		 * finish up it's resources.
-		 */
-		struct stg_consumed_read_event *ev_consume =
-			new_stg_consumed_read_event();
-		EVENT_SUBMIT(ev_consume);
 		return false;
 	}
 	if (is_gnssdata_event(eh)) {
@@ -258,7 +208,5 @@ static bool event_handler(const struct event_header *eh)
 }
 
 EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE(MODULE, ack_pasture_event);
 EVENT_SUBSCRIBE(MODULE, gnssdata_event);
 EVENT_SUBSCRIBE(MODULE, pasture_ready_event);
-EVENT_SUBSCRIBE(MODULE, stg_ack_read_event);

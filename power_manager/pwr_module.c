@@ -66,29 +66,53 @@ static void battery_poll_work_fn()
 	event->battery_mv = batt_voltage;
 	EVENT_SUBMIT(event);
 
-	if (batt_voltage < CONFIG_BATTRY_LOW_THRESHOLD &&
-	    batt_voltage > CONFIG_BATTRY_CRITICAL_THRESHOLD) {
-		struct pwr_status_event *event = new_pwr_status_event();
-		event->pwr_state = PWR_LOW;
-		EVENT_SUBMIT(event);
-		current_state = PWR_LOW;
+	/* Keep old state as reference for later */
+	int old_state = current_state;
 
-	} else if (batt_voltage < CONFIG_BATTRY_CRITICAL_THRESHOLD) {
-		struct pwr_status_event *event = new_pwr_status_event();
-		event->pwr_state = PWR_CRITICAL;
-		EVENT_SUBMIT(event);
-		current_state = PWR_CRITICAL;
+	switch (old_state) {
+	case PWR_NORMAL:
+		if (batt_voltage <
+		    CONFIG_BATTERY_CRITICAL - CONFIG_BATTERY_THRESHOLD) {
+			current_state = PWR_CRITICAL;
+		} else if (batt_voltage <
+			   CONFIG_BATTERY_LOW - CONFIG_BATTERY_THRESHOLD) {
+			current_state = PWR_LOW;
+		}
+		break;
 
-	} else if (batt_voltage >= (CONFIG_BATTRY_NORMAL_THRESHOLD) &&
-		   current_state != PWR_NORMAL) {
-		/* Avoid sending state change if PWR state is normal */
-		struct pwr_status_event *event = new_pwr_status_event();
-		event->pwr_state = PWR_NORMAL;
-		EVENT_SUBMIT(event);
-		current_state = PWR_NORMAL;
+	case PWR_LOW:
+		if (batt_voltage <
+		    CONFIG_BATTERY_CRITICAL - CONFIG_BATTERY_THRESHOLD) {
+			current_state = PWR_CRITICAL;
+		} else if (batt_voltage >
+			   CONFIG_BATTERY_LOW + CONFIG_BATTERY_THRESHOLD) {
+			current_state = PWR_NORMAL;
+		}
+		break;
+	case PWR_CRITICAL:
+		if ((batt_voltage >
+		     (CONFIG_BATTERY_CRITICAL + CONFIG_BATTERY_THRESHOLD)) &&
+		    (batt_voltage < CONFIG_BATTERY_LOW)) {
+			current_state = PWR_LOW;
+		} else if (batt_voltage >
+			   CONFIG_BATTERY_LOW + CONFIG_BATTERY_THRESHOLD) {
+			current_state = PWR_NORMAL;
+		}
+		break;
+
+	default:
+		break;
 	}
+
+	if (old_state != current_state) {
+		/* Avoid sending the same state twice */
+		struct pwr_status_event *event = new_pwr_status_event();
+		event->pwr_state = current_state;
+		EVENT_SUBMIT(event);
+	}
+
 	k_work_reschedule(&battery_poll_work,
-			  K_SECONDS(CONFIG_BATTRY_POLLER_WORK_SEC));
+			  K_SECONDS(CONFIG_BATTERY_POLLER_WORK_SEC));
 }
 
 int pwr_module_init(void)
@@ -112,7 +136,7 @@ int pwr_module_init(void)
 	/* Initialize periodic battery poll function */
 	k_work_init_delayable(&battery_poll_work, battery_poll_work_fn);
 	k_work_reschedule(&battery_poll_work,
-			  K_SECONDS(CONFIG_BATTRY_POLLER_WORK_SEC));
+			  K_SECONDS(CONFIG_BATTERY_POLLER_WORK_SEC));
 
 	return 0;
 }

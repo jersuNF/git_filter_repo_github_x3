@@ -268,7 +268,7 @@ void init_moving_average(void)
 	VbattSMA.average = 0;
 	VbattSMA.N = 0;
 	VbattSMA.total = 0;
-	VbattSMA.MAX_SAMPLES = 300; //one sample pr mainloop
+	VbattSMA.MAX_SAMPLES = CONFIG_BATTERY_MOVING_AVERAGE_SAMPLES;
 }
 
 uint16_t approx_moving_average(MovAvg *p, uint16_t val)

@@ -15,20 +15,24 @@ if POWER_MANAGER
         module-str = Battery logging
         source "subsys/logging/Kconfig.template.log_config"
 
-        config BATTRY_POLLER_WORK_SEC
+        config BATTERY_POLLER_WORK_SEC
         int "Seconds between modem poll"
         default 300
 
-        config BATTRY_NORMAL_THRESHOLD
-        int "Battery threshold defined in mV to enter Normal state"
-        default 3500
+        config BATTERY_THRESHOLD
+        int "Battery hysteresis in mV"
+        default 50
 
-        config BATTRY_LOW_THRESHOLD
+        config BATTERY_LOW
         int "Battery threshold defined in mV to enter low state"
-        default 3400
+        default 3450
 
-        config BATTRY_CRITICAL_THRESHOLD
+        config BATTERY_CRITICAL
         int "Battery threshold defined in mV to enter critical state"
-        default 3200
+        default 3250
 
+        config BATTERY_MOVING_AVERAGE_SAMPLES
+        int "Number of moving average samples to be considered. Higher number gives smoother voltage change"
+        default 300
+        
 endif

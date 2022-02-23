@@ -253,8 +253,6 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 
 	/* Publish pastrure ready event for those who need. */
 	if (partition == STG_PARTITION_PASTURE) {
-		fence_t *f = (fence_t *)data;
-		LOG_INF("wrote points %d", f->header.n_points);
 		struct pasture_ready_event *ev = new_pasture_ready_event();
 		EVENT_SUBMIT(ev);
 	}

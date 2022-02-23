@@ -76,7 +76,8 @@ typedef int (*stg_read_log_cb)(uint8_t *data, size_t len);
  * @param[in] cb pointer location to the callback function that is 
  *               called during the fcb walk.
  * 
- * @return 0 on success, otherwise negative errno.
+ * @return 0 on success 
+ * @return -ENODATA if no data available, Otherwise negative errno.
  */
 int stg_read_log_data(stg_read_log_cb cb);
 
@@ -87,7 +88,8 @@ int stg_read_log_data(stg_read_log_cb cb);
  * @param[in] cb pointer location to the callback function that is 
  *               called during the fcb walk.
  * 
- * @return 0 on success, otherwise negative errno.
+ * @return 0 on success 
+ * @return -ENODATA if no data available, Otherwise negative errno.
  */
 int stg_read_ano_data(stg_read_log_cb cb);
 
@@ -98,7 +100,8 @@ int stg_read_ano_data(stg_read_log_cb cb);
  * @param[in] cb pointer location to the callback function that is 
  *               called during the fcb walk.
  * 
- * @return 0 on success, otherwise negative errno.
+ * @return 0 on success 
+ * @return -ENODATA if no data available, Otherwise negative errno.
  */
 int stg_read_pasture_data(stg_read_log_cb cb);
 

@@ -38,6 +38,9 @@ const struct flash_area *pasture_area;
 struct fcb pasture_fcb;
 struct flash_sector pasture_sectors[FLASH_PASTURE_NUM_SECTORS];
 
+K_SEM_DEFINE(write_sem, 1, 1);
+K_SEM_DEFINE(read_sem, 1, 1);
+
 /* Callback context config given to walk callback function. 
  * We can either give the data directly if only one entry (newest),
  * or we can call the callback function for each entry read.
@@ -188,12 +191,17 @@ int stg_init_storage_controller(void)
 	if (err) {
 		return err;
 	}
+
 	return 0;
 }
 
 int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 			   size_t len)
 {
+	if (k_sem_take(&write_sem, K_SECONDS(CONFIG_SEM_READ_WRITE_TIMEOUT))) {
+		LOG_ERR("Semaphore timeout for writing to partition.");
+		return -EBUSY;
+	}
 	/* Determine write type. If true, we only have this newest entry 
 	 * to be written below on the flash partition. */
 	bool rotate_to_this = true;
@@ -210,7 +218,7 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 	if (rotate_to_this) {
 		err = fcb_clear(fcb);
 		if (err) {
-			return err;
+			goto cleanup;
 		}
 	}
 
@@ -221,7 +229,7 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 		if (err) {
 			LOG_ERR("Unable to rotate fcb from -ENOSPC, err %d",
 				err);
-			return err;
+			goto cleanup;
 		}
 		/* Retry appending. */
 		err = fcb_append(fcb, len, &loc);
@@ -230,25 +238,25 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 				err);
 			nf_app_error(ERR_SENDER_STORAGE_CONTROLLER,
 				     -ENOTRECOVERABLE, NULL, 0);
-			return err;
+			goto cleanup;
 		}
 		LOG_INF("Rotated FCB since it's full.");
 	} else if (err) {
 		LOG_ERR("Error appending new fcb entry, err %d", err);
-		return err;
+		goto cleanup;
 	}
 
 	err = flash_area_write(fcb->fap, FCB_ENTRY_FA_DATA_OFF(loc), data, len);
 	if (err) {
 		LOG_ERR("Error writing to flash area. err %d", err);
-		return err;
+		goto cleanup;
 	}
 
 	/* Finish entry. */
 	err = fcb_append_finish(fcb, &loc);
 	if (err) {
 		LOG_ERR("Error finishing new entry. err %d", err);
-		return err;
+		goto cleanup;
 	}
 
 	/* Publish pastrure ready event for those who need. */
@@ -256,8 +264,9 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 		struct pasture_ready_event *ev = new_pasture_ready_event();
 		EVENT_SUBMIT(ev);
 	}
-
-	return 0;
+cleanup:
+	k_sem_give(&write_sem);
+	return err;
 }
 
 int stg_clear_partition(flash_partition_t partition)
@@ -322,9 +331,17 @@ static inline int read_fcb_partition(flash_partition_t partition,
 				     stg_read_log_cb cb)
 {
 	/* Check if we have any data available. */
+	int err = 0;
+
+	if (k_sem_take(&read_sem, K_SECONDS(CONFIG_SEM_READ_WRITE_TIMEOUT))) {
+		LOG_ERR("Semaphore timeout for reading from partition.");
+		return -EBUSY;
+	}
+
 	struct fcb *fcb = get_fcb(partition);
 	if (fcb_is_empty(fcb)) {
-		return -ENODATA;
+		err = -ENODATA;
+		goto cleanup;
 	}
 
 	/* Length location used to store the entry location used
@@ -351,24 +368,27 @@ static inline int read_fcb_partition(flash_partition_t partition,
 	config.len = &entry_len;
 
 	if (cb == NULL) {
-		return -EINVAL;
+		err = -EINVAL;
+		goto cleanup;
 	}
 	config.cb = cb;
 
-	int err = fcb_walk(fcb, NULL, walk_cb, &config);
+	err = fcb_walk(fcb, NULL, walk_cb, &config);
 	if (err) {
 		LOG_ERR("Error walking over FCB storage, err %d", err);
-		return err;
+		goto cleanup;
 	}
 
 	if (!read_only_newest) {
 		err = fcb_clear(fcb);
 		if (err) {
 			LOG_ERR("Error clearing FCB after walk, err %d", err);
-			return err;
+			goto cleanup;
 		}
 	}
-	return 0;
+cleanup:
+	k_sem_give(&read_sem);
+	return err;
 }
 
 int stg_read_log_data(stg_read_log_cb cb)

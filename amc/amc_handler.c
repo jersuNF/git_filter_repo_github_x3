@@ -22,6 +22,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
  * to ensure that we're calculating with a valid cached fence.
  */
 static fence_t *cached_fence = NULL;
+static size_t cached_fence_size = 0;
 
 #define REQUEST_DATA_SEM_TIMEOUT_SEC 5
 K_SEM_DEFINE(fence_data_sem, 1, 1);
@@ -84,50 +85,15 @@ void calculate_work_fn(struct k_work *item)
 		atomic_set(&new_gnss_written, false);
 	}
 
-	/* At the moment, we just play the welcome sound everytime we get GNSS
-	 * data, but this is just to test if everything is linked together.
-	 * In the future, this function will contain logic that compares the
-	 * cached fencedata, cached gnssdata and trigger sound events that our
-	 * unit test can subscribe to.
-	 */
-
-	/** @warning The below section MUST be removed and is 
-	 *           only correlated to current
-	 *           unit test to see that the shell work. Its a simple
-	 *           algorithm that checks if if every content of 
-	 *           both fencedata and gnss data is equal to 
-	 *           1337 respectively. Plays a sound the unit test
-	 *           subscribes to if its correct.
-	 */
-	bool fencedata_correct = true;
-	if (cached_fence->header.n_points <= 0) {
-		fencedata_correct = false;
-	}
-	for (int i = 0; i < cached_fence->header.n_points; i++) {
-		if (cached_fence->p_c[i].s_x_dm == 1337 &&
-		    cached_fence->p_c[i].s_y_dm == 1337) {
-			continue;
-		}
-		fencedata_correct = false;
-	}
-
-	bool gnssdata_correct = (current_gnssdata_area->lat == 1337 &&
-				 current_gnssdata_area->lon == 1337);
-
-	if (gnssdata_correct && fencedata_correct) {
-		struct sound_event *s_ev = new_sound_event();
-		s_ev->type = SND_WELCOME;
-		EVENT_SUBMIT(s_ev);
-	}
-
-	if (!gnssdata_correct) {
-		if (current_gnssdata_area->lat == 123 &&
-		    current_gnssdata_area->lon == 123) {
-			struct sound_event *s_ev = new_sound_event();
-			s_ev->type = SND_FIND_ME;
-			EVENT_SUBMIT(s_ev);
+	/* Calculations here, REMOVE BELOW CODE. */
+	if (cached_fence->p_c[0].s_x_dm == 0xDE) {
+		if (current_gnssdata_area->lat == 1337) {
+			struct sound_event *ev = new_sound_event();
+			ev->type = SND_WELCOME;
+			EVENT_SUBMIT(ev);
 		}
 	}
+
 	/* Calculation finished, give semaphore so we can swap memory region
 	 * on next GNSS request. 
 	 * As well as notifying we're not using fence data area. 
@@ -167,9 +133,11 @@ static inline int update_pasture_cache(uint8_t *data, size_t len)
 	if (cached_fence != NULL) {
 		k_free(cached_fence);
 		cached_fence = NULL;
+		cached_fence_size = 0;
 	}
 
 	cached_fence = k_malloc(len);
+	cached_fence_size = len;
 
 	if (cached_fence == NULL) {
 		LOG_ERR("No memory left for caching the fence.");
@@ -207,7 +175,7 @@ static bool event_handler(const struct event_header *eh)
 		int err = stg_read_pasture_data(update_pasture_cache);
 		if (err) {
 			char *err_msg = "Cannot update pasture cache on AMC.";
-			nf_app_fatal(ERR_SENDER_AMC, -ENOMEM, err_msg,
+			nf_app_fatal(ERR_SENDER_AMC, err, err_msg,
 				     strlen(err_msg));
 		}
 		return false;

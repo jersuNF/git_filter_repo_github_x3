@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2021 Nofence
+# Copyright (c) 2022 Nofence AS
 #
 
 target_include_directories(app PRIVATE 
@@ -10,6 +10,6 @@ target_include_directories(app PRIVATE
 
 target_sources(app PRIVATE
 			./storage.c
-			./../../events/storage_controller/storage_events.c
+			./../../events/storage_controller/pasture_event.c
 			./../../events/error_handler/error_event.c
 )

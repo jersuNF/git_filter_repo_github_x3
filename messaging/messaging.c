@@ -273,23 +273,24 @@ static void process_lte_proto_event(void)
 			return;
 		}
 		if (new_fframe >= 0){
-			latest_frame = new_fframe;
-			if (latest_frame == expected_fframe){
+			if (new_fframe == DOWNLOAD_COMPLETE){
+				struct new_fence_available *fence_ready;
+				fence_ready = new_new_fence_available();
+				fence_ready->fence_version = new_fence_in_progress;
+				EVENT_SUBMIT(fence_ready);
+				LOG_WRN("Fence %d download "
+					"complete!", new_fence_in_progress);
+				return;
+			}
+			if (new_fframe == expected_fframe){
+				latest_frame = new_fframe;
 				expected_fframe++;
 				int ret = request_fframe(new_fence_in_progress,
 							 expected_fframe);
 				LOG_WRN("Requesting frame %d of new fence: %d"
 					".\n", expected_fframe,
 					new_fence_in_progress);
-				if (latest_frame == DOWNLOAD_COMPLETE){
-					struct new_fence_available *fence_ready;
-					fence_ready = new_new_fence_available();
-					fence_ready->fence_version = new_fence_in_progress;
-					EVENT_SUBMIT(fence_ready);
-					LOG_WRN("Fence %d download "
-						"complete!", new_fence_in_progress);
-					return;
-				}
+
 			} else{
 				latest_frame = 0;
 				new_fence_in_progress = 0;
@@ -573,13 +574,15 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 {
 	static uint32_t version;
 	static uint8_t total_frames;
-	uint8_t frame = &fenceResp->ucFrameNumber;
+	uint8_t frame = fenceResp->ucFrameNumber;
+	LOG_WRN("Received frame %d\n", frame);
 	if (frame == 0){
-		version = &fenceResp->ulFenceDefVersion;
-		total_frames = &fenceResp->ucTotalFrames;
+		version = fenceResp->ulFenceDefVersion;
+		total_frames = fenceResp->ucTotalFrames;
+		LOG_WRN("Total number of fence frames = %d\n", total_frames);
 		return 0;
 	}
-	if (new_fence_in_progress != &fenceResp->ulFenceDefVersion){
+	if (new_fence_in_progress != fenceResp->ulFenceDefVersion){
 		return 0; //something went wrong, restart fence request
 	}
 	if (frame == total_frames-1){

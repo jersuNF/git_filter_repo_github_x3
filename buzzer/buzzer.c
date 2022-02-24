@@ -10,6 +10,8 @@
 #include <drivers/pwm.h>
 #include "melodies.h"
 
+#include "error_event.h"
+
 #define MODULE buzzer
 LOG_MODULE_REGISTER(MODULE, CONFIG_BUZZER_LOG_LEVEL);
 
@@ -24,12 +26,19 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BUZZER_LOG_LEVEL);
 const struct device *buzzer_pwm;
 
 static volatile enum sound_event_type current_type = SND_READY_FOR_NEXT_TYPE;
-atomic_t stop_current_sound = ATOMIC_INIT(false);
+K_SEM_DEFINE(stop_sound_sem, 1, 1);
+static volatile bool stop_current_sound = false;
+static struct k_work stop_sound_work;
+
 static struct k_work_q sound_q;
 static struct k_work sound_work;
 K_THREAD_STACK_DEFINE(sound_buzzer_area, CONFIG_BUZZER_THREAD_SIZE);
 
-atomic_t current_warn_zone_freq = ATOMIC_INIT(0);
+void warn_zone_timeout_handler(struct k_timer *dummy);
+K_TIMER_DEFINE(warn_zone_timeout_timer, warn_zone_timeout_handler, NULL);
+
+K_SEM_DEFINE(warn_zone_sem, 1, 1);
+uint32_t current_warn_zone_freq = 0;
 
 /* Check power consumption for this PWM set. */
 int set_pwm_to_idle(void)
@@ -68,14 +77,6 @@ int play_freq(const uint32_t freq, const uint32_t sustain, const uint8_t volume)
 {
 	int err;
 
-	/* Check variable set by event_handler thread when we
-	 * receive new events with higher priority, terminate if true.
-	 */
-	if (atomic_get(&stop_current_sound)) {
-		err = -EINTR;
-		goto set_to_idle;
-	}
-
 	uint32_t pulse = get_pulse_width(freq, volume);
 
 	err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, freq, pulse, 0);
@@ -100,26 +101,134 @@ set_to_idle : {
 void play_song(const note_t *song, const size_t num_notes)
 {
 	for (int i = 0; i < num_notes; i++) {
-		int ret = play_freq(song[i].t, song[i].s,
-				    BUZZER_SOUND_VOLUME_PERCENT);
-		/* Exit song if we get interrupted (new sound with lower 
-		 * priority queued or error occured.)
-		 */
-		if (ret) {
+		/* Exit if we get the command to stop playing. */
+		int err = k_sem_take(&stop_sound_sem, K_SECONDS(1));
+		if (err || stop_current_sound) {
+			k_sem_give(&stop_sound_sem);
+			return;
+		}
+		k_sem_give(&stop_sound_sem);
+
+		err = play_freq(song[i].t, song[i].s,
+				BUZZER_SOUND_VOLUME_PERCENT);
+		if (err) {
 			return;
 		}
 	}
 }
 
+/** @brief Timeout function that is called if we do not get a new updated
+ *         warn zone frequency within that duration, ultimately ending
+ *         the warn zone event.
+ */
+void warn_zone_timeout_handler(struct k_timer *dummy)
+{
+	ARG_UNUSED(dummy);
+
+	/* Set flag to true, meaning we will abort the current sound. */
+	k_work_submit(&stop_sound_work);
+
+	/* Warning here. */
+	char *msg = "Timeout on getting a new warn zone freq";
+	nf_app_warning(ERR_SENDER_SOUND_CONTROLLER, -ETIMEDOUT, msg,
+		       strlen(msg));
+}
+
+/** @brief Starts the while loop for playing warn zone. The conditions that
+ *         will break the loop is either that another sound event has been queued
+ *         that has higher priority, or the current_warn_zone_freq is outside
+ *         the min/max range (i.e animal is not in warn zone anymore.)
+ * 
+ * @note It's is required to set the frequency before submitting the 
+ *       warn zone event, otherwise the buzzer will process the warn zone event
+ *       and then see that the warn_zone_frequency is 0 and stop looping.
+ * 
+ * @note The the frequency recevied from AMC must be exactly equal to
+ *       WARN_FREQ_MS_PERIOD_MAX in order to publish the
+ *       SND_STATUS_PLAYING_MAX event for the EP module to subscribe to
+ *       for instance.
+ */
 void start_warn_zone_loop(void)
 {
-	///* While any higher priority sounds is not queued up. */
-	//while (!atomic_get(&stop_current_sound)) {
-	//	/* While frequency is higher than minimum value. */
-	//	do {
-	//		int freq_value = atomic_get(&stop_current_sound);
-	//	} while (current_warn_zone_freq <);
-	//}
+	int err = 0;
+	while (true) {
+		uint32_t warn_zone_freq_duration =
+			CONFIG_BUZZER_WARN_ZONE_FREQ_INTERVAL;
+
+		err = k_sem_take(&warn_zone_sem, K_SECONDS(1));
+		if (err) {
+			LOG_ERR("Timeout on waiting for warn_zone semaphore.");
+			goto exit_error;
+		}
+
+		if (current_warn_zone_freq > WARN_FREQ_MS_PERIOD_INIT ||
+		    current_warn_zone_freq < WARN_FREQ_MS_PERIOD_MAX) {
+			/* Exit if we're outside the range. */
+			k_sem_give(&warn_zone_sem);
+			goto exit_freq_range;
+		}
+
+		/* Exit if we get the command to stop playing. */
+		err = k_sem_take(&stop_sound_sem, K_SECONDS(1));
+		if (err) {
+			goto exit_error;
+		}
+		if (stop_current_sound) {
+			k_sem_give(&stop_sound_sem);
+			goto exit_stopped_sound;
+		}
+		k_sem_give(&stop_sound_sem);
+
+		/* Submits MAX event if the frequency is at max. 
+		 * It is submitted BEFORE the max sound is played for n seconds
+		 * meaning that i.e the EP module has n seconds window to play
+		 * a zap command given from AMC as well until the sound
+		 * controller submits an IDLE event again.
+		 */
+		if (current_warn_zone_freq == WARN_FREQ_MS_PERIOD_MAX) {
+			struct sound_status_event *ev =
+				new_sound_status_event();
+			ev->status = SND_STATUS_PLAYING_MAX;
+			EVENT_SUBMIT(ev);
+
+			warn_zone_freq_duration =
+				CONFIG_BUZZER_MAX_WARN_ZONE_FREQ_INTERVAL;
+		} else {
+			struct sound_status_event *ev =
+				new_sound_status_event();
+			ev->status = SND_STATUS_PLAYING;
+			EVENT_SUBMIT(ev);
+		}
+
+		err = play_freq(current_warn_zone_freq,
+				warn_zone_freq_duration * MSEC_PER_SEC,
+				BUZZER_SOUND_VOLUME_PERCENT);
+		if (err) {
+			k_sem_give(&warn_zone_sem);
+			goto exit_error;
+		}
+		k_sem_give(&warn_zone_sem);
+	}
+	/* Goto labels for easier overview of the different scenarios that
+	 * can abort the warn zone playing.
+	 */
+exit_freq_range : {
+	LOG_INF("Current warn zone pwm period (%dms) is outside the playable range.",
+		current_warn_zone_freq);
+
+	/* Stop timeout timer. */
+	k_timer_stop(&warn_zone_timeout_timer);
+	return;
+}
+exit_stopped_sound : {
+	LOG_INF("Stopped SND_WARN due to higher priority or new frequency timeout.");
+	return;
+}
+exit_error : {
+	char *msg = "Error occured during warn zone playing.";
+	nf_app_error(ERR_SENDER_SOUND_CONTROLLER, err, msg, strlen(msg));
+	return;
+}
 }
 
 void play()
@@ -129,8 +238,14 @@ void play()
 		return;
 	}
 
-	/* Starting a new sound type, set atomic to false. */
-	atomic_set(&stop_current_sound, false);
+	/* Starting a new sound type, set to false. */
+	int err = k_sem_take(&stop_sound_sem, K_SECONDS(1));
+	if (err) {
+		LOG_ERR("Timeout on stopping sound sem.");
+		return;
+	}
+	stop_current_sound = false;
+	k_sem_give(&stop_sound_sem);
 
 	struct sound_status_event *ev_playing = new_sound_status_event();
 
@@ -156,17 +271,7 @@ void play()
 		play_song(m_geiterams, n_geiterams_notes);
 		break;
 	}
-	case SND_MAX: {
-		ev_playing->status = SND_STATUS_PLAYING_MAX;
-		EVENT_SUBMIT(ev_playing);
-
-		/* Play max freq here. */
-		break;
-	}
 	case SND_WARN: {
-		ev_playing->status = SND_WARN;
-		EVENT_SUBMIT(ev_playing);
-
 		start_warn_zone_loop();
 		break;
 	}
@@ -180,6 +285,19 @@ void play()
 	EVENT_SUBMIT(ev_idle);
 
 	current_type = SND_READY_FOR_NEXT_TYPE;
+}
+
+void stop_sound_fn(struct k_work *item)
+{
+	ARG_UNUSED(item);
+
+	int err = k_sem_take(&stop_sound_sem, K_SECONDS(1));
+	if (err) {
+		LOG_ERR("Timeout on stopping sound sem.");
+		return;
+	}
+	stop_current_sound = true;
+	k_sem_give(&stop_sound_sem);
 }
 
 int buzzer_module_init(void)
@@ -203,6 +321,7 @@ int buzzer_module_init(void)
 			   K_THREAD_STACK_SIZEOF(sound_buzzer_area),
 			   CONFIG_BUZZER_THREAD_PRIORITY, NULL);
 	k_work_init(&sound_work, play);
+	k_work_init(&stop_sound_work, stop_sound_fn);
 
 	struct sound_status_event *ev = new_sound_status_event();
 	ev->status = SND_STATUS_IDLE;
@@ -226,23 +345,55 @@ static bool event_handler(const struct event_header *eh)
 
 		/* Check if we want to process or not. Must be done here
 		 * since sound thread is busy playing. Notify sound thread
-		 * with atomic variable whether it should stop playing or
+		 * with whether it should stop playing or
 		 * continue.
 		 */
-		if (ev->type > current_type) {
-			return false;
-		} else {
-			atomic_set(&stop_current_sound, true);
+		if (ev->type <= current_type) {
+			int err = k_sem_take(&stop_sound_sem, K_SECONDS(1));
+			if (err) {
+				LOG_ERR("Timeout on stopping sound sem.");
+				return false;
+			}
+			stop_current_sound = true;
+			k_sem_give(&stop_sound_sem);
+
 			current_type = ev->type;
 			k_work_submit_to_queue(&sound_q, &sound_work);
+
+			if (ev->type == SND_WARN) {
+				/* If current type is warn zone, start timeout timer
+			 	 * for getting a new frequency to play. */
+				k_timer_start(
+					&warn_zone_timeout_timer,
+					K_SECONDS(
+						CONFIG_BUZZER_UPDATE_WARN_FREQ_TIMEOUT_SEC),
+					K_NO_WAIT);
+			} else {
+				/* Stop any existing timeout timers if we have
+				 * another event type than warn zone.
+				 */
+				k_timer_stop(&warn_zone_timeout_timer);
+			}
 		}
 		return false;
 	}
 	if (is_sound_set_warn_freq_event(eh)) {
 		struct sound_set_warn_freq_event *ev =
 			cast_sound_set_warn_freq_event(eh);
-		atomic_set(&current_warn_zone_freq, ev->freq);
 
+		int err = k_sem_take(&warn_zone_sem, K_SECONDS(1));
+		if (err) {
+			LOG_ERR("Timeout on waiting for warn_zone semaphore.");
+		} else {
+			current_warn_zone_freq = ev->freq;
+		}
+		k_sem_give(&warn_zone_sem);
+
+		/* Restart timeout timer. */
+		k_timer_start(
+			&warn_zone_timeout_timer,
+			K_SECONDS(CONFIG_BUZZER_UPDATE_WARN_FREQ_TIMEOUT_SEC),
+			K_NO_WAIT);
 		return false;
 	}
 

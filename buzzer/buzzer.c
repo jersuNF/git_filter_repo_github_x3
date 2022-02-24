@@ -19,6 +19,8 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BUZZER_LOG_LEVEL);
 #define PWM_CHANNEL DT_PWMS_CHANNEL(DT_ALIAS(pwm_buzzer))
 #endif
 
+#define BUZZER_SOUND_VOLUME_PERCENT 100
+
 const struct device *buzzer_pwm;
 
 static volatile enum sound_event_type current_type = SND_READY_FOR_NEXT_TYPE;
@@ -26,6 +28,8 @@ atomic_t stop_current_sound = ATOMIC_INIT(false);
 static struct k_work_q sound_q;
 static struct k_work sound_work;
 K_THREAD_STACK_DEFINE(sound_buzzer_area, CONFIG_BUZZER_THREAD_SIZE);
+
+atomic_t current_warn_zone_freq = ATOMIC_INIT(0);
 
 /* Check power consumption for this PWM set. */
 int set_pwm_to_idle(void)
@@ -38,54 +42,84 @@ int set_pwm_to_idle(void)
 	return 0;
 }
 
-/** @brief Plays a note.
+/** @brief Calculates the necessary duty cycle to receive the wanted volume
+ *         level percent given and gives pulse width.
  * 
- * @param note note to be played, contains freq and sustain
+ * @param volume loudness of the played frequency, ranging from 0-100%
+ *               This is simply having a ratio for a duty cycle between 0%-50%.
  * 
- * @return true if ready for next note, false if we want to terminate sequence
+ * @return pulse width to output target loudness level.
  */
-int play_note(note_t note)
+static inline uint32_t get_pulse_width(uint32_t freq, uint8_t volume)
 {
+	return (freq / 2) * (volume / 100);
+}
+
+/** @brief Plays a frequency for given duration.
+ * 
+ * @param freq frequency tone to be played in hz.
+ * @param sustain length/duration of the note/frequency to be played in ms
+ * @param volume loudness of the played frequency, ranging from 0%-100%
+ *               This is simply having a ratio for a duty cycle between 0%-50%.
+ * 
+ * @return 0 on success, otherwise negative errno.
+ */
+int play_freq(const uint32_t freq, const uint32_t sustain, const uint8_t volume)
+{
+	int err;
+
 	/* Check variable set by event_handler thread when we
 	 * receive new events with higher priority, terminate if true.
 	 */
 	if (atomic_get(&stop_current_sound)) {
-		return false;
+		err = -EINTR;
+		goto set_to_idle;
 	}
 
-	int err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, note.t, note.t / 2U,
-				   0);
+	uint32_t pulse = get_pulse_width(freq, volume);
+
+	err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, freq, pulse, 0);
+
 	if (err) {
 		LOG_ERR("Error %d: failed to set pulse width", err);
-		return false;
+		goto set_to_idle;
 	}
 
 	/* Play note for 'sustain (s)' milliseconds. */
-	k_sleep(K_MSEC(note.s));
+	k_sleep(K_MSEC(sustain));
 
-	err = set_pwm_to_idle();
-	if (err) {
-		return false;
+set_to_idle : {
+	int pwm_idle_err = set_pwm_to_idle();
+	if (pwm_idle_err) {
+		return pwm_idle_err;
 	}
-	return true;
+	return err;
+}
 }
 
 void play_song(const note_t *song, const size_t num_notes)
 {
-	/* Play all the notes in the note array. Do not turn of PWM
-	 * between notes as that is just unecessary when we change the note
-	 * straight after. Turn off PWM (set to 0) when song is finished.
-	 */
 	for (int i = 0; i < num_notes; i++) {
-		if (!play_note(song[i])) {
-			/* Exit if function returns false, this means
-			 * the atomic variable set by event handler
-			 * is true and we have a higher priority sound
-			 * incomming.
-			 */
+		int ret = play_freq(song[i].t, song[i].s,
+				    BUZZER_SOUND_VOLUME_PERCENT);
+		/* Exit song if we get interrupted (new sound with lower 
+		 * priority queued or error occured.)
+		 */
+		if (ret) {
 			return;
 		}
 	}
+}
+
+void start_warn_zone_loop(void)
+{
+	///* While any higher priority sounds is not queued up. */
+	//while (!atomic_get(&stop_current_sound)) {
+	//	/* While frequency is higher than minimum value. */
+	//	do {
+	//		int freq_value = atomic_get(&stop_current_sound);
+	//	} while (current_warn_zone_freq <);
+	//}
 }
 
 void play()
@@ -105,8 +139,7 @@ void play()
 		ev_playing->status = SND_STATUS_PLAYING;
 		EVENT_SUBMIT(ev_playing);
 
-		note_t c6 = { .t = tone_c_6, .s = d_8 };
-		play_note(c6);
+		play_freq(tone_c_6, d_8, BUZZER_SOUND_VOLUME_PERCENT);
 		break;
 	}
 	case SND_PERSPELMANN: {
@@ -128,6 +161,13 @@ void play()
 		EVENT_SUBMIT(ev_playing);
 
 		/* Play max freq here. */
+		break;
+	}
+	case SND_WARN: {
+		ev_playing->status = SND_WARN;
+		EVENT_SUBMIT(ev_playing);
+
+		start_warn_zone_loop();
 		break;
 	}
 	default: {
@@ -198,6 +238,13 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	if (is_sound_set_warn_freq_event(eh)) {
+		struct sound_set_warn_freq_event *ev =
+			cast_sound_set_warn_freq_event(eh);
+		atomic_set(&current_warn_zone_freq, ev->freq);
+
+		return false;
+	}
 
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
@@ -207,3 +254,4 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, sound_event);
+EVENT_SUBSCRIBE(MODULE, sound_set_warn_freq_event);

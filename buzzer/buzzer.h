@@ -9,9 +9,18 @@
 #include "event_manager.h"
 #include "sound_event.h"
 
+/** Freq of warning start. (1000000 / 2000)*/
+#define WARN_FREQ_INIT 500
+
+/** Freq of max warning. (1000000 / 4200) */
+#define WARN_FREQ_MAX 248
+
+/** Duration of the warning tone in ms. */
+#define WARN_MIN_DURATION_MS 5000
+
 typedef enum { d_16 = 250, d_8 = 500 } duration_t;
 
-/* Tone frequencies in microseconds. (1000000 / hz)
+/** Tone frequencies interval in microseconds. (1000000 / hz)
  * https://pages.mtu.edu/~suits/notefreqs.html
  */
 typedef enum {
@@ -32,10 +41,10 @@ typedef enum {
 } tone_t;
 
 typedef struct {
-	/* Tone/frequency. Note being played. */
+	/** Tone/frequency. Note being played. */
 	tone_t t;
 
-	/* Sustain. Duration of note being played. */
+	/** Sustain. Duration of note being played. */
 	duration_t s;
 } note_t;
 

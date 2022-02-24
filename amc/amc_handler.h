@@ -9,7 +9,9 @@
 
 /** @brief Initializes the work calculation thread and puts
  *         request events for fence and GNSS data.
+ * 
+ * @return 0 on success, otherwise negative errno.
  */
-void amc_module_init(void);
+int amc_module_init(void);
 
 #endif /* _AMC_HANDLER_H_ */

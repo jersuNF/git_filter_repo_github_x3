@@ -4,7 +4,7 @@
 #include <zephyr.h>
 
 #define MY_STACK_SIZE 1024
-#define MY_PRIORITY 5
+#define MY_PRIORITY 30
 #define MODULE cellular_controller
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
@@ -44,11 +44,11 @@ static APP_BMEM bool connected;
 
 void receive_tcp(struct data *sock_data)
 {
-	int8_t err, received;
+	int8_t  received;
 	char *buf = NULL;
 	uint8_t *pMsgIn = NULL;
 	while(1){
-		k_sleep(K_SECONDS(0.5));
+		k_sleep(K_SECONDS(1.5));
 		if(connected){
 			received = socket_receive(sock_data, &buf);
 			if (received == 0) {
@@ -60,8 +60,6 @@ void receive_tcp(struct data *sock_data)
 				    false) { /* TODO: notify the error handler */
 					LOG_ERR("New message received while the messaging module "
 						"hasn't consumed the previous one!\n");
-					err = -1;
-//					return err;
 				} else {
 					if (pMsgIn != NULL) {
 						free(pMsgIn);
@@ -76,12 +74,11 @@ void receive_tcp(struct data *sock_data)
 					msgIn->len = received;
 					LOG_INF("Submitting msgIn event!\n");
 					EVENT_SUBMIT(msgIn);
-//					return 0;
 				}
 			} else {
 				LOG_ERR("Socket receive error!\n");
 				submit_error(SOCKET_RECV, received);
-//				return received;
+				stop_tcp();
 			}
 		}
 	}
@@ -91,6 +88,10 @@ int8_t start_tcp(void)
 {
 	int8_t ret = -1;
 	struct sockaddr_in addr4;
+//	if (!connected){
+//		stop_tcp();
+//		k_sleep(K_SECONDS(0.1));
+//	}
 
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
 		addr4.sin_family = AF_INET;
@@ -124,24 +125,29 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		uint8_t *pCharMsgOut = event->buf;
 		size_t MsgOutLen = event->len;
 
-		int8_t err = start_tcp();
-		if (err != 0) { /* TODO: notify error handler! */
-			submit_error(SOCKET_CONNECT, err);
-			return false;
-		}
+/*TODO: cleanup this mess, we need to be aware of the socket '0' actual state of
+ * cennection.*/
+
+//		while (start_tcp() != 0) {
+//			stop_tcp();
+//			LOG_WRN("Retry socket connect!\n");
+//			k_sleep(K_SECONDS(0.1));
+//		}
+		start_tcp();
 		connected = true;
 		/* make a local copy of the message to send.*/
 		char *CharMsgOut;
 		CharMsgOut = (char *)malloc(MsgOutLen);
 		memcpy(CharMsgOut, pCharMsgOut, MsgOutLen);
 
-		if (CharMsgOut != NULL && CharMsgOut[0] != '\0') {
+		if (*CharMsgOut == *pCharMsgOut) {
+			LOG_DBG("Publishing ack to messaging!\n");
 			struct cellular_ack_event *ack =
 				new_cellular_ack_event();
 			EVENT_SUBMIT(ack);
 		}
 
-		err = send_tcp(CharMsgOut, MsgOutLen);
+		int8_t err = send_tcp(CharMsgOut, MsgOutLen);
 		if (err < 0) { /* TODO: notify error handler! */
 			submit_error(SOCKET_SEND, err);
 			free(CharMsgOut);
@@ -212,7 +218,7 @@ int8_t cellular_controller_init(void)
 					"used. \n");
 //				goto exit_cellular_controller;
 			}
-			ret = 0;
+			ret = 0;//start_tcp();
 			if (ret == 0) {
 				LOG_INF("TCP connection started!\n");
 				connected = true;

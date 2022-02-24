@@ -18,6 +18,7 @@
 #include "nf_version.h"
 #include "collar_protocol.h"
 
+#define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
 
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
@@ -28,17 +29,26 @@ K_SEM_DEFINE(cache_lock_sem, 1, 1);
 
 collar_state_struct_t current_state;
 gps_last_fix_struct_t cached_fix;
-uint8_t poll_period_minutes = 2;
+
+static uint32_t new_fence_in_progress;
+static uint8_t latest_frame, expected_fframe;
+static bool first_frame;
+
+uint8_t poll_period_minutes = 5;
 void build_poll_request(NofenceMessage *);
+int8_t request_fframe(uint32_t, uint8_t);
 void proto_InitHeader(NofenceMessage *);
 void process_poll_response(NofenceMessage *);
+uint8_t process_fence_msg(FenceDefinitionResponse *pResp);
 int send_message(NofenceMessage *);
+void messaging_thread_fn(void);
 
 _DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *);
 bool proto_hasLastKnownDatePos(const gps_last_fix_struct_t *);
 
 bool m_confirm_acc_limits, m_confirm_ble_key, m_transfer_boot_params;
-bool send_out_ack;
+bool send_out_ack, use_server_time;
+bool keep_connection;
 
 K_SEM_DEFINE(ble_ctrl_sem, 0, 1);
 K_SEM_DEFINE(ble_data_sem, 0, 1);
@@ -68,16 +78,23 @@ struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
 					&lte_proto_msgq, 0),
 };
 
-struct k_work_q poll_q;
-static struct k_work_delayable modem_poll_work;
+static struct k_work_q poll_q;
+struct k_work_delayable modem_poll_work;
+
+K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_SIZE,
+		messaging_thread_fn, NULL, NULL, NULL,
+		CONFIG_MESSAGING_THREAD_PRIORITY, 0, 0);
+
+K_KERNEL_STACK_DEFINE(messaging_poll_thread, CONFIG_MESSAGING_POLL_THREAD_SIZE);
 
 void modem_poll_work_fn()
 {
 	/* Add logic for the periodic protobuf modem poller. */
+	LOG_WRN("Starting periodic poll work fn!\n");
 	NofenceMessage new_msg;
 	memset(&new_msg, 0, sizeof(new_msg));
 	if (!k_sem_take(&cache_lock_sem, K_SECONDS(1))) {
-		LOG_DBG("Building pull request!\n");
+		LOG_DBG("Building poll request!\n");
 		build_poll_request(&new_msg);
 		k_sem_give(&cache_lock_sem);
 	}
@@ -212,7 +229,7 @@ static inline void process_ble_data_event(void)
 	k_sem_give(&ble_data_sem);
 }
 
-static inline void process_lte_proto_event(void)
+static void process_lte_proto_event(void)
 {
 	struct cellular_proto_in_event ev;
 
@@ -245,7 +262,40 @@ static inline void process_lte_proto_event(void)
 		process_poll_response(&proto);
 		return;
 	} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
-		process_fence_msg();
+		uint8_t new_fframe =
+			process_fence_msg(&proto.m.fence_definition_resp);
+		if (new_fframe == 0 && first_frame){
+			first_frame = false;
+		}
+		else if (new_fframe == 0 && !first_frame){ //something went bad
+			latest_frame = 0;
+			new_fence_in_progress = 0;
+			return;
+		}
+		if (new_fframe >= 0){
+			latest_frame = new_fframe;
+			if (latest_frame == expected_fframe){
+				expected_fframe++;
+				int ret = request_fframe(new_fence_in_progress,
+							 expected_fframe);
+				LOG_WRN("Requesting frame %d of new fence: %d"
+					".\n", expected_fframe,
+					new_fence_in_progress);
+				if (latest_frame == DOWNLOAD_COMPLETE){
+					struct new_fence_available *fence_ready;
+					fence_ready = new_new_fence_available();
+					fence_ready->fence_version = new_fence_in_progress;
+					EVENT_SUBMIT(fence_ready);
+					LOG_WRN("Fence %d download "
+						"complete!", new_fence_in_progress);
+					return;
+				}
+			} else{
+				latest_frame = 0;
+				new_fence_in_progress = 0;
+				return;
+			}
+		}
 		return;
 	} else if (proto.which_m == NofenceMessage_ubx_ano_reply_tag) {
 		process_ano_msg();
@@ -276,22 +326,15 @@ void messaging_thread_fn()
 	}
 }
 
-K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_SIZE,
-		messaging_thread_fn, NULL, NULL, NULL,
-		CONFIG_MESSAGING_THREAD_PRIORITY, 0, 0);
-
-K_THREAD_STACK_DEFINE(messaging_poll_thread, CONFIG_MESSAGING_POLL_THREAD_SIZE);
-
 void messaging_module_init(void)
 {
-	LOG_INF("Inintializing messaging module!\n");
-	k_work_queue_init(&poll_q);
+	LOG_INF("Initializing messaging module!\n");
 	k_work_queue_start(&poll_q, messaging_poll_thread,
 			   K_THREAD_STACK_SIZEOF(messaging_poll_thread),
 			   CONFIG_MESSAGING_POLL_THREAD_PRIORITY, NULL);
 
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
-	k_work_reschedule_for_queue(&poll_q, &modem_poll_work, K_NO_WAIT);
+	k_work_schedule_for_queue(&poll_q, &modem_poll_work, K_NO_WAIT);
 }
 
 void build_poll_request(NofenceMessage *poll_req)
@@ -369,12 +412,33 @@ void build_poll_request(NofenceMessage *poll_req)
 	}
 }
 
+
+
+int8_t request_fframe(uint32_t version, uint8_t frame){
+	NofenceMessage fence_req;
+	proto_InitHeader(&fence_req); /* fill up message header. */
+	fence_req.which_m = NofenceMessage_fence_definition_req_tag;
+	fence_req.m.fence_definition_req.ulFenceDefVersion = version;
+	fence_req.m.fence_definition_req.ucFrameNumber = frame;
+	int ret = send_message(&fence_req);
+	if (ret){
+		LOG_WRN("Failed to send request for frame %d\n", frame);
+		return -1;
+	}
+	return 0;
+}
+
 void proto_InitHeader(NofenceMessage *msg)
 {
 	msg->header.ulId = 11500; //TODO: read from eeprom
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
-	msg->header.ulUnixTimestamp = 1644913291;
+	if (use_server_time){
+		msg->header.ulUnixTimestamp = time_from_server;
+	}
+	else{
+		msg->header.ulUnixTimestamp = cached_fix.unixTimestamp;
+	}
 }
 
 int send_message(NofenceMessage *msg_proto)
@@ -414,13 +478,16 @@ int send_message(NofenceMessage *msg_proto)
 	LOG_DBG("Message length = %u!\n", encoded_size + 2);
 	msg2send->len = encoded_size + 2;
 	LOG_DBG("Finished building message event\n!\n");
+
 	EVENT_SUBMIT(msg2send);
 	LOG_DBG("Submitted message event\n!\n");
+
 	while (!send_out_ack) {
 		k_sleep(K_SECONDS(0.1));
+		LOG_WRN("Waiting for ack!\n");
 	}
-	free(tmp);
 	send_out_ack = false;
+	free(tmp);
 	return 0;
 }
 
@@ -451,9 +518,14 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_bUseServerTime && pResp->bUseServerTime) {
 		LOG_WRN("Server time will be used!\n");
 		time_from_server = proto->header.ulUnixTimestamp;
+		use_server_time = true;
 	}
 	if (pResp->has_usPollConnectIntervalSec) {
-		poll_period_minutes = pResp->usPollConnectIntervalSec;
+		poll_period_minutes = pResp->usPollConnectIntervalSec/60;
+		k_work_reschedule_for_queue(&poll_q, &modem_poll_work,
+					    K_SECONDS(poll_period_minutes * 60));
+		LOG_WRN("Poll period of %d minutes will be used!\n",
+			poll_period_minutes);
 	}
 	if (pResp->has_usAccSigmaSleepLimit) {
 		/* TODO: submit pResp->usAccSigmaSleepLimit to AMC module.
@@ -473,8 +545,19 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_versionInfo) {
 		process_upgrade_request(pResp->versionInfo);
 	}
-	if (pResp->ulFenceDefVersion) {
-		/* TODO: Submit pResp->ulFenceDefVersion to AMC */
+	if (pResp->ulFenceDefVersion != current_state.fence_version &&
+	    new_fence_in_progress != pResp->ulFenceDefVersion) {
+		/* TODO: Download new fence and submit pResp->ulFenceDefVersion
+		 * to AMC */
+		//request frame 0
+		first_frame = true;
+		LOG_WRN("Requesting frame 0 of fence: %d!"
+			,pResp->ulFenceDefVersion);
+		int ret = request_fframe(pResp->ulFenceDefVersion, 0);
+		if (ret == 0){
+			first_frame = true;
+			new_fence_in_progress = pResp->ulFenceDefVersion;
+		}
 	}
 	return;
 }
@@ -486,9 +569,24 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 	return;
 }
 
-void process_fence_msg(void)
+uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 {
-	return;
+	static uint32_t version;
+	static uint8_t total_frames;
+	uint8_t frame = &fenceResp->ucFrameNumber;
+	if (frame == 0){
+		version = &fenceResp->ulFenceDefVersion;
+		total_frames = &fenceResp->ucTotalFrames;
+		return 0;
+	}
+	if (new_fence_in_progress != &fenceResp->ulFenceDefVersion){
+		return 0; //something went wrong, restart fence request
+	}
+	if (frame == total_frames-1){
+		return DOWNLOAD_COMPLETE;
+	}
+	/* TODO: write "fenceResp" to flash. */
+	return frame;
 }
 
 void process_ano_msg(void)

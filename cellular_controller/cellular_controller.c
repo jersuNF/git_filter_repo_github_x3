@@ -5,6 +5,8 @@
 
 #define MY_STACK_SIZE 1024
 #define MY_PRIORITY 30
+#define SOCKET_POLL_INTERVAL 0.25
+#define SOCK_RECV_TIMEOUT 60
 #define MODULE cellular_controller
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
@@ -47,13 +49,22 @@ void receive_tcp(struct data *sock_data)
 	int8_t  received;
 	char *buf = NULL;
 	uint8_t *pMsgIn = NULL;
+	static uint8_t socket_idle_count;
 	while(1){
-		k_sleep(K_SECONDS(1.5));
+		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
 		if(connected){
+			socket_idle_count++;
+			if (socket_idle_count >
+			    SOCK_RECV_TIMEOUT/SOCKET_POLL_INTERVAL){
+				connected = false;
+				stop_tcp();
+				socket_idle_count = 0;
+			}
 			received = socket_receive(sock_data, &buf);
 			if (received == 0) {
 //				return 0;
 			} else if (received > 0) {
+				socket_idle_count = 0;
 				LOG_WRN("received %d bytes!\n", received);
 
 				if (messaging_ack ==
@@ -78,7 +89,9 @@ void receive_tcp(struct data *sock_data)
 			} else {
 				LOG_ERR("Socket receive error!\n");
 				submit_error(SOCKET_RECV, received);
+				connected = false;
 				stop_tcp();
+				socket_idle_count = 0;
 			}
 		}
 	}

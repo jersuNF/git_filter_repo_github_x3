@@ -459,7 +459,6 @@ static bool data_cb(struct bt_data *data, void *user_data)
 {
 	adv_data_t *adv_data = user_data;
 	struct net_buf_simple net_buf;
-	uint8_t battery;
 	if (data->type == BT_DATA_MANUFACTURER_DATA) {
 		net_buf_simple_init_with_data(&net_buf, (void *)data->data,
 					      data->data_len);
@@ -473,10 +472,10 @@ static bool data_cb(struct bt_data *data, void *user_data)
 			adv_data->minor = net_buf_simple_pull_be16(&net_buf);
 			adv_data->rssi = net_buf_simple_pull_u8(&net_buf); //197
 
-			LOG_INF("Nofence beacon Major: %u Minor: %u RSSI: %u MANUF_ID: %u Beacon type: %u",
-				adv_data->major, adv_data->minor,
-				adv_data->rssi, adv_data->manuf_id,
-				adv_data->beacon_dev_type);
+			// LOG_INF("Nofence beacon Major: %u Minor: %u RSSI: %u MANUF_ID: %u Beacon type: %u",
+			// 	adv_data->major, adv_data->minor,
+			// 	adv_data->rssi, adv_data->manuf_id,
+			// 	adv_data->beacon_dev_type);
 		} else {
 			memset(adv_data, 0, sizeof(*adv_data));
 		}

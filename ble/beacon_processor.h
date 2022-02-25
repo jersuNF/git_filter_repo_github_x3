@@ -27,30 +27,24 @@
 #define BEACON_DIST_INFINITY (UINT8_MAX - 1)
 #define BEACON_DIST_MAX_M (50)
 
-typedef struct _BeaconHistory {
+struct beacon_connection_info {
 	uint8_t beacon_dist;
 	uint8_t time_diff;
-} BeaconHistory;
-
-/** @brief : Very simple ring buffer to store measurements for one Beacon **/
-struct ring_buffer_t {
-	/** Buffer memory. */
-	BeaconHistory buffer[MAX_BEACON_MEASUREMENTS];
-	uint8_t tail_index;
-	uint8_t head_index;
 };
 
-typedef struct _SingleBeaconInfo {
+struct beacon_info {
+	size_t num_conn;
+	uint8_t conn_history_peeker;
 	bt_addr_le_t mac_address;
 	uint8_t calculated_dist;
 	uint32_t prevMeasureTime;
-	struct ring_buffer_t beacon_hist_fifo;
-
-} SingleBeaconInfo_t;
-
-typedef struct _BeaconsInfo {
-	SingleBeaconInfo_t single_beacon_infos[MAX_BEACONS];
-} BeaconsInfo_t;
+	struct beacon_connection_info history[MAX_BEACON_MEASUREMENTS];
+};
+struct beacon_list {
+	uint8_t beacon_peeker;
+	size_t arr_size;
+	struct beacon_info beacon_array[MAX_BEACONS];
+};
 
 void beac_init(void);
 

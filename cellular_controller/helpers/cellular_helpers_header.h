@@ -14,7 +14,7 @@
 #include "nf_eeprom.h"
 #define INVALID_SOCK (-1)
 #define PEER_PORT CONFIG_SERVER_PORT
-#define RECV_BUF_SIZE 128
+#define RECV_BUF_SIZE 366
 
 #define SOCKS5_PROXY_V4_ADDR ""
 #define SOCKS5_PROXY_PORT 1080

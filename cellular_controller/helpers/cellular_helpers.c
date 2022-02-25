@@ -119,7 +119,7 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 	return ret;
 }
 
-int8_t socket_receive(struct data *data, char **msg)
+int socket_receive(struct data *data, char **msg)
 {
 	int received;
 	static char buf[RECV_BUF_SIZE];

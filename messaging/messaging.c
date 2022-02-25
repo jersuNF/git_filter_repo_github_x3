@@ -30,13 +30,16 @@ K_SEM_DEFINE(cache_lock_sem, 1, 1);
 collar_state_struct_t current_state;
 gps_last_fix_struct_t cached_fix;
 
-static uint32_t new_fence_in_progress;
-static uint8_t latest_frame, expected_fframe;
-static bool first_frame;
+static uint32_t new_fence_in_progress, new_ano_in_progress;
+static uint8_t expected_fframe, expected_ano_frame;
+static bool first_frame, first_ano_frame;
 
 uint8_t poll_period_minutes = 5;
 void build_poll_request(NofenceMessage *);
 int8_t request_fframe(uint32_t, uint8_t);
+void fence_download(uint8_t);
+int8_t request_ano_frame(uint16_t, uint16_t);
+void ano_download(uint8_t);
 void proto_InitHeader(NofenceMessage *);
 void process_poll_response(NofenceMessage *);
 void process_upgrade_request(VersionInfoFW *);
@@ -101,7 +104,6 @@ void modem_poll_work_fn()
 	}
 	LOG_WRN("Messaging - Sending new message!\n");
 	send_message(&new_msg);
-
 	k_work_reschedule_for_queue(&poll_q, &modem_poll_work,
 				    K_SECONDS(poll_period_minutes * 60));
 }
@@ -177,6 +179,10 @@ static bool event_handler(const struct event_header *eh)
 			cached_fix = ev->fix;
 			k_sem_give(&cache_lock_sem);
 		}
+		return false;
+	}
+	if (is_request_ano_event(eh)) {
+		request_ano_frame(54, 0);
 		return false;
 	}
 
@@ -261,43 +267,11 @@ static void process_lte_proto_event(void)
 	} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
 		uint8_t new_fframe =
 			process_fence_msg(&proto.m.fence_definition_resp);
-		if (new_fframe == 0 && first_frame){
-			first_frame = false;
-		}
-		else if (new_fframe == 0 && !first_frame){ //something went bad
-			latest_frame = 0;
-			new_fence_in_progress = 0;
-			return;
-		}
-		if (new_fframe >= 0){
-			if (new_fframe == DOWNLOAD_COMPLETE){
-				struct new_fence_available *fence_ready;
-				fence_ready = new_new_fence_available();
-				fence_ready->fence_version = new_fence_in_progress;
-				EVENT_SUBMIT(fence_ready);
-				LOG_WRN("Fence %d download "
-					"complete!", new_fence_in_progress);
-				return;
-			}
-			if (new_fframe == expected_fframe){
-				latest_frame = new_fframe;
-				expected_fframe++;
-				/* TODO: handle failure to send request!*/
-				int ret = request_fframe(new_fence_in_progress,
-							 expected_fframe);
-				LOG_WRN("Requesting frame %d of new fence: %d"
-					".\n", expected_fframe,
-					new_fence_in_progress);
-
-			} else{
-				latest_frame = 0;
-				new_fence_in_progress = 0;
-				return;
-			}
-		}
+		fence_download(new_fframe);
 		return;
 	} else if (proto.which_m == NofenceMessage_ubx_ano_reply_tag) {
-		process_ano_msg(&proto.m.ubx_ano_reply);
+		uint8_t new_ano_frame = process_ano_msg(&proto.m.ubx_ano_reply);
+		ano_download(new_ano_frame);
 		return;
 	} else {
 		return;
@@ -425,6 +399,91 @@ int8_t request_fframe(uint32_t version, uint8_t frame){
 		return -1;
 	}
 	return 0;
+}
+
+void fence_download( uint8_t new_fframe){
+	if (new_fframe == 0 && first_frame){
+		first_frame = false;
+	}
+	else if (new_fframe == 0 && !first_frame){ //something went bad
+		expected_fframe = 0;
+		new_fence_in_progress = 0;
+		return;
+	}
+	if (new_fframe >= 0){
+		if (new_fframe == DOWNLOAD_COMPLETE){
+			struct new_fence_available *fence_ready;
+			fence_ready = new_new_fence_available();
+			fence_ready->fence_version = new_fence_in_progress;
+			EVENT_SUBMIT(fence_ready);
+			LOG_WRN("Fence %d download "
+				"complete!", new_fence_in_progress);
+			return;
+		}
+		if (new_fframe == expected_fframe){
+			expected_fframe++;
+			/* TODO: handle failure to send request!*/
+			int ret = request_fframe(new_fence_in_progress,
+						 expected_fframe);
+			LOG_WRN("Requesting frame %d of new fence: %d"
+				".\n", expected_fframe,
+				new_fence_in_progress);
+
+		} else{
+			expected_fframe = 0;
+			new_fence_in_progress = 0;
+			return;
+		}
+	}
+}
+
+int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start){
+	NofenceMessage fence_req;
+	proto_InitHeader(&fence_req); /* fill up message header. */
+	fence_req.which_m = NofenceMessage_ubx_ano_req_tag;
+	fence_req.m.ubx_ano_req.usAnoId = ano_id;
+	fence_req.m.ubx_ano_req.usStartAno = ano_start;
+	int ret = send_message(&fence_req);
+	if (ret){
+		LOG_WRN("Failed to send request for frame %d\n", ano_start);
+		return -1;
+	}
+	return 0;
+}
+
+void ano_download(uint8_t new_ano_frame){
+	if (new_ano_frame == 0 && first_ano_frame){
+		first_frame = false;
+	}
+	else if (new_ano_frame == 0 && !first_ano_frame){ //something went bad
+		expected_ano_frame = 0;
+		new_fence_in_progress = 0;
+		return;
+	}
+	if (new_ano_frame >= 0){
+		if (new_ano_frame == DOWNLOAD_COMPLETE){
+			struct ano_ready *ano_ready;
+			ano_ready = new_ano_ready();
+			EVENT_SUBMIT(ano_ready);
+			LOG_WRN("ANO %d download "
+				"complete!", new_ano_in_progress);
+			return;
+		}
+		if (new_ano_frame == expected_ano_frame){
+			expected_ano_frame++;
+			/* TODO: handle failure to send request!*/
+			int ret = request_fframe(new_ano_in_progress,
+						 expected_ano_frame);
+			LOG_WRN("Requesting frame %d of new ano: %d"
+				".\n", expected_ano_frame,
+				new_ano_in_progress);
+
+		} else{
+			expected_ano_frame = 0;
+			new_ano_in_progress = 0;
+			return;
+		}
+	}
 }
 
 void proto_InitHeader(NofenceMessage *msg)
@@ -591,6 +650,7 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 
 uint8_t process_ano_msg(UbxAnoReply *anoResp)
 {
+	LOG_DBG("Ano response received!\n");
 	return 0;
 }
 

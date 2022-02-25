@@ -17,7 +17,7 @@ static int server_port;
 static char server_ip[15];
 
 int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
-uint8_t socket_receive(struct data *, char **);
+int socket_receive(struct data *, char **);
 int8_t lte_init(void);
 bool lte_is_ready(void);
 
@@ -46,7 +46,7 @@ static APP_BMEM bool connected;
 
 void receive_tcp(struct data *sock_data)
 {
-	int8_t  received;
+	int  received;
 	char *buf = NULL;
 	uint8_t *pMsgIn = NULL;
 	static float socket_idle_count;

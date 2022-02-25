@@ -29,15 +29,14 @@
 
 struct beacon_connection_info {
 	uint8_t beacon_dist;
-	uint8_t time_diff;
+	uint32_t time_diff;
 };
 
 struct beacon_info {
 	size_t num_conn;
 	uint8_t conn_history_peeker;
 	bt_addr_le_t mac_address;
-	uint8_t calculated_dist;
-	uint32_t prevMeasureTime;
+	uint8_t avg_dist;
 	struct beacon_connection_info history[MAX_BEACON_MEASUREMENTS];
 };
 struct beacon_list {
@@ -46,13 +45,9 @@ struct beacon_list {
 	struct beacon_info beacon_array[MAX_BEACONS];
 };
 
-void beac_init(void);
+void init_beacon_list(void);
 
-void beac_reset(void);
-
-bool beac_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
-			int8_t rssi_sample_value, adv_data_t *p_adv_data);
-
-SingleBeaconInfo_t *beac_get_nearest_beacon(uint32_t minTimestamp);
+bool beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
+			  int8_t rssi_sample_value, adv_data_t *p_adv_data);
 
 #endif

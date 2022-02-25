@@ -4,9 +4,9 @@
 #include <zephyr.h>
 
 #define MY_STACK_SIZE 1024
-#define MY_PRIORITY 30
+#define MY_PRIORITY 14
 #define SOCKET_POLL_INTERVAL 0.25
-#define SOCK_RECV_TIMEOUT 60
+#define SOCK_RECV_TIMEOUT 10
 #define MODULE cellular_controller
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
@@ -49,24 +49,14 @@ void receive_tcp(struct data *sock_data)
 	int8_t  received;
 	char *buf = NULL;
 	uint8_t *pMsgIn = NULL;
-	static uint8_t socket_idle_count;
+	static float socket_idle_count;
 	while(1){
 		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
 		if(connected){
-			socket_idle_count++;
-			if (socket_idle_count >
-			    SOCK_RECV_TIMEOUT/SOCKET_POLL_INTERVAL){
-				connected = false;
-				stop_tcp();
-				socket_idle_count = 0;
-			}
 			received = socket_receive(sock_data, &buf);
-			if (received == 0) {
-//				return 0;
-			} else if (received > 0) {
+			if (received > 0) {
 				socket_idle_count = 0;
 				LOG_WRN("received %d bytes!\n", received);
-
 				if (messaging_ack ==
 				    false) { /* TODO: notify the error handler */
 					LOG_ERR("New message received while the messaging module "
@@ -86,11 +76,21 @@ void receive_tcp(struct data *sock_data)
 					LOG_INF("Submitting msgIn event!\n");
 					EVENT_SUBMIT(msgIn);
 				}
+			} else if (received == 0) {
+				socket_idle_count += SOCKET_POLL_INTERVAL;
+				if (socket_idle_count > SOCK_RECV_TIMEOUT){
+					LOG_ERR("Socket receive timed out!, "
+						"%f\n", socket_idle_count);
+					submit_error(SOCKET_RECV, received);
+					stop_tcp();
+					connected = false;
+					socket_idle_count = 0;
+				}
 			} else {
 				LOG_ERR("Socket receive error!\n");
 				submit_error(SOCKET_RECV, received);
-				connected = false;
 				stop_tcp();
+				connected = false;
 				socket_idle_count = 0;
 			}
 		}
@@ -101,10 +101,6 @@ int8_t start_tcp(void)
 {
 	int8_t ret = -1;
 	struct sockaddr_in addr4;
-//	if (!connected){
-//		stop_tcp();
-//		k_sleep(K_SECONDS(0.1));
-//	}
 
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
 		addr4.sin_family = AF_INET;
@@ -131,25 +127,41 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		stop_tcp();
 		connected = false;
 		return true;
-	} else if (is_messaging_proto_out_event(eh)) {
+	}else if (is_messaging_host_address_event(eh)) {
+		/*TODO: compare with host address in eeprom and store the new
+		 * one if needed. Restart might be needed then. */
+		struct messaging_host_address_event *event =
+			cast_messaging_host_address_event(eh);
+		memcpy(&server_address[0], event->address,
+		       sizeof(event->address));
+
+		char *ptr_port;
+		ptr_port = strchr(server_address, ':') + 1;
+		server_port = atoi(ptr_port);
+		if (server_port <= 0) {
+			return -1;
+		}
+		uint8_t ip_len;
+		ip_len = ptr_port - 1 - &server_address[0];
+		memcpy(&server_ip[0], &server_address[0], ip_len);
+	}else if (is_messaging_proto_out_event(eh)) {
 		/* Accessing event data. */
 		struct messaging_proto_out_event *event =
 			cast_messaging_proto_out_event(eh);
 		uint8_t *pCharMsgOut = event->buf;
 		size_t MsgOutLen = event->len;
-
-/*TODO: cleanup this mess, we need to be aware of the socket '0' actual state of
- * cennection.*/
-
-//		while (start_tcp() != 0) {
-//			stop_tcp();
-//			LOG_WRN("Retry socket connect!\n");
-//			k_sleep(K_SECONDS(0.1));
-//		}
-		start_tcp();
-		connected = true;
+		if(!connected){
+			int8_t  ret = start_tcp();
+			if (ret == 0){
+				connected = true;
+			}else{
+				LOG_WRN("Connection failed!");
+				stop_tcp();
+				/*TODO: notify error handler*/
+			}
+		}
 		/* make a local copy of the message to send.*/
-		char *CharMsgOut;
+		uint8_t *CharMsgOut;
 		CharMsgOut = (char *)malloc(MsgOutLen);
 		memcpy(CharMsgOut, pCharMsgOut, MsgOutLen);
 
@@ -212,7 +224,8 @@ int8_t cellular_controller_init(void)
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {
 		LOG_ERR("GSM driver was not found!\n");
-		return -1;
+		submit_error(OTHER, -1);
+		goto exit_cellular_controller;
 	}
 	ret = lte_init();
 	if (ret == 1) {
@@ -231,7 +244,7 @@ int8_t cellular_controller_init(void)
 					"used. \n");
 //				goto exit_cellular_controller;
 			}
-			ret = 0;//start_tcp();
+			ret = start_tcp();
 			if (ret == 0) {
 				LOG_INF("TCP connection started!\n");
 				connected = true;
@@ -261,3 +274,4 @@ EVENT_LISTENER(MODULE, cellular_controller_event_handler);
 EVENT_SUBSCRIBE(MODULE, messaging_ack_event);
 EVENT_SUBSCRIBE(MODULE, messaging_proto_out_event);
 EVENT_SUBSCRIBE(MODULE, messaging_stop_connection_event);
+EVENT_SUBSCRIBE(MODULE, messaging_host_address_event);

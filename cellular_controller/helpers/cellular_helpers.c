@@ -72,16 +72,8 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 
 	data->tcp.sock = socket(addr->sa_family, SOCK_STREAM, IPPROTO_TCP);
 	if (data->tcp.sock > 0){ /* socket 0 already created!*/
-//		(void)close(conf.ipv4.tcp.sock);
 		data->tcp.sock = 0;
-//		data->tcp.sock = socket(addr->sa_family, SOCK_STREAM, IPPROTO_TCP);
 		}
-//		ret = connect(0, addr, addrlen);
-//		if(ret < 0){ /* recreate socket 0*/
-//			data->tcp.sock = socket(addr->sa_family, SOCK_STREAM, IPPROTO_TCP);
-//		}else{
-//			return 0;
-//		}
 
 	if (data->tcp.sock < 0) {
 		LOG_ERR("Failed to create TCP socket (%s): %d", data->proto,

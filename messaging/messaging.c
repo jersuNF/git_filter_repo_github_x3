@@ -39,7 +39,9 @@ void build_poll_request(NofenceMessage *);
 int8_t request_fframe(uint32_t, uint8_t);
 void proto_InitHeader(NofenceMessage *);
 void process_poll_response(NofenceMessage *);
-uint8_t process_fence_msg(FenceDefinitionResponse *pResp);
+void process_upgrade_request(VersionInfoFW *);
+uint8_t process_fence_msg(FenceDefinitionResponse *);
+uint8_t process_ano_msg(UbxAnoReply *);
 int send_message(NofenceMessage *);
 void messaging_thread_fn(void);
 
@@ -48,7 +50,6 @@ bool proto_hasLastKnownDatePos(const gps_last_fix_struct_t *);
 
 bool m_confirm_acc_limits, m_confirm_ble_key, m_transfer_boot_params;
 bool send_out_ack, use_server_time;
-bool keep_connection;
 
 K_SEM_DEFINE(ble_ctrl_sem, 0, 1);
 K_SEM_DEFINE(ble_data_sem, 0, 1);
@@ -115,10 +116,6 @@ void modem_poll_work_fn()
  */
 static bool event_handler(const struct event_header *eh)
 {
-	size_t len;
-	uint8_t *pMsg = NULL;
-	uint8_t *buf = NULL;
-
 	if (is_ble_ctrl_event(eh)) {
 		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
 		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
@@ -135,7 +132,7 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_cellular_proto_in_event(eh)) {
-		struct lte_proto_event *ev = cast_cellular_proto_in_event(eh);
+		struct cellular_proto_in_event *ev = cast_cellular_proto_in_event(eh);
 		while (k_msgq_put(&lte_proto_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&lte_proto_msgq);
 		}
@@ -285,6 +282,7 @@ static void process_lte_proto_event(void)
 			if (new_fframe == expected_fframe){
 				latest_frame = new_fframe;
 				expected_fframe++;
+				/* TODO: handle failure to send request!*/
 				int ret = request_fframe(new_fence_in_progress,
 							 expected_fframe);
 				LOG_WRN("Requesting frame %d of new fence: %d"
@@ -299,7 +297,7 @@ static void process_lte_proto_event(void)
 		}
 		return;
 	} else if (proto.which_m == NofenceMessage_ubx_ano_reply_tag) {
-		process_ano_msg();
+		process_ano_msg(&proto.m.ubx_ano_reply);
 		return;
 	} else {
 		return;
@@ -446,12 +444,11 @@ int send_message(NofenceMessage *msg_proto)
 {
 	uint8_t encoded_msg[NofenceMessage_size];
 	memset(encoded_msg, 0, sizeof(encoded_msg));
-	LOG_DBG("Byte array !400%0x\n", encoded_msg);
 	size_t encoded_size = 0;
 	LOG_DBG("Start message encoding!, size: %d, version: %u\n",
 		sizeof(*msg_proto), msg_proto->header.ulVersion);
 
-	LOG_WRN("Input to proto encode: %p,%p,%lu,%p\n", msg_proto,
+	LOG_WRN("Input to proto encode: %p,%p,%u,%p\n", msg_proto,
 		&encoded_msg[0], sizeof(encoded_msg), &encoded_size);
 
 	int ret = collar_protocol_encode(msg_proto, &encoded_msg[0],
@@ -544,7 +541,7 @@ void process_poll_response(NofenceMessage *proto)
 		 * .size to BLE controller. */
 	}
 	if (pResp->has_versionInfo) {
-		process_upgrade_request(pResp->versionInfo);
+		process_upgrade_request(&pResp->versionInfo);
 	}
 	if (pResp->ulFenceDefVersion != current_state.fence_version &&
 	    new_fence_in_progress != pResp->ulFenceDefVersion) {
@@ -592,9 +589,9 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	return frame;
 }
 
-void process_ano_msg(void)
+uint8_t process_ano_msg(UbxAnoReply *anoResp)
 {
-	return;
+	return 0;
 }
 
 _DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *gpsLastFix)

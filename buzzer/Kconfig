@@ -28,16 +28,20 @@ if BUZZER
 		  becomes ready.
 
 	config BUZZER_WARN_ZONE_FREQ_INTERVAL
-		int "How often and long we play the NORMAL warn zone frequency in sec."
-		default 1
+		int "How often and long we play the NORMAL warn zone frequency in ms."
+		default 2000
 
 	config BUZZER_MAX_WARN_ZONE_FREQ_INTERVAL
-		int "How often and long we play the MAX warn zone frequency in sec."
-		default 5
+		int "How often and long we play the MAX warn zone frequency in ms."
+		default 2000
 
 	config BUZZER_UPDATE_WARN_FREQ_TIMEOUT_SEC
 		int "Timeout if we do not get new warn zone freq from AMC."
 		default 1
+
+	config BUZZER_LONGEST_NOTE_SUSTAIN
+		int "Maximum length of sustain notes, prevents timeouts on sems."
+		default 10
 		  
 	menu "Message Queues"
 		config MSGQ_SOUND_EVENT_SIZE

@@ -198,7 +198,7 @@ int stg_init_storage_controller(void)
 int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 			   size_t len)
 {
-	if (k_sem_take(&write_sem, K_SECONDS(CONFIG_SEM_READ_WRITE_TIMEOUT))) {
+	if (k_sem_take(&write_sem, K_MSEC(CONFIG_SEM_READ_WRITE_TIMEOUT))) {
 		LOG_ERR("Semaphore timeout for writing to partition.");
 		return -EBUSY;
 	}
@@ -333,7 +333,7 @@ static inline int read_fcb_partition(flash_partition_t partition,
 	/* Check if we have any data available. */
 	int err = 0;
 
-	if (k_sem_take(&read_sem, K_SECONDS(CONFIG_SEM_READ_WRITE_TIMEOUT))) {
+	if (k_sem_take(&read_sem, K_MSEC(CONFIG_SEM_READ_WRITE_TIMEOUT))) {
 		LOG_ERR("Semaphore timeout for reading from partition.");
 		return -EBUSY;
 	}

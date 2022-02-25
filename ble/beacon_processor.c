@@ -208,7 +208,7 @@ bool beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 	/* If it doesn't exit, add it to list. */
 	if (target_beacon == -1) {
 		/* Populate 1 new history entry. */
-		memset(&beacon.history, 0, sizeof(beacon.history));
+		beacon.avg_dist = UINT8_MAX;
 		add_to_beacon_history(&info, &beacon);
 		add_to_beacon_list(&beacons, &beacon);
 	} else {

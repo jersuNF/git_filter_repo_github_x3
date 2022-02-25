@@ -72,7 +72,7 @@ static void inline end_current_sound(void)
  */
 static inline uint32_t get_pulse_width(uint32_t freq, uint8_t volume)
 {
-	return (freq / 2) * (volume / 100);
+	return (freq / 2) * ((float)volume / 100);
 }
 
 /** @brief Plays a frequency for given duration.

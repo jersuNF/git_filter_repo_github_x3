@@ -26,9 +26,12 @@
 #define SANITY_CHECK_HUMIDITY_MAX 100
 #define SANITY_CHECK_HUMIDITY_MIN 0
 
+#define SENSOR_VALUE_TO_FLOAT(integer, frac)                                   \
+	(float)(((float)integer) + (float)((float)frac / 1000000))
+
 LOG_MODULE_REGISTER(env_sensor, CONFIG_ENV_SENSOR_LOG_LEVEL);
 
-static inline int sensor_sanity_check(enum sensor_channel sc, int32_t integer)
+static inline int sensor_sanity_check(enum sensor_channel sc, float value)
 {
 	int max = 0;
 	int min = 0;
@@ -49,8 +52,8 @@ static inline int sensor_sanity_check(enum sensor_channel sc, int32_t integer)
 	default:
 		return -EINVAL;
 	}
-
-	if (integer <= max && integer >= min) {
+	LOG_INF("Value is %f", value);
+	if (value <= max && value >= min) {
 		return 0;
 	} else {
 		return -ERANGE;
@@ -100,9 +103,8 @@ static inline void update_env_sensor_event_values(void)
 
 	struct env_sensor_event *ev = new_env_sensor_event();
 
-	ev->temp.integer = temp.val1;
-	ev->temp.frac = temp.val2;
-	err = sensor_sanity_check(SENSOR_CHAN_AMBIENT_TEMP, ev->temp.integer);
+	ev->temp = SENSOR_VALUE_TO_FLOAT(temp.val1, temp.val2);
+	err = sensor_sanity_check(SENSOR_CHAN_AMBIENT_TEMP, ev->temp);
 
 	if (err) {
 		char *msg = "Sanity check failed for temperature.";
@@ -110,9 +112,8 @@ static inline void update_env_sensor_event_values(void)
 		return;
 	}
 
-	ev->press.integer = press.val1;
-	ev->press.frac = press.val2;
-	err = sensor_sanity_check(SENSOR_CHAN_PRESS, ev->press.integer);
+	ev->press = SENSOR_VALUE_TO_FLOAT(press.val1, press.val2);
+	err = sensor_sanity_check(SENSOR_CHAN_PRESS, ev->press);
 
 	if (err) {
 		char *msg = "Sanity check failed for pressure.";
@@ -120,9 +121,8 @@ static inline void update_env_sensor_event_values(void)
 		return;
 	}
 
-	ev->humidity.integer = humidity.val1;
-	ev->humidity.frac = humidity.val2;
-	err = sensor_sanity_check(SENSOR_CHAN_HUMIDITY, ev->humidity.integer);
+	ev->humidity = SENSOR_VALUE_TO_FLOAT(humidity.val1, humidity.val2);
+	err = sensor_sanity_check(SENSOR_CHAN_HUMIDITY, ev->humidity);
 
 	if (err) {
 		char *msg = "Sanity check failed for humidity.";

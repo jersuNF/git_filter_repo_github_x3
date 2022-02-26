@@ -17,6 +17,8 @@
 #include "request_events.h"
 #include "nf_version.h"
 #include "collar_protocol.h"
+#include "UBX.h"
+#include "unixTime.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
@@ -30,8 +32,8 @@ K_SEM_DEFINE(cache_lock_sem, 1, 1);
 collar_state_struct_t current_state;
 gps_last_fix_struct_t cached_fix;
 
-static uint32_t new_fence_in_progress, new_ano_in_progress;
-static uint8_t expected_fframe, expected_ano_frame;
+static uint32_t new_fence_in_progress;
+static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
 static bool first_frame, first_ano_frame;
 
 uint8_t poll_period_minutes = 5;
@@ -39,7 +41,7 @@ void build_poll_request(NofenceMessage *);
 int8_t request_fframe(uint32_t, uint8_t);
 void fence_download(uint8_t);
 int8_t request_ano_frame(uint16_t, uint16_t);
-void ano_download(uint8_t);
+void ano_download(uint16_t, uint16_t);
 void proto_InitHeader(NofenceMessage *);
 void process_poll_response(NofenceMessage *);
 void process_upgrade_request(VersionInfoFW *);
@@ -50,7 +52,8 @@ void messaging_thread_fn(void);
 
 _DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *);
 bool proto_hasLastKnownDatePos(const gps_last_fix_struct_t *);
-
+static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t,
+					    uint8_t);
 bool m_confirm_acc_limits, m_confirm_ble_key, m_transfer_boot_params;
 bool send_out_ack, use_server_time;
 
@@ -183,6 +186,13 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_request_ano_event(eh)) {
 		request_ano_frame(54, 0);
+		//request frame 0
+		first_ano_frame = true;
+		LOG_WRN("Requesting ano data!\n");
+		int ret = request_ano_frame(0, 0);
+		if (ret == 0){
+			first_ano_frame = false;
+		}
 		return false;
 	}
 
@@ -270,8 +280,9 @@ static void process_lte_proto_event(void)
 		fence_download(new_fframe);
 		return;
 	} else if (proto.which_m == NofenceMessage_ubx_ano_reply_tag) {
-		uint8_t new_ano_frame = process_ano_msg(&proto.m.ubx_ano_reply);
-		ano_download(new_ano_frame);
+		uint16_t new_ano_frame = process_ano_msg(&proto.m
+								  .ubx_ano_reply);
+		ano_download(proto.m.ubx_ano_reply.usAnoId, new_ano_frame);
 		return;
 	} else {
 		return;
@@ -418,6 +429,8 @@ void fence_download( uint8_t new_fframe){
 			EVENT_SUBMIT(fence_ready);
 			LOG_WRN("Fence %d download "
 				"complete!", new_fence_in_progress);
+			first_ano_frame = true;
+			request_ano_frame(0, 0);
 			return;
 		}
 		if (new_fframe == expected_fframe){
@@ -438,26 +451,29 @@ void fence_download( uint8_t new_fframe){
 }
 
 int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start){
-	NofenceMessage fence_req;
-	proto_InitHeader(&fence_req); /* fill up message header. */
-	fence_req.which_m = NofenceMessage_ubx_ano_req_tag;
-	fence_req.m.ubx_ano_req.usAnoId = ano_id;
-	fence_req.m.ubx_ano_req.usStartAno = ano_start;
-	int ret = send_message(&fence_req);
+	NofenceMessage ano_req;
+	proto_InitHeader(&ano_req); /* fill up message header. */
+	ano_req.which_m = NofenceMessage_ubx_ano_req_tag;
+	ano_req.m.ubx_ano_req.usAnoId = ano_id;
+	ano_req.m.ubx_ano_req.usStartAno = ano_start;
+	int ret = send_message(&ano_req);
 	if (ret){
-		LOG_WRN("Failed to send request for frame %d\n", ano_start);
+		LOG_WRN("Failed to send request for ano %d\n", ano_start);
 		return -1;
 	}
 	return 0;
 }
 
-void ano_download(uint8_t new_ano_frame){
-	if (new_ano_frame == 0 && first_ano_frame){
-		first_frame = false;
+void ano_download(uint16_t ano_id, uint16_t new_ano_frame){
+	LOG_WRN("ano_id = %d, ano_frame = %d\n", ano_id, new_ano_frame);
+	if (first_ano_frame){
+		new_ano_in_progress = ano_id;
+		expected_ano_frame = 0;
+		first_ano_frame = false;
 	}
 	else if (new_ano_frame == 0 && !first_ano_frame){ //something went bad
 		expected_ano_frame = 0;
-		new_fence_in_progress = 0;
+		new_ano_in_progress = 0;
 		return;
 	}
 	if (new_ano_frame >= 0){
@@ -469,20 +485,22 @@ void ano_download(uint8_t new_ano_frame){
 				"complete!", new_ano_in_progress);
 			return;
 		}
-		if (new_ano_frame == expected_ano_frame){
-			expected_ano_frame++;
+//		if (new_ano_frame > expected_ano_frame){
+			expected_ano_frame += new_ano_frame;
+			LOG_WRN("expected ano frame = %d\n",
+				expected_ano_frame);
 			/* TODO: handle failure to send request!*/
-			int ret = request_fframe(new_ano_in_progress,
+			int ret = request_ano_frame(ano_id,
 						 expected_ano_frame);
 			LOG_WRN("Requesting frame %d of new ano: %d"
 				".\n", expected_ano_frame,
 				new_ano_in_progress);
 
-		} else{
-			expected_ano_frame = 0;
-			new_ano_in_progress = 0;
+//		} else{
+//			expected_ano_frame = 0;
+//			new_ano_in_progress = 0;
 			return;
-		}
+//		}
 	}
 }
 
@@ -651,7 +669,17 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 uint8_t process_ano_msg(UbxAnoReply *anoResp)
 {
 	LOG_DBG("Ano response received!\n");
-	return 0;
+	uint8_t rec_ano_frames = anoResp->rgucBuf.size/sizeof(UBX_MGA_ANO_RAW_t);
+	UBX_MGA_ANO_RAW_t *temp = NULL;
+	temp = (UBX_MGA_ANO_RAW_t *) (anoResp->rgucBuf.bytes + sizeof(UBX_MGA_ANO_RAW_t));
+	uint32_t age = ano_date_to_unixtime_midday(temp->mga_ano.year,
+						   temp->mga_ano.month,
+						   temp->mga_ano.day);
+//	if (age > today + 3days){
+//		return DOWNLOAD_COMPLETE;
+//	}
+	LOG_DBG("Number of received ano buffer = %d!\n", rec_ano_frames);
+	return rec_ano_frames;
 }
 
 _DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *gpsLastFix)
@@ -686,4 +714,14 @@ _DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *gpsLastFix)
 bool proto_hasLastKnownDatePos(const gps_last_fix_struct_t *gps)
 {
 	return gps->unixTimestamp != 0;
+}
+
+static uint32_t ano_date_to_unixtime_midday(uint8_t year, uint8_t month, uint8_t day) {
+	nf_time_t nf_time;
+	nf_time.day = day;
+	nf_time.month = month;
+	nf_time.year = year + 2000;
+	nf_time.hour = 12; //assumed per ANO specs
+	nf_time.minute = nf_time.second = 0;
+	return time2unix(&nf_time);
 }

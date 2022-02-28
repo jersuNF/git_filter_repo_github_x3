@@ -503,7 +503,7 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 	    adv_data.minor == BEACON_MINOR_ID) {
 		//printk("process_event\n");
 		const uint32_t now = k_uptime_get_32();
-		beac_process_event(now, addr, rssi, &adv_data);
+		beacon_process_event(now, addr, rssi, &adv_data);
 	}
 }
 
@@ -522,6 +522,8 @@ int ble_module_init()
 	}
 
 	bt_conn_cb_register(&conn_callbacks);
+
+	init_beacon_list();
 
 	/* Start beacon scanner subsystem */
 	struct bt_le_scan_param scan_param = {

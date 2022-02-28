@@ -22,3 +22,23 @@ config MSG_BUF_SIZE
 	default 2048
 	help
 	  Size of transmit/receive buffer for transfer between interfaces.
+
+config BEACON_SHORTEST_DISTANCE
+	bool "Use the shortest distance across all Beacons"
+	default y
+
+config BEACON_DISTANCE_MAX
+	int "Max distance for a Beacon to be considerd. Must be less than 255"
+	default 50
+
+config BEACON_MAX_MEASUREMENTS
+	int "Max measurements per Beacon"
+	default 8
+
+config BEACON_MAX_BROADCASTERS
+	int "Max number of Beacons to scan for"
+	default 4
+
+config BEACON_MAX_MEASUREMENT_AGE
+	int "Max age of measurements in buffer. Given in seconds"
+	default 10

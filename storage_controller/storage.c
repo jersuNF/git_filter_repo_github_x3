@@ -38,8 +38,8 @@ const struct flash_area *pasture_area;
 struct fcb pasture_fcb;
 struct flash_sector pasture_sectors[FLASH_PASTURE_NUM_SECTORS];
 
-K_SEM_DEFINE(write_sem, 1, 1);
-K_SEM_DEFINE(read_sem, 1, 1);
+K_MUTEX_DEFINE(write_mutex);
+K_MUTEX_DEFINE(read_mutex);
 
 /* Callback context config given to walk callback function. 
  * We can either give the data directly if only one entry (newest),
@@ -198,8 +198,9 @@ int stg_init_storage_controller(void)
 int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 			   size_t len)
 {
-	if (k_sem_take(&write_sem, K_MSEC(CONFIG_SEM_READ_WRITE_TIMEOUT))) {
-		LOG_ERR("Semaphore timeout for writing to partition.");
+	if (k_mutex_lock(&write_mutex,
+			 K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+		LOG_ERR("Mutex timeout for writing to partition.");
 		return -EBUSY;
 	}
 	/* Determine write type. If true, we only have this newest entry 
@@ -265,7 +266,7 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 		EVENT_SUBMIT(ev);
 	}
 cleanup:
-	k_sem_give(&write_sem);
+	k_mutex_unlock(&write_mutex);
 	return err;
 }
 
@@ -333,8 +334,9 @@ static inline int read_fcb_partition(flash_partition_t partition,
 	/* Check if we have any data available. */
 	int err = 0;
 
-	if (k_sem_take(&read_sem, K_MSEC(CONFIG_SEM_READ_WRITE_TIMEOUT))) {
-		LOG_ERR("Semaphore timeout for reading from partition.");
+	if (k_mutex_lock(&read_mutex,
+			 K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+		LOG_ERR("Mutex timeout for reading from partition.");
 		return -EBUSY;
 	}
 
@@ -387,7 +389,7 @@ static inline int read_fcb_partition(flash_partition_t partition,
 		}
 	}
 cleanup:
-	k_sem_give(&read_sem);
+	k_mutex_unlock(&read_mutex);
 	return err;
 }
 

@@ -22,6 +22,7 @@
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
+#define SECONDS_IN_THREE_DAYS 259200
 
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
 
@@ -675,9 +676,11 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 	uint32_t age = ano_date_to_unixtime_midday(temp->mga_ano.year,
 						   temp->mga_ano.month,
 						   temp->mga_ano.day);
-//	if (age > today + 3days){
-//		return DOWNLOAD_COMPLETE;
-//	}
+	LOG_WRN("Relative age of received ANO frame = %d, %d \n",
+		age, time_from_server);
+	if (age > time_from_server + SECONDS_IN_THREE_DAYS){
+		return DOWNLOAD_COMPLETE;
+	}
 	LOG_DBG("Number of received ano buffer = %d!\n", rec_ano_frames);
 	return rec_ano_frames;
 }

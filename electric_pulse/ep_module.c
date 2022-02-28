@@ -175,6 +175,6 @@ static bool event_handler(const struct event_header *eh)
 	return false;
 }
 
-EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE(MODULE, ep_status_event);
-EVENT_SUBSCRIBE(MODULE, sound_event);
+EVENT_LISTENER(LOG_MODULE_NAME, event_handler);
+EVENT_SUBSCRIBE(LOG_MODULE_NAME, ep_status_event);
+EVENT_SUBSCRIBE(LOG_MODULE_NAME, sound_event);

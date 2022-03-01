@@ -6,7 +6,7 @@
 #define MY_STACK_SIZE 1024
 #define MY_PRIORITY 14
 #define SOCKET_POLL_INTERVAL 0.25
-#define SOCK_RECV_TIMEOUT 10
+#define SOCK_RECV_TIMEOUT 60
 #define MODULE cellular_controller
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 

@@ -19,6 +19,8 @@
 #include "collar_protocol.h"
 #include "UBX.h"
 #include "unixTime.h"
+#include "error_event.h"
+#include "helpers.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
@@ -95,19 +97,23 @@ K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_SIZE,
 
 K_KERNEL_STACK_DEFINE(messaging_poll_thread, CONFIG_MESSAGING_POLL_THREAD_SIZE);
 
+/**
+ * @brief Build, send a poll request, and reschedule after
+ * "poll_period_minutes".
+ */
 void modem_poll_work_fn()
 {
 	/* Add logic for the periodic protobuf modem poller. */
 	LOG_WRN("Starting periodic poll work fn!\n");
-	NofenceMessage new_msg;
-	memset(&new_msg, 0, sizeof(new_msg));
+	NofenceMessage new_poll_msg;
+	memset(&new_poll_msg, 0, sizeof(new_poll_msg));
 	if (!k_sem_take(&cache_lock_sem, K_SECONDS(1))) {
 		LOG_DBG("Building poll request!\n");
-		build_poll_request(&new_msg);
+		build_poll_request(&new_poll_msg);
 		k_sem_give(&cache_lock_sem);
 	}
 	LOG_WRN("Messaging - Sending new message!\n");
-	send_message(&new_msg);
+	send_message(&new_poll_msg);
 	k_work_reschedule_for_queue(&poll_q, &modem_poll_work,
 				    K_SECONDS(poll_period_minutes * 60));
 }
@@ -215,7 +221,8 @@ EVENT_SUBSCRIBE(MODULE, update_fence_status);
 EVENT_SUBSCRIBE(MODULE, update_fence_version);
 EVENT_SUBSCRIBE(MODULE, update_flash_erase);
 EVENT_SUBSCRIBE(MODULE, update_zap_count);
-EVENT_SUBSCRIBE(MODULE, new_gps_fix);
+EVENT_SUBSCRIBE(MODULE, animal_warning_event);
+EVENT_SUBSCRIBE(MODULE, animal_escape_event);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -430,15 +437,18 @@ void fence_download( uint8_t new_fframe){
 			EVENT_SUBMIT(fence_ready);
 			LOG_WRN("Fence %d download "
 				"complete!", new_fence_in_progress);
+			expected_fframe = 0;
+			new_fence_in_progress = 0;
+			/* trigger ano download for the sake of testing only
 			first_ano_frame = true;
 			request_ano_frame(0, 0);
+			 */
 			return;
 		}
 		if (new_fframe == expected_fframe){
 			expected_fframe++;
 			/* TODO: handle failure to send request!*/
-			int ret = request_fframe(new_fence_in_progress,
-						 expected_fframe);
+			request_fframe(new_fence_in_progress, expected_fframe);
 			LOG_WRN("Requesting frame %d of new fence: %d"
 				".\n", expected_fframe,
 				new_fence_in_progress);
@@ -486,22 +496,24 @@ void ano_download(uint16_t ano_id, uint16_t new_ano_frame){
 				"complete!", new_ano_in_progress);
 			return;
 		}
-//		if (new_ano_frame > expected_ano_frame){
-			expected_ano_frame += new_ano_frame;
-			LOG_WRN("expected ano frame = %d\n",
-				expected_ano_frame);
-			/* TODO: handle failure to send request!*/
-			int ret = request_ano_frame(ano_id,
-						 expected_ano_frame);
-			LOG_WRN("Requesting frame %d of new ano: %d"
-				".\n", expected_ano_frame,
-				new_ano_in_progress);
 
-//		} else{
-//			expected_ano_frame = 0;
-//			new_ano_in_progress = 0;
-			return;
-//		}
+		expected_ano_frame += new_ano_frame;
+		LOG_WRN("expected ano frame = %d\n",
+			expected_ano_frame);
+		/* TODO: handle failure to send request!*/
+		int ret = request_ano_frame(ano_id,
+					 expected_ano_frame);
+
+		LOG_WRN("Requesting frame %d of new ano: %d"
+			".\n", expected_ano_frame,
+			new_ano_in_progress);
+
+		if (ret != 0){
+			/* TODO: reset ANO state and retry later.*/
+			expected_ano_frame = 0;
+			new_ano_in_progress = 0;
+		}
+		return;
 	}
 }
 
@@ -520,11 +532,12 @@ void proto_InitHeader(NofenceMessage *msg)
 
 int send_message(NofenceMessage *msg_proto)
 {
+	static uint8_t waiting_cycles;
 	uint8_t encoded_msg[NofenceMessage_size];
 	memset(encoded_msg, 0, sizeof(encoded_msg));
 	size_t encoded_size = 0;
 	LOG_DBG("Start message encoding!, size: %d, version: %u\n",
-		sizeof(*msg_proto), msg_proto->header.ulVersion);
+		sizeof(msg_proto), msg_proto->header.ulVersion);
 
 	LOG_WRN("Input to proto encode: %p,%p,%u,%p\n", msg_proto,
 		&encoded_msg[0], sizeof(encoded_msg), &encoded_size);
@@ -535,7 +548,7 @@ int send_message(NofenceMessage *msg_proto)
 		printk("\\x%02x", encoded_msg[i]);
 	}
 	printk("\n");
-	/* add 16-bit uint size of encodede message. */
+	/* add 16-bit uint: size of encoded message. */
 	char *tmp;
 	tmp = (char *)malloc(encoded_size + 2);
 	uint16_t size = BYTESWAP16(encoded_size);
@@ -549,7 +562,6 @@ int send_message(NofenceMessage *msg_proto)
 	struct messaging_proto_out_event *msg2send =
 		new_messaging_proto_out_event();
 	LOG_DBG("Declared message event!\n");
-	//msg2send->buf = &encoded_msg[0];
 	msg2send->buf = tmp;
 	LOG_DBG("Message length = %u!\n", encoded_size + 2);
 	msg2send->len = encoded_size + 2;
@@ -561,8 +573,16 @@ int send_message(NofenceMessage *msg_proto)
 	while (!send_out_ack) {
 		k_sleep(K_SECONDS(0.1));
 		LOG_WRN("Waiting for ack!\n");
+		if (waiting_cycles++ > 10){
+			waiting_cycles = 0;
+			char *e_msg = "Timed out waiting for cellular ack!\n";
+			nf_app_error(ERR_MESSAGING, ETIME,
+				     e_msg, strlen(e_msg));
+			return -1;
+		}
 	}
 	send_out_ack = false;
+	waiting_cycles = 0;
 	free(tmp);
 	return 0;
 }

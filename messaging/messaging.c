@@ -168,6 +168,8 @@ static bool event_handler(const struct event_header *eh)
 	if (is_update_fence_version(eh)) {
 		struct update_fence_version *ev = cast_update_fence_version(eh);
 		current_state.fence_version = ev->fence_version;
+		modem_poll_work_fn(); /* notify server as soon as the new
+ * fence is activated.*/
 		return false;
 	}
 	if (is_update_flash_erase(eh)) {
@@ -230,10 +232,10 @@ static inline void process_ble_ctrl_event(void)
 
 	int err = k_msgq_get(&ble_ctrl_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting ble_ctrl_event: %d", err);
+		LOG_ERR("Error getting ble_ctrl_event: %d\n", err);
 		return;
 	}
-	LOG_INF("Processed ble_ctrl_event.");
+	LOG_INF("Processed ble_ctrl_event.\n");
 	k_sem_give(&ble_ctrl_sem);
 }
 
@@ -243,10 +245,10 @@ static inline void process_ble_data_event(void)
 
 	int err = k_msgq_get(&ble_data_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting ble_data_event: %d", err);
+		LOG_ERR("Error getting ble_data_event: %d\n", err);
 		return;
 	}
-	LOG_INF("Processed ble_data_event.");
+	LOG_INF("Processed ble_data_event.\n");
 	k_sem_give(&ble_data_sem);
 }
 
@@ -256,10 +258,10 @@ static void process_lte_proto_event(void)
 
 	int err = k_msgq_get(&lte_proto_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting lte_proto_event: %d", err);
+		LOG_ERR("Error getting lte_proto_event: %d\n", err);
 		return;
 	}
-	LOG_INF("Processed lte_proto_msgq.");
+	LOG_INF("Processed lte_proto_msgq.\n");
 	k_sem_give(&lte_proto_sem);
 
 	NofenceMessage proto;
@@ -273,7 +275,7 @@ static void process_lte_proto_event(void)
 	}
 	printk("\n");
 	if (err) {
-		LOG_ERR("Error decoding protobuf message.");
+		LOG_ERR("Error decoding protobuf message.\n");
 		return;
 	}
 	struct messaging_ack_event *ack = new_messaging_ack_event();
@@ -436,9 +438,8 @@ void fence_download( uint8_t new_fframe){
 			fence_ready->fence_version = new_fence_in_progress;
 			EVENT_SUBMIT(fence_ready);
 			LOG_WRN("Fence %d download "
-				"complete!", new_fence_in_progress);
+				"complete!\n", new_fence_in_progress);
 			expected_fframe = 0;
-			new_fence_in_progress = 0;
 			/* trigger ano download for the sake of testing only
 			first_ano_frame = true;
 			request_ano_frame(0, 0);
@@ -493,7 +494,7 @@ void ano_download(uint16_t ano_id, uint16_t new_ano_frame){
 			ano_ready = new_ano_ready();
 			EVENT_SUBMIT(ano_ready);
 			LOG_WRN("ANO %d download "
-				"complete!", new_ano_in_progress);
+				"complete!\n", new_ano_in_progress);
 			return;
 		}
 
@@ -647,7 +648,7 @@ void process_poll_response(NofenceMessage *proto)
 		 * to AMC */
 		//request frame 0
 		first_frame = true;
-		LOG_WRN("Requesting frame 0 of fence: %d!"
+		LOG_WRN("Requesting frame 0 of fence: %d!\n"
 			,pResp->ulFenceDefVersion);
 		int ret = request_fframe(pResp->ulFenceDefVersion, 0);
 		if (ret == 0){

@@ -38,8 +38,9 @@ const struct flash_area *pasture_area;
 struct fcb pasture_fcb;
 struct flash_sector pasture_sectors[FLASH_PASTURE_NUM_SECTORS];
 
-K_MUTEX_DEFINE(write_mutex);
-K_MUTEX_DEFINE(read_mutex);
+K_MUTEX_DEFINE(log_mutex);
+K_MUTEX_DEFINE(ano_mutex);
+K_MUTEX_DEFINE(pasture_mutex);
 
 /* Callback context config given to walk callback function. 
  * We can either give the data directly if only one entry (newest),
@@ -79,6 +80,25 @@ struct fcb *get_fcb(flash_partition_t partition)
 		return NULL;
 	}
 	return fcb;
+}
+
+/** @brief Gets mutex to lock/unlock based on partition.
+ * 
+ * @param partition which partition to get mutex from
+ * 
+ * @return pointer to mutex structure
+ */
+struct k_mutex *get_mutex(flash_partition_t partition)
+{
+	if (partition == STG_PARTITION_LOG) {
+		return &log_mutex;
+	} else if (partition == STG_PARTITION_ANO) {
+		return &ano_mutex;
+	} else if (partition == STG_PARTITION_PASTURE) {
+		return &pasture_mutex;
+	}
+	LOG_ERR("Invalid partition given.");
+	return NULL;
 }
 
 static inline int init_fcb_on_partition(flash_partition_t partition)
@@ -198,9 +218,14 @@ int stg_init_storage_controller(void)
 int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 			   size_t len)
 {
-	if (k_mutex_lock(&write_mutex,
-			 K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
-		LOG_ERR("Mutex timeout for writing to partition.");
+	struct k_mutex *mtx = get_mutex(partition);
+
+	if (mtx == NULL) {
+		return -EINVAL;
+	}
+
+	if (k_mutex_lock(mtx, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+		LOG_ERR("Mutex timeout in storage controller.");
 		return -ETIMEDOUT;
 	}
 	/* Determine write type. If true, we only have this newest entry 
@@ -266,7 +291,7 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 		EVENT_SUBMIT(ev);
 	}
 cleanup:
-	k_mutex_unlock(&write_mutex);
+	k_mutex_unlock(mtx);
 	return err;
 }
 
@@ -288,11 +313,6 @@ int stg_clear_partition(flash_partition_t partition)
  */
 static inline int stg_read_entry_raw(struct walk_callback_config *config)
 {
-	if (k_mutex_lock(&read_mutex,
-			 K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
-		LOG_ERR("Mutex timeout for reading from partition.");
-		return -ETIMEDOUT;
-	}
 	struct fcb *fcb = get_fcb(config->p);
 
 	int err = 0;
@@ -301,8 +321,6 @@ static inline int stg_read_entry_raw(struct walk_callback_config *config)
 
 	if (err) {
 		LOG_ERR("Error reading from flash to callback, err %d", err);
-
-		k_mutex_unlock(&read_mutex);
 		return err;
 	}
 
@@ -312,7 +330,6 @@ static inline int stg_read_entry_raw(struct walk_callback_config *config)
 	if (err) {
 		LOG_ERR("Error from user callback, err %d", err);
 	}
-	k_mutex_unlock(&read_mutex);
 	return err;
 }
 
@@ -339,9 +356,20 @@ static int walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 static inline int read_fcb_partition(flash_partition_t partition,
 				     stg_read_log_cb cb)
 {
-	/* Check if we have any data available. */
 	int err = 0;
 
+	struct k_mutex *mtx = get_mutex(partition);
+
+	if (mtx == NULL) {
+		return -EINVAL;
+	}
+
+	if (k_mutex_lock(mtx, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+		LOG_ERR("Mutex timeout in storage controller.");
+		return -ETIMEDOUT;
+	}
+
+	/* Check if we have any data available. */
 	struct fcb *fcb = get_fcb(partition);
 	if (fcb_is_empty(fcb)) {
 		err = -ENODATA;
@@ -391,6 +419,7 @@ static inline int read_fcb_partition(flash_partition_t partition,
 		}
 	}
 cleanup:
+	k_mutex_unlock(mtx);
 	return err;
 }
 

@@ -42,7 +42,7 @@ if STORAGE_CONTROLLER
 
 	config MUTEX_READ_WRITE_TIMEOUT
 		int "Number of ms before we timeout waiting for semaphore."
-		default 1000
+		default 10000
 
 	config WALK_CONSUME_TIMEOUT_SEC
 		int "Seconds to wait before giving up during walk process."

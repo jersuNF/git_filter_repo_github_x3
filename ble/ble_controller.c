@@ -482,8 +482,9 @@ static bool event_handler(const struct event_header *eh)
 		}
 
 		uint32_t written =
-			ring_buf_put(&ble_tx_ring_buf, event->buf, event->len);
-		if (written != event->len) {
+			ring_buf_put(&ble_tx_ring_buf, event->dyndata.data,
+				     event->dyndata.size);
+		if (written != event->dyndata.size) {
 			LOG_WRN("MSG -> BLE overflow");
 		}
 

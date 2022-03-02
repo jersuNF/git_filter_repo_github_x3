@@ -1,0 +1,13 @@
+menuconfig ENV_SENSOR
+	bool "Environment sensor controller for handling events"
+	default y
+
+if ENV_SENSOR
+	module = ENV_SENSOR
+	module-str = ENV-SENSOR
+	source "subsys/logging/Kconfig.template.log_config"
+
+	menu "ERROR_HANDLER"
+    	rsource "./../../modules/error_handler/Kconfig"
+	endmenu
+endif

@@ -54,4 +54,8 @@ if MESSAGING
 		int "Size of the GSM modem LTE connection protobuf message"
 		default 4
 	endmenu
+
+	menu "FW_EVENTS"
+	rsource "./../../events/fw_upgrade/Kconfig"
+	endmenu # FW_EVENTS
 endif

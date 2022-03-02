@@ -1,12 +1,10 @@
-
-
 zephyr_include_directories(
     .
-    ./../../events/fw_upgrade/
+    ./../../events/env_sensor_event/
     ./../../events/error_handler/)
 
 target_sources(app PRIVATE 
-fw_upgrade.c
-./../../events/fw_upgrade/fw_upgrade_events.c
+env_sensor.c
+./../../events/environment/env_sensor_event.c
 ./../../events/error_handler/error_event.c
 )

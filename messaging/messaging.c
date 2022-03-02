@@ -10,7 +10,6 @@
 #include "ble_ctrl_event.h"
 #include "ble_data_event.h"
 #include "lte_proto_event.h"
-#include "http_downloader.h"
 
 #include "cellular_controller_events.h"
 #include "gps_controller_events.h"

@@ -110,6 +110,7 @@ static int ep_module_release(void)
 		LOG_WRN("Time between EP is shorter than allowed");
 		return -EACCES;
 	}
+	LOG_INF("Zapping now as all conditions are met!");
 	for (i = 0; i < EP_duration; i++) {
 		err = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_HIGH);
 		k_busy_wait(EP_ON_TIME);
@@ -146,7 +147,7 @@ static bool event_handler(const struct event_header *eh)
 				}
 			} else {
 				char *e_msg =
-					"Try to give EP outside Sound Max event";
+					"Tried to give EP outside sound max event";
 				nf_app_error(ERR_ELECTRIC_PULSE, -EACCES, e_msg,
 					     strlen(e_msg));
 			}

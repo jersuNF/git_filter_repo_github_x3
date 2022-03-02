@@ -27,7 +27,7 @@ struct beacon_list {
 
 void init_beacon_list(void);
 
-void beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
-			  int8_t scanner_rssi_measured, adv_data_t *p_adv_data);
+int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
+			 int8_t scanner_rssi_measured, adv_data_t *p_adv_data);
 
 #endif /* BEACON_PROCESSOR_H */

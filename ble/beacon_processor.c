@@ -281,17 +281,17 @@ static double calculate_accuracy(int8_t tx_power, int8_t rssi)
  * @param[in] addr Pointer to beacon bt_addr_le_t address
  * @param[in] scanner_rssi_measured RSSI value measured
  * @param[in] p_adv_data Pointer to beacon advertise data
- * @return True if beacon is successfully processed. 
+ * @return shortest distance, or -EIO if measurement is out of range.
  */
-void beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
-			  int8_t scanner_rssi_measured, adv_data_t *p_adv_data)
+int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
+			 int8_t scanner_rssi_measured, adv_data_t *p_adv_data)
 {
 	int8_t beacon_adv_rssi = signed2(p_adv_data->rssi);
 	double m = calculate_accuracy(beacon_adv_rssi, scanner_rssi_measured);
 
 	if (m > CONFIG_BEACON_DISTANCE_MAX || m > BEACON_DISTANCE_INFINITY) {
 		last_calculated_distance = UINT8_MAX;
-		return;
+		return -EIO;
 	}
 
 	if (m < 1.0) {
@@ -380,12 +380,12 @@ void beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 			LOG_ERR("Unecspected state, last calculated: %u, shortest: %d",
 				last_calculated_distance, shortest_dist);
 			last_calculated_distance = shortest_dist;
-			return;
+			return -EIO;
 		}
 	}
 	EVENT_SUBMIT(event);
 	last_calculated_distance = shortest_dist;
-	return;
+	return shortest_dist;
 }
 
 /**

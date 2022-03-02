@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Nofence AS
+ * Copyright (c) 2022 Nofence AS
  */
 
 #include <zephyr.h>
@@ -384,6 +384,21 @@ int stg_read_ano_data(stg_read_log_cb cb)
 int stg_read_pasture_data(stg_read_log_cb cb)
 {
 	return read_fcb_partition(STG_PARTITION_PASTURE, cb);
+}
+
+int stg_write_log_data(uint8_t *data, size_t len)
+{
+	return stg_write_to_partition(STG_PARTITION_LOG, data, len);
+}
+
+int stg_write_ano_data(uint8_t *data, size_t len, )
+{
+	return stg_write_to_partition(STG_PARTITION_ANO, data, len);
+}
+
+int stg_write_pasture_data(uint8_t *data, size_t len)
+{
+	return stg_write_to_partition(STG_PARTITION_PASTURE, data, len);
 }
 
 int stg_fcb_reset_and_init()

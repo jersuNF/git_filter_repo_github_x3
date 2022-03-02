@@ -40,7 +40,7 @@ if BUZZER
 		default 1
 
 	config BUZZER_LONGEST_NOTE_SUSTAIN
-		int "Maximum length of sustain notes, prevents timeouts on sems."
+		int "Maximum length of sustain notes in s, prevents timeouts on sems."
 		default 10
 		  
 	menu "Message Queues"

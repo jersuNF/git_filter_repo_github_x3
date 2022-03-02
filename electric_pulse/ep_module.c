@@ -160,9 +160,13 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 
-	if (is_sound_event(eh)) {
-		const struct sound_event *event = cast_sound_event(eh);
-		if (event->type == SND_MAX) {
+	if (is_sound_status_event(eh)) {
+		/* Open up window for zapping since we recieved that
+		 * the sound controller is playing MAX warn freq.
+		 */
+		const struct sound_status_event *event =
+			cast_sound_status_event(eh);
+		if (event->status == SND_STATUS_PLAYING_MAX) {
 			trigger_ready = true;
 		} else {
 			trigger_ready = false;
@@ -175,6 +179,6 @@ static bool event_handler(const struct event_header *eh)
 	return false;
 }
 
-EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE(MODULE, ep_status_event);
-EVENT_SUBSCRIBE(MODULE, sound_event);
+EVENT_LISTENER(LOG_MODULE_NAME, event_handler);
+EVENT_SUBSCRIBE(LOG_MODULE_NAME, ep_status_event);
+EVENT_SUBSCRIBE_EARLY(LOG_MODULE_NAME, sound_status_event);

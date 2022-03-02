@@ -53,7 +53,7 @@ int set_pwm_to_idle(void)
 
 /** @brief Gives the early sound exit sem which means
 *          that if we're currently waiting for the timeout
-*          in the sound thread during play_freq, we exit early so
+*          in the sound thread during play_from_ms, we exit early so
 *          we can play the next sound immediately.
 */
 static void inline end_current_sound(void)
@@ -77,21 +77,22 @@ static inline uint32_t get_pulse_width(uint32_t freq, uint8_t volume)
 
 /** @brief Plays a frequency for given duration.
  * 
- * @param freq frequency tone to be played in hz.
- * @param sustain length/duration of the note/frequency to be played in ms
+ * @param period period delay in ms of pulses.
+ * @param sustain length/duration of the note/frequency to be played in us
  * @param volume loudness of the played frequency, ranging from 0%-100%
  *               This is simply having a ratio for a duty cycle between 0%-50%.
  * 
  * @return 0 on success, otherwise negative errno.
  * @return -EINTR if sound was aborted by another thread.
  */
-int play_freq(const uint32_t freq, const uint32_t sustain, const uint8_t volume)
+int play_from_ms(const uint32_t period, const uint32_t sustain,
+		 const uint8_t volume)
 {
 	int err;
 
-	uint32_t pulse = get_pulse_width(freq, volume);
+	uint32_t pulse = get_pulse_width(period, volume);
 
-	err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, freq, pulse, 0);
+	err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, period, pulse, 0);
 	if (err) {
 		LOG_ERR("Error %d: failed to set pulse width", err);
 		goto set_to_idle;
@@ -101,12 +102,12 @@ int play_freq(const uint32_t freq, const uint32_t sustain, const uint8_t volume)
 	 * during the note being played.
 	 */
 	uint32_t duration =
-		sustain > MSEC_PER_SEC * CONFIG_BUZZER_LONGEST_NOTE_SUSTAIN ?
-			(MSEC_PER_SEC * CONFIG_BUZZER_LONGEST_NOTE_SUSTAIN) -
+		sustain > USEC_PER_SEC * CONFIG_BUZZER_LONGEST_NOTE_SUSTAIN ?
+			(USEC_PER_SEC * CONFIG_BUZZER_LONGEST_NOTE_SUSTAIN) -
 				1 :
 			sustain;
 
-	int ticks = k_sleep(K_MSEC(duration));
+	int ticks = k_sleep(K_USEC(duration));
 	if (ticks > 0) {
 		err = -EINTR;
 		goto set_to_idle;
@@ -119,6 +120,23 @@ set_to_idle : {
 	}
 	return err;
 }
+}
+
+/** @brief Helper function to convert hz frequency to ms delay used by
+ *         pwm_pin_set_usec.
+ * 
+ * @param freq frequency of the note to be played in HZ. 0 = off.
+ * @param sustain length/duration of the note/frequency to be played in us
+ * @param volume loudness of the played frequency, ranging from 0%-100%
+ *               This is simply having a ratio for a duty cycle between 0%-50%.
+ * 
+ * @return 0 on success
+ *         -EINTR if sound thread aborted.
+ *         Otherwise negative errno.
+ */
+int play_hz(const uint32_t freq, const uint32_t sustain, const uint8_t volume)
+{
+	return play_from_ms(1000 / freq, sustain, volume);
 }
 
 void play_song(const note_t *song, const size_t num_notes)
@@ -134,14 +152,212 @@ void play_song(const note_t *song, const size_t num_notes)
 		}
 		k_sem_give(&stop_sound_sem);
 
-		err = play_freq(song[i].t, song[i].s,
-				BUZZER_SOUND_VOLUME_PERCENT);
+		err = play_from_ms(song[i].t, song[i].s,
+				   BUZZER_SOUND_VOLUME_PERCENT);
 		if (err) {
 			/* We can process -EINTR if we want here. */
 			return;
 		}
 	}
 }
+
+void play_cattle(void)
+{
+	uint16_t i = 250;
+	int err = play_hz(i, 10 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+
+	if (err) {
+		return;
+	}
+
+	for (; i < 400; i += 1) {
+		err = play_hz(i, 4000, BUZZER_SOUND_VOLUME_PERCENT);
+		if (err) {
+			return;
+		}
+	}
+
+	err = play_hz(400, 500 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+
+	for (; i > 250; i -= 3) {
+		err = play_hz(i, 4000, BUZZER_SOUND_VOLUME_PERCENT);
+		if (err) {
+			return;
+		}
+	}
+
+	err = play_hz(250, 30 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+	if (err) {
+		return;
+	}
+}
+
+void play_welcome(void)
+{
+	uint16_t i = 1000;
+	int err = play_hz(i, 10 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+
+	if (err) {
+		return;
+	}
+
+	for (; i < 4000; i += 4) {
+		err = play_hz(i, 0, BUZZER_SOUND_VOLUME_PERCENT);
+		if (err) {
+			return;
+		}
+	}
+
+	err = play_hz(i, 30 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+
+	if (err) {
+		return;
+	}
+
+	err = play_hz(0, 70 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+
+	if (err) {
+		return;
+	}
+
+	for (i = 700; i < 4000; i += 2) {
+		err = play_hz(i, 0, BUZZER_SOUND_VOLUME_PERCENT);
+		if (err) {
+			return;
+		}
+	}
+
+	err = play_hz(i, 30 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+
+	if (err) {
+		return;
+	}
+
+	for (; i > 1500; i--) {
+		err = play_hz(i, 0, BUZZER_SOUND_VOLUME_PERCENT);
+
+		if (err) {
+			return;
+		}
+	}
+	for (; i > 600; i -= 2) {
+		err = play_hz(i, 0, BUZZER_SOUND_VOLUME_PERCENT);
+
+		if (err) {
+			return;
+		}
+	}
+
+	err = play_hz(i, 30 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+
+	if (err) {
+		return;
+	}
+}
+
+void play_short_200(void)
+{
+	play_hz(100, 200 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+}
+
+void play_short_100(void)
+{
+	play_hz(100, 100 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+}
+
+void play_solar_test(void)
+{
+	int err = play_hz(tone_c_6, 100 * USEC_PER_MSEC,
+			  BUZZER_SOUND_VOLUME_PERCENT);
+	if (err) {
+		return;
+	}
+
+	err = play_hz(0, 40 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+	if (err) {
+		return;
+	}
+
+	err = play_hz(tone_g_6, 300 * USEC_PER_MSEC,
+		      BUZZER_SOUND_VOLUME_PERCENT);
+	if (err) {
+		return;
+	}
+}
+
+/* Deprecated Beep_SND?
+void play_snd_key(void) 
+{
+	play_hz(3000, 100 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+}
+
+void play_snd_longkey(void) 
+{
+	int err = play_hz(500, 30 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+
+	if (err) {
+		return;
+	}
+
+	err = play_hz(200, 10 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+
+	if (err) {
+		return;
+	}
+
+	err = play_hz(500, 50 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+
+	if (err) {
+		return;
+	}
+}
+
+void play_snd_stop(void) 
+{
+	play_hz(450, 15 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+}
+
+void play_snd_short(void) 
+{
+	play_hz(100, 1 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+}
+
+void play_snd_shutdown(void) 
+{
+	int i;
+	int err;
+
+	for (i = 4500; i > 500; i--) {
+		err = play_hz(i, 0, BUZZER_SOUND_VOLUME_PERCENT);
+		if (err) {
+			return;
+		}
+	}
+
+	err = play_hz(i, 100 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+	if (err) {
+		return;
+	}
+}
+
+void play_snd_prep(void) 
+{
+	int err = play_hz(500, 20 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+	if (err) {
+		return;
+	}
+
+	err = play_hz(0, 20 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+	if (err) {
+		return;
+	}
+
+	err = play_hz(500, 20 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+	if (err) {
+		return;
+	}
+}
+*/
 
 /** @brief Timeout function that is called if we do not get a new updated
  *         warn zone frequency within that duration, ultimately ending
@@ -242,13 +458,14 @@ void start_warn_zone_loop(void)
 				CONFIG_BUZZER_MAX_WARN_ZONE_FREQ_INTERVAL;
 		}
 
-		err = play_freq(current_warn_zone_freq, warn_zone_freq_duration,
-				BUZZER_SOUND_VOLUME_PERCENT);
+		err = play_from_ms(current_warn_zone_freq,
+				   warn_zone_freq_duration,
+				   BUZZER_SOUND_VOLUME_PERCENT);
 		if (err) {
 			k_sem_give(&warn_zone_sem);
 			if (err == -EINTR) {
 				/* Next warn zone frequency available, 
-				 * restart and play_freq. 
+				 * restart and play_from_ms. 
 				 */
 				continue;
 			}
@@ -293,6 +510,11 @@ void play()
 
 	struct sound_status_event *ev_playing = new_sound_status_event();
 
+	if (current_type != SND_OFF || current_type != SND_WARN) {
+		ev_playing->status = SND_STATUS_PLAYING;
+		EVENT_SUBMIT(ev_playing);
+	}
+
 	switch (current_type) {
 	case SND_OFF: {
 		err = set_pwm_to_idle();
@@ -302,26 +524,38 @@ void play()
 		break;
 	}
 	case SND_WELCOME: {
-		ev_playing->status = SND_STATUS_PLAYING;
-		EVENT_SUBMIT(ev_playing);
-
-		play_freq(tone_c_6, d_8, BUZZER_SOUND_VOLUME_PERCENT);
+		play_welcome();
+		break;
+	}
+	case SND_SETUPMODE: {
+		play_song(m_setupmode, n_setupmode_notes);
+		break;
+	}
+	case SND_SHORT_100: {
+		play_short_100();
+		break;
+	}
+	case SND_SHORT_200: {
+		play_short_200();
+		break;
+	}
+	case SND_SOLAR_TEST: {
+		play_solar_test();
 		break;
 	}
 	case SND_PERSPELMANN: {
-		ev_playing->status = SND_STATUS_PLAYING;
-		EVENT_SUBMIT(ev_playing);
-
 		play_song(m_perspelmann, n_perspelmann_notes);
 		break;
 	}
 	case SND_FIND_ME: {
-		ev_playing->status = SND_STATUS_PLAYING;
-		EVENT_SUBMIT(ev_playing);
-
 		play_song(m_geiterams, n_geiterams_notes);
 		break;
 	}
+
+	case SND_CATTLE: {
+		play_cattle();
+		break;
+	};
 	case SND_WARN: {
 		start_warn_zone_loop();
 		break;
@@ -437,7 +671,7 @@ static bool event_handler(const struct event_header *eh)
 		struct sound_set_warn_freq_event *ev =
 			cast_sound_set_warn_freq_event(eh);
 
-		/* Restart play_freq as we have a new freq, if currently
+		/* Restart play_from_ms as we have a new freq, if currently
 		 * playing SND_WARN and restart timeout timer.
 		 */
 		if (current_type == SND_WARN) {

@@ -105,6 +105,38 @@ int stg_read_ano_data(stg_read_log_cb cb);
  */
 int stg_read_pasture_data(stg_read_log_cb cb);
 
+/** 
+ * @brief Writes log data to external flash LOG partition.
+ * 
+ * @param[in] data pointer location to of data to be written
+ * @param[in] len length of data
+ * 
+ * @return 0 on success, otherwise negative errno
+ */
+int stg_write_log_data(uint8_t *data, size_t len);
+
+/** 
+ * @brief Writes ano data to external flash ANO partition.
+ * 
+ * @param[in] data pointer location to of data to be written
+ * @param[in] len length of data
+ * @param[in] first_frame true if we're receiving first ANO frame, which
+ *                        clears previous frame.
+ * 
+ * @return 0 on success, otherwise negative errno
+ */
+int stg_write_ano_data(uint8_t *data, size_t len, uint32_t first_frame);
+
+/** 
+ * @brief Writes log data to external flash LOG partition.
+ * 
+ * @param[in] data pointer location to of data to be written
+ * @param[in] len length of data
+ * 
+ * @return 0 on success, otherwise negative errno
+ */
+int stg_write_pasture_data(uint8_t *data, size_t len);
+
 #define SECTOR_SIZE                                                            \
 	MAX(CONFIG_NORDIC_QSPI_NOR_FLASH_LAYOUT_PAGE_SIZE,                     \
 	    CONFIG_STORAGE_SECTOR_SIZE)

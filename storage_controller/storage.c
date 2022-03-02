@@ -215,8 +215,48 @@ int stg_init_storage_controller(void)
 	return 0;
 }
 
+/** 
+ * @brief Writes a frame to target partition. Needs to be used if we have 
+ *        greater data contents than what we can buffer, so we have to split
+ *        up the writing.
+ * 
+ * @param[in] data pointer location to of data to be written
+ * @param[in] len length of data
+ * @param[in] first_frame true if we're writing the first frame which
+ *                        erases all previous entries.
+ * 
+ * @return 0 on success, otherwise negative errno
+ */
+int stg_write_frame_to_partition(flash_partition_t partition, uint8_t *data,
+				 size_t len, bool first_frame)
+{
+	int err;
+
+	/* Check if started a new entry or is on the same entry. */
+	if (first_frame) {
+		/* New entry, pass the TRUE flag to erase previous entry. */
+		err = stg_write_to_partition(partition, data, len, true);
+	} else {
+		/* Same entry, pass the false flag to keep previous frames. */
+		err = stg_write_to_partition(partition, data, len, false);
+	}
+
+	return err;
+}
+
+/** 
+ * @brief Writes data to given partition.
+ * 
+ * @param[in] partition which partition to write to.
+ * @param[in] data pointer location to of data to be written.
+ * @param[in] len length of data.
+ * @param[in] rotate_to_this Clears all the previous entries if this is true
+ *                           making the current entry the only one present.
+ * 
+ * @return 0 on success, otherwise negative errno
+ */
 int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
-			   size_t len)
+			   size_t len, bool rotate_to_this)
 {
 	struct k_mutex *mtx = get_mutex(partition);
 
@@ -227,13 +267,6 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 	if (k_mutex_lock(mtx, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		LOG_ERR("Mutex timeout in storage controller.");
 		return -ETIMEDOUT;
-	}
-	/* Determine write type. If true, we only have this newest entry 
-	 * to be written below on the flash partition. */
-	bool rotate_to_this = true;
-
-	if (partition == STG_PARTITION_LOG) {
-		rotate_to_this = false;
 	}
 
 	struct fcb_entry loc;
@@ -297,8 +330,22 @@ cleanup:
 
 int stg_clear_partition(flash_partition_t partition)
 {
+	struct k_mutex *mtx = get_mutex(partition);
+
+	if (mtx == NULL) {
+		return -EINVAL;
+	}
+
+	if (k_mutex_lock(mtx, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+		LOG_ERR("Mutex timeout in storage controller when clearing.");
+		return -ETIMEDOUT;
+	}
+
 	struct fcb *fcb = get_fcb(partition);
-	return fcb_clear(fcb);
+	int err = fcb_clear(fcb);
+
+	k_mutex_unlock(mtx);
+	return err;
 }
 
 /** @brief Helper function for reading entry from external flash. Calls
@@ -440,17 +487,18 @@ int stg_read_pasture_data(stg_read_log_cb cb)
 
 int stg_write_log_data(uint8_t *data, size_t len)
 {
-	return stg_write_to_partition(STG_PARTITION_LOG, data, len);
+	return stg_write_to_partition(STG_PARTITION_LOG, data, len, false);
 }
 
-int stg_write_ano_data(uint8_t *data, size_t len, )
+int stg_write_ano_data(uint8_t *data, size_t len, bool first_frame)
 {
-	return stg_write_to_partition(STG_PARTITION_ANO, data, len);
+	return stg_write_frame_to_partition(STG_PARTITION_ANO, data, len,
+					    first_frame);
 }
 
 int stg_write_pasture_data(uint8_t *data, size_t len)
 {
-	return stg_write_to_partition(STG_PARTITION_PASTURE, data, len);
+	return stg_write_to_partition(STG_PARTITION_PASTURE, data, len, true);
 }
 
 int stg_fcb_reset_and_init()

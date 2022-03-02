@@ -11,6 +11,7 @@
 #include "pasture_structure.h"
 #include "event_manager.h"
 #include "error_event.h"
+#include "messaging_module_events.h"
 
 #include "storage.h"
 
@@ -46,13 +47,104 @@ atomic_t new_gnss_written = ATOMIC_INIT(false);
  * this calculation function can submit to event handler.
  */
 K_THREAD_STACK_DEFINE(amc_calculation_thread_area, CONFIG_AMC_CALCULATION_SIZE);
-static struct k_work_q calc_work_q;
+static struct k_work_q amc_work_q;
 
 /* Calculation work item, can be changed in future based on the algorithm
  * we use and how many functions we want to create for the distance
  * calculation algorithm.
  */
 static struct k_work calc_work;
+
+/* Process the new fence received from messaging module. */
+static struct k_work process_new_fence_work;
+
+int verify_pasture(uint8_t *data, size_t len)
+{
+	ARG_UNUSED(data);
+	ARG_UNUSED(len);
+	return 0;
+}
+
+static inline int update_pasture_cache(uint8_t *data, size_t len)
+{
+	int err = k_sem_take(&fence_data_sem,
+			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
+	if (err) {
+		LOG_ERR("Error semaphore, retry request pasture here?");
+		return err;
+	}
+
+	/* Free previous fence if any. */
+	if (cached_fence != NULL) {
+		k_free(cached_fence);
+		cached_fence = NULL;
+		cached_fence_size = 0;
+	}
+
+	cached_fence = k_malloc(len);
+	cached_fence_size = len;
+
+	if (cached_fence == NULL) {
+		LOG_ERR("No memory left for caching the fence.");
+		k_sem_give(&fence_data_sem);
+		return -ENOMEM;
+	}
+	/* Memcpy the flash contents. */
+	memcpy(cached_fence, data, len);
+
+	/* Can add calculation check if fence is valid if we want here. */
+	LOG_INF("Updated pasture cache to US_ID: %d",
+		cached_fence->header.us_id);
+
+	k_sem_give(&fence_data_sem);
+	return 0;
+}
+
+void process_new_fence_fn(struct k_work *item)
+{
+	/* Fetch fence from somewhere, not sure where?? */
+	uint8_t *dummy_data = 0x00;
+	size_t len = 0;
+
+	ARG_UNUSED(item);
+	int err;
+
+	/* Verify fence. */
+	err = verify_pasture(dummy_data, len);
+	if (err) {
+		LOG_ERR("Error verifying new fence from messaging module.");
+		return;
+	}
+
+	/* Update AMC cache. */
+	err = update_pasture_cache(dummy_data, len);
+	if (err) {
+		LOG_ERR("Error verifying new fence from messaging module.");
+		return;
+	}
+
+	/* Store to external flash. */
+	err = stg_write_pasture_data(dummy_data, len);
+	if (err) {
+		LOG_ERR("Error verifying new fence from messaging module.");
+		return;
+	}
+}
+
+static inline int update_pasture_from_stg(void)
+{
+	int err = stg_read_pasture_data(update_pasture_cache);
+	if (err == -ENODATA) {
+		char *err_msg = "No pasture found on external flash.";
+		nf_app_warning(ERR_SENDER_AMC, err, err_msg, strlen(err_msg));
+		return 0;
+	} else if (err) {
+		char *err_msg = "Couldn't update pasture cache in AMC.";
+		nf_app_fatal(ERR_SENDER_AMC, err, err_msg, strlen(err_msg));
+		return err;
+	}
+	return 0;
+}
 
 /**
  * @brief Work function for calculating the distance etc using fence and gnss
@@ -103,68 +195,20 @@ void calculate_work_fn(struct k_work *item)
 	k_sem_give(&fence_data_sem);
 }
 
-static inline int update_pasture(void)
-{
-	int err = stg_read_pasture_data(update_pasture_cache);
-	if (err == -ENODATA) {
-		char *err_msg = "No pasture found on external flash.";
-		nf_app_warning(ERR_SENDER_AMC, err, err_msg, strlen(err_msg));
-		return 0;
-	} else if (err) {
-		char *err_msg = "Couldn't update pasture cache in AMC.";
-		nf_app_fatal(ERR_SENDER_AMC, err, err_msg, strlen(err_msg));
-		return err;
-	}
-	return 0;
-}
-
 int amc_module_init(void)
 {
 	/* Init work item and start and init calculation 
 	 * work queue thread and item. 
 	 */
-	k_work_queue_init(&calc_work_q);
-	k_work_queue_start(&calc_work_q, amc_calculation_thread_area,
+	k_work_queue_init(&amc_work_q);
+	k_work_queue_start(&amc_work_q, amc_calculation_thread_area,
 			   K_THREAD_STACK_SIZEOF(amc_calculation_thread_area),
 			   CONFIG_AMC_CALCULATION_PRIORITY, NULL);
 	k_work_init(&calc_work, calculate_work_fn);
+	k_work_init(&process_new_fence_work, process_new_fence_fn);
 
-	return update_pasture();
-}
-
-static inline int update_pasture_cache(uint8_t *data, size_t len)
-{
-	int err = k_sem_take(&fence_data_sem,
-			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
-	if (err) {
-		LOG_ERR("Error semaphore, retry request pasture here?");
-		return err;
-	}
-
-	/* Free previous fence if any. */
-	if (cached_fence != NULL) {
-		k_free(cached_fence);
-		cached_fence = NULL;
-		cached_fence_size = 0;
-	}
-
-	cached_fence = k_malloc(len);
-	cached_fence_size = len;
-
-	if (cached_fence == NULL) {
-		LOG_ERR("No memory left for caching the fence.");
-		k_sem_give(&fence_data_sem);
-		return -ENOMEM;
-	}
-	/* Memcpy the flash contents. */
-	memcpy(cached_fence, data, len);
-
-	/* Can add calculation check if fence is valid if we want here. */
-	LOG_INF("Updated pasture cache to US_ID: %d",
-		cached_fence->header.us_id);
-
-	k_sem_give(&fence_data_sem);
-	return 0;
+	/* Fetch the fence from external flash. */
+	return update_pasture_from_stg();
 }
 
 /**
@@ -177,14 +221,12 @@ static inline int update_pasture_cache(uint8_t *data, size_t len)
  */
 static bool event_handler(const struct event_header *eh)
 {
-	if (is_pasture_ready_event(eh)) {
-		/* Update fence cache by freeing previous fence, and copying
-		 * new one from storage controller. Takes a callback function
-		 * that is called when the storage controller reads the data.
-		 * Once the data has been copied, the storage controller
-		 * frees and handles everything with the buffered data.
+	if (is_new_fence_available(eh)) {
+		/* Start by fetching the new fence and verify it's validity.
+		 * If its valid, copy it to the cached area and also
+		 * store it to external flash.
 		 */
-		update_pasture();
+		k_work_submit_to_queue(&amc_work_q, process_new_fence_work);
 		return false;
 	}
 	if (is_gnssdata_event(eh)) {
@@ -205,7 +247,7 @@ static bool event_handler(const struct event_header *eh)
 		atomic_set(&new_gnss_written, true);
 
 		/* Call the calculation thread. */
-		k_work_submit_to_queue(&calc_work_q, &calc_work);
+		k_work_submit_to_queue(&amc_work_q, &calc_work);
 		return false;
 	}
 	/* If event is unhandled, unsubscribe. */
@@ -216,4 +258,4 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, gnssdata_event);
-EVENT_SUBSCRIBE(MODULE, pasture_ready_event);
+EVENT_SUBSCRIBE(MODULE, new_fence_available);

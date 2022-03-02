@@ -36,8 +36,9 @@ static K_WORK_DEFINE(bt_send_work, bt_send_work_handler);
 static struct bt_conn *current_conn;
 static struct bt_gatt_exchange_params exchange_params;
 static uint32_t nus_max_send_len;
-static atomic_t ready;
-static atomic_t active;
+static atomic_t atomic_bt_ready;
+static atomic_t atomic_bt_adv_active;
+static atomic_t atomic_bt_scan_active;
 
 static char bt_device_name[DEVICE_NAME_LEN + 1] = CONFIG_BT_DEVICE_NAME;
 
@@ -246,9 +247,9 @@ static void adv_start(void)
 {
 	int err;
 
-	if (!atomic_get(&ready)) {
+	if (!atomic_get(&atomic_bt_ready)) {
 		/* Advertising will start when ready */
-		LOG_INF("Advertising not ready");
+		LOG_INF("Advertising not ready to start");
 		return;
 	}
 
@@ -440,11 +441,11 @@ static void bt_ready(int err)
 	mfg_data[BLE_MFG_IDX_ATMEGA_VER] = (atmega_ver & 0x00ff);
 	mfg_data[BLE_MFG_IDX_ATMEGA_VER + 1] = (atmega_ver & 0xff00) >> 8;
 
-	atomic_set(&ready, true);
+	atomic_set(&atomic_bt_ready, true);
 
-	atomic_set(&active, true);
+	atomic_set(&atomic_bt_adv_active, true);
 
-	if (atomic_get(&active)) {
+	if (atomic_get(&atomic_bt_adv_active)) {
 		adv_start();
 	}
 }
@@ -507,22 +508,15 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 	}
 }
 
-int ble_module_init()
+static void scan_start(void)
 {
-	int err;
-
-	atomic_set(&active, false);
-
-	nus_max_send_len = ATT_MIN_PAYLOAD;
-
-	err = bt_enable(bt_ready);
-	if (err) {
-		LOG_ERR("bt_enable: %d", err);
-		return err;
+	if (!atomic_get(&atomic_bt_ready)) {
+		/* Scan will start when bt is ready */
+		LOG_INF("Scanning not ready to start");
+		return;
 	}
 
-	bt_conn_cb_register(&conn_callbacks);
-
+	/* Initialize the beacon list */
 	init_beacon_list();
 
 	/* Start beacon scanner subsystem */
@@ -532,10 +526,44 @@ int ble_module_init()
 		.interval = 0x003C,
 		.window = 0x0028,
 	};
-	err = bt_le_scan_start(&scan_param, scan_cb);
+	int err = bt_le_scan_start(&scan_param, scan_cb);
 	if (err) {
-		LOG_ERR("Starting scanning failed (err %d)", err);
+		LOG_ERR("Beacon scanning failed (err %d)", err);
+	} else {
+		LOG_INF("Starting scanning after beacons");
+	}
+}
+
+static void scan_stop(void)
+{
+	int err = bt_le_scan_stop();
+	if (err) {
+		LOG_ERR("bt_le_scan_stop error: %d", err);
+	}
+}
+
+int ble_module_init()
+{
+	int err;
+
+	atomic_set(&atomic_bt_adv_active, false);
+	atomic_set(&atomic_bt_scan_active, false);
+
+	nus_max_send_len = ATT_MIN_PAYLOAD;
+
+	/* Enable ble subsystem and start advertisement */
+	err = bt_enable(bt_ready);
+	if (err) {
+		LOG_ERR("bt_enable: %d", err);
 		return err;
+	}
+
+	/* Callback to monitor connected/disconnected state */
+	bt_conn_cb_register(&conn_callbacks);
+
+	/* Start scanning after beacons. Set flag to true */
+	if (!atomic_set(&atomic_bt_scan_active, true)) {
+		scan_start();
 	}
 
 	return 0;
@@ -596,12 +624,12 @@ static bool event_handler(const struct event_header *eh)
 
 		switch (event->cmd) {
 		case BLE_CTRL_ADV_ENABLE:
-			if (!atomic_set(&active, true)) {
+			if (!atomic_set(&atomic_bt_adv_active, true)) {
 				adv_start();
 			}
 			break;
 		case BLE_CTRL_ADV_DISABLE:
-			if (atomic_set(&active, false)) {
+			if (atomic_set(&atomic_bt_adv_active, false)) {
 				adv_stop();
 			}
 			break;
@@ -625,6 +653,16 @@ static bool event_handler(const struct event_header *eh)
 			break;
 		case BLE_CTRL_FENCE_DEF_VER_UPDATE:
 			fence_def_ver_update(event->param.fence_def_ver);
+			break;
+		case BLE_CTRL_SCAN_START:
+			if (!atomic_set(&atomic_bt_scan_active, true)) {
+				scan_start();
+			}
+			break;
+		case BLE_CTRL_SCAN_STOP:
+			if (atomic_set(&atomic_bt_scan_active, false)) {
+				scan_stop();
+			}
 			break;
 		default:
 			/* Unhandled control message */

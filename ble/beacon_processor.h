@@ -16,7 +16,7 @@ struct beacon_info {
 	uint8_t num_conn;
 	uint8_t conn_history_peeker;
 	bt_addr_le_t mac_address;
-	uint8_t avg_dist;
+	uint8_t calculated_dist;
 	struct beacon_connection_info history[CONFIG_BEACON_MAX_MEASUREMENTS];
 };
 struct beacon_list {
@@ -27,7 +27,7 @@ struct beacon_list {
 
 void init_beacon_list(void);
 
-bool beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
+void beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 			  int8_t scanner_rssi_measured, adv_data_t *p_adv_data);
 
 #endif /* BEACON_PROCESSOR_H */

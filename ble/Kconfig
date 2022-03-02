@@ -31,6 +31,14 @@ config BEACON_DISTANCE_MAX
 	int "Max distance for a Beacon to be considerd. Must be less than 255"
 	default 50
 
+config BEACON_LOW_LIMIT
+	int "Low limit distance measurement. Given in meters"
+	default 10
+
+config BEACON_HIGH_LIMIT
+	int "High limit distance measurement. Given in meters"
+	default 15
+
 config BEACON_MAX_MEASUREMENTS
 	int "Max measurements per Beacon"
 	default 8

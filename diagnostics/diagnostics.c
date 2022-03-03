@@ -193,6 +193,10 @@ static uint32_t diagnostics_process_input(enum diagnostics_interface interface,
 	} else {
 #if CONFIG_DIAGNOSTICS_TEXT_PARSER
 		bytes_parsed = parser_handle(interface, data, size);
+#else
+		/* Echo for now */
+		bytes_parsed = size;
+		diagnostics_send(interface, data, size);
 #endif
 	}
 	return bytes_parsed;

@@ -37,7 +37,7 @@ if MESSAGING
 
 	config MESSAGING_POLL_THREAD_PRIORITY
 		int "Priority of the poll to server queue thread"
-		default 1
+		default -1
 		  
 	config PROTO_POLLER_WORK_SEC
 		int "Seconds between modem poll"
@@ -46,6 +46,9 @@ if MESSAGING
 	menu "Message Queues"
 		config MSGQ_BLE_CTRL_SIZE
 		int "Size of the bluetooth control command data received"
+		default 4
+		config MSGQ_BLE_CMD_SIZE
+		int "Size of the bluetooth commands data received"
 		default 4
 		config MSGQ_BLE_DATA_SIZE
 		int "Size of the bluetooth connection data received"

@@ -9,6 +9,8 @@
 #include <logging/log.h>
 #include "ble_ctrl_event.h"
 #include "ble_data_event.h"
+#include "ble_cmd_event.h"
+#include "nofence_service.h"
 #include "lte_proto_event.h"
 
 #include "cellular_controller_events.h"
@@ -20,6 +22,9 @@
 #include "unixTime.h"
 #include "error_event.h"
 #include "helpers.h"
+#include <power/reboot.h>
+
+#include "sound_event.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
@@ -54,8 +59,7 @@ void messaging_thread_fn(void);
 
 _DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *);
 bool proto_hasLastKnownDatePos(const gps_last_fix_struct_t *);
-static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t,
-					    uint8_t);
+static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
 bool m_confirm_acc_limits, m_confirm_ble_key, m_transfer_boot_params;
 bool send_out_ack, use_server_time;
 
@@ -71,16 +75,21 @@ K_MSGQ_DEFINE(ble_ctrl_msgq, sizeof(struct ble_ctrl_event),
 	      CONFIG_MSGQ_BLE_CTRL_SIZE, 4);
 K_MSGQ_DEFINE(ble_data_msgq, sizeof(struct ble_data_event),
 	      CONFIG_MSGQ_BLE_DATA_SIZE, 4);
+K_MSGQ_DEFINE(ble_cmd_msgq, sizeof(struct ble_cmd_event),
+	      CONFIG_MSGQ_BLE_CMD_SIZE, 4);
 K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct lte_proto_event),
 	      CONFIG_MSGQ_LTE_PROTO_SIZE, 4);
 
-#define NUM_MSGQ_EVENTS 3
+#define NUM_MSGQ_EVENTS 4
 struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY, &ble_ctrl_msgq,
 					0),
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY, &ble_data_msgq,
+					0),
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
+					K_POLL_MODE_NOTIFY_ONLY, &ble_cmd_msgq,
 					0),
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY,
@@ -135,6 +144,13 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	if (is_ble_cmd_event(eh)) {
+		struct ble_cmd_event *ev = cast_ble_cmd_event(eh);
+		while (k_msgq_put(&ble_cmd_msgq, ev, K_NO_WAIT) != 0) {
+			k_msgq_purge(&ble_cmd_msgq);
+		}
+		return false;
+	}
 	if (is_ble_data_event(eh)) {
 		struct ble_data_event *ev = cast_ble_data_event(eh);
 		while (k_msgq_put(&ble_data_msgq, ev, K_NO_WAIT) != 0) {
@@ -143,7 +159,8 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_cellular_proto_in_event(eh)) {
-		struct cellular_proto_in_event *ev = cast_cellular_proto_in_event(eh);
+		struct cellular_proto_in_event *ev =
+			cast_cellular_proto_in_event(eh);
 		while (k_msgq_put(&lte_proto_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&lte_proto_msgq);
 		}
@@ -198,7 +215,7 @@ static bool event_handler(const struct event_header *eh)
 		first_ano_frame = true;
 		LOG_WRN("Requesting ano data!\n");
 		int ret = request_ano_frame(0, 0);
-		if (ret == 0){
+		if (ret == 0) {
 			first_ano_frame = false;
 		}
 		return false;
@@ -211,8 +228,12 @@ static bool event_handler(const struct event_header *eh)
 }
 
 EVENT_LISTENER(MODULE, event_handler);
+
+/* Bluetooth events. */
 EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
+EVENT_SUBSCRIBE(MODULE, ble_cmd_event);
 EVENT_SUBSCRIBE(MODULE, ble_data_event);
+
 EVENT_SUBSCRIBE(MODULE, lte_proto_event);
 EVENT_SUBSCRIBE(MODULE, cellular_ack_event);
 EVENT_SUBSCRIBE(MODULE, cellular_proto_in_event);
@@ -249,6 +270,62 @@ static inline void process_ble_data_event(void)
 	}
 	LOG_INF("Processed ble_data_event.\n");
 	k_sem_give(&ble_data_sem);
+}
+
+static inline void process_ble_cmd_event(void)
+{
+	struct ble_cmd_event ev;
+
+	int err = k_msgq_get(&ble_cmd_msgq, &ev, K_NO_WAIT);
+	if (err) {
+		LOG_ERR("Error getting ble_cmd_event: %d\n", err);
+		return;
+	}
+
+	enum command_char ble_command = ev.cmd;
+
+	switch (ble_command) {
+	case CMD_TURN_OFF_FENCE: {
+		/* Wait for final AMC integration. Should simply issue an event. */
+		break;
+	}
+	case CMD_REBOOT_AVR_MCU: {
+		uint32_t shutdown_time_sec = 5;
+
+		struct reboot_scheduled_event *r_ev =
+			new_reboot_scheduled_event();
+		r_ev->reboots_at =
+			k_uptime_get_32() + (shutdown_time_sec * MSEC_PER_SEC);
+		EVENT_SUBMIT(r_ev);
+
+		k_sleep(K_SECONDS(shutdown_time_sec));
+
+/* Add a check that we are using NRF board
+ * since they are the ones supported by nordic's <power/reboot.h>
+ */
+#ifdef CONFIG_BOARD_NF_X25_NRF52840
+		sys_reboot(SYS_REBOOT_COLD);
+#endif
+		break;
+	}
+	case CMD_PLAY_SOUND: {
+		struct sound_event *s_ev = new_sound_event();
+		s_ev->type = SND_FIND_ME;
+		EVENT_SUBMIT(s_ev);
+		break;
+	}
+	case CMD_DOWNLOAD_FENCE: {
+		/* Downloads fence from bluetooth? */
+		break;
+	}
+	case CMD_FW_INSTALL: {
+		/* Deprecated as we have ble_dfu.c instead? */
+		break;
+	}
+	default: {
+		break;
+	}
+	}
 }
 
 static void process_lte_proto_event(void)
@@ -289,8 +366,8 @@ static void process_lte_proto_event(void)
 		fence_download(new_fframe);
 		return;
 	} else if (proto.which_m == NofenceMessage_ubx_ano_reply_tag) {
-		uint16_t new_ano_frame = process_ano_msg(&proto.m
-								  .ubx_ano_reply);
+		uint16_t new_ano_frame =
+			process_ano_msg(&proto.m.ubx_ano_reply);
 		ano_download(proto.m.ubx_ano_reply.usAnoId, new_ano_frame);
 		return;
 	} else {
@@ -304,6 +381,9 @@ void messaging_thread_fn()
 		if (rc == 0) {
 			while (k_msgq_num_used_get(&ble_ctrl_msgq) > 0) {
 				process_ble_ctrl_event();
+			}
+			while (k_msgq_num_used_get(&ble_cmd_msgq) > 0) {
+				process_ble_cmd_event();
 			}
 			while (k_msgq_num_used_get(&ble_data_msgq) > 0) {
 				process_ble_data_event();
@@ -405,39 +485,39 @@ void build_poll_request(NofenceMessage *poll_req)
 	}
 }
 
-
-
-int8_t request_fframe(uint32_t version, uint8_t frame){
+int8_t request_fframe(uint32_t version, uint8_t frame)
+{
 	NofenceMessage fence_req;
 	proto_InitHeader(&fence_req); /* fill up message header. */
 	fence_req.which_m = NofenceMessage_fence_definition_req_tag;
 	fence_req.m.fence_definition_req.ulFenceDefVersion = version;
 	fence_req.m.fence_definition_req.ucFrameNumber = frame;
 	int ret = send_message(&fence_req);
-	if (ret){
+	if (ret) {
 		LOG_WRN("Failed to send request for frame %d\n", frame);
 		return -1;
 	}
 	return 0;
 }
 
-void fence_download( uint8_t new_fframe){
-	if (new_fframe == 0 && first_frame){
+void fence_download(uint8_t new_fframe)
+{
+	if (new_fframe == 0 && first_frame) {
 		first_frame = false;
-	}
-	else if (new_fframe == 0 && !first_frame){ //something went bad
+	} else if (new_fframe == 0 && !first_frame) { //something went bad
 		expected_fframe = 0;
 		new_fence_in_progress = 0;
 		return;
 	}
-	if (new_fframe >= 0){
-		if (new_fframe == DOWNLOAD_COMPLETE){
+	if (new_fframe >= 0) {
+		if (new_fframe == DOWNLOAD_COMPLETE) {
 			struct new_fence_available *fence_ready;
 			fence_ready = new_new_fence_available();
 			fence_ready->fence_version = new_fence_in_progress;
 			EVENT_SUBMIT(fence_ready);
 			LOG_WRN("Fence %d download "
-				"complete!\n", new_fence_in_progress);
+				"complete!\n",
+				new_fence_in_progress);
 			expected_fframe = 0;
 			/* trigger ano download for the sake of testing only
 			first_ano_frame = true;
@@ -445,15 +525,15 @@ void fence_download( uint8_t new_fframe){
 			 */
 			return;
 		}
-		if (new_fframe == expected_fframe){
+		if (new_fframe == expected_fframe) {
 			expected_fframe++;
 			/* TODO: handle failure to send request!*/
 			request_fframe(new_fence_in_progress, expected_fframe);
 			LOG_WRN("Requesting frame %d of new fence: %d"
-				".\n", expected_fframe,
-				new_fence_in_progress);
+				".\n",
+				expected_fframe, new_fence_in_progress);
 
-		} else{
+		} else {
 			expected_fframe = 0;
 			new_fence_in_progress = 0;
 			return;
@@ -461,54 +541,55 @@ void fence_download( uint8_t new_fframe){
 	}
 }
 
-int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start){
+int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
+{
 	NofenceMessage ano_req;
 	proto_InitHeader(&ano_req); /* fill up message header. */
 	ano_req.which_m = NofenceMessage_ubx_ano_req_tag;
 	ano_req.m.ubx_ano_req.usAnoId = ano_id;
 	ano_req.m.ubx_ano_req.usStartAno = ano_start;
 	int ret = send_message(&ano_req);
-	if (ret){
+	if (ret) {
 		LOG_WRN("Failed to send request for ano %d\n", ano_start);
 		return -1;
 	}
 	return 0;
 }
 
-void ano_download(uint16_t ano_id, uint16_t new_ano_frame){
+void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
+{
 	LOG_WRN("ano_id = %d, ano_frame = %d\n", ano_id, new_ano_frame);
-	if (first_ano_frame){
+	if (first_ano_frame) {
 		new_ano_in_progress = ano_id;
 		expected_ano_frame = 0;
 		first_ano_frame = false;
-	}
-	else if (new_ano_frame == 0 && !first_ano_frame){ //something went bad
+	} else if (new_ano_frame == 0 &&
+		   !first_ano_frame) { //something went bad
 		expected_ano_frame = 0;
 		new_ano_in_progress = 0;
 		return;
 	}
-	if (new_ano_frame >= 0){
-		if (new_ano_frame == DOWNLOAD_COMPLETE){
+	if (new_ano_frame >= 0) {
+		if (new_ano_frame == DOWNLOAD_COMPLETE) {
 			struct ano_ready *ano_ready;
 			ano_ready = new_ano_ready();
 			EVENT_SUBMIT(ano_ready);
 			LOG_WRN("ANO %d download "
-				"complete!\n", new_ano_in_progress);
+				"complete!\n",
+				new_ano_in_progress);
 			return;
 		}
 
 		expected_ano_frame += new_ano_frame;
-		LOG_WRN("expected ano frame = %d\n",
-			expected_ano_frame);
+		LOG_WRN("expected ano frame = %d\n", expected_ano_frame);
 		/* TODO: handle failure to send request!*/
-		int ret = request_ano_frame(ano_id,
-					 expected_ano_frame);
+		int ret = request_ano_frame(ano_id, expected_ano_frame);
 
 		LOG_WRN("Requesting frame %d of new ano: %d"
-			".\n", expected_ano_frame,
-			new_ano_in_progress);
+			".\n",
+			expected_ano_frame, new_ano_in_progress);
 
-		if (ret != 0){
+		if (ret != 0) {
 			/* TODO: reset ANO state and retry later.*/
 			expected_ano_frame = 0;
 			new_ano_in_progress = 0;
@@ -522,10 +603,9 @@ void proto_InitHeader(NofenceMessage *msg)
 	msg->header.ulId = 11500; //TODO: read from eeprom
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
-	if (use_server_time){
+	if (use_server_time) {
 		msg->header.ulUnixTimestamp = time_from_server;
-	}
-	else{
+	} else {
 		msg->header.ulUnixTimestamp = cached_fix.unixTimestamp;
 	}
 }
@@ -573,11 +653,11 @@ int send_message(NofenceMessage *msg_proto)
 	while (!send_out_ack) {
 		k_sleep(K_SECONDS(0.1));
 		LOG_WRN("Waiting for ack!\n");
-		if (waiting_cycles++ > 10){
+		if (waiting_cycles++ > 10) {
 			waiting_cycles = 0;
 			char *e_msg = "Timed out waiting for cellular ack!\n";
-			nf_app_error(ERR_MESSAGING, ETIME,
-				     e_msg, strlen(e_msg));
+			nf_app_error(ERR_MESSAGING, ETIME, e_msg,
+				     strlen(e_msg));
 			return -1;
 		}
 	}
@@ -617,9 +697,10 @@ void process_poll_response(NofenceMessage *proto)
 		use_server_time = true;
 	}
 	if (pResp->has_usPollConnectIntervalSec) {
-		poll_period_minutes = pResp->usPollConnectIntervalSec/60;
-		k_work_reschedule_for_queue(&poll_q, &modem_poll_work,
-					    K_SECONDS(poll_period_minutes * 60));
+		poll_period_minutes = pResp->usPollConnectIntervalSec / 60;
+		k_work_reschedule_for_queue(
+			&poll_q, &modem_poll_work,
+			K_SECONDS(poll_period_minutes * 60));
 		LOG_WRN("Poll period of %d minutes will be used!\n",
 			poll_period_minutes);
 	}
@@ -647,10 +728,10 @@ void process_poll_response(NofenceMessage *proto)
 		 * to AMC */
 		//request frame 0
 		first_frame = true;
-		LOG_WRN("Requesting frame 0 of fence: %d!\n"
-			,pResp->ulFenceDefVersion);
+		LOG_WRN("Requesting frame 0 of fence: %d!\n",
+			pResp->ulFenceDefVersion);
 		int ret = request_fframe(pResp->ulFenceDefVersion, 0);
-		if (ret == 0){
+		if (ret == 0) {
 			first_frame = true;
 			new_fence_in_progress = pResp->ulFenceDefVersion;
 		}
@@ -671,16 +752,16 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	static uint8_t total_frames;
 	uint8_t frame = fenceResp->ucFrameNumber;
 	LOG_WRN("Received frame %d\n", frame);
-	if (frame == 0){
+	if (frame == 0) {
 		version = fenceResp->ulFenceDefVersion;
 		total_frames = fenceResp->ucTotalFrames;
 		LOG_WRN("Total number of fence frames = %d\n", total_frames);
 		return 0;
 	}
-	if (new_fence_in_progress != fenceResp->ulFenceDefVersion){
+	if (new_fence_in_progress != fenceResp->ulFenceDefVersion) {
 		return 0; //something went wrong, restart fence request
 	}
-	if (frame == total_frames-1){
+	if (frame == total_frames - 1) {
 		return DOWNLOAD_COMPLETE;
 	}
 	/* TODO: write "fenceResp" to flash. */
@@ -690,15 +771,16 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 uint8_t process_ano_msg(UbxAnoReply *anoResp)
 {
 	LOG_DBG("Ano response received!\n");
-	uint8_t rec_ano_frames = anoResp->rgucBuf.size/sizeof(UBX_MGA_ANO_RAW_t);
+	uint8_t rec_ano_frames =
+		anoResp->rgucBuf.size / sizeof(UBX_MGA_ANO_RAW_t);
 	UBX_MGA_ANO_RAW_t *temp = NULL;
-	temp = (UBX_MGA_ANO_RAW_t *) (anoResp->rgucBuf.bytes + sizeof(UBX_MGA_ANO_RAW_t));
-	uint32_t age = ano_date_to_unixtime_midday(temp->mga_ano.year,
-						   temp->mga_ano.month,
-						   temp->mga_ano.day);
-	LOG_WRN("Relative age of received ANO frame = %d, %d \n",
-		age, time_from_server);
-	if (age > time_from_server + SECONDS_IN_THREE_DAYS){
+	temp = (UBX_MGA_ANO_RAW_t *)(anoResp->rgucBuf.bytes +
+				     sizeof(UBX_MGA_ANO_RAW_t));
+	uint32_t age = ano_date_to_unixtime_midday(
+		temp->mga_ano.year, temp->mga_ano.month, temp->mga_ano.day);
+	LOG_WRN("Relative age of received ANO frame = %d, %d \n", age,
+		time_from_server);
+	if (age > time_from_server + SECONDS_IN_THREE_DAYS) {
 		return DOWNLOAD_COMPLETE;
 	}
 	LOG_DBG("Number of received ano buffer = %d!\n", rec_ano_frames);
@@ -739,7 +821,9 @@ bool proto_hasLastKnownDatePos(const gps_last_fix_struct_t *gps)
 	return gps->unixTimestamp != 0;
 }
 
-static uint32_t ano_date_to_unixtime_midday(uint8_t year, uint8_t month, uint8_t day) {
+static uint32_t ano_date_to_unixtime_midday(uint8_t year, uint8_t month,
+					    uint8_t day)
+{
 	nf_time_t nf_time;
 	nf_time.day = day;
 	nf_time.month = month;

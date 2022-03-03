@@ -20,6 +20,8 @@
 #include <zephyr.h>
 #include <zephyr/types.h>
 
+#include "ble_cmd_event.h"
+
 #define MODULE nofence_ble_service
 #include <logging/log.h>
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_SERVICE_LOG_LEVEL);
@@ -92,11 +94,15 @@ ssize_t write_command_char(struct bt_conn *conn,
 			   uint16_t len, uint16_t offset, uint8_t flags)
 {
 	if (len == sizeof(nofence_data.cmd)) {
-		// Grab and copy fota metadata
 		uint8_t *cmd_char = (uint8_t *)buf;
 		memcpy(nofence_data.cmd, cmd_char, len);
 		LOG_INF("Received write request of command char %d",
 			nofence_data.cmd[0]);
+
+		/* Submit event to messaging module. */
+		struct ble_cmd_event *ev = new_ble_cmd_event();
+		ev->cmd = *cmd_char;
+		EVENT_SUBMIT(ev);
 	} else {
 		LOG_ERR("Size %d of written command char is too long", len);
 	}

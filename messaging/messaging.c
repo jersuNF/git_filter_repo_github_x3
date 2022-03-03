@@ -21,6 +21,11 @@
 #include "error_event.h"
 #include "helpers.h"
 
+#include "storage.h"
+
+#include "pasture_structure.h"
+#include "fw_upgrade_events.h"
+
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
 #define SECONDS_IN_THREE_DAYS 259200
@@ -34,8 +39,10 @@ K_SEM_DEFINE(cache_lock_sem, 1, 1);
 collar_state_struct_t current_state;
 gps_last_fix_struct_t cached_fix;
 
+/* Cached fence for constructing the new fence from fence_download frames. */
 static fence_t *new_fence_points = NULL;
 static size_t new_fence_size;
+static size_t curr_copied_coords = 0;
 
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
@@ -97,6 +104,18 @@ K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_SIZE,
 		CONFIG_MESSAGING_THREAD_PRIORITY, 0, 0);
 
 K_KERNEL_STACK_DEFINE(messaging_poll_thread, CONFIG_MESSAGING_POLL_THREAD_SIZE);
+
+void cleanup_cached_fence_resources(void)
+{
+	/* Free and cleanup the resources of the cached fence
+	 * as we have now verified that AMC has retrieved 
+	 * the new fence and started using it.
+	 */
+	k_free(new_fence_points);
+	new_fence_points = NULL;
+	new_fence_size = 0;
+	curr_copied_coords = 0;
+}
 
 /**
  * @brief Build, send a poll request, and reschedule after
@@ -170,8 +189,11 @@ static bool event_handler(const struct event_header *eh)
 	if (is_update_fence_version(eh)) {
 		struct update_fence_version *ev = cast_update_fence_version(eh);
 		current_state.fence_version = ev->fence_version;
-		modem_poll_work_fn(); /* notify server as soon as the new
- * fence is activated.*/
+
+		cleanup_cached_fence_resources();
+
+		/* Notify server as soon as the new fence is activated. */
+		modem_poll_work_fn();
 		return false;
 	}
 	if (is_update_flash_erase(eh)) {
@@ -211,6 +233,45 @@ static bool event_handler(const struct event_header *eh)
 	__ASSERT_NO_MSG(false);
 
 	return false;
+}
+
+int crc_check_msg_cached_fence()
+{
+	//uint16_t crc = 0xFFFF;
+	//uint16_t eepUint16;
+	//uint16_t receivedCRC = new_fence_points->
+	//
+	//if (receivedCRC == EMPTY_FENCE_CRC) {
+	//	//we received old fence definition without crc, or we have just migrated and the
+	//	// current fenceDef will not be validated until a new one is downloaded
+	//	return true;
+	//}
+	//
+	//uint8_t fenceCount = EEPROM_GetNumberOfFences();
+	//uint32_t eepUint32 = EEPROM_GetFenceConfigCrc();
+	//FenceHeader header = { 0 };
+	//
+	//crc = nf_crc16_uint32(eepUint32, &crc);
+	//eepUint32 = EEPROM_GetOriginLon();
+	//crc = nf_crc16_uint32(eepUint32, &crc);
+	//eepUint32 = EEPROM_GetOriginLat();
+	//crc = nf_crc16_uint32(eepUint32, &crc);
+	//eepUint16 = EEPROM_GetK_LON();
+	//crc = nf_crc16_uint16(eepUint16, &crc);
+	//eepUint16 = EEPROM_GetK_LAT();
+	//crc = nf_crc16_uint16(eepUint16, &crc);
+	//
+	//for (uint8_t fenceNo = 0; fenceNo < fenceCount; fenceNo++) {
+	//	EEPROM_ReadFenceHeader(fenceNo, &header);
+	//	for (uint8_t i = 0; i < header.nPoints; i++) {
+	//		eepUint32 = eeprom_read_dword((void *)(header.pC + i));
+	//		crc = nf_crc16_uint32(eepUint32, &crc);
+	//	}
+	//}
+	//
+	//return crc == receivedCRC;
+	//
+	return 0;
 }
 
 EVENT_LISTENER(MODULE, event_handler);
@@ -434,15 +495,30 @@ void fence_download(uint8_t new_fframe)
 	}
 	if (new_fframe >= 0) {
 		if (new_fframe == DOWNLOAD_COMPLETE) {
-			int ret = crc_check_fence();
-			if (ret) {
-				LOG_ERR("Crc mismatch.");
+			int err = crc_check_msg_cached_fence();
+			if (err) {
+				/* CRC error, try again? */
+				expected_fframe = 0;
+				new_fence_in_progress = 0;
+				cleanup_cached_fence_resources();
 				return;
 			}
-			struct pasture_ready_event *fence_ready =
-				new_pasture_ready_event();
+
+			/* Write to storage controller. */
+			err = stg_write_pasture_data(
+				(uint8_t *)new_fence_points, new_fence_size);
+
+			if (err) {
+				LOG_ERR("Error storing new fence to external flash.");
+				return;
+			}
+
+			/* Notify AMC that a new fence is available. */
+			struct new_fence_available *fence_ready =
+				new_new_fence_available();
 			fence_ready->fence_version = new_fence_in_progress;
 			EVENT_SUBMIT(fence_ready);
+
 			LOG_WRN("Fence %d download "
 				"complete!\n",
 				new_fence_in_progress);
@@ -464,6 +540,7 @@ void fence_download(uint8_t new_fframe)
 		} else {
 			expected_fframe = 0;
 			new_fence_in_progress = 0;
+			cleanup_cached_fence_resources();
 			return;
 		}
 	}
@@ -687,28 +764,25 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 	return;
 }
 
-int crc_check_fence()
-{
-}
-
 uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 {
-	sizeof(FenceDefinitionResponse) static uint32_t version;
-	static uint8_t total_frames;
 	uint8_t frame = fenceResp->ucFrameNumber;
-	LOG_WRN("Received frame %d\n", frame);
+	LOG_INF("Received fence frame number %d\n", frame);
 
-	struct fence_frame_event *ev = new_fence_frame_event();
-	memcpy(&ev->fence_frame, fenceResp, sizeof(FenceDefinitionResponse));
-	EVENT_SUBMIT(ev);
+	if (new_fence_in_progress != fenceResp->ulFenceDefVersion) {
+		/* Something went wrong, restart fence request. */
+		return 0;
+	}
 
 	if (frame == 0) {
-		if (new_fence_points != NULL) {
+		if (new_fence_points != NULL || curr_copied_coords != 0 ||
+		    new_fence_size != 0) {
 			/* Something happend and the previous fence
-			 * was not freed.
+			 * has not yet been consumed/freed correctly.
 			 */
 			return 0;
 		}
+		/* Setup the new fence. */
 		new_fence_size =
 			sizeof(fence_t) + (sizeof(fence_coordinate_t) *
 					   fenceResp->m.xHeader.ulTotalFences);
@@ -720,27 +794,21 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 		new_fence_points->header.e_fence_type =
 			fenceResp->m.xFence.eFenceType;
 
-		version = fenceResp->ulFenceDefVersion;
-		total_frames = fenceResp->ucTotalFrames;
-		LOG_WRN("Total number of fence frames = %d\n", total_frames);
-		return 0;
+		LOG_INF("Total number of fence frames = %d",
+			fenceResp->ucTotalFrames);
 	}
 
-	/* Copy up to 40 fence points from the frame. */
-	memcpy(&new_fence_points->p_c, fenceResp->m.xFence.rgulPoints,
+	/* Copy up to 40 fence points from the frame to the cached fence. */
+	memcpy(&new_fence_points->p_c[curr_copied_coords],
+	       fenceResp->m.xFence.rgulPoints,
 	       sizeof(fence_coordinate_t) *
 		       fenceResp->m.xFence.rgulPoints_count);
-	new_fence_points->p_c += fenceResp->m.xFence.rgulPoints_count;
+	curr_copied_coords += fenceResp->m.xFence.rgulPoints_count;
 
-	if (new_fence_in_progress != fenceResp->ulFenceDefVersion) {
-		return 0; //something went wrong, restart fence request
-	}
-
-	if (frame == total_frames - 1) {
+	if (frame == fenceResp->ucTotalFrames - 1) {
 		return DOWNLOAD_COMPLETE;
 	}
 
-	/* TODO: write "fenceResp" to flash. */
 	return frame;
 }
 

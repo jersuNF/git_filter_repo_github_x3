@@ -48,11 +48,13 @@ int stg_fcb_reset_and_init();
  * @param[in] partition which partition to write to.
  * @param[in] data input where the flash data is written from.
  * @param[in] len input regarding the size of the written data.
+ * @param[in] rotate_to_this Clears all the previous entries if this is true
+ *                           making the current entry the only one present.
  * 
  * @return 0 on success, otherwise negative errno.
  */
 int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
-			   size_t len);
+			   size_t len, bool rotate_to_this);
 
 /** 
  * @brief Callback function containing the read entry data. Created
@@ -125,7 +127,7 @@ int stg_write_log_data(uint8_t *data, size_t len);
  * 
  * @return 0 on success, otherwise negative errno
  */
-int stg_write_ano_data(uint8_t *data, size_t len, uint32_t first_frame);
+int stg_write_ano_data(uint8_t *data, size_t len, bool first_frame);
 
 /** 
  * @brief Writes log data to external flash LOG partition.

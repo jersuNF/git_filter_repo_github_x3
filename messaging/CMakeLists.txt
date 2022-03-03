@@ -11,6 +11,7 @@ zephyr_include_directories(
 	${CMAKE_CURRENT_SOURCE_DIR}/../../events/gps_controller/
 	${CMAKE_CURRENT_SOURCE_DIR}/../../events/messaging/
 	${CMAKE_CURRENT_SOURCE_DIR}/../../events/error_handler/
+	${CMAKE_CURRENT_SOURCE_DIR}/../../modules/storage_controller/
 	${CMAKE_CURRENT_SOURCE_DIR}/include/
 	${PROJECT_BINARY_DIR}/include/generated/)
 

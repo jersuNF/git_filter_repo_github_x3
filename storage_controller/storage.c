@@ -15,7 +15,6 @@
 #include "log_structure.h"
 #include "pasture_structure.h"
 #include "storage.h"
-#include "pasture_event.h"
 
 #include "error_event.h"
 
@@ -244,17 +243,6 @@ int stg_write_frame_to_partition(flash_partition_t partition, uint8_t *data,
 	return err;
 }
 
-/** 
- * @brief Writes data to given partition.
- * 
- * @param[in] partition which partition to write to.
- * @param[in] data pointer location to of data to be written.
- * @param[in] len length of data.
- * @param[in] rotate_to_this Clears all the previous entries if this is true
- *                           making the current entry the only one present.
- * 
- * @return 0 on success, otherwise negative errno
- */
 int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 			   size_t len, bool rotate_to_this)
 {
@@ -316,12 +304,6 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 	if (err) {
 		LOG_ERR("Error finishing new entry. err %d", err);
 		goto cleanup;
-	}
-
-	/* Publish pastrure ready event for those who need. */
-	if (partition == STG_PARTITION_PASTURE) {
-		struct pasture_ready_event *ev = new_pasture_ready_event();
-		EVENT_SUBMIT(ev);
 	}
 cleanup:
 	k_mutex_unlock(mtx);

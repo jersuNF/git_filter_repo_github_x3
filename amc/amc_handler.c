@@ -7,7 +7,6 @@
 #include <logging/log.h>
 #include "sound_event.h"
 #include "request_events.h"
-#include "pasture_event.h"
 #include "pasture_structure.h"
 #include "event_manager.h"
 #include "error_event.h"
@@ -24,9 +23,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
  */
 static fence_t *cached_fence = NULL;
 static size_t cached_fence_size = 0;
-
-static FenceDefinitionResponse *new_fence_frames = NULL;
-#define FENCE_IN_PROGRESS_SIZE sizeof(FenceDefinitionResponse) * 8
+atomic_t new_fence_version = ATOMIC_INIT(0);
 
 #define REQUEST_DATA_SEM_TIMEOUT_SEC 5
 K_SEM_DEFINE(fence_data_sem, 1, 1);
@@ -58,15 +55,7 @@ static struct k_work_q amc_work_q;
  */
 static struct k_work calc_work;
 
-/* Process the new fence received from messaging module. */
 static struct k_work process_new_fence_work;
-
-int verify_pasture(uint8_t *data, size_t len)
-{
-	ARG_UNUSED(data);
-	ARG_UNUSED(len);
-	return 0;
-}
 
 static inline int update_pasture_cache(uint8_t *data, size_t len)
 {
@@ -103,37 +92,6 @@ static inline int update_pasture_cache(uint8_t *data, size_t len)
 	return 0;
 }
 
-void process_new_fence_fn(struct k_work *item)
-{
-	/* Fetch fence from somewhere, not sure where?? */
-	uint8_t *dummy_data = 0x00;
-	size_t len = 0;
-
-	ARG_UNUSED(item);
-	int err;
-
-	/* Verify fence. */
-	err = verify_pasture(dummy_data, len);
-	if (err) {
-		LOG_ERR("Error verifying new fence from messaging module.");
-		return;
-	}
-
-	/* Update AMC cache. */
-	err = update_pasture_cache(dummy_data, len);
-	if (err) {
-		LOG_ERR("Error verifying new fence from messaging module.");
-		return;
-	}
-
-	/* Store to external flash. */
-	err = stg_write_pasture_data(dummy_data, len);
-	if (err) {
-		LOG_ERR("Error verifying new fence from messaging module.");
-		return;
-	}
-}
-
 static inline int update_pasture_from_stg(void)
 {
 	int err = stg_read_pasture_data(update_pasture_cache);
@@ -147,6 +105,22 @@ static inline int update_pasture_from_stg(void)
 		return err;
 	}
 	return 0;
+}
+
+void process_new_fence_fn(struct k_work *item)
+{
+	/* Update AMC cache. */
+	int err = update_pasture_from_stg();
+	if (err) {
+		new_fence_version = 0;
+		LOG_ERR("Error caching new pasture from storage controller.");
+		return;
+	}
+
+	/* Submit event that we have now began to use the new fence. */
+	struct update_fence_version *ver = new_update_fence_version();
+	ver->fence_version = (uint32_t)atomic_get(&new_fence_version);
+	EVENT_SUBMIT(ver);
 }
 
 /**
@@ -225,11 +199,10 @@ int amc_module_init(void)
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_new_fence_available(eh)) {
-		/* Start by fetching the new fence and verify it's validity.
-		 * If its valid, copy it to the cached area and also
-		 * store it to external flash.
-		 */
-		k_work_submit_to_queue(&amc_work_q, process_new_fence_work);
+		struct new_fence_available *event =
+			cast_new_fence_available(eh);
+		atomic_set(&new_fence_version, event->fence_version);
+		k_work_submit_to_queue(&amc_work_q, &process_new_fence_work);
 		return false;
 	}
 	if (is_gnssdata_event(eh)) {

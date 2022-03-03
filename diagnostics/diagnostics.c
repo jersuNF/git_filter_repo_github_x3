@@ -196,6 +196,7 @@ static uint32_t diagnostics_process_input(enum diagnostics_interface interface,
 #else
 		/* Echo for now */
 		bytes_parsed = size;
+		LOG_ERR("Trying to send diag resp");
 		diagnostics_send(interface, data, size);
 #endif
 	}

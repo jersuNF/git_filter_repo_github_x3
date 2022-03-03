@@ -34,6 +34,9 @@ K_SEM_DEFINE(cache_lock_sem, 1, 1);
 collar_state_struct_t current_state;
 gps_last_fix_struct_t cached_fix;
 
+static fence_t *new_fence_points = NULL;
+static size_t new_fence_size;
+
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
 static bool first_frame, first_ano_frame;
@@ -431,6 +434,11 @@ void fence_download(uint8_t new_fframe)
 	}
 	if (new_fframe >= 0) {
 		if (new_fframe == DOWNLOAD_COMPLETE) {
+			int ret = crc_check_fence();
+			if (ret) {
+				LOG_ERR("Crc mismatch.");
+				return;
+			}
 			struct pasture_ready_event *fence_ready =
 				new_pasture_ready_event();
 			fence_ready->fence_version = new_fence_in_progress;
@@ -679,21 +687,55 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 	return;
 }
 
+int crc_check_fence()
+{
+}
+
 uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 {
-	static uint32_t version;
+	sizeof(FenceDefinitionResponse) static uint32_t version;
 	static uint8_t total_frames;
 	uint8_t frame = fenceResp->ucFrameNumber;
 	LOG_WRN("Received frame %d\n", frame);
+
+	struct fence_frame_event *ev = new_fence_frame_event();
+	memcpy(&ev->fence_frame, fenceResp, sizeof(FenceDefinitionResponse));
+	EVENT_SUBMIT(ev);
+
 	if (frame == 0) {
+		if (new_fence_points != NULL) {
+			/* Something happend and the previous fence
+			 * was not freed.
+			 */
+			return 0;
+		}
+		new_fence_size =
+			sizeof(fence_t) + (sizeof(fence_coordinate_t) *
+					   fenceResp->m.xHeader.ulTotalFences);
+		new_fence_points = (fence_t *)k_malloc(new_fence_size);
+
+		new_fence_points->header.us_id = fenceResp->m.xFence.usId;
+		new_fence_points->header.n_points =
+			fenceResp->m.xHeader.ulTotalFences;
+		new_fence_points->header.e_fence_type =
+			fenceResp->m.xFence.eFenceType;
+
 		version = fenceResp->ulFenceDefVersion;
 		total_frames = fenceResp->ucTotalFrames;
 		LOG_WRN("Total number of fence frames = %d\n", total_frames);
 		return 0;
 	}
+
+	/* Copy up to 40 fence points from the frame. */
+	memcpy(&new_fence_points->p_c, fenceResp->m.xFence.rgulPoints,
+	       sizeof(fence_coordinate_t) *
+		       fenceResp->m.xFence.rgulPoints_count);
+	new_fence_points->p_c += fenceResp->m.xFence.rgulPoints_count;
+
 	if (new_fence_in_progress != fenceResp->ulFenceDefVersion) {
 		return 0; //something went wrong, restart fence request
 	}
+
 	if (frame == total_frames - 1) {
 		return DOWNLOAD_COMPLETE;
 	}

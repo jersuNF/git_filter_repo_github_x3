@@ -25,6 +25,9 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
 static fence_t *cached_fence = NULL;
 static size_t cached_fence_size = 0;
 
+static FenceDefinitionResponse *new_fence_frames = NULL;
+#define FENCE_IN_PROGRESS_SIZE sizeof(FenceDefinitionResponse) * 8
+
 #define REQUEST_DATA_SEM_TIMEOUT_SEC 5
 K_SEM_DEFINE(fence_data_sem, 1, 1);
 static inline int update_pasture_cache(uint8_t *data, size_t len);

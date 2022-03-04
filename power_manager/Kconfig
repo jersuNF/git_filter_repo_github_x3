@@ -1,0 +1,38 @@
+# Copyright (c) 2021 Nofence AS
+
+
+menuconfig POWER_MANAGER
+        bool "Enable Power Manager module"
+	select LOG
+        default y
+
+if POWER_MANAGER
+        module = PWR_MODULE
+        module-str = PWR module
+        source "subsys/logging/Kconfig.template.log_config"
+
+        module = BATTERY
+        module-str = Battery logging
+        source "subsys/logging/Kconfig.template.log_config"
+
+        config BATTERY_POLLER_WORK_SEC
+        int "Seconds between modem poll"
+        default 300
+
+        config BATTERY_THRESHOLD
+        int "Battery hysteresis in mV"
+        default 50
+
+        config BATTERY_LOW
+        int "Battery threshold defined in mV to enter low state"
+        default 3450
+
+        config BATTERY_CRITICAL
+        int "Battery threshold defined in mV to enter critical state"
+        default 3250
+
+        config BATTERY_MOVING_AVERAGE_SAMPLES
+        int "Number of moving average samples to be considered. Higher number gives smoother voltage change"
+        default 300
+        
+endif

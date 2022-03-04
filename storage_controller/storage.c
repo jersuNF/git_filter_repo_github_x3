@@ -38,6 +38,10 @@ const struct flash_area *pasture_area;
 struct fcb pasture_fcb;
 struct flash_sector pasture_sectors[FLASH_PASTURE_NUM_SECTORS];
 
+K_MUTEX_DEFINE(log_mutex);
+K_MUTEX_DEFINE(ano_mutex);
+K_MUTEX_DEFINE(pasture_mutex);
+
 /* Callback context config given to walk callback function. 
  * We can either give the data directly if only one entry (newest),
  * or we can call the callback function for each entry read.
@@ -76,6 +80,25 @@ struct fcb *get_fcb(flash_partition_t partition)
 		return NULL;
 	}
 	return fcb;
+}
+
+/** @brief Gets mutex to lock/unlock based on partition.
+ * 
+ * @param partition which partition to get mutex from
+ * 
+ * @return pointer to mutex structure
+ */
+struct k_mutex *get_mutex(flash_partition_t partition)
+{
+	if (partition == STG_PARTITION_LOG) {
+		return &log_mutex;
+	} else if (partition == STG_PARTITION_ANO) {
+		return &ano_mutex;
+	} else if (partition == STG_PARTITION_PASTURE) {
+		return &pasture_mutex;
+	}
+	LOG_ERR("Invalid partition given.");
+	return NULL;
 }
 
 static inline int init_fcb_on_partition(flash_partition_t partition)
@@ -188,12 +211,23 @@ int stg_init_storage_controller(void)
 	if (err) {
 		return err;
 	}
+
 	return 0;
 }
 
 int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 			   size_t len)
 {
+	struct k_mutex *mtx = get_mutex(partition);
+
+	if (mtx == NULL) {
+		return -EINVAL;
+	}
+
+	if (k_mutex_lock(mtx, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+		LOG_ERR("Mutex timeout in storage controller.");
+		return -ETIMEDOUT;
+	}
 	/* Determine write type. If true, we only have this newest entry 
 	 * to be written below on the flash partition. */
 	bool rotate_to_this = true;
@@ -210,7 +244,7 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 	if (rotate_to_this) {
 		err = fcb_clear(fcb);
 		if (err) {
-			return err;
+			goto cleanup;
 		}
 	}
 
@@ -221,7 +255,7 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 		if (err) {
 			LOG_ERR("Unable to rotate fcb from -ENOSPC, err %d",
 				err);
-			return err;
+			goto cleanup;
 		}
 		/* Retry appending. */
 		err = fcb_append(fcb, len, &loc);
@@ -230,25 +264,25 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 				err);
 			nf_app_error(ERR_SENDER_STORAGE_CONTROLLER,
 				     -ENOTRECOVERABLE, NULL, 0);
-			return err;
+			goto cleanup;
 		}
 		LOG_INF("Rotated FCB since it's full.");
 	} else if (err) {
 		LOG_ERR("Error appending new fcb entry, err %d", err);
-		return err;
+		goto cleanup;
 	}
 
 	err = flash_area_write(fcb->fap, FCB_ENTRY_FA_DATA_OFF(loc), data, len);
 	if (err) {
 		LOG_ERR("Error writing to flash area. err %d", err);
-		return err;
+		goto cleanup;
 	}
 
 	/* Finish entry. */
 	err = fcb_append_finish(fcb, &loc);
 	if (err) {
 		LOG_ERR("Error finishing new entry. err %d", err);
-		return err;
+		goto cleanup;
 	}
 
 	/* Publish pastrure ready event for those who need. */
@@ -256,8 +290,9 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 		struct pasture_ready_event *ev = new_pasture_ready_event();
 		EVENT_SUBMIT(ev);
 	}
-
-	return 0;
+cleanup:
+	k_mutex_unlock(mtx);
+	return err;
 }
 
 int stg_clear_partition(flash_partition_t partition)
@@ -321,10 +356,24 @@ static int walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 static inline int read_fcb_partition(flash_partition_t partition,
 				     stg_read_log_cb cb)
 {
+	int err = 0;
+
+	struct k_mutex *mtx = get_mutex(partition);
+
+	if (mtx == NULL) {
+		return -EINVAL;
+	}
+
+	if (k_mutex_lock(mtx, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+		LOG_ERR("Mutex timeout in storage controller.");
+		return -ETIMEDOUT;
+	}
+
 	/* Check if we have any data available. */
 	struct fcb *fcb = get_fcb(partition);
 	if (fcb_is_empty(fcb)) {
-		return -ENODATA;
+		err = -ENODATA;
+		goto cleanup;
 	}
 
 	/* Length location used to store the entry location used
@@ -351,24 +400,27 @@ static inline int read_fcb_partition(flash_partition_t partition,
 	config.len = &entry_len;
 
 	if (cb == NULL) {
-		return -EINVAL;
+		err = -EINVAL;
+		goto cleanup;
 	}
 	config.cb = cb;
 
-	int err = fcb_walk(fcb, NULL, walk_cb, &config);
+	err = fcb_walk(fcb, NULL, walk_cb, &config);
 	if (err) {
 		LOG_ERR("Error walking over FCB storage, err %d", err);
-		return err;
+		goto cleanup;
 	}
 
 	if (!read_only_newest) {
 		err = fcb_clear(fcb);
 		if (err) {
 			LOG_ERR("Error clearing FCB after walk, err %d", err);
-			return err;
+			goto cleanup;
 		}
 	}
-	return 0;
+cleanup:
+	k_mutex_unlock(mtx);
+	return err;
 }
 
 int stg_read_log_data(stg_read_log_cb cb)

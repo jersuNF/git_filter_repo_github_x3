@@ -72,7 +72,7 @@ uint32_t commander_handle(enum diagnostics_interface interface,
 		bool ack = false;
 		uint8_t cmd = 0;
 		if (cobs_buffer[0] == 'N') {
-			if (cobs_buffer[0] == 0x20) {
+			if (cobs_buffer[1] == 0x20) {
 				/* Simulate the highest tone event */
 				struct sound_event *sound_event_high = new_sound_event();
 				sound_event_high->type = SND_MAX;
@@ -80,7 +80,7 @@ uint32_t commander_handle(enum diagnostics_interface interface,
 
 				cmd = 0x20;
 				ack = true;
-			} else if (cobs_buffer[0] == 0x50) {
+			} else if (cobs_buffer[1] == 0x50) {
 				/* Send electric pulse */
 				struct ep_status_event *ready_ep_event = new_ep_status_event();
 				ready_ep_event->ep_status = EP_RELEASE;

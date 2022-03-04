@@ -35,6 +35,7 @@
 uint32_t time_from_server;
 
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
+K_SEM_DEFINE(send_ack_sem, 0, 1);
 
 collar_state_struct_t current_state;
 gps_last_fix_struct_t cached_fix;
@@ -48,7 +49,6 @@ static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
 static bool first_frame, first_ano_frame;
 
-uint8_t poll_period_minutes = 5;
 void build_poll_request(NofenceMessage *);
 int8_t request_fframe(uint32_t, uint8_t);
 void fence_download(uint8_t);
@@ -59,7 +59,10 @@ void process_poll_response(NofenceMessage *);
 void process_upgrade_request(VersionInfoFW *);
 uint8_t process_fence_msg(FenceDefinitionResponse *);
 uint8_t process_ano_msg(UbxAnoReply *);
-int send_message(NofenceMessage *);
+
+int encode_and_send_message(NofenceMessage *);
+int send_binary_message(uint8_t *, size_t);
+
 void messaging_thread_fn(void);
 
 _DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *);
@@ -71,6 +74,8 @@ bool send_out_ack, use_server_time;
 K_SEM_DEFINE(ble_ctrl_sem, 0, 1);
 K_SEM_DEFINE(ble_data_sem, 0, 1);
 K_SEM_DEFINE(lte_proto_sem, 0, 1);
+
+K_MUTEX_DEFINE(send_binary_mutex);
 
 #define MODULE messaging
 LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
@@ -96,14 +101,18 @@ struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
 					&lte_proto_msgq, 0),
 };
 
-static struct k_work_q poll_q;
+static struct k_work_q send_q;
 struct k_work_delayable modem_poll_work;
+struct k_work_delayable log_work;
+
+atomic_t poll_period_minutes = ATOMIC_INIT(5);
+atomic_t log_period_minutes = ATOMIC_INIT(30);
 
 K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_SIZE,
 		messaging_thread_fn, NULL, NULL, NULL,
 		CONFIG_MESSAGING_THREAD_PRIORITY, 0, 0);
 
-K_KERNEL_STACK_DEFINE(messaging_poll_thread, CONFIG_MESSAGING_POLL_THREAD_SIZE);
+K_KERNEL_STACK_DEFINE(messaging_send_thread, CONFIG_MESSAGING_SEND_THREAD_SIZE);
 
 void cleanup_cached_fence_resources(void)
 {
@@ -117,6 +126,64 @@ void cleanup_cached_fence_resources(void)
 	curr_copied_coords = 0;
 }
 
+int read_log_data_cb(uint8_t *data, size_t len)
+{
+	uint8_t *bytes = k_malloc(len + 2);
+	memcpy(&bytes[2], data, len);
+
+	int err = send_binary_message(bytes, len + 2);
+	if (err) {
+		LOG_ERR("Error sending binary message for log data %i", err);
+	}
+	k_free(bytes);
+	return err;
+}
+
+void build_log_message()
+{
+	/* Fill in NofenceMessage and encode it, then store on fcb. Do it twice,
+	 * once for seq message 1 and once for seq message 2. As such;
+
+	 * NofenceMessage seq_1;
+	 * NofenceMessage seq_2;
+	 * 
+	 * seq_1.which_m = NofenceMessage_seq_msg_tag;
+	 * seq_2.which_m = NofenceMessage_seq_msg_2_tag;
+	 * ...
+	 * ...
+	 * 
+	 * collar_protocol_encode(seq_1, dst1, dst_max_size1, dst_size1);
+	 * collar_protocol_encode(seq_2, dst2, dst_max_size2, dst_size2);
+	 * 
+	 * stg_write_log_data(dst1, dst_size1);
+	 * stg_write_log_data(dst2, dst_size2);
+	 * 
+	 * DONE.
+	 */
+	return;
+}
+
+/**
+ * @brief Build, send a log request, and reschedule after
+ *        "log_period_minutes" minutes.
+ */
+void log_data_periodic_fn()
+{
+	/* Construct log data and write to storage controller. */
+	build_log_message();
+
+	/* Read and send out all the log data if any. */
+	int err = stg_read_log_data(read_log_data_cb);
+	if (err) {
+		LOG_ERR("Error reading all sequence messages from storage %i",
+			err);
+	}
+
+	/* Reschedule. */
+	k_work_reschedule_for_queue(&send_q, &log_work,
+				    K_MINUTES(atomic_get(&log_period_minutes)));
+}
+
 /**
  * @brief Build, send a poll request, and reschedule after
  * "poll_period_minutes".
@@ -124,18 +191,21 @@ void cleanup_cached_fence_resources(void)
 void modem_poll_work_fn()
 {
 	/* Add logic for the periodic protobuf modem poller. */
-	LOG_WRN("Starting periodic poll work fn!\n");
+	LOG_INF("Starting periodic poll work fn!\n");
 	NofenceMessage new_poll_msg;
-	memset(&new_poll_msg, 0, sizeof(new_poll_msg));
+
 	if (!k_sem_take(&cache_lock_sem, K_SECONDS(1))) {
 		LOG_DBG("Building poll request!\n");
 		build_poll_request(&new_poll_msg);
 		k_sem_give(&cache_lock_sem);
 	}
-	LOG_WRN("Messaging - Sending new message!\n");
-	send_message(&new_poll_msg);
-	k_work_reschedule_for_queue(&poll_q, &modem_poll_work,
-				    K_SECONDS(poll_period_minutes * 60));
+
+	LOG_INF("Messaging - Sending new message!\n");
+	encode_and_send_message(&new_poll_msg);
+
+	k_work_reschedule_for_queue(
+		&send_q, &modem_poll_work,
+		K_MINUTES(atomic_get(&poll_period_minutes)));
 }
 
 /**
@@ -190,8 +260,6 @@ static bool event_handler(const struct event_header *eh)
 		struct update_fence_version *ev = cast_update_fence_version(eh);
 		current_state.fence_version = ev->fence_version;
 
-		cleanup_cached_fence_resources();
-
 		/* Notify server as soon as the new fence is activated. */
 		modem_poll_work_fn();
 		return false;
@@ -206,7 +274,7 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_cellular_ack_event(eh)) {
-		send_out_ack = true;
+		k_sem_give(&send_ack_sem);
 		return false;
 	}
 	if (is_new_gps_fix(eh)) {
@@ -386,12 +454,15 @@ void messaging_thread_fn()
 void messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module!\n");
-	k_work_queue_start(&poll_q, messaging_poll_thread,
-			   K_THREAD_STACK_SIZEOF(messaging_poll_thread),
-			   CONFIG_MESSAGING_POLL_THREAD_PRIORITY, NULL);
+	k_work_queue_start(&send_q, messaging_send_thread,
+			   K_THREAD_STACK_SIZEOF(messaging_send_thread),
+			   CONFIG_MESSAGING_SEND_THREAD_PRIORITY, NULL);
 
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
-	k_work_schedule_for_queue(&poll_q, &modem_poll_work, K_NO_WAIT);
+	k_work_init_delayable(&log_work, log_data_periodic_fn);
+
+	k_work_schedule_for_queue(&send_q, &modem_poll_work, K_NO_WAIT);
+	k_work_schedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 }
 
 void build_poll_request(NofenceMessage *poll_req)
@@ -476,7 +547,7 @@ int8_t request_fframe(uint32_t version, uint8_t frame)
 	fence_req.which_m = NofenceMessage_fence_definition_req_tag;
 	fence_req.m.fence_definition_req.ulFenceDefVersion = version;
 	fence_req.m.fence_definition_req.ucFrameNumber = frame;
-	int ret = send_message(&fence_req);
+	int ret = encode_and_send_message(&fence_req);
 	if (ret) {
 		LOG_WRN("Failed to send request for frame %d\n", frame);
 		return -1;
@@ -512,6 +583,8 @@ void fence_download(uint8_t new_fframe)
 				LOG_ERR("Error storing new fence to external flash.");
 				return;
 			}
+
+			cleanup_cached_fence_resources();
 
 			/* Notify AMC that a new fence is available. */
 			struct new_fence_available *fence_ready =
@@ -553,7 +626,7 @@ int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 	ano_req.which_m = NofenceMessage_ubx_ano_req_tag;
 	ano_req.m.ubx_ano_req.usAnoId = ano_id;
 	ano_req.m.ubx_ano_req.usStartAno = ano_start;
-	int ret = send_message(&ano_req);
+	int ret = encode_and_send_message(&ano_req);
 	if (ret) {
 		LOG_WRN("Failed to send request for ano %d\n", ano_start);
 		return -1;
@@ -612,61 +685,58 @@ void proto_InitHeader(NofenceMessage *msg)
 	}
 }
 
-int send_message(NofenceMessage *msg_proto)
+/** @brief Sends a binary encoded message to the server through cellular
+ *         controller.
+ * @param data binary message. @note Assumes 2 first bytes are empty.
+ * @param len length of the binary data including the 2 start bytes.
+ * 
+ * @return 0 on success, otherwise negative errno.
+ */
+int send_binary_message(uint8_t *data, size_t len)
 {
-	static uint8_t waiting_cycles;
-	uint8_t encoded_msg[NofenceMessage_size];
+	/* We can only send 1 message at a time, use mutex. */
+	if (k_mutex_lock(&send_binary_mutex,
+			 K_SECONDS(CONFIG_BINARY_SEND_TIMEOUT_SEC * 2)) == 0) {
+		uint16_t byteswap_size = BYTESWAP16(len - 2);
+		memcpy(&data[0], &byteswap_size, 2);
+
+		struct messaging_proto_out_event *msg2send =
+			new_messaging_proto_out_event();
+		msg2send->buf = data;
+		msg2send->len = len;
+		EVENT_SUBMIT(msg2send);
+
+		int err = k_sem_take(&send_ack_sem,
+				     K_SECONDS(CONFIG_BINARY_SEND_TIMEOUT_SEC));
+		if (err) {
+			char *e_msg = "Timed out waiting for cellular ack!";
+			nf_app_error(ERR_MESSAGING, -ETIMEDOUT, e_msg,
+				     strlen(e_msg));
+			k_mutex_unlock(&send_binary_mutex);
+			return -ETIMEDOUT;
+		}
+		k_mutex_unlock(&send_binary_mutex);
+		return 0;
+	} else {
+		return -ETIMEDOUT;
+	}
+}
+
+int encode_and_send_message(NofenceMessage *msg_proto)
+{
+	uint8_t encoded_msg[NofenceMessage_size + 2];
 	memset(encoded_msg, 0, sizeof(encoded_msg));
 	size_t encoded_size = 0;
-	LOG_DBG("Start message encoding!, size: %d, version: %u\n",
+
+	LOG_INF("Start message encoding!, size: %d, version: %u\n",
 		sizeof(msg_proto), msg_proto->header.ulVersion);
-
-	LOG_WRN("Input to proto encode: %p,%p,%u,%p\n", msg_proto,
-		&encoded_msg[0], sizeof(encoded_msg), &encoded_size);
-
-	int ret = collar_protocol_encode(msg_proto, &encoded_msg[0],
-					 sizeof(encoded_msg), &encoded_size);
-	for (int i = 0; i < encoded_size; i++) {
-		printk("\\x%02x", encoded_msg[i]);
+	int ret = collar_protocol_encode(msg_proto, &encoded_msg[2],
+					 NofenceMessage_size, &encoded_size);
+	if (ret) {
+		LOG_ERR("Error encoding nofence message. %i", ret);
+		return ret;
 	}
-	printk("\n");
-	/* add 16-bit uint: size of encoded message. */
-	char *tmp;
-	tmp = (char *)malloc(encoded_size + 2);
-	uint16_t size = BYTESWAP16(encoded_size);
-	memcpy(tmp, &size, 2);
-	memcpy(tmp + 2, &encoded_msg[0], encoded_size);
-	for (int i = 0; i < encoded_size + 2; i++) {
-		printk("\\x%02x", tmp[i]);
-	}
-	printk("\n");
-	LOG_DBG("Finished message encoding, %d\n", ret);
-	struct messaging_proto_out_event *msg2send =
-		new_messaging_proto_out_event();
-	LOG_DBG("Declared message event!\n");
-	msg2send->buf = tmp;
-	LOG_DBG("Message length = %u!\n", encoded_size + 2);
-	msg2send->len = encoded_size + 2;
-	LOG_DBG("Finished building message event\n!\n");
-
-	EVENT_SUBMIT(msg2send);
-	LOG_DBG("Submitted message event\n!\n");
-
-	while (!send_out_ack) {
-		k_sleep(K_SECONDS(0.1));
-		LOG_WRN("Waiting for ack!\n");
-		if (waiting_cycles++ > 10) {
-			waiting_cycles = 0;
-			char *e_msg = "Timed out waiting for cellular ack!\n";
-			nf_app_error(ERR_MESSAGING, ETIME, e_msg,
-				     strlen(e_msg));
-			return -1;
-		}
-	}
-	send_out_ack = false;
-	waiting_cycles = 0;
-	free(tmp);
-	return 0;
+	return send_binary_message(encoded_msg, encoded_size + 2);
 }
 
 void process_poll_response(NofenceMessage *proto)
@@ -699,12 +769,14 @@ void process_poll_response(NofenceMessage *proto)
 		use_server_time = true;
 	}
 	if (pResp->has_usPollConnectIntervalSec) {
-		poll_period_minutes = pResp->usPollConnectIntervalSec / 60;
+		atomic_set(&poll_period_minutes,
+			   pResp->usPollConnectIntervalSec / 60);
+
 		k_work_reschedule_for_queue(
-			&poll_q, &modem_poll_work,
-			K_SECONDS(poll_period_minutes * 60));
+			&send_q, &modem_poll_work,
+			K_MINUTES(atomic_get(&poll_period_minutes)));
 		LOG_WRN("Poll period of %d minutes will be used!\n",
-			poll_period_minutes);
+			atomic_get(&poll_period_minutes));
 	}
 	if (pResp->has_usAccSigmaSleepLimit) {
 		/* TODO: submit pResp->usAccSigmaSleepLimit to AMC module.
@@ -834,9 +906,9 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 		frame_type = ANO_FRAME_LAST;
 	}
 
-	/* Write to storage controller's inactive partition. */
-	int err = stg_write_ano_data((uint8_t *)anoResp, sizeof(UbxAnoReply),
-				     frame_type);
+	/* Write to storage controller's ANO WRITE partition. */
+	int err = stg_write_ano_data((uint8_t *)&anoResp->rgucBuf,
+				     anoResp->rgucBuf.size, frame_type);
 
 	if (err) {
 		LOG_ERR("Error writing ano frame to storage controller %i",

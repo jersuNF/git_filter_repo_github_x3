@@ -13,6 +13,8 @@ passthrough.c
 
 if (CONFIG_DIAGNOSTICS_TEXT_PARSER)
 target_sources(app PRIVATE parser.c)
+else()
+target_sources(app PRIVATE commander.c cobs.c)
 endif()
 
 endif()

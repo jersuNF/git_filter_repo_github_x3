@@ -31,10 +31,15 @@ static int commander_ack(enum diagnostics_interface interface, bool ack)
 	uint8_t resp_ack[] = {'N', ack ? 0x01 : 0x00};
 
 	cobs_encode_result cobs_res;
-	cobs_res = cobs_encode(cobs_buffer, sizeof(cobs_buffer),
+	cobs_res = cobs_encode(cobs_buffer, sizeof(cobs_buffer)-1,
 			       resp_ack, sizeof(resp_ack));
-
-	commander_actions.send_resp(interface, resp_ack, strlen(resp_ack));
+	if (cobs_res.status == COBS_ENCODE_OK) {
+		uint32_t size = cobs_res.out_len;
+		cobs_buffer[size++] = '\x00';
+		commander_actions.send_resp(interface, cobs_buffer, size);
+	} else {
+		ret = -ECOMM;
+	}
 
 	return ret;
 }

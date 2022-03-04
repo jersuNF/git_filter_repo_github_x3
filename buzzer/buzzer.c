@@ -32,6 +32,8 @@ static struct k_work_q sound_q;
 static struct k_work sound_work;
 K_THREAD_STACK_DEFINE(sound_buzzer_area, CONFIG_BUZZER_THREAD_SIZE);
 
+K_SEM_DEFINE(abort_sound_sem, 0, 1);
+
 void warn_zone_timeout_handler(struct k_timer *dummy);
 K_TIMER_DEFINE(warn_zone_timeout_timer, warn_zone_timeout_handler, NULL);
 
@@ -46,26 +48,14 @@ int set_pwm_to_idle(void)
 	return 0;
 }
 
-/** @brief Wakeup the k_work_q thread used to play sounds. Will make the 
- *         k_sleep call return a value greater than 0, in which case
+/** @brief Give semaphore to abort sounds. Will make the 
+ *         k_sem_take call return a value equal 0, in which case
  *         the sound thread returns -EINTR, to be able to notify
  *         that we want to stop playing any further sounds from current event.
 */
 static void inline end_current_sound(void)
 {
-	/* Might need more investigation; Properly terminate the thread
-	 * gracefully. The absolute worst case that can happen now is
-	 * that we play warn frequency with K_FOREVER, and that we call
-	 * end_current_sound RIGHT BEFORE the k_sleep(K_FOREVER), meaning we
-	 * try to wake up a non-sleeping thread. The thread then gets stuck
-	 * forever in k_sleep if no subsequent calls of this function are made.
-	 * You might think of locking with sem/mutex, but that's not possible
-	 * since we use timer ISR. Setting atomic variable is also not possible
-	 * since that doesn't happen real-time, and we get the same issue as
-	 * with k_sleep/k_wakeup.
-	 */
-	k_tid_t s_thread = k_work_queue_thread_get(&sound_q);
-	k_wakeup(s_thread);
+	k_sem_give(&abort_sound_sem);
 }
 
 /** @brief Calculates the necessary duty cycle to receive the wanted volume
@@ -125,8 +115,8 @@ int play_from_ms(const uint32_t period, const uint32_t sustain,
 		dur = K_USEC(us);
 	}
 
-	int ticks = k_sleep(dur);
-	if (ticks > 0) {
+	
+	if (k_sem_take(&abort_sound_sem, dur) == 0) {
 		err = -EINTR;
 	}
 
@@ -434,6 +424,8 @@ int play_warn_zone_from_freq(void)
 
 void play()
 {
+	k_sem_take(&abort_sound_sem, K_NO_WAIT);
+
 	if (buzzer_pwm == NULL) {
 		LOG_ERR("Buzzer PWM not yet initialized.");
 		return;
@@ -567,7 +559,6 @@ static bool event_handler(const struct event_header *eh)
 		if (ev->type <= atomic_get(&current_type_signal)) {
 			end_current_sound();
 			atomic_set(&current_type_signal, ev->type);
-			k_work_submit_to_queue(&sound_q, &sound_work);
 
 			if (ev->type == SND_WARN) {
 				/* If current type is warn zone, start timeout timer
@@ -583,6 +574,7 @@ static bool event_handler(const struct event_header *eh)
 				 */
 				k_timer_stop(&warn_zone_timeout_timer);
 			}
+			k_work_submit_to_queue(&sound_q, &sound_work);
 		}
 		return false;
 	}

@@ -10,9 +10,8 @@
 /** Used to tell storage controller which region to read/write to. */
 typedef enum {
 	STG_PARTITION_LOG = 0,
-	STG_PARTITION_ANO_A = 1,
-	STG_PARTITION_ANO_B = 2,
-	STG_PARTITION_PASTURE = 3
+	STG_PARTITION_ANO = 1,
+	STG_PARTITION_PASTURE = 2
 } flash_partition_t;
 
 /** 
@@ -118,24 +117,17 @@ int stg_read_pasture_data(stg_read_log_cb cb);
  */
 int stg_write_log_data(uint8_t *data, size_t len);
 
-/** Used to tell what type of frame it is for ANO data. */
-typedef enum {
-	ANO_FRAME_FIRST = 0,
-	ANO_FRAME = 1,
-	ANO_FRAME_LAST = 2
-} ano_frame_type;
-
 /** 
  * @brief Writes ano data to external flash ANO partition.
  * 
  * @param[in] data pointer location to of data to be written
  * @param[in] len length of data
- * @param[in] frame_type used to intialize the ANO partitions if 
- *                       its the frist frame, or cleanup if its the last.
+ * @param[in] first_frame used to intialize the ANO partitions if 
+ *                        its the frist frame
  * 
  * @return 0 on success, otherwise negative errno
  */
-int stg_write_ano_data(uint8_t *data, size_t len, ano_frame_type frame_type);
+int stg_write_ano_data(uint8_t *data, size_t len, bool first_frame);
 
 /** 
  * @brief Writes log data to external flash LOG partition.
@@ -153,8 +145,7 @@ int stg_write_pasture_data(uint8_t *data, size_t len);
 
 #define FLASH_LOG_NUM_SECTORS PM_LOG_PARTITION_SIZE / SECTOR_SIZE
 
-#define FLASH_ANO_A_NUM_SECTORS PM_ANO_PARTITION_A_SIZE / SECTOR_SIZE
-#define FLASH_ANO_B_NUM_SECTORS PM_ANO_PARTITION_B_SIZE / SECTOR_SIZE
+#define FLASH_ANO_NUM_SECTORS PM_ANO_PARTITION_SIZE / SECTOR_SIZE
 
 #define FLASH_PASTURE_NUM_SECTORS PM_PASTURE_PARTITION_SIZE / SECTOR_SIZE
 

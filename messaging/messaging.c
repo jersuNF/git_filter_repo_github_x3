@@ -21,6 +21,8 @@
 #include "error_event.h"
 #include "helpers.h"
 
+#include "storage_event.h"
+
 #include "storage.h"
 
 #include "pasture_structure.h"
@@ -454,6 +456,7 @@ void messaging_thread_fn()
 void messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module!\n");
+	k_work_queue_init(&send_q);
 	k_work_queue_start(&send_q, messaging_send_thread,
 			   K_THREAD_STACK_SIZEOF(messaging_send_thread),
 			   CONFIG_MESSAGING_SEND_THREAD_PRIORITY, NULL);
@@ -752,7 +755,9 @@ void process_poll_response(NofenceMessage *proto)
  * to eeprom if it is different from the previously stored address.*/
 	}
 	if (pResp->has_bEraseFlash && pResp->bEraseFlash) {
-		/* TODO: publish erase flash event to storage module */
+		struct request_flash_erase_event *flash_erase_event =
+			new_request_flash_erase_event();
+		EVENT_SUBMIT(flash_erase_event);
 	}
 	// If we are asked to, reboot
 	if (pResp->has_bReboot && pResp->bReboot) {
@@ -896,26 +901,22 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 	LOG_WRN("Relative age of received ANO frame = %d, %d \n", age,
 		time_from_server);
 
-	ano_frame_type frame_type = ANO_FRAME;
+	bool first_frame = false;
 
 	if (rec_ano_frames == 0) {
-		frame_type = ANO_FRAME_FIRST;
-	}
-
-	if (age > time_from_server + SECONDS_IN_THREE_DAYS) {
-		frame_type = ANO_FRAME_LAST;
+		first_frame = true;
 	}
 
 	/* Write to storage controller's ANO WRITE partition. */
 	int err = stg_write_ano_data((uint8_t *)&anoResp->rgucBuf,
-				     anoResp->rgucBuf.size, frame_type);
+				     anoResp->rgucBuf.size, first_frame);
 
 	if (err) {
 		LOG_ERR("Error writing ano frame to storage controller %i",
 			err);
 	}
 
-	if (frame_type == ANO_FRAME_LAST) {
+	if (age > time_from_server + SECONDS_IN_THREE_DAYS) {
 		return DOWNLOAD_COMPLETE;
 	}
 

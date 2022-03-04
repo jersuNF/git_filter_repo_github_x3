@@ -24,11 +24,11 @@ int commander_init(struct commander_action* actions)
 	return 0;
 }
 
-static int commander_ack(enum diagnostics_interface interface, bool ack)
+static int commander_ack(enum diagnostics_interface interface, bool ack, uint8_t cmd)
 {
 	int ret = 0;
 
-	uint8_t resp_ack[] = {'N', ack ? 0x01 : 0x00};
+	uint8_t resp_ack[] = {'N', cmd, ack ? 0x01 : 0x00};
 
 	cobs_encode_result cobs_res;
 	cobs_res = cobs_encode(cobs_buffer, sizeof(cobs_buffer)-1,
@@ -70,6 +70,7 @@ uint32_t commander_handle(enum diagnostics_interface interface,
 	if ((cobs_res.status == COBS_DECODE_OK) && (cobs_res.out_len > 0)) {
 		/* TODO - Specify and implement proper commander format */
 		bool ack = false;
+		uint8_t cmd = 0;
 		if (cobs_buffer[0] == 'N') {
 			if (cobs_buffer[0] == 0x20) {
 				/* Simulate the highest tone event */
@@ -77,6 +78,7 @@ uint32_t commander_handle(enum diagnostics_interface interface,
 				sound_event_high->type = SND_MAX;
 				EVENT_SUBMIT(sound_event_high);
 
+				cmd = 0x20;
 				ack = true;
 			} else if (cobs_buffer[0] == 0x50) {
 				/* Send electric pulse */
@@ -84,10 +86,11 @@ uint32_t commander_handle(enum diagnostics_interface interface,
 				ready_ep_event->ep_status = EP_RELEASE;
 				EVENT_SUBMIT(ready_ep_event);
 				
+				cmd = 0x50;
 				ack = true;
 			}
 		}
-		commander_ack(interface, ack);
+		commander_ack(interface, ack, cmd);
 	}
 
 	/* We have consumed data up to and including the 0 delimiter */

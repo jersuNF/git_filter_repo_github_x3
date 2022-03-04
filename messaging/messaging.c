@@ -576,21 +576,18 @@ void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
 	}
 	if (new_ano_frame >= 0) {
 		if (new_ano_frame == DOWNLOAD_COMPLETE) {
-			struct ano_ready *ano_ready;
-			ano_ready = new_ano_ready();
-			EVENT_SUBMIT(ano_ready);
-			LOG_WRN("ANO %d download "
+			LOG_INF("ANO %d download "
 				"complete!\n",
 				new_ano_in_progress);
 			return;
 		}
 
 		expected_ano_frame += new_ano_frame;
-		LOG_WRN("expected ano frame = %d\n", expected_ano_frame);
+		LOG_INF("expected ano frame = %d\n", expected_ano_frame);
 		/* TODO: handle failure to send request!*/
 		int ret = request_ano_frame(ano_id, expected_ano_frame);
 
-		LOG_WRN("Requesting frame %d of new ano: %d"
+		LOG_INF("Requesting frame %d of new ano: %d"
 			".\n",
 			expected_ano_frame, new_ano_in_progress);
 
@@ -820,13 +817,36 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 	UBX_MGA_ANO_RAW_t *temp = NULL;
 	temp = (UBX_MGA_ANO_RAW_t *)(anoResp->rgucBuf.bytes +
 				     sizeof(UBX_MGA_ANO_RAW_t));
+
 	uint32_t age = ano_date_to_unixtime_midday(
 		temp->mga_ano.year, temp->mga_ano.month, temp->mga_ano.day);
+
 	LOG_WRN("Relative age of received ANO frame = %d, %d \n", age,
 		time_from_server);
+
+	ano_frame_type frame_type = ANO_FRAME;
+
+	if (rec_ano_frames == 0) {
+		frame_type = ANO_FRAME_FIRST;
+	}
+
 	if (age > time_from_server + SECONDS_IN_THREE_DAYS) {
+		frame_type = ANO_FRAME_LAST;
+	}
+
+	/* Write to storage controller's inactive partition. */
+	int err = stg_write_ano_data((uint8_t *)anoResp, sizeof(UbxAnoReply),
+				     frame_type);
+
+	if (err) {
+		LOG_ERR("Error writing ano frame to storage controller %i",
+			err);
+	}
+
+	if (frame_type == ANO_FRAME_LAST) {
 		return DOWNLOAD_COMPLETE;
 	}
+
 	LOG_DBG("Number of received ano buffer = %d!\n", rec_ano_frames);
 	return rec_ano_frames;
 }

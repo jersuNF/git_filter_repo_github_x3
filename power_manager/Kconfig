@@ -15,9 +15,13 @@ if POWER_MANAGER
         module-str = Battery logging
         source "subsys/logging/Kconfig.template.log_config"
 
+        module = CHARGING
+        module-str = Charging logging
+        source "subsys/logging/Kconfig.template.log_config"
+
         config BATTERY_POLLER_WORK_SEC
         int "Seconds between modem poll"
-        default 300
+        default 5
 
         config BATTERY_THRESHOLD
         int "Battery hysteresis in mV"

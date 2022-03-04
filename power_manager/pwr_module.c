@@ -17,6 +17,7 @@
 #include "error_event.h"
 #include "battery.h"
 #include "ble_ctrl_event.h"
+#include "charging.h"
 
 #define MODULE pwr_module
 #include <logging/log.h>
@@ -133,6 +134,10 @@ int pwr_module_init(void)
 		return err;
 	}
 
+	/* Initialize and start charging */
+	init_charging_module();
+	start_charging();
+
 	/* Initialize periodic battery poll function */
 	k_work_init_delayable(&battery_poll_work, battery_poll_work_fn);
 	k_work_reschedule(&battery_poll_work,
@@ -156,8 +161,9 @@ int log_and_fetch_battery_voltage(void)
 	event->param.battery = batt_soc;
 	EVENT_SUBMIT(event);
 
-	LOG_INF("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
-		batt_soc);
+	int charging_current = read_analog_charging_channel();
 
+	LOG_INF("Voltage: %d mV; State Of Charge: %u precent; Current: %d",
+		batt_mV, batt_soc, charging_current);
 	return batt_mV;
 }

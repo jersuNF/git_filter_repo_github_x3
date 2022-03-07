@@ -87,10 +87,10 @@ static void battery_poll_work_fn()
 		}
 		break;
 	case PWR_CRITICAL:
-		if ((batt_voltage >
-		     (CONFIG_BATTERY_CRITICAL + CONFIG_BATTERY_THRESHOLD)) {
+		if (batt_voltage >
+		    (CONFIG_BATTERY_CRITICAL + CONFIG_BATTERY_THRESHOLD)) {
 			current_state = PWR_LOW;
-		} 
+		}
 		break;
 
 	default:

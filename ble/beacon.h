@@ -1,6 +1,8 @@
-//
-// Created by per on 30.08.2021.
-//
+
+/*
+ * Copyright (c) 2021 Nofence AS
+ * Created by Per on 30.08.2021.
+ */
 
 #ifndef X3_FW_BEACON_H
 #define X3_FW_BEACON_H

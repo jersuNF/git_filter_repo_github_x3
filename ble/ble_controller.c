@@ -502,7 +502,6 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 	bt_data_parse(buf, data_cb, (void *)&adv_data);
 	if (adv_data.major == BEACON_MAJOR_ID &&
 	    adv_data.minor == BEACON_MINOR_ID) {
-		//printk("process_event\n");
 		const uint32_t now = k_uptime_get_32();
 		beacon_process_event(now, addr, rssi, &adv_data);
 	}

@@ -26,7 +26,7 @@ if ANIMAL_MONITOR_CONTROL
 
 	config AMC_CALCULATION_PRIORITY
 		int "Priority of the calculation thread"
-		default 1
+		default -1
 		help
 		  A cooperative thread has a negative priority value. 
 		  Once it becomes the current thread, a cooperative thread 

@@ -3,7 +3,6 @@
  */
 
 #include <zephyr.h>
-#include <logging/log.h>
 #include <device.h>
 #include <devicetree.h>
 #include <drivers/gpio.h>
@@ -13,8 +12,9 @@
 #include "error_event.h"
 #include "sound_event.h"
 
-#define LOG_MODULE_NAME ep_module
-LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_EP_MODULE_LOG_LEVEL);
+#define MODULE ep_module
+#include <logging/log.h>
+LOG_MODULE_REGISTER(MODULE, CONFIG_EP_MODULE_LOG_LEVEL);
 
 /* TODO: fetch this config value from EEPROM. Store it here for now */
 #define CATTLE 0
@@ -175,6 +175,6 @@ static bool event_handler(const struct event_header *eh)
 	return false;
 }
 
-EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE(MODULE, ep_status_event);
-EVENT_SUBSCRIBE(MODULE, sound_event);
+EVENT_LISTENER(LOG_MODULE_NAME, event_handler);
+EVENT_SUBSCRIBE(LOG_MODULE_NAME, ep_status_event);
+EVENT_SUBSCRIBE(LOG_MODULE_NAME, sound_event);

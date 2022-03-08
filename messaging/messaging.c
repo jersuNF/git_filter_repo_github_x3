@@ -128,19 +128,6 @@ void cleanup_cached_fence_resources(void)
 	curr_copied_coords = 0;
 }
 
-int read_log_data_cb(uint8_t *data, size_t len)
-{
-	uint8_t *bytes = k_malloc(len + 2);
-	memcpy(&bytes[2], data, len);
-
-	int err = send_binary_message(bytes, len + 2);
-	if (err) {
-		LOG_ERR("Error sending binary message for log data %i", err);
-	}
-	k_free(bytes);
-	return err;
-}
-
 void build_log_message()
 {
 	/* Fill in NofenceMessage and encode it, then store on fcb. Do it twice,
@@ -163,6 +150,19 @@ void build_log_message()
 	 * DONE.
 	 */
 	return;
+}
+
+int read_log_data_cb(uint8_t *data, size_t len)
+{
+	uint8_t *bytes = k_malloc(len + 2);
+	memcpy(&bytes[2], data, len);
+
+	int err = send_binary_message(bytes, len + 2);
+	if (err) {
+		LOG_ERR("Error sending binary message for log data %i", err);
+	}
+	k_free(bytes);
+	return err;
 }
 
 /**

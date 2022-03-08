@@ -251,19 +251,10 @@ unsigned int battery_level_soc(unsigned int batt_mV,
 	return batt_level_precentage;
 }
 
-/** 
- * @brief Moving average struct copied from old code 
- */
-typedef struct {
-	uint32_t total;
-	uint16_t average;
-	uint16_t N; // working number of samples
-	uint16_t MAX_SAMPLES;
-} MovAvg;
-
+/** @brief Moving average for battery defined outside function */
 MovAvg VbattSMA;
 
-void init_moving_average(void)
+void init_battery_moving_average(void)
 {
 	VbattSMA.average = 0;
 	VbattSMA.N = 0;

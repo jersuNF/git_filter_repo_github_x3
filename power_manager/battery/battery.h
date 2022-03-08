@@ -45,10 +45,29 @@ unsigned int battery_level_soc(unsigned int batt_mV,
 /** 
  * @brief Initialize moving average struct
  */
-void init_moving_average(void);
+void init_battery_moving_average(void);
 /** 
  * @brief Calculate a moving average of the battery voltage
  * @return averaged voltage in mV, or negative error code on error
  */
 int battery_sample_averaged(void);
+
+/** 
+ * @brief Moving average struct copied from old code 
+ */
+typedef struct {
+	uint32_t total;
+	uint16_t average;
+	uint16_t N; // working number of samples
+	uint16_t MAX_SAMPLES;
+} MovAvg;
+
+/** 
+ * @brief Calculate the estimated battery level based on a measured voltage.
+ * @param p Pointer to MovAvg struct
+ * @param val value to add
+ * @return Moving average
+ */
+uint16_t approx_moving_average(MovAvg *p, uint16_t val);
+
 #endif /* APPLICATION_BATTERY_H_ */

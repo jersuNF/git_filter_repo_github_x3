@@ -73,10 +73,7 @@ static void battery_poll_work_fn()
 	switch (old_state) {
 	case PWR_NORMAL:
 		if (batt_voltage <
-		    CONFIG_BATTERY_CRITICAL - CONFIG_BATTERY_THRESHOLD) {
-			current_state = PWR_CRITICAL;
-		} else if (batt_voltage <
-			   CONFIG_BATTERY_LOW - CONFIG_BATTERY_THRESHOLD) {
+		    CONFIG_BATTERY_LOW - CONFIG_BATTERY_THRESHOLD) {
 			current_state = PWR_LOW;
 		}
 		break;
@@ -91,13 +88,9 @@ static void battery_poll_work_fn()
 		}
 		break;
 	case PWR_CRITICAL:
-		if ((batt_voltage >
-		     (CONFIG_BATTERY_CRITICAL + CONFIG_BATTERY_THRESHOLD)) &&
-		    (batt_voltage < CONFIG_BATTERY_LOW)) {
+		if (batt_voltage >
+		    (CONFIG_BATTERY_CRITICAL + CONFIG_BATTERY_THRESHOLD)) {
 			current_state = PWR_LOW;
-		} else if (batt_voltage >
-			   CONFIG_BATTERY_LOW + CONFIG_BATTERY_THRESHOLD) {
-			current_state = PWR_NORMAL;
 		}
 		break;
 
@@ -118,7 +111,12 @@ static void battery_poll_work_fn()
 
 int pwr_module_init(void)
 {
-	init_moving_average();
+	init_battery_moving_average();
+	init_current_moving_average();
+
+	/* Initialize and start charging */
+	init_charging_module();
+	start_charging();
 
 	/* Set PWR state to NORMAL as initial state */
 	struct pwr_status_event *event = new_pwr_status_event();
@@ -133,10 +131,6 @@ int pwr_module_init(void)
 		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
 		return err;
 	}
-
-	/* Initialize and start charging */
-	init_charging_module();
-	start_charging();
 
 	/* Initialize periodic battery poll function */
 	k_work_init_delayable(&battery_poll_work, battery_poll_work_fn);
@@ -161,9 +155,9 @@ int log_and_fetch_battery_voltage(void)
 	event->param.battery = batt_soc;
 	EVENT_SUBMIT(event);
 
-	int charging_current = read_analog_charging_channel();
+	int charging_current_avg = current_sample_averaged();
 
 	LOG_INF("Voltage: %d mV; State Of Charge: %u precent; Current: %d",
-		batt_mV, batt_soc, charging_current);
+		batt_mV, batt_soc, charging_current_avg);
 	return batt_mV;
 }

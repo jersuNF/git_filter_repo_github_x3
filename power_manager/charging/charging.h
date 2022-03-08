@@ -13,5 +13,7 @@ int stop_charging(void);
 
 int read_analog_charging_channel(void);
 int charging_current(void);
+void init_current_moving_average(void);
+int current_sample_averaged(void);
 
 #endif /* _CHARGING_H_ */

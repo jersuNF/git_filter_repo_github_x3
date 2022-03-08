@@ -3,6 +3,8 @@
  */
 
 #include "charging.h"
+#include "battery.h"
+
 #include <drivers/gpio.h>
 #include <drivers/adc.h>
 
@@ -24,13 +26,6 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_CHARGING_LOG_LEVEL);
 #define CHARGING_LOAD_PIN DT_GPIO_PIN(CHARGING_LOAD_NODE, gpios)
 #define CHARGING_LOAD_FLAGS DT_GPIO_FLAGS(CHARGING_LOAD_NODE, gpios)
 
-#define Vdcdc (205ul * 10000ul) //205 = 2,05V with resolution
-#define CURRENT_SENSE_RESISTOR 39
-#define CURRENT_SENSE_GAIN 50 //MAX9634FEKS+
-#define MAX_CURRENT_VALUE_mA                                                   \
-	((Vdcdc / CURRENT_SENSE_GAIN) /                                        \
-	 CURRENT_SENSE_RESISTOR) //In mA -> for MAX9634TERS+ this value is 683mA
-
 const struct device *charging_dcdc_dev;
 const struct device *charging_load_dev;
 const struct device *charging_adc_dev;
@@ -40,12 +35,23 @@ static bool charging_ok;
 static int16_t raw_data;
 
 #define CHARGING_ADC_DEVICE_NAME DT_LABEL(DT_ALIAS(charging_current))
-#define CHARGING_ADC_RESOLUTION 10
+#define CHARGING_ADC_RESOLUTION 14
 #define CHARGING_ADC_GAIN ADC_GAIN_1_6
 #define CHARGING_ADC_REFERENCE ADC_REF_INTERNAL
 #define CHARGING_ADC_ACQUISITION_TIME                                          \
 	ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)
 #define CHARGING_ADC_CHANNEL 4
+
+// Scaling the result Current sensor (gain 25V/V) MAX measured current is 678mA -> Resolution = 683/1024 = 0,666
+#define Vdcdc (205ul * 10000ul) //205 = 2,05V with resolution
+
+#define CURRENT_SENSE_RESISTOR 39ul
+#define CURRENT_SENSE_GAIN 50ul //MAX9634FEKS+
+
+//***DO NOT CHANGE***
+#define MAX_CURRENT_VALUE_mA                                                   \
+	((Vdcdc / CURRENT_SENSE_GAIN) /                                        \
+	 CURRENT_SENSE_RESISTOR) //In mA -> for MAX9634TERS+ this value is 683mA
 
 // the channel configuration with channel not yet filled in
 static struct adc_channel_cfg charging_channel_cfg = {
@@ -67,7 +73,9 @@ int init_charging_adc(void)
 	if (charging_adc_dev != NULL) {
 		charging_channel_cfg.channel_id = CHARGING_ADC_CHANNEL;
 #if CONFIG_ADC_CONFIGURABLE_INPUTS
-		charging_channel_cfg.input_positive = CHARGING_ADC_CHANNEL + 1,
+		charging_channel_cfg.input_positive =
+			SAADC_CH_PSELP_PSELP_AnalogInput0 +
+			CHARGING_ADC_CHANNEL;
 #endif
 		ret = adc_channel_setup(charging_adc_dev,
 					&charging_channel_cfg);
@@ -93,20 +101,23 @@ static int charging_setup(const struct device *arg)
 
 int read_analog_charging_channel(void)
 {
-	const struct adc_sequence sequence = {
+	struct adc_sequence sequence = {
 		.options = NULL, // extra samples and callback
-		.channels = BIT(4), // bit mask of channels to read
+		.channels = BIT(
+			CHARGING_ADC_CHANNEL), // bit mask of channels to read
 		.buffer = &raw_data, // where to put samples read
 		.buffer_size = sizeof(raw_data),
 		.resolution = CHARGING_ADC_RESOLUTION, // desired resolution
-		.oversampling = 0, // don't oversample
-		.calibrate = false // don't calibrate
+		.oversampling = 4,
+		.calibrate = true // don't calibrate
 	};
 
 	int32_t sample_value = -ENOENT;
 
 	if (charging_ok) {
+		LOG_INF("Charging okay");
 		int ret = adc_read(charging_adc_dev, &sequence);
+		sequence.calibrate = false;
 		if (ret == 0) {
 			sample_value = raw_data;
 		}
@@ -115,7 +126,8 @@ int read_analog_charging_channel(void)
 				      charging_channel_cfg.gain,
 				      sequence.resolution, &sample_value);
 	}
-
+	sample_value =
+		((sample_value * CURRENT_SENSE_GAIN) / CURRENT_SENSE_RESISTOR);
 	return sample_value;
 }
 
@@ -211,9 +223,28 @@ int stop_charging(void)
 	return 0;
 }
 
-int charging_current(void)
+/** @brief Moving average for current defined outside function */
+MovAvg IchrgSMA;
+
+void init_current_moving_average(void)
 {
-	return 0;
+	IchrgSMA.average = 0;
+	IchrgSMA.N = 0;
+	IchrgSMA.total = 0;
+	IchrgSMA.MAX_SAMPLES = CONFIG_CURRENT_MOVING_AVERAGE_SAMPLES;
+}
+
+int current_sample_averaged(void)
+{
+	int current_ma = read_analog_charging_channel();
+	if (current_ma < 0) {
+		LOG_ERR("Failed to read solar charging current: %d",
+			current_ma);
+		return -ENOENT;
+	}
+	uint16_t avg_current_value =
+		approx_moving_average(&IchrgSMA, current_ma);
+	return avg_current_value;
 }
 
 /* Initialze battery setup on startup */

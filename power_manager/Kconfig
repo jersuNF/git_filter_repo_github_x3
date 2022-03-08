@@ -38,5 +38,10 @@ if POWER_MANAGER
         config BATTERY_MOVING_AVERAGE_SAMPLES
         int "Number of moving average samples to be considered. Higher number gives smoother voltage change"
         default 300
+
+        config CURRENT_MOVING_AVERAGE_SAMPLES
+        int "Number of moving average samples to be considered for current measurement. Higher number gives smoother voltage change"
+        default 32
+
         
 endif

@@ -21,7 +21,7 @@ if POWER_MANAGER
 
         config BATTERY_POLLER_WORK_SEC
         int "Seconds between modem poll"
-        default 5
+        default 300
 
         config BATTERY_THRESHOLD
         int "Battery hysteresis in mV"
@@ -41,7 +41,7 @@ if POWER_MANAGER
 
         config CURRENT_MOVING_AVERAGE_SAMPLES
         int "Number of moving average samples to be considered for current measurement. Higher number gives smoother voltage change"
-        default 1
+        default 32
 
         
 endif

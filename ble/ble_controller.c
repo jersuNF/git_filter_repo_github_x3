@@ -20,6 +20,7 @@
 #include "ble_controller.h"
 #include "msg_data_event.h"
 #include "beacon_processor.h"
+#include "ble_dfu.h"
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_CONTROLLER_LOG_LEVEL);
 
@@ -473,10 +474,10 @@ static bool data_cb(struct bt_data *data, void *user_data)
 			adv_data->minor = net_buf_simple_pull_be16(&net_buf);
 			adv_data->rssi = net_buf_simple_pull_u8(&net_buf); //197
 
-			// LOG_INF("Nofence beacon Major: %u Minor: %u RSSI: %u MANUF_ID: %u Beacon type: %u",
-			// 	adv_data->major, adv_data->minor,
-			// 	adv_data->rssi, adv_data->manuf_id,
-			// 	adv_data->beacon_dev_type);
+			LOG_DBG("Nofence beacon Major: %u Minor: %u RSSI: %u MANUF_ID: %u Beacon type: %u",
+				adv_data->major, adv_data->minor,
+				adv_data->rssi, adv_data->manuf_id,
+				adv_data->beacon_dev_type);
 		} else {
 			memset(adv_data, 0, sizeof(*adv_data));
 		}
@@ -559,6 +560,7 @@ int ble_module_init()
 
 	/* Callback to monitor connected/disconnected state */
 	bt_conn_cb_register(&conn_callbacks);
+	err = bt_dfu_init();
 
 	/* Start scanning after beacons. Set flag to true */
 	if (!atomic_set(&atomic_bt_scan_active, true)) {

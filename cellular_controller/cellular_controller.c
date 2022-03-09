@@ -1,6 +1,7 @@
 #include "cellular_controller_events.h"
 #include "cellular_helpers_header.h"
 #include "messaging_module_events.h"
+#include <modem_nf.h>
 #include <zephyr.h>
 
 #define MY_STACK_SIZE 1024
@@ -185,6 +186,8 @@ int8_t cellular_controller_init(void)
 	int8_t ret;
 	printk("Cellular controller starting!, %p\n", k_current_get());
 	connected = false;
+	
+	modem_nf_reset();
 
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {

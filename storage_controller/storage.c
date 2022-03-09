@@ -22,6 +22,7 @@
 #include "messaging_module_events.h"
 
 #include "embedded.pb.h"
+#include "UBX.h"
 
 /* Get sizes and offset definitions from pm_static.yml. */
 #include <pm_config.h>
@@ -34,9 +35,11 @@ const struct flash_area *log_area;
 struct fcb log_fcb;
 struct flash_sector log_sectors[FLASH_LOG_NUM_SECTORS];
 
+static inline void update_ano_active_index();
 const struct flash_area *ano_area;
 struct fcb ano_fcb;
 struct flash_sector ano_sectors[FLASH_ANO_NUM_SECTORS];
+struct flash_sector *active_ano_sector = &ano_sectors[0];
 
 const struct flash_area *pasture_area;
 struct fcb pasture_fcb;
@@ -216,6 +219,7 @@ static inline int init_fcb_on_partition(flash_partition_t partition)
 
 	LOG_INF("Setup FCB for partition %d: %d sectors with sizes %db.",
 		partition, fcb->f_sector_cnt, fcb->f_sectors[0].fs_size);
+
 	has_inited = true;
 	return err;
 }
@@ -252,6 +256,9 @@ int stg_init_storage_controller(void)
 		k_work_init(&erase_work, erase_flash_fn);
 		queue_inited = true;
 	}
+
+	/* Check which ANO partition is active. */
+	update_ano_active_index();
 
 	return 0;
 }
@@ -293,12 +300,12 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 	int err = 0;
 
 	/* If we only want to read the newest, clear all previous entries. */
-	if (rotate_to_this) {
+	/*if (rotate_to_this) {
 		err = fcb_clear(fcb);
 		if (err) {
 			return err;
 		}
-	}
+	}*/
 
 	/* Appending a new entry, rotate(replaces) oldest if no space. */
 	err = fcb_append(fcb, len, &loc);
@@ -410,7 +417,20 @@ static int walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
 	return err;
 }
 
+/** @brief Reads fcb partition and callbacks all the entries found on the sector.
+ *         If sector == NULL, then we traverse entire storage.
+ * 
+ * @param partition partition to read from.
+ * @param sector sector to read from. If null, read entire partition.
+ * @param cb callback that gives the entries found.
+ * @param rotate_after_read rotates f_oldest() if true and a sector is given, 
+ *                          clears partition if sector == NULL. Does nothing 
+ *                          if false.
+ * 
+ * @return 0 on success, otherwise negative errno.
+ */
 static inline int read_fcb_partition(flash_partition_t partition,
+				     struct flash_sector *sector,
 				     stg_read_log_cb cb, bool rotate_after_read)
 {
 	int err = 0;
@@ -442,16 +462,21 @@ static inline int read_fcb_partition(flash_partition_t partition,
 	}
 	config.cb = cb;
 
-	err = fcb_walk(fcb, NULL, walk_cb, &config);
+	err = fcb_walk(fcb, sector, walk_cb, &config);
 	if (err) {
 		LOG_ERR("Error walking over FCB storage, err %d", err);
 		return err;
 	}
 
 	if (rotate_after_read) {
-		err = fcb_clear(fcb);
-		if (err) {
-			LOG_ERR("Error clearing FCB after walk, err %d", err);
+		if (sector == NULL) {
+			err = fcb_clear(fcb);
+			if (err) {
+				LOG_ERR("Error clearing FCB after walk, err %d",
+					err);
+			}
+		} else {
+			err = fcb_rotate(fcb);
 		}
 	}
 	return err;
@@ -462,7 +487,7 @@ int stg_read_log_data(stg_read_log_cb cb)
 	if (k_mutex_lock(&log_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
 	}
-	int err = read_fcb_partition(STG_PARTITION_LOG, cb, true);
+	int err = read_fcb_partition(STG_PARTITION_LOG, NULL, cb, true);
 	if (err) {
 		LOG_ERR("Error reading from log partition.");
 	}
@@ -470,12 +495,89 @@ int stg_read_log_data(stg_read_log_cb cb)
 	return err;
 }
 
+static struct flash_sector *cur_sector;
+
+int check_if_ano_valid_cb(uint8_t *data, size_t len)
+{
+	UBX_MGA_ANO_RAW_t *ano_frame = (UBX_MGA_ANO_RAW_t *)(data);
+
+	/* Age logic here. */
+	LOG_INF("Year %i, month %i, day %i", ano_frame->mga_ano.year,
+		ano_frame->mga_ano.month, ano_frame->mga_ano.day);
+
+	/* If age is valid, update ano sector. Fetch from somewhere! */
+	if (ano_frame->mga_ano.year == 22) {
+		LOG_INF("Updated offset to be %i", (int)cur_sector->fs_off);
+		active_ano_sector = cur_sector;
+		/* Done, we found oldest, valid timestamp, exit loop. */
+		return -EINTR;
+	}
+	return 0;
+}
+
+/** @brief Helper function to increment a sector to the next.
+ * 
+ * @param[in] fcb fcb to target.
+ * @param[inout] sector which sector to increment.
+ */
+static inline void increment_sector(struct fcb *fcb,
+				    struct flash_sector *sector)
+{
+	sector++;
+	if (sector >= &fcb->f_sectors[fcb->f_sector_cnt]) {
+		sector = &fcb->f_sectors[0];
+	}
+}
+
+static inline void update_ano_active_index()
+{
+	struct fcb *fcb = get_fcb(STG_PARTITION_ANO);
+
+	cur_sector = fcb->f_oldest;
+
+	int err = 0;
+	int sectors_checked = 0;
+
+	while (true) {
+		err = read_fcb_partition(STG_PARTITION_ANO, cur_sector,
+					 check_if_ano_valid_cb, false);
+
+		if (err) {
+			if (err == -EINTR) {
+				LOG_INF("Updated ANO index partition to be offset %i",
+					(int)active_ano_sector->fs_off);
+				return;
+			} else if (err == -ENODATA) {
+				goto no_valid_ano;
+			} else {
+				LOG_ERR("Error reading ano to update index %i",
+					err);
+				return;
+			}
+		}
+
+		increment_sector(fcb, cur_sector);
+
+		sectors_checked++;
+
+		if (sectors_checked > fcb->f_sector_cnt) {
+			/* Exit if we reached the end, meaning
+			 * no ANO data is valid... 
+			 */
+			goto no_valid_ano;
+		}
+	}
+no_valid_ano:
+	LOG_WRN("No valid ANO data on the partition. %i", err);
+	return;
+}
+
 int stg_read_ano_data(stg_read_log_cb cb)
 {
 	if (k_mutex_lock(&ano_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
 	}
-	int err = read_fcb_partition(STG_PARTITION_ANO, cb, false);
+	int err = read_fcb_partition(STG_PARTITION_ANO, NULL, cb, false);
 	if (err) {
 		LOG_ERR("Error reading from ano partition.");
 	}
@@ -489,10 +591,37 @@ int stg_read_pasture_data(stg_read_log_cb cb)
 			 K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
 	}
-	int err = read_fcb_partition(STG_PARTITION_PASTURE, cb, false);
+	/*int err = read_fcb_partition(STG_PARTITION_PASTURE, NULL, cb, false);
 	if (err) {
 		LOG_ERR("Error reading from pasture partition.");
+	}*/
+	struct fcb *fcb = get_fcb(STG_PARTITION_PASTURE);
+
+	if (fcb_is_empty(fcb)) {
+		return -ENODATA;
 	}
+
+	struct fcb_entry entry;
+	int err = fcb_offset_last_n(fcb, 1, &entry);
+
+	if (err) {
+		k_mutex_unlock(&pasture_mutex);
+		return err;
+	}
+
+	size_t fence_size = entry.fe_data_len;
+	uint8_t *fence = k_malloc(fence_size);
+
+	err = flash_area_read(fcb->fap, FCB_ENTRY_FA_DATA_OFF(entry), fence,
+			      fence_size);
+	if (err) {
+		k_free(fence);
+		k_mutex_unlock(&pasture_mutex);
+		return err;
+	}
+
+	cb(fence, fence_size);
+
 	k_mutex_unlock(&pasture_mutex);
 	return err;
 }

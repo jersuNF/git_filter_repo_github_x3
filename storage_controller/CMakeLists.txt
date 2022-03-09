@@ -11,7 +11,8 @@ target_include_directories(app PRIVATE
 			./include/
 			./../../events/error_handler/
 			./../../events/storage/
-			./../../events/messaging/)
+			./../../events/messaging/
+			./../../modules/messaging/)
 
 target_sources(app PRIVATE
 			./storage.c

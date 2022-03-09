@@ -54,7 +54,7 @@ int stg_fcb_reset_and_init();
  * @return 0 on success, otherwise negative errno.
  */
 int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
-			   size_t len, bool rotate_to_this);
+			   size_t len);
 
 /** 
  * @brief Callback function containing the read entry data. Created
@@ -68,7 +68,7 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
  * 
  * @return 0 on success, otherwise negative errno.
  */
-typedef int (*stg_read_log_cb)(uint8_t *data, size_t len);
+typedef int (*stg_read_cb)(uint8_t *data, size_t len);
 
 /** 
  * @brief Reads all the new available log data and calls the callback function
@@ -81,7 +81,13 @@ typedef int (*stg_read_log_cb)(uint8_t *data, size_t len);
  * @return 0 on success 
  * @return -ENODATA if no data available, Otherwise negative errno.
  */
-int stg_read_log_data(stg_read_log_cb cb);
+int stg_read_log_data(stg_read_cb cb);
+
+enum ano_data_read_type {
+	ANO_READ_ALL = 0,
+	ANO_READ_SINCE_BOOT = 1,
+	ANO_READ_SINCE_SENT = 2
+};
 
 /** 
  * @brief Reads newest ano data and stores the data onto 
@@ -89,14 +95,21 @@ int stg_read_log_data(stg_read_log_cb cb);
  * 
  * @param[in] cb pointer location to the callback function that is 
  *               called during the fcb walk.
+ * @param[in] type Determines the read type (which sectors to read). 
+ * 
+ *                 If ANO_READ_ALL, reads ALL ano entries on flash, no filter.
+ *                 If ANO_READ_SINCE_BOOT, reads all ano entries that were
+ *                 valid when we booted.
+ *                 If ANO_READ_SINCE_SENT, reads all ano entries from where
+ *                 we left off on the previous stg_read_ano_data call.
  * 
  * @return 0 on success 
  * @return -ENODATA if no data available, Otherwise negative errno.
  */
-int stg_read_ano_data(stg_read_log_cb cb);
+int stg_read_ano_data(stg_read_cb cb, bool read_from_boot_entry);
 
 /** 
- * @brief Reads the newest pasture and sttores the data onto 
+ * @brief Reads the newest pasture and stores the data onto 
  *        the pointer location. The caller must deal with allocation itself.
  * 
  * @param[in] cb pointer location to the callback function that is 
@@ -105,7 +118,7 @@ int stg_read_ano_data(stg_read_log_cb cb);
  * @return 0 on success 
  * @return -ENODATA if no data available, Otherwise negative errno.
  */
-int stg_read_pasture_data(stg_read_log_cb cb);
+int stg_read_pasture_data(stg_read_cb cb);
 
 /** 
  * @brief Writes log data to external flash LOG partition.
@@ -127,7 +140,7 @@ int stg_write_log_data(uint8_t *data, size_t len);
  * 
  * @return 0 on success, otherwise negative errno
  */
-int stg_write_ano_data(uint8_t *data, size_t len, bool first_frame);
+int stg_write_ano_data(uint8_t *data, size_t len);
 
 /** 
  * @brief Writes log data to external flash LOG partition.

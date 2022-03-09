@@ -35,11 +35,14 @@ const struct flash_area *log_area;
 struct fcb log_fcb;
 struct flash_sector log_sectors[FLASH_LOG_NUM_SECTORS];
 
-static inline void update_ano_active_index();
+static inline void set_ano_active_boot();
 const struct flash_area *ano_area;
 struct fcb ano_fcb;
 struct flash_sector ano_sectors[FLASH_ANO_NUM_SECTORS];
-struct flash_sector *active_ano_sector = &ano_sectors[0];
+
+/* Needs to be initialized to fcb_getnext(f_oldest). */
+struct fcb_entry boot_active_ano_entry = { .fe_sector = NULL };
+struct fcb_entry sent_active_ano_entry = { .fe_sector = NULL };
 
 const struct flash_area *pasture_area;
 struct fcb pasture_fcb;
@@ -258,54 +261,17 @@ int stg_init_storage_controller(void)
 	}
 
 	/* Check which ANO partition is active. */
-	update_ano_active_index();
+	set_ano_active_boot();
 
 	return 0;
 }
 
-/** 
- * @brief Writes a frame to target partition. Needs to be used if we have 
- *        greater data contents than what we can buffer, so we have to split
- *        up the writing.
- * 
- * @param[in] data pointer location to of data to be written
- * @param[in] len length of data
- * @param[in] first_frame true if we're writing the first frame which
- *                        erases all previous entries.
- * 
- * @return 0 on success, otherwise negative errno
- */
-int stg_write_frame_to_partition(flash_partition_t partition, uint8_t *data,
-				 size_t len, bool first_frame)
-{
-	int err;
-
-	/* Check if started a new entry or is on the same entry. */
-	if (first_frame) {
-		/* New entry, pass the TRUE flag to erase previous entries. */
-		err = stg_write_to_partition(partition, data, len, true);
-	} else {
-		/* Same entry, pass the false flag to keep previous frames. */
-		err = stg_write_to_partition(partition, data, len, false);
-	}
-
-	return err;
-}
-
 int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
-			   size_t len, bool rotate_to_this)
+			   size_t len)
 {
 	struct fcb_entry loc;
 	struct fcb *fcb = get_fcb(partition);
 	int err = 0;
-
-	/* If we only want to read the newest, clear all previous entries. */
-	/*if (rotate_to_this) {
-		err = fcb_clear(fcb);
-		if (err) {
-			return err;
-		}
-	}*/
 
 	/* Appending a new entry, rotate(replaces) oldest if no space. */
 	err = fcb_append(fcb, len, &loc);
@@ -335,6 +301,14 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 	if (err) {
 		LOG_ERR("Error writing to flash area. err %d", err);
 		return err;
+	}
+
+	if (partition == STG_PARTITION_ANO) {
+		UBX_MGA_ANO_RAW_t *ano_frame = (UBX_MGA_ANO_RAW_t *)(data);
+		LOG_INF("Wrote frame %i %i %i from sector offset %i",
+			ano_frame->mga_ano.year, ano_frame->mga_ano.month,
+			ano_frame->mga_ano.day,
+			(int)FCB_ENTRY_FA_DATA_OFF(loc));
 	}
 
 	/* Finish entry. */
@@ -495,8 +469,6 @@ int stg_read_log_data(stg_read_log_cb cb)
 	return err;
 }
 
-static struct flash_sector *cur_sector;
-
 int check_if_ano_valid_cb(uint8_t *data, size_t len)
 {
 	UBX_MGA_ANO_RAW_t *ano_frame = (UBX_MGA_ANO_RAW_t *)(data);
@@ -507,82 +479,142 @@ int check_if_ano_valid_cb(uint8_t *data, size_t len)
 
 	/* If age is valid, update ano sector. Fetch from somewhere! */
 	if (ano_frame->mga_ano.year == 22) {
-		LOG_INF("Updated offset to be %i", (int)cur_sector->fs_off);
-		active_ano_sector = cur_sector;
 		/* Done, we found oldest, valid timestamp, exit loop. */
 		return -EINTR;
 	}
 	return 0;
 }
 
-/** @brief Helper function to increment a sector to the next.
- * 
- * @param[in] fcb fcb to target.
- * @param[inout] sector which sector to increment.
- */
-static inline void increment_sector(struct fcb *fcb,
-				    struct flash_sector *sector)
+static inline void set_ano_active_boot()
 {
-	sector++;
-	if (sector >= &fcb->f_sectors[fcb->f_sector_cnt]) {
-		sector = &fcb->f_sectors[0];
+	if (k_mutex_lock(&ano_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+		return;
 	}
-}
 
-static inline void update_ano_active_index()
-{
-	struct fcb *fcb = get_fcb(STG_PARTITION_ANO);
-
-	cur_sector = fcb->f_oldest;
-
-	int err = 0;
-	int sectors_checked = 0;
+	int err = fcb_getnext(&ano_fcb, &boot_active_ano_entry);
+	if (err) {
+		k_mutex_unlock(&ano_mutex);
+		return;
+	}
 
 	while (true) {
-		err = read_fcb_partition(STG_PARTITION_ANO, cur_sector,
-					 check_if_ano_valid_cb, false);
+		uint8_t *data = k_malloc(boot_active_ano_entry.fe_data_len);
+
+		err = flash_area_read(
+			ano_fcb.fap,
+			FCB_ENTRY_FA_DATA_OFF(boot_active_ano_entry), data,
+			boot_active_ano_entry.fe_data_len);
 
 		if (err) {
-			if (err == -EINTR) {
-				LOG_INF("Updated ANO index partition to be offset %i",
-					(int)active_ano_sector->fs_off);
-				return;
-			} else if (err == -ENODATA) {
-				goto no_valid_ano;
-			} else {
-				LOG_ERR("Error reading ano to update index %i",
-					err);
-				return;
-			}
+			LOG_ERR("Error reading ano to update index %i", err);
+			k_mutex_unlock(&ano_mutex);
+			k_free(data);
+			return;
+		}
+		err = check_if_ano_valid_cb(data,
+					    boot_active_ano_entry.fe_data_len);
+		k_free(data);
+
+		if (err == -EINTR) {
+			LOG_INF("Found oldest valid sector.");
+			LOG_INF("Updated offset to be %i",
+				(int)FCB_ENTRY_FA_DATA_OFF(
+					boot_active_ano_entry));
+			k_mutex_unlock(&ano_mutex);
+			return;
 		}
 
-		increment_sector(fcb, cur_sector);
-
-		sectors_checked++;
-
-		if (sectors_checked > fcb->f_sector_cnt) {
-			/* Exit if we reached the end, meaning
-			 * no ANO data is valid... 
-			 */
-			goto no_valid_ano;
+		err = fcb_getnext(&ano_fcb, &boot_active_ano_entry);
+		if (err) {
+			LOG_ERR("Error getnext %i", err);
+			k_mutex_unlock(&ano_mutex);
+			return;
 		}
 	}
-no_valid_ano:
-	LOG_WRN("No valid ANO data on the partition. %i", err);
+	k_mutex_unlock(&ano_mutex);
 	return;
 }
 
-int stg_read_ano_data(stg_read_log_cb cb)
+int stg_read_ano_data(stg_read_log_cb cb, bool read_from_boot_entry)
 {
 	if (k_mutex_lock(&ano_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
 	}
-	int err = read_fcb_partition(STG_PARTITION_ANO, NULL, cb, false);
-	if (err) {
-		LOG_ERR("Error reading from ano partition.");
+
+	int err = 0;
+
+	if (fcb_is_empty(&ano_fcb)) {
+		LOG_WRN("No new ANO frames found on partition.");
+		k_mutex_unlock(&ano_mutex);
+		return -ENODATA;
+	}
+
+	struct fcb_entry target_entry;
+
+	if (read_from_boot_entry) {
+		if (boot_active_ano_entry.fe_sector == NULL) {
+			k_mutex_unlock(&ano_mutex);
+			return -EINVAL;
+		}
+		memcpy(&target_entry, &boot_active_ano_entry,
+		       sizeof(struct fcb_entry));
+	} else {
+		memcpy(&target_entry, &sent_active_ano_entry,
+		       sizeof(struct fcb_entry));
+
+		err = fcb_getnext(&ano_fcb, &target_entry);
+		if (err) {
+			LOG_ERR("Error fetching next ano entry %i", err);
+			k_mutex_unlock(&ano_mutex);
+			return err;
+		}
+	}
+
+	while (true) {
+		uint8_t *data = k_malloc(target_entry.fe_data_len);
+
+		err = flash_area_read(ano_fcb.fap,
+				      FCB_ENTRY_FA_DATA_OFF(target_entry), data,
+				      target_entry.fe_data_len);
+
+		if (err) {
+			LOG_ERR("Error reading ano to update index %i", err);
+			k_mutex_unlock(&ano_mutex);
+			k_free(data);
+			return err;
+		}
+
+		UBX_MGA_ANO_RAW_t *ano_frame = (UBX_MGA_ANO_RAW_t *)(data);
+		LOG_INF("Read frame %i %i %i from sector offset %i",
+			ano_frame->mga_ano.year, ano_frame->mga_ano.month,
+			ano_frame->mga_ano.day,
+			(int)FCB_ENTRY_FA_DATA_OFF(target_entry));
+
+		cb(data, target_entry.fe_data_len);
+		k_free(data);
+
+		/** We just sent new data, update the entry pointer. 
+		 * 
+		 * @note We update this pointer to data that has been sent,
+		 * which means the next time we want to read we have
+		 * to call fcb_getnext on sent_active_ano_entry.
+		 */
+		memcpy(&sent_active_ano_entry, &target_entry,
+		       sizeof(struct fcb_entry));
+
+		err = fcb_getnext(&ano_fcb, &target_entry);
+
+		if (err) {
+			/* We end up here if getnext doesn't find next entry
+			 * in which case we have iterated through everything
+			 * and need to break out of the loop. 
+			 */
+			k_mutex_unlock(&ano_mutex);
+			return 0;
+		}
 	}
 	k_mutex_unlock(&ano_mutex);
-	return err;
+	return 0;
 }
 
 int stg_read_pasture_data(stg_read_log_cb cb)
@@ -591,10 +623,7 @@ int stg_read_pasture_data(stg_read_log_cb cb)
 			 K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
 	}
-	/*int err = read_fcb_partition(STG_PARTITION_PASTURE, NULL, cb, false);
-	if (err) {
-		LOG_ERR("Error reading from pasture partition.");
-	}*/
+
 	struct fcb *fcb = get_fcb(STG_PARTITION_PASTURE);
 
 	if (fcb_is_empty(fcb)) {
@@ -621,6 +650,7 @@ int stg_read_pasture_data(stg_read_log_cb cb)
 	}
 
 	cb(fence, fence_size);
+	k_free(fence);
 
 	k_mutex_unlock(&pasture_mutex);
 	return err;
@@ -631,30 +661,27 @@ int stg_write_log_data(uint8_t *data, size_t len)
 	if (k_mutex_lock(&log_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
 	}
-	int err = stg_write_to_partition(STG_PARTITION_LOG, data, len, false);
+
+	int err = stg_write_to_partition(STG_PARTITION_LOG, data, len);
+
 	if (err) {
 		LOG_ERR("Error writing to log partition.");
 	}
+
 	k_mutex_unlock(&log_mutex);
 	return err;
 }
 
-int stg_write_ano_data(uint8_t *data, size_t len, bool first_frame)
+int stg_write_ano_data(uint8_t *data, size_t len)
 {
 	if (k_mutex_lock(&ano_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
 	}
-	/* If its the first frame, we have to delete all the other entries (frames)
-	 * that exists, since we can only have 1 ANO data on the
-	 * partition.
-	 */
-	int err = stg_write_frame_to_partition(STG_PARTITION_ANO, data, len,
-					       first_frame);
+
+	int err = stg_write_to_partition(STG_PARTITION_ANO, data, len);
 
 	if (err) {
 		LOG_ERR("Error writing to ano partition, err %i", err);
-		k_mutex_unlock(&ano_mutex);
-		return err;
 	}
 
 	k_mutex_unlock(&ano_mutex);
@@ -667,12 +694,13 @@ int stg_write_pasture_data(uint8_t *data, size_t len)
 			 K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
 	}
-	int err =
-		stg_write_to_partition(STG_PARTITION_PASTURE, data, len, true);
+
+	int err = stg_write_to_partition(STG_PARTITION_PASTURE, data, len);
 
 	if (err) {
 		LOG_ERR("Error writing to pasture partition %i", err);
 	}
+
 	k_mutex_unlock(&pasture_mutex);
 	return err;
 }

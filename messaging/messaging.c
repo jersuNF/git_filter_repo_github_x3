@@ -901,15 +901,9 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 	LOG_WRN("Relative age of received ANO frame = %d, %d \n", age,
 		time_from_server);
 
-	bool first_frame = false;
-
-	if (rec_ano_frames == 0) {
-		first_frame = true;
-	}
-
 	/* Write to storage controller's ANO WRITE partition. */
 	int err = stg_write_ano_data((uint8_t *)&anoResp->rgucBuf,
-				     anoResp->rgucBuf.size, first_frame);
+				     anoResp->rgucBuf.size);
 
 	if (err) {
 		LOG_ERR("Error writing ano frame to storage controller %i",

@@ -36,14 +36,11 @@ static int16_t raw_data;
 
 #define CHARGING_ADC_DEVICE_NAME DT_LABEL(DT_ALIAS(charging_current))
 #define CHARGING_ADC_RESOLUTION 14
-#define CHARGING_ADC_GAIN ADC_GAIN_1_6
+#define CHARGING_ADC_GAIN ADC_GAIN_1
 #define CHARGING_ADC_REFERENCE ADC_REF_INTERNAL
 #define CHARGING_ADC_ACQUISITION_TIME                                          \
 	ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)
 #define CHARGING_ADC_CHANNEL 4
-
-// Scaling the result Current sensor (gain 25V/V) MAX measured current is 678mA -> Resolution = 683/1024 = 0,666
-#define Vdcdc (205ul * 10000ul) //205 = 2,05V with resolution
 
 #define CURRENT_SENSE_RESISTOR 39ul
 #define CURRENT_SENSE_GAIN 50ul //MAX9634FEKS+
@@ -53,7 +50,9 @@ static int16_t raw_data;
 	((Vdcdc / CURRENT_SENSE_GAIN) /                                        \
 	 CURRENT_SENSE_RESISTOR) //In mA -> for MAX9634TERS+ this value is 683mA
 
-// the channel configuration with channel not yet filled in
+/** @brief Moving average for current defined outside function */
+MovAvg IchrgSMA;
+
 static struct adc_channel_cfg charging_channel_cfg = {
 	.gain = CHARGING_ADC_GAIN,
 	.reference = CHARGING_ADC_REFERENCE,
@@ -90,12 +89,21 @@ int init_charging_adc(void)
 	return 0;
 }
 
-static int charging_setup(const struct device *arg)
+void init_current_moving_average(void)
+{
+	IchrgSMA.average = 0;
+	IchrgSMA.N = 0;
+	IchrgSMA.total = 0;
+	IchrgSMA.MAX_SAMPLES = CONFIG_CURRENT_MOVING_AVERAGE_SAMPLES;
+}
+
+int charging_setup(void)
 {
 	int err = init_charging_adc();
-
 	charging_ok = (err == 0);
 	LOG_INF("Charging ADC setup %s", charging_ok ? "complete" : "error");
+	init_current_moving_average();
+
 	return err;
 }
 
@@ -223,17 +231,6 @@ int stop_charging(void)
 	return 0;
 }
 
-/** @brief Moving average for current defined outside function */
-MovAvg IchrgSMA;
-
-void init_current_moving_average(void)
-{
-	IchrgSMA.average = 0;
-	IchrgSMA.N = 0;
-	IchrgSMA.total = 0;
-	IchrgSMA.MAX_SAMPLES = CONFIG_CURRENT_MOVING_AVERAGE_SAMPLES;
-}
-
 int current_sample_averaged(void)
 {
 	int current_ma = read_analog_charging_channel();
@@ -246,6 +243,3 @@ int current_sample_averaged(void)
 		approx_moving_average(&IchrgSMA, current_ma);
 	return avg_current_value;
 }
-
-/* Initialze battery setup on startup */
-SYS_INIT(charging_setup, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

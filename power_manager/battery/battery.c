@@ -59,6 +59,11 @@ struct divider_config {
 	uint32_t full_ohm;
 };
 
+/** @brief Moving average for battery defined outside function */
+MovAvg VbattSMA;
+
+static bool battery_ok;
+
 static const struct divider_config divider_config = {
 #if DT_NODE_HAS_STATUS(VBATT, okay)
 	.io_channel = {
@@ -180,14 +185,24 @@ static int divider_setup(void)
 	return err;
 }
 
-static bool battery_ok;
+/** 
+ * @brief Initialize moving average struct
+ */
+static void init_battery_moving_average(void)
+{
+	VbattSMA.average = 0;
+	VbattSMA.N = 0;
+	VbattSMA.total = 0;
+	VbattSMA.MAX_SAMPLES = CONFIG_BATTERY_MOVING_AVERAGE_SAMPLES;
+}
 
-static int battery_setup(const struct device *arg)
+int battery_setup(void)
 {
 	int err = divider_setup();
-
 	battery_ok = (err == 0);
 	LOG_INF("Battery divider setup %s", battery_ok ? "complete" : "error");
+	init_battery_moving_average();
+
 	return err;
 }
 
@@ -251,17 +266,6 @@ unsigned int battery_level_soc(unsigned int batt_mV,
 	return batt_level_precentage;
 }
 
-/** @brief Moving average for battery defined outside function */
-MovAvg VbattSMA;
-
-void init_battery_moving_average(void)
-{
-	VbattSMA.average = 0;
-	VbattSMA.N = 0;
-	VbattSMA.total = 0;
-	VbattSMA.MAX_SAMPLES = CONFIG_BATTERY_MOVING_AVERAGE_SAMPLES;
-}
-
 uint16_t approx_moving_average(MovAvg *p, uint16_t val)
 {
 	p->total += (uint32_t)val; // add to total
@@ -285,6 +289,3 @@ int battery_sample_averaged(void)
 	uint16_t approx_batt_value = approx_moving_average(&VbattSMA, batt_mV);
 	return approx_batt_value;
 }
-
-/* Initialze battery setup on startup */
-SYS_INIT(battery_setup, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

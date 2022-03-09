@@ -111,8 +111,9 @@ static void battery_poll_work_fn()
 
 int pwr_module_init(void)
 {
-	init_battery_moving_average();
-	init_current_moving_average();
+	/* Configure battery voltage and charging adc */
+	battery_setup();
+	charging_setup();
 
 	/* Initialize and start charging */
 	init_charging_module();

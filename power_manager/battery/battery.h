@@ -43,10 +43,6 @@ unsigned int battery_level_soc(unsigned int batt_mV,
 			       const struct battery_level_point *curve);
 
 /** 
- * @brief Initialize moving average struct
- */
-void init_battery_moving_average(void);
-/** 
  * @brief Calculate a moving average of the battery voltage
  * @return averaged voltage in mV, or negative error code on error
  */
@@ -69,5 +65,11 @@ typedef struct {
  * @return Moving average
  */
 uint16_t approx_moving_average(MovAvg *p, uint16_t val);
+
+/** 
+ * @brief Set up the battery divider
+ * @return 0 on success, otherwise -ENOENT error code if device not ready.
+ */
+int battery_setup(void);
 
 #endif /* APPLICATION_BATTERY_H_ */

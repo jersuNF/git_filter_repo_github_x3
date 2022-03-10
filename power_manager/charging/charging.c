@@ -128,14 +128,15 @@ int read_analog_charging_channel(void)
 		sequence.calibrate = false;
 		if (ret == 0) {
 			sample_value = raw_data;
+			adc_raw_to_millivolts(
+				adc_ref_internal(charging_adc_dev),
+				charging_channel_cfg.gain, sequence.resolution,
+				&sample_value);
+			sample_value = ((sample_value * CURRENT_SENSE_GAIN) /
+					CURRENT_SENSE_RESISTOR);
 		}
-
-		adc_raw_to_millivolts(adc_ref_internal(charging_adc_dev),
-				      charging_channel_cfg.gain,
-				      sequence.resolution, &sample_value);
 	}
-	sample_value =
-		((sample_value * CURRENT_SENSE_GAIN) / CURRENT_SENSE_RESISTOR);
+
 	return sample_value;
 }
 

@@ -8,6 +8,7 @@
 #include <net/net_event.h>
 #include <net/net_conn_mgr.h>
 #include <net/socket.h>
+#include <modem_nf.h>
 #include "cellular_helpers_header.h"
 
 #include <logging/log.h>
@@ -131,6 +132,11 @@ int8_t socket_receive(struct data *data, char **msg)
 		return received;
 	}
 	return 0;
+}
+
+int reset_modem(void)
+{
+	return modem_nf_reset();
 }
 
 void stop_tcp(void)

@@ -1,7 +1,6 @@
 #include "cellular_controller_events.h"
 #include "cellular_helpers_header.h"
 #include "messaging_module_events.h"
-#include <modem_nf.h>
 #include <zephyr.h>
 
 #define MY_STACK_SIZE 1024
@@ -20,6 +19,8 @@ K_KERNEL_STACK_DEFINE(keep_alive_stack,
 		      CONFIG_CELLULAR_KEEP_ALIVE_STACK_SIZE);
 struct k_thread keep_alive_thread;
 static struct k_sem connection_state_sem;
+/* TODO - monitor connection and change is alive? Use atomic? */
+bool connection_is_alive = false;
 
 int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
 uint8_t socket_receive(struct data *, char **);
@@ -190,7 +191,8 @@ static int cellular_controller_connect(void* dev)
 {
 	int ret = lte_init();
 	if (ret != 0) {
-		LOG_ERR("Failed to start LTE connection, check network interface!");
+		LOG_ERR("Failed to start LTE connection, "
+			"check network interface!");
 		goto exit;
 	}
 
@@ -216,14 +218,11 @@ exit:
 
 static void cellular_controller_keep_alive(void* dev)
 {
-	/* TODO - monitor connection and change is alive? Use atomic? */
-	bool connection_is_alive = false;
-
 	while (true) {
 		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
 			if (!connection_is_alive) {
 				//stop_tcp();
-				int ret = modem_nf_reset();
+				int ret = reset_modem();
 
 				if (ret == 0) {
 					ret = cellular_controller_connect(dev);
@@ -234,6 +233,11 @@ static void cellular_controller_keep_alive(void* dev)
 			}
 		}
 	}
+}
+
+bool cellular_controller_is_connected(void)
+{
+	return connection_is_alive;
 }
 
 int8_t cellular_controller_init(void)
@@ -249,6 +253,7 @@ int8_t cellular_controller_init(void)
 	}
 
 	/* Start connection keep-alive thread */
+	connection_is_alive = false;
 	k_sem_init(&connection_state_sem, 1, 1);
 	k_thread_create(&keep_alive_thread, keep_alive_stack,
 			K_KERNEL_STACK_SIZEOF(keep_alive_stack),

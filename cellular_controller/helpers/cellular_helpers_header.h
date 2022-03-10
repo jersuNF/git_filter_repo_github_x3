@@ -72,6 +72,7 @@ struct configs {
      */
 extern struct configs conf;
 
+int reset_modem(void);
 int8_t send_tcp(char *, size_t);
 void stop_tcp(void);
 const struct device *bind_modem(void);

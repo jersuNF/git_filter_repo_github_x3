@@ -559,6 +559,34 @@ int stg_write_pasture_data(uint8_t *data, size_t len)
 	return err;
 }
 
+uint32_t get_num_entries(flash_partition_t partition)
+{
+	struct fcb *fcb = get_fcb(partition);
+	struct k_mutex *mtx = get_mutex(partition);
+
+	if (mtx == NULL || fcb == NULL) {
+		return -EINVAL;
+	}
+
+	if (k_mutex_lock(mtx, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+		LOG_ERR("Mutex timeout in storage controller when clearing.");
+		return -ETIMEDOUT;
+	}
+
+	struct fcb_entry oldest_entry;
+
+	memset(&oldest_entry, 0, sizeof(struct fcb_entry));
+	oldest_entry.fe_sector = NULL;
+
+	uint32_t cnt = 0;
+	while (fcb_getnext(fcb, &oldest_entry) == 0) {
+		cnt++;
+	}
+
+	k_mutex_unlock(mtx);
+	return cnt;
+}
+
 int stg_fcb_reset_and_init()
 {
 	memset(&log_fcb, 0, sizeof(log_fcb));
@@ -574,6 +602,17 @@ int stg_fcb_reset_and_init()
 	active_log_entry.fe_sector = NULL;
 
 	return stg_init_storage_controller();
+}
+
+bool stg_log_pointing_to_last()
+{
+	struct fcb_entry test_entry;
+	memcpy(&test_entry, &active_log_entry, sizeof(struct fcb_entry));
+
+	if (fcb_getnext(&log_fcb, &test_entry) != 0) {
+		return true;
+	}
+	return false;
 }
 
 static bool event_handler(const struct event_header *eh)

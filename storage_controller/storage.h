@@ -133,6 +133,23 @@ int stg_write_ano_data(uint8_t *data, size_t len);
  */
 int stg_write_pasture_data(uint8_t *data, size_t len);
 
+/** 
+ * @brief Checks if log active pointer is pointing to last element, return
+ *        true is this is the case.
+ * 
+ * @return 0(false) if not empty, 1(true) if empty (pointing to last).
+ */
+bool stg_log_pointing_to_last();
+
+/** 
+ * @brief Returns the amount of entries on the given partition.
+ * 
+ * @param[in] partition which partition to check entries from.
+ * 
+ * @return number of entries on partition.
+ */
+uint32_t get_num_entries(flash_partition_t partition);
+
 #define SECTOR_SIZE                                                            \
 	MAX(CONFIG_NORDIC_QSPI_NOR_FLASH_LAYOUT_PAGE_SIZE,                     \
 	    CONFIG_STORAGE_SECTOR_SIZE)

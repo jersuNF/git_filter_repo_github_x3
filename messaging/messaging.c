@@ -176,9 +176,20 @@ void log_data_periodic_fn()
 
 	/* Read and send out all the log data if any. */
 	int err = stg_read_log_data(read_log_data_cb, 0);
-	if (err) {
+	if (err && err != -ENODATA) {
 		LOG_ERR("Error reading all sequence messages from storage %i",
 			err);
+	} else if (err == -ENODATA) {
+		LOG_INF("No log data available on flash for sending.");
+	}
+
+	/* If all entries has been consumed, empty storage. */
+	if (stg_log_pointing_to_last()) {
+		err = stg_clear_partition(STG_PARTITION_LOG);
+		if (err) {
+			LOG_ERR("Error clearing FCB storage for LOG %i", err);
+		}
+		LOG_INF("Emptied LOG partition data as we have read everything.");
 	}
 
 	/* Reschedule. */

@@ -565,6 +565,14 @@ int stg_fcb_reset_and_init()
 	memset(&ano_fcb, 0, sizeof(ano_fcb));
 	memset(&pasture_fcb, 0, sizeof(pasture_fcb));
 
+	memset(&active_ano_entry, 0, sizeof(struct fcb_entry));
+	memset(&last_sent_ano_entry, 0, sizeof(struct fcb_entry));
+	memset(&active_log_entry, 0, sizeof(struct fcb_entry));
+
+	active_ano_entry.fe_sector = NULL;
+	last_sent_ano_entry.fe_sector = NULL;
+	active_log_entry.fe_sector = NULL;
+
 	return stg_init_storage_controller();
 }
 

@@ -21,8 +21,6 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BUZZER_LOG_LEVEL);
 #define PWM_CHANNEL DT_PWMS_CHANNEL(DT_ALIAS(pwm_buzzer))
 #endif
 
-#define BUZZER_SOUND_VOLUME_PERCENT 100
-
 const struct device *buzzer_pwm;
 
 atomic_t current_warn_zone_freq = ATOMIC_INIT(0);
@@ -115,7 +113,6 @@ int play_from_ms(const uint32_t period, const uint32_t sustain,
 		dur = K_USEC(us);
 	}
 
-	
 	if (k_sem_take(&abort_sound_sem, dur) == 0) {
 		err = -EINTR;
 	}
@@ -151,9 +148,10 @@ int play_hz(const uint32_t freq, const uint32_t sustain, const uint8_t volume)
 void play_song(const note_t *song, const size_t num_notes)
 {
 	for (int i = 0; i < num_notes; i++) {
-		int err = play_hz(song[i].t, song[i].s,
+		int err = play_hz(song[i].t, song[i].s * USEC_PER_MSEC,
 				  BUZZER_SOUND_VOLUME_PERCENT);
 		if (err) {
+			LOG_WRN("Song aborted.");
 			return;
 		}
 	}
@@ -193,6 +191,7 @@ void play_cattle(void)
 void play_welcome(void)
 {
 	uint16_t i = 1000;
+	int loop_delay = 2;
 	int err = play_hz(i, 10 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
 
 	if (err) {
@@ -200,7 +199,7 @@ void play_welcome(void)
 	}
 
 	for (; i < 4000; i += 4) {
-		err = play_hz(i, 0, BUZZER_SOUND_VOLUME_PERCENT);
+		err = play_hz(i, loop_delay, BUZZER_SOUND_VOLUME_PERCENT);
 		if (err) {
 			return;
 		}
@@ -219,7 +218,7 @@ void play_welcome(void)
 	}
 
 	for (i = 700; i < 4000; i += 2) {
-		err = play_hz(i, 0, BUZZER_SOUND_VOLUME_PERCENT);
+		err = play_hz(i, loop_delay, BUZZER_SOUND_VOLUME_PERCENT);
 		if (err) {
 			return;
 		}
@@ -232,14 +231,14 @@ void play_welcome(void)
 	}
 
 	for (; i > 1500; i--) {
-		err = play_hz(i, 0, BUZZER_SOUND_VOLUME_PERCENT);
+		err = play_hz(i, loop_delay, BUZZER_SOUND_VOLUME_PERCENT);
 
 		if (err) {
 			return;
 		}
 	}
 	for (; i > 600; i -= 2) {
-		err = play_hz(i, 0, BUZZER_SOUND_VOLUME_PERCENT);
+		err = play_hz(i, loop_delay, BUZZER_SOUND_VOLUME_PERCENT);
 
 		if (err) {
 			return;

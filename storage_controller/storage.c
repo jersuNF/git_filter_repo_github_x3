@@ -239,7 +239,6 @@ int stg_init_storage_controller(void)
 
 	/* Setup work threads. */
 	if (!queue_inited) {
-		LOG_INF("Initializing messaging module!\n");
 		k_work_queue_init(&erase_q);
 		k_work_queue_start(&erase_q, erase_flash_thread,
 				   K_THREAD_STACK_SIZEOF(erase_flash_thread),

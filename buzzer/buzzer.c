@@ -145,6 +145,41 @@ int play_hz(const uint32_t freq, const uint32_t sustain, const uint8_t volume)
 	return play_from_ms(us_period, sustain, volume);
 }
 
+/** @brief Plays a set of frequencies from start to end with steps. Accepts
+ *         sweeps in both directions (start>end or start<end)
+ * 
+ * @param start_freq start frequency of sweep in hz.
+ * @param end_freq end frequency of sweep in hz.
+ * @param duration duration of sweep in us.
+ * @param step_count number of steps to reach end_freq from start_freq.
+ * 
+ * @return 0 on success, otherwise negative errno.
+ * @return -EINTR if sound was aborted by another thread.
+ */
+int play_sweep(int32_t start_freq, int32_t end_freq, uint32_t duration,
+	       uint16_t step_count)
+{
+	if (step_count == 0 || start_freq == 0 || end_freq == 0 ||
+	    duration == 0) {
+		return -EINVAL;
+	}
+
+	uint32_t sustain = duration / step_count;
+
+	for (uint16_t i = 0; i < step_count; i++) {
+		uint32_t freq = (uint32_t)(
+			start_freq +
+			(i * ((end_freq - start_freq) / (int32_t)step_count)));
+
+		int err = play_hz(freq, sustain, BUZZER_SOUND_VOLUME_PERCENT);
+		if (err) {
+			return err;
+		}
+	}
+
+	return 0;
+}
+
 void play_song(const note_t *song, const size_t num_notes)
 {
 	for (int i = 0; i < num_notes; i++) {
@@ -188,24 +223,25 @@ void play_cattle(void)
 	}
 }
 
+#define TIME_PER_STEP_USEC 80
+
 void play_welcome(void)
 {
-	uint16_t i = 1000;
-	int loop_delay = 2;
-	int err = play_hz(i, 10 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+	int err =
+		play_hz(1000, 10 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
 
 	if (err) {
 		return;
 	}
 
-	for (; i < 4000; i += 4) {
-		err = play_hz(i, loop_delay, BUZZER_SOUND_VOLUME_PERCENT);
-		if (err) {
-			return;
-		}
+	int steps = 750;
+	err = play_sweep(1000, 4000, TIME_PER_STEP_USEC * steps, steps);
+
+	if (err) {
+		return;
 	}
 
-	err = play_hz(i, 30 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+	err = play_hz(4000, 30 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
 
 	if (err) {
 		return;
@@ -217,35 +253,34 @@ void play_welcome(void)
 		return;
 	}
 
-	for (i = 700; i < 4000; i += 2) {
-		err = play_hz(i, loop_delay, BUZZER_SOUND_VOLUME_PERCENT);
-		if (err) {
-			return;
-		}
-	}
-
-	err = play_hz(i, 30 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+	steps = 1650;
+	err = play_sweep(700, 4000, TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
 		return;
 	}
 
-	for (; i > 1500; i--) {
-		err = play_hz(i, loop_delay, BUZZER_SOUND_VOLUME_PERCENT);
+	err = play_hz(4000, 30 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
 
-		if (err) {
-			return;
-		}
-	}
-	for (; i > 600; i -= 2) {
-		err = play_hz(i, loop_delay, BUZZER_SOUND_VOLUME_PERCENT);
-
-		if (err) {
-			return;
-		}
+	if (err) {
+		return;
 	}
 
-	err = play_hz(i, 30 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+	steps = 2500;
+	err = play_sweep(4000, 1500, TIME_PER_STEP_USEC * steps, steps);
+
+	if (err) {
+		return;
+	}
+
+	steps = 450;
+	err = play_sweep(1500, 600, TIME_PER_STEP_USEC * steps, steps);
+
+	if (err) {
+		return;
+	}
+
+	err = play_hz(600, 30 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
 
 	if (err) {
 		return;

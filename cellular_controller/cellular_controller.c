@@ -15,6 +15,12 @@ char server_address[EEP_HOST_PORT_BUF_SIZE];
 static int server_port;
 static char server_ip[15];
 
+/* Connection keep-alive thread structures */
+K_KERNEL_STACK_DEFINE(keep_alive_stack,
+		      CONFIG_CELLULAR_KEEP_ALIVE_STACK_SIZE);
+struct k_thread keep_alive_thread;
+static struct k_sem connection_state_sem;
+
 int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
 uint8_t socket_receive(struct data *, char **);
 int8_t lte_init(void);
@@ -180,55 +186,78 @@ int8_t cache_server_address(void)
 	}
 }
 
+static int cellular_controller_connect(void* dev)
+{
+	int ret = lte_init();
+	if (ret != 0) {
+		LOG_ERR("Failed to start LTE connection, check network interface!");
+		goto exit;
+	}
+
+	LOG_INF("Cellular network interface ready!\n");
+
+	ret = cache_server_address();
+	if (ret != 0) {
+		LOG_ERR("Failed caching server address from memory!");
+		goto exit;
+	}
+
+	ret = start_tcp();
+	if (ret != 0) {
+		LOG_ERR("Failed starting TCP connection!");
+		goto exit;
+	}
+	LOG_INF("TCP connection started!\n");
+	connected = true;
+
+exit:
+	return ret;
+}
+
+static void cellular_controller_keep_alive(void* dev)
+{
+	/* TODO - monitor connection and change is alive? Use atomic? */
+	bool connection_is_alive = false;
+
+	while (true) {
+		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
+			if (!connection_is_alive) {
+				//stop_tcp();
+				int ret = modem_nf_reset();
+
+				if (ret == 0) {
+					ret = cellular_controller_connect(dev);
+					if (ret == 0) {
+						connection_is_alive = true;
+					}
+				}
+			}
+		}
+	}
+}
+
 int8_t cellular_controller_init(void)
 {
 	messaging_ack = true;
-	int8_t ret;
 	printk("Cellular controller starting!, %p\n", k_current_get());
 	connected = false;
 	
-	modem_nf_reset();
-
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {
 		LOG_ERR("GSM driver was not found!\n");
 		return -1;
 	}
-	ret = lte_init();
-	if (ret == 1) {
-		LOG_INF("Cellular network interface ready!\n");
 
-		if (lte_is_ready()) {
-			ret = cache_server_address();
-			if (ret == 0) {
-				LOG_INF("Server ip address successfully cached from "
-					"eeprom!\n");
-			} else {
-				goto exit_cellular_controller;
-			}
-			ret = start_tcp();
-			if (ret == 0) {
-				LOG_INF("TCP connection started!\n");
-				connected = true;
-				return 0;
-			} else {
-				goto exit_cellular_controller;
-			}
-		} else {
-			LOG_ERR("Check LTE network configuration!");
-			/* TODO: notify error handler! */
-			goto exit_cellular_controller;
-		}
-	} else {
-		LOG_ERR("Failed to start LTE connection, check network interface!");
-		/* TODO: notify error handler! */
-		goto exit_cellular_controller;
-	}
+	/* Start connection keep-alive thread */
+	k_sem_init(&connection_state_sem, 1, 1);
+	k_thread_create(&keep_alive_thread, keep_alive_stack,
+			K_KERNEL_STACK_SIZEOF(keep_alive_stack),
+			(k_thread_entry_t) cellular_controller_keep_alive,
+			(void*)gsm_dev, NULL, NULL, 
+			K_PRIO_COOP(CONFIG_CELLULAR_KEEP_ALIVE_THREAD_PRIORITY),
+			0, K_NO_WAIT);
 
-exit_cellular_controller:
-	stop_tcp();
-	LOG_ERR("Cellular controller initialization failure!");
-	return -1;
+	return 0;
 }
 
 EVENT_LISTENER(MODULE, cellular_controller_event_handler);

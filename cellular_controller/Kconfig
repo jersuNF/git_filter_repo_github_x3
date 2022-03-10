@@ -1,3 +1,19 @@
 menuconfig CELLULAR_CONTROLLER
 	bool "Cellular controller module"
 	default y
+
+if CELLULAR_CONTROLLER
+	config CELLULAR_KEEP_ALIVE_STACK_SIZE
+		int "Stack size for the u-blox MIA-M10 GNSS driver RX thread"
+		default 1024
+		help
+		This stack is used by the u-blox MIA-M10 RX thread.
+	
+	config CELLULAR_KEEP_ALIVE_THREAD_PRIORITY
+		int "Priority of the connection keep-alive thread"
+		default 7
+		help
+		This priority is used by the Cellular Controller keep-alive thread.
+
+
+endif # CELLULAR_CONTROLLER

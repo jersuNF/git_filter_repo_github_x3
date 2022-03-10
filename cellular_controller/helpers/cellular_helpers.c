@@ -19,18 +19,18 @@ static struct net_if_config *cfg;
 
 int8_t lte_init(void)
 {
-	int rc = 1;
+	int rc = 0;
 
 	/* wait for network interface to be ready */
 	iface = net_if_get_default();
-	if (!iface) {
+	if (iface == NULL) {
 		LOG_ERR("Could not get iface (network interface)!");
 		rc = -1;
 		goto exit;
 	}
 
 	cfg = net_if_get_config(iface);
-	if (!cfg) {
+	if (cfg == NULL) {
 		LOG_ERR("Could not get iface config!");
 		rc = -2;
 		goto exit;

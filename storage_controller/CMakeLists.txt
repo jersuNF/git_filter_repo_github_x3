@@ -9,6 +9,7 @@ list(APPEND ZEPHYR_EXTRA_MODULES
 target_include_directories(app PRIVATE 
 			.
 			./include/
+			./fcb_ext/
 			./../../events/error_handler/
 			./../../events/storage/
 			./../../events/messaging/
@@ -16,6 +17,7 @@ target_include_directories(app PRIVATE
 
 target_sources(app PRIVATE
 			./storage.c
+			./fcb_ext/fcb_ext.c
 			./../../events/error_handler/error_event.c
 			./../../events/storage/storage_event.c
 )

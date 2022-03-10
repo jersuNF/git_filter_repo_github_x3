@@ -11,6 +11,8 @@
 #include <string.h>
 #include <fs/fcb.h>
 
+#include "fcb_ext.h"
+
 #include "ano_structure.h"
 #include "log_structure.h"
 #include "pasture_structure.h"
@@ -35,14 +37,15 @@ const struct flash_area *log_area;
 struct fcb log_fcb;
 struct flash_sector log_sectors[FLASH_LOG_NUM_SECTORS];
 
-static inline void set_ano_active_boot();
+static inline void update_ano_active_entry();
 const struct flash_area *ano_area;
 struct fcb ano_fcb;
 struct flash_sector ano_sectors[FLASH_ANO_NUM_SECTORS];
 
-/* Needs to be initialized to fcb_getnext(f_oldest). */
-struct fcb_entry boot_active_ano_entry = { .fe_sector = NULL };
-struct fcb_entry sent_active_ano_entry = { .fe_sector = NULL };
+struct fcb_entry active_ano_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
+struct fcb_entry last_sent_ano_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
+
+struct fcb_entry active_log_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
 
 const struct flash_area *pasture_area;
 struct fcb pasture_fcb;
@@ -58,21 +61,6 @@ void erase_flash_fn(struct k_work *item);
 struct k_work_q erase_q;
 struct k_work erase_work;
 static bool queue_inited = false;
-
-/* Callback context config given to walk callback function. 
- * We can either give the data directly if only one entry (newest),
- * or we can call the callback function for each entry read.
- * If data and len is NULL, cb should be given, and vice versa.
- */
-struct walk_callback_config {
-	uint8_t *data;
-	size_t *len;
-	stg_read_log_cb cb;
-	flash_partition_t p;
-
-	/* Not user configurable. Used by FCB. */
-	off_t offset;
-};
 
 void erase_flash_fn(struct k_work *item)
 {
@@ -260,8 +248,10 @@ int stg_init_storage_controller(void)
 		queue_inited = true;
 	}
 
-	/* Check which ANO partition is active. */
-	set_ano_active_boot();
+	/* Check which ANO partition is active. We just booted, so
+	 * we have to go through every entry.
+	 */
+	update_ano_active_entry(NULL);
 
 	return 0;
 }
@@ -303,14 +293,6 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 		return err;
 	}
 
-	if (partition == STG_PARTITION_ANO) {
-		UBX_MGA_ANO_RAW_t *ano_frame = (UBX_MGA_ANO_RAW_t *)(data);
-		LOG_INF("Wrote frame %i %i %i from sector offset %i",
-			ano_frame->mga_ano.year, ano_frame->mga_ano.month,
-			ano_frame->mga_ano.day,
-			(int)FCB_ENTRY_FA_DATA_OFF(loc));
-	}
-
 	/* Finish entry. */
 	err = fcb_append_finish(fcb, &loc);
 	if (err) {
@@ -332,6 +314,17 @@ int stg_clear_partition(flash_partition_t partition)
 		return -ETIMEDOUT;
 	}
 
+	if (partition == STG_PARTITION_ANO) {
+		active_ano_entry.fe_sector = NULL;
+		active_ano_entry.fe_elem_off = 0;
+
+		last_sent_ano_entry.fe_sector = NULL;
+		last_sent_ano_entry.fe_elem_off = 0;
+	} else if (partition == STG_PARTITION_LOG) {
+		active_log_entry.fe_sector = NULL;
+		active_log_entry.fe_elem_off = 0;
+	}
+
 	struct fcb *fcb = get_fcb(partition);
 	int err = fcb_clear(fcb);
 
@@ -339,136 +332,48 @@ int stg_clear_partition(flash_partition_t partition)
 	return err;
 }
 
-/** @brief Helper function for reading entry from external flash. Calls
- *         the necessary callback function if it's not NULL, stores it
- *         into the config DATA/LEN if no callback is given.
- * 
- * @param[in] config walk callback config containing all the information
- *                   the raw read function requires, such as offsets, lengths,
- *                   target callback, data pointer etc..
- * 
- * @return 0 on success, otherwise negative errno.
- */
-static inline int stg_read_entry_raw(struct walk_callback_config *config)
-{
-	struct fcb *fcb = get_fcb(config->p);
-
-	int err = 0;
-	err = flash_area_read(fcb->fap, config->offset, config->data,
-			      *config->len);
-
-	if (err) {
-		LOG_ERR("Error reading from flash to callback, err %d", err);
-		return err;
-	}
-
-	/* Callback function with the contents to the caller. */
-	err = config->cb(config->data, *config->len);
-
-	if (err) {
-		LOG_ERR("Error from user callback, err %d", err);
-	}
-	return err;
-}
-
-static int walk_cb(struct fcb_entry_ctx *loc_ctx, void *arg)
-{
-	struct walk_callback_config *config =
-		(struct walk_callback_config *)arg;
-
-	config->offset = FCB_ENTRY_FA_DATA_OFF(loc_ctx->loc);
-	*config->len = loc_ctx->loc.fe_data_len;
-
-	/* Allocate buffer for the data. */
-	config->data = (uint8_t *)k_malloc(*config->len);
-	if (config->data == NULL) {
-		LOG_ERR("No memory left for allocation of entry.");
-		return -ENOMEM;
-	}
-
-	int err = stg_read_entry_raw(config);
-	k_free(config->data);
-	return err;
-}
-
-/** @brief Reads fcb partition and callbacks all the entries found on the sector.
- *         If sector == NULL, then we traverse entire storage.
- * 
- * @param partition partition to read from.
- * @param sector sector to read from. If null, read entire partition.
- * @param cb callback that gives the entries found.
- * @param rotate_after_read rotates f_oldest() if true and a sector is given, 
- *                          clears partition if sector == NULL. Does nothing 
- *                          if false.
- * 
- * @return 0 on success, otherwise negative errno.
- */
-static inline int read_fcb_partition(flash_partition_t partition,
-				     struct flash_sector *sector,
-				     stg_read_log_cb cb, bool rotate_after_read)
-{
-	int err = 0;
-
-	/* Check if we have any data available. */
-	struct fcb *fcb = get_fcb(partition);
-	if (fcb_is_empty(fcb)) {
-		err = -ENODATA;
-		return err;
-	}
-
-	/* Length location used to store the entry location used
-	 * filled in later by the storage controller and then given in
-	 * the callback to the caller.
-	 */
-	size_t entry_len;
-
-	/* Construct the config that is used as argument 
-	 * to the callback function, this config contains all information
-	 * the read operation requires. 
-	 */
-	struct walk_callback_config config;
-	config.p = partition;
-	config.len = &entry_len;
-
-	if (cb == NULL) {
-		err = -EINVAL;
-		return err;
-	}
-	config.cb = cb;
-
-	err = fcb_walk(fcb, sector, walk_cb, &config);
-	if (err) {
-		LOG_ERR("Error walking over FCB storage, err %d", err);
-		return err;
-	}
-
-	if (rotate_after_read) {
-		if (sector == NULL) {
-			err = fcb_clear(fcb);
-			if (err) {
-				LOG_ERR("Error clearing FCB after walk, err %d",
-					err);
-			}
-		} else {
-			err = fcb_rotate(fcb);
-		}
-	}
-	return err;
-}
-
-int stg_read_log_data(stg_read_log_cb cb)
+int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 {
 	if (k_mutex_lock(&log_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
 	}
-	int err = read_fcb_partition(STG_PARTITION_LOG, NULL, cb, true);
+
+	if (fcb_is_empty(&log_fcb)) {
+		k_mutex_unlock(&ano_mutex);
+		return -ENODATA;
+	}
+
+	struct fcb_entry start_entry;
+
+	memcpy(&start_entry, &active_log_entry, sizeof(struct fcb_entry));
+
+	int err = fcb_getnext(&log_fcb, &start_entry);
 	if (err) {
+		LOG_ERR("Error fetching next log entry %i", err);
+		k_mutex_unlock(&ano_mutex);
+		return err;
+	}
+
+	err = fcb_walk_from_entry(cb, &log_fcb, &start_entry, num_entries);
+	if (err && err != -EINTR) {
 		LOG_ERR("Error reading from log partition.");
 	}
+
+	/* Update the entry we're currently on. */
+	memcpy(&active_log_entry, &start_entry, sizeof(struct fcb_entry));
+
 	k_mutex_unlock(&log_mutex);
 	return err;
 }
 
+/** @brief When condition is met that we have a valid ANO partition,
+ *         return -EINTR.
+ * @param[in] data data to check
+ * @param[in] len size of data
+ * 
+ * @returns 0 if we want to search more ANO frames.
+ * @returns -EINTR if we found a valid frame, stopping the walk process.
+ */
 int check_if_ano_valid_cb(uint8_t *data, size_t len)
 {
 	UBX_MGA_ANO_RAW_t *ano_frame = (UBX_MGA_ANO_RAW_t *)(data);
@@ -485,57 +390,43 @@ int check_if_ano_valid_cb(uint8_t *data, size_t len)
 	return 0;
 }
 
-static inline void set_ano_active_boot()
+/** @brief Goes through ANO partition data and stops whenever
+ *         it reaches a valid ano frame based on logic from function 
+ *         check_if_ano_valid_cb. When traversing stops with -EINTR, we're done
+ *         and active_ano_entry is kept on RAM for future reads.
+ * 
+ * @param entry Entry to start reading ANO data from. If NULL, traverse entire
+ *              storage.
+ */
+static inline void update_ano_active_entry(struct fcb_entry *entry)
 {
 	if (k_mutex_lock(&ano_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return;
 	}
 
-	int err = fcb_getnext(&ano_fcb, &boot_active_ano_entry);
-	if (err) {
-		k_mutex_unlock(&ano_mutex);
-		return;
+	struct fcb_entry start_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
+	if (entry != NULL) {
+		memcpy(&start_entry, entry, sizeof(struct fcb_entry));
 	}
 
-	while (true) {
-		uint8_t *data = k_malloc(boot_active_ano_entry.fe_data_len);
+	int err = fcb_walk_from_entry(check_if_ano_valid_cb, &ano_fcb,
+				      &start_entry, 0);
 
-		err = flash_area_read(
-			ano_fcb.fap,
-			FCB_ENTRY_FA_DATA_OFF(boot_active_ano_entry), data,
-			boot_active_ano_entry.fe_data_len);
-
-		if (err) {
-			LOG_ERR("Error reading ano to update index %i", err);
-			k_mutex_unlock(&ano_mutex);
-			k_free(data);
-			return;
-		}
-		err = check_if_ano_valid_cb(data,
-					    boot_active_ano_entry.fe_data_len);
-		k_free(data);
-
-		if (err == -EINTR) {
-			LOG_INF("Found oldest valid sector.");
-			LOG_INF("Updated offset to be %i",
-				(int)FCB_ENTRY_FA_DATA_OFF(
-					boot_active_ano_entry));
-			k_mutex_unlock(&ano_mutex);
-			return;
-		}
-
-		err = fcb_getnext(&ano_fcb, &boot_active_ano_entry);
-		if (err) {
-			LOG_ERR("Error getnext %i", err);
-			k_mutex_unlock(&ano_mutex);
-			return;
-		}
+	if (err == -EINTR) {
+		/* Found valid boot partition, copy the entry header. */
+		memcpy(&active_ano_entry, &start_entry,
+		       sizeof(struct fcb_entry));
+	} else if (err == -ENODATA) {
+		LOG_WRN("No ano frames available at ano partition.");
+	} else if (err) {
+		LOG_ERR("Error fetching ANO entries when updating %i", err);
 	}
+
 	k_mutex_unlock(&ano_mutex);
 	return;
 }
 
-int stg_read_ano_data(stg_read_log_cb cb, bool read_from_boot_entry)
+int stg_read_ano_data(fcb_read_cb cb, bool last_valid_ano, uint16_t num_entries)
 {
 	if (k_mutex_lock(&ano_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
@@ -544,80 +435,49 @@ int stg_read_ano_data(stg_read_log_cb cb, bool read_from_boot_entry)
 	int err = 0;
 
 	if (fcb_is_empty(&ano_fcb)) {
-		LOG_WRN("No new ANO frames found on partition.");
+		LOG_WRN("No ano frames found on partition.");
 		k_mutex_unlock(&ano_mutex);
 		return -ENODATA;
 	}
 
-	struct fcb_entry target_entry;
+	struct fcb_entry start_entry;
 
-	if (read_from_boot_entry) {
-		if (boot_active_ano_entry.fe_sector == NULL) {
+	if (last_valid_ano) {
+		if (active_ano_entry.fe_sector == NULL) {
 			k_mutex_unlock(&ano_mutex);
 			return -EINVAL;
 		}
-		memcpy(&target_entry, &boot_active_ano_entry,
+		memcpy(&start_entry, &active_ano_entry,
 		       sizeof(struct fcb_entry));
 	} else {
-		memcpy(&target_entry, &sent_active_ano_entry,
+		memcpy(&start_entry, &last_sent_ano_entry,
 		       sizeof(struct fcb_entry));
-
-		err = fcb_getnext(&ano_fcb, &target_entry);
-		if (err) {
-			LOG_ERR("Error fetching next ano entry %i", err);
-			k_mutex_unlock(&ano_mutex);
-			return err;
-		}
 	}
 
-	while (true) {
-		uint8_t *data = k_malloc(target_entry.fe_data_len);
-
-		err = flash_area_read(ano_fcb.fap,
-				      FCB_ENTRY_FA_DATA_OFF(target_entry), data,
-				      target_entry.fe_data_len);
-
-		if (err) {
-			LOG_ERR("Error reading ano to update index %i", err);
-			k_mutex_unlock(&ano_mutex);
-			k_free(data);
-			return err;
-		}
-
-		UBX_MGA_ANO_RAW_t *ano_frame = (UBX_MGA_ANO_RAW_t *)(data);
-		LOG_INF("Read frame %i %i %i from sector offset %i",
-			ano_frame->mga_ano.year, ano_frame->mga_ano.month,
-			ano_frame->mga_ano.day,
-			(int)FCB_ENTRY_FA_DATA_OFF(target_entry));
-
-		cb(data, target_entry.fe_data_len);
-		k_free(data);
-
-		/** We just sent new data, update the entry pointer. 
-		 * 
-		 * @note We update this pointer to data that has been sent,
-		 * which means the next time we want to read we have
-		 * to call fcb_getnext on sent_active_ano_entry.
-		 */
-		memcpy(&sent_active_ano_entry, &target_entry,
-		       sizeof(struct fcb_entry));
-
-		err = fcb_getnext(&ano_fcb, &target_entry);
-
-		if (err) {
-			/* We end up here if getnext doesn't find next entry
-			 * in which case we have iterated through everything
-			 * and need to break out of the loop. 
-			 */
-			k_mutex_unlock(&ano_mutex);
-			return 0;
-		}
+	err = fcb_getnext(&ano_fcb, &start_entry);
+	if (err) {
+		LOG_ERR("Error fetching next ano entry %i", err);
+		k_mutex_unlock(&ano_mutex);
+		return err;
 	}
+
+	err = fcb_walk_from_entry(cb, &ano_fcb, &start_entry, num_entries);
+
+	if (err && err != -EINTR) {
+		k_mutex_unlock(&ano_mutex);
+		return err;
+	}
+
+	/* We know start_entry has been filled with the last read entry,
+	 * so we can simply memcpy the contents.
+	 */
+	memcpy(&last_sent_ano_entry, &start_entry, sizeof(struct fcb_entry));
+
 	k_mutex_unlock(&ano_mutex);
 	return 0;
 }
 
-int stg_read_pasture_data(stg_read_log_cb cb)
+int stg_read_pasture_data(fcb_read_cb cb)
 {
 	if (k_mutex_lock(&pasture_mutex,
 			 K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {

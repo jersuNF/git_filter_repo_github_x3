@@ -175,7 +175,7 @@ void log_data_periodic_fn()
 	build_log_message();
 
 	/* Read and send out all the log data if any. */
-	int err = stg_read_log_data(read_log_data_cb);
+	int err = stg_read_log_data(read_log_data_cb, 0);
 	if (err) {
 		LOG_ERR("Error reading all sequence messages from storage %i",
 			err);

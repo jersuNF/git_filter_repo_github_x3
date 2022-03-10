@@ -6,6 +6,7 @@
 #define _STORAGE_H_
 
 #include <zephyr.h>
+#include "fcb_ext.h"
 
 /** Used to tell storage controller which region to read/write to. */
 typedef enum {
@@ -57,37 +58,18 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 			   size_t len);
 
 /** 
- * @brief Callback function containing the read entry data. Created
- *        by the caller, which also means we do not 
- *        link in a partition since the caller should have a unique
- *        callback function of what they want to do with the data. We just 
- *        give them some data and a length for every entry.
- * 
- * @param[in] data the raw data pointer.
- * @param[in] len size of the data.
- * 
- * @return 0 on success, otherwise negative errno.
- */
-typedef int (*stg_read_cb)(uint8_t *data, size_t len);
-
-/** 
  * @brief Reads all the new available log data and calls the callback function
  *        with all the unread log entries.
  *        The caller must deal with allocation itself.
  * 
  * @param[in] cb pointer location to the callback function that is 
  *               called during the fcb walk.
+ * @param[in] num_entries number of entries we want to read. If 0, read all.
  * 
  * @return 0 on success 
  * @return -ENODATA if no data available, Otherwise negative errno.
  */
-int stg_read_log_data(stg_read_cb cb);
-
-enum ano_data_read_type {
-	ANO_READ_ALL = 0,
-	ANO_READ_SINCE_BOOT = 1,
-	ANO_READ_SINCE_SENT = 2
-};
+int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries);
 
 /** 
  * @brief Reads newest ano data and stores the data onto 
@@ -95,18 +77,17 @@ enum ano_data_read_type {
  * 
  * @param[in] cb pointer location to the callback function that is 
  *               called during the fcb walk.
- * @param[in] type Determines the read type (which sectors to read). 
- * 
- *                 If ANO_READ_ALL, reads ALL ano entries on flash, no filter.
- *                 If ANO_READ_SINCE_BOOT, reads all ano entries that were
- *                 valid when we booted.
- *                 If ANO_READ_SINCE_SENT, reads all ano entries from where
- *                 we left off on the previous stg_read_ano_data call.
+ * @param[in] last_valid_ano  If false, reads from last known sent ANO frame.
+ *                            If true, reads from active_ano_entry which
+ *                            points to oldest entry with valid ANO data.
+ *                            This pointer is updated using update_ano_active_entry.
+ * @param[in] num_entries number of entries we want to read. If 0, read all.
  * 
  * @return 0 on success 
  * @return -ENODATA if no data available, Otherwise negative errno.
  */
-int stg_read_ano_data(stg_read_cb cb, bool read_from_boot_entry);
+int stg_read_ano_data(fcb_read_cb cb, bool last_valid_ano,
+		      uint16_t num_entries);
 
 /** 
  * @brief Reads the newest pasture and stores the data onto 
@@ -118,7 +99,7 @@ int stg_read_ano_data(stg_read_cb cb, bool read_from_boot_entry);
  * @return 0 on success 
  * @return -ENODATA if no data available, Otherwise negative errno.
  */
-int stg_read_pasture_data(stg_read_cb cb);
+int stg_read_pasture_data(fcb_read_cb cb);
 
 /** 
  * @brief Writes log data to external flash LOG partition.

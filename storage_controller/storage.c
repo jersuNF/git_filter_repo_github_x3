@@ -349,9 +349,8 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 
 	int err = fcb_getnext(&log_fcb, &start_entry);
 	if (err) {
-		LOG_ERR("Error fetching next log entry %i", err);
 		k_mutex_unlock(&ano_mutex);
-		return err;
+		return -ENODATA;
 	}
 
 	err = fcb_walk_from_entry(cb, &log_fcb, &start_entry, num_entries);
@@ -443,10 +442,6 @@ int stg_read_ano_data(fcb_read_cb cb, bool last_valid_ano, uint16_t num_entries)
 	struct fcb_entry start_entry;
 
 	if (last_valid_ano) {
-		if (active_ano_entry.fe_sector == NULL) {
-			k_mutex_unlock(&ano_mutex);
-			return -EINVAL;
-		}
 		memcpy(&start_entry, &active_ano_entry,
 		       sizeof(struct fcb_entry));
 	} else {
@@ -456,9 +451,8 @@ int stg_read_ano_data(fcb_read_cb cb, bool last_valid_ano, uint16_t num_entries)
 
 	err = fcb_getnext(&ano_fcb, &start_entry);
 	if (err) {
-		LOG_ERR("Error fetching next ano entry %i", err);
 		k_mutex_unlock(&ano_mutex);
-		return err;
+		return -ENODATA;
 	}
 
 	err = fcb_walk_from_entry(cb, &ano_fcb, &start_entry, num_entries);

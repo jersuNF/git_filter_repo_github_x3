@@ -23,6 +23,8 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BUZZER_LOG_LEVEL);
 
 const struct device *buzzer_pwm;
 
+#define TIME_PER_STEP_USEC 30
+
 atomic_t current_warn_zone_freq = ATOMIC_INIT(0);
 atomic_t current_type_signal = ATOMIC_INIT(SND_READY_FOR_NEXT_TYPE);
 
@@ -222,8 +224,6 @@ void play_cattle(void)
 		return;
 	}
 }
-
-#define TIME_PER_STEP_USEC 80
 
 void play_welcome(void)
 {

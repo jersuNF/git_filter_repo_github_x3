@@ -42,12 +42,6 @@ if BUZZER
 	config BUZZER_LONGEST_NOTE_SUSTAIN
 		int "Maximum length of sustain notes in s, prevents timeouts on sems."
 		default 10
-		  
-	menu "Message Queues"
-		config MSGQ_SOUND_EVENT_SIZE
-		int "Size of the message queue for sound events"
-		default 4
-	endmenu
 
 	menu "ERROR_HANDLER"
     	rsource "./../../modules/error_handler/Kconfig"

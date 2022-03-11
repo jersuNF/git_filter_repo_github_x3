@@ -42,8 +42,9 @@ static int16_t raw_data;
 	ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)
 #define CHARGING_ADC_CHANNEL 4
 
-#define CURRENT_SENSE_RESISTOR 39ul
-#define CURRENT_SENSE_GAIN 50ul //MAX9634FEKS+
+#define CURRENT_SENSE_RESISTOR 0.039f // In Ohm
+#define CURRENT_SENSE_GAIN 50.0f //MAX9634FEKS+
+#define CURRENT_OFFSET 3.5f // mA
 
 //***DO NOT CHANGE***
 #define MAX_CURRENT_VALUE_mA                                                   \
@@ -116,11 +117,12 @@ int read_analog_charging_channel(void)
 		.buffer = &raw_data, // where to put samples read
 		.buffer_size = sizeof(raw_data),
 		.resolution = CHARGING_ADC_RESOLUTION, // desired resolution
-		.oversampling = 4,
+		.oversampling = 8,
 		.calibrate = true // don't calibrate
 	};
 
-	int32_t sample_value = -ENOENT;
+	int32_t sample_value;
+	float result;
 
 	if (charging_ok) {
 		LOG_INF("Charging okay");
@@ -132,12 +134,18 @@ int read_analog_charging_channel(void)
 				adc_ref_internal(charging_adc_dev),
 				charging_channel_cfg.gain, sequence.resolution,
 				&sample_value);
-			sample_value = ((sample_value * CURRENT_SENSE_GAIN) /
-					CURRENT_SENSE_RESISTOR);
-		}
-	}
+			result = ((float)sample_value /
+				  (CURRENT_SENSE_GAIN *
+				   CURRENT_SENSE_RESISTOR)) -
+				 CURRENT_OFFSET;
 
-	return sample_value;
+			LOG_INF("Charging: %f", result);
+			return (int)result;
+		}
+	} else {
+		return -ENOENT;
+	}
+	return 0;
 }
 
 int init_charging_module(void)

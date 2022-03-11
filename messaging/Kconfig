@@ -14,11 +14,11 @@ if MESSAGING
 		default 4
 
 	config MESSAGING_THREAD_SIZE
-		int "Size of the poller thread"
-		default 8192
+		int "Size of the message processing thread"
+		default 2048
 
 	config MESSAGING_THREAD_PRIORITY
-		int "Priority of the poller thread"
+		int "Priority of the message processing thread"
 		default 1
 		help
 		  A cooperative thread has a negative priority value. 
@@ -30,10 +30,18 @@ if MESSAGING
 		  may be supplanted at any time if a cooperative thread, 
 		  or a preemptible thread of higher or equal priority, 
 		  becomes ready.
-		  
-	config PROTO_POLLER_WORK_SEC
-		int "Seconds between modem poll"
-		default 900
+
+	config MESSAGING_SEND_THREAD_SIZE
+		int "Size of the send to server queue thread"
+		default 2048
+
+	config MESSAGING_SEND_THREAD_PRIORITY
+		int "Priority of the send to server queue thread"
+		default 1
+
+	config BINARY_SEND_TIMEOUT_SEC
+		int "Seconds to wait for cellular ack"
+		default 1
 
 	menu "Message Queues"
 		config MSGQ_BLE_CTRL_SIZE

@@ -15,3 +15,5 @@ target_sources(app PRIVATE
 ./../../events/buzzer/sound_event.c
 ./../../events/error_handler/error_event.c
 )
+
+add_subdirectory(lib)

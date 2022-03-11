@@ -37,4 +37,8 @@ if ANIMAL_MONITOR_CONTROL
 		  may be supplanted at any time if a cooperative thread, 
 		  or a preemptible thread of higher or equal priority, 
 		  becomes ready.
+
+	menu "AMC LIBS"
+	rsource "lib/Kconfig"
+	endmenu # AMC LIBS
 endif

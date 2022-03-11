@@ -39,8 +39,6 @@ int get_pasture_cache(fence_t *fence, size_t *len);
  */
 int set_pasture_cache(uint8_t *fence, size_t len);
 
-/** @note Need to include correct gnss struct. BUILD ERROR. */
-
 /**
  * @brief Fetches the cached gnss data and outputs the
  *        pointer location to the cached gnss area.

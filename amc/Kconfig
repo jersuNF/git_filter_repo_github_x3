@@ -9,7 +9,7 @@ menuconfig ANIMAL_MONITOR_CONTROL
 
 if ANIMAL_MONITOR_CONTROL
 	config AMC_LOG_LEVEL
-		int "Log level for the messaging module"
+		int "Log level for the AMC module"
 		default 4
 	
 	config STATIC_GNSSDATA_SIZE

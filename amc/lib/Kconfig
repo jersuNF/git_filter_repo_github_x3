@@ -1,5 +1,5 @@
 config AMC_LIB_LOG_LEVEL
-	int "Log level for the messaging module"
+	int "Log level for the AMC LIB modules"
 	default 4
 
 config FENCE_CACHE_TIMEOUT_SEC

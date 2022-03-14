@@ -20,8 +20,9 @@
 #include "ble_controller.h"
 #include "msg_data_event.h"
 #include "beacon_processor.h"
+#if CONFIG_BOARD_NF_X25_NRF52840
 #include "ble_dfu.h"
-
+#endif
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_CONTROLLER_LOG_LEVEL);
 
 static void bt_send_work_handler(struct k_work *work);
@@ -560,8 +561,9 @@ int ble_module_init()
 
 	/* Callback to monitor connected/disconnected state */
 	bt_conn_cb_register(&conn_callbacks);
+#if CONFIG_BOARD_NF_X25_NRF52840
 	err = bt_dfu_init();
-
+#endif
 	/* Start scanning after beacons. Set flag to true */
 	if (!atomic_set(&atomic_bt_scan_active, true)) {
 		scan_start();

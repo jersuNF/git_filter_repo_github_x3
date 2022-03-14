@@ -17,8 +17,10 @@
 #include "error_event.h"
 #include "battery.h"
 #include "ble_ctrl_event.h"
-#include "charging.h"
 
+#if CONFIG_ADC_NRFX_SAADC
+#include "charging.h"
+#endif
 #define MODULE pwr_module
 #include <logging/log.h>
 
@@ -113,12 +115,14 @@ int pwr_module_init(void)
 {
 	/* Configure battery voltage and charging adc */
 	battery_setup();
+
+#if CONFIG_ADC_NRFX_SAADC
 	charging_setup();
 
 	/* Initialize and start charging */
 	init_charging_module();
 	start_charging();
-
+#endif
 	/* Set PWR state to NORMAL as initial state */
 	struct pwr_status_event *event = new_pwr_status_event();
 	event->pwr_state = PWR_NORMAL;
@@ -155,10 +159,11 @@ int log_and_fetch_battery_voltage(void)
 	event->cmd = BLE_CTRL_BATTERY_UPDATE;
 	event->param.battery = batt_soc;
 	EVENT_SUBMIT(event);
-
+#if CONFIG_ADC_NRFX_SAADC
 	int charging_current_avg = current_sample_averaged();
 
 	LOG_INF("Voltage: %d mV; State Of Charge: %u precent; Current: %d",
 		batt_mV, batt_soc, charging_current_avg);
+#endif
 	return batt_mV;
 }

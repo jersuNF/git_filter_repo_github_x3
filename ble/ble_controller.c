@@ -20,6 +20,7 @@
 #include "ble_controller.h"
 #include "msg_data_event.h"
 #include "beacon_processor.h"
+#include "ble_beacon_event.h"
 #if CONFIG_BOARD_NF_X25_NRF52840
 #include "ble_dfu.h"
 #endif
@@ -517,17 +518,25 @@ static bool data_cb(struct bt_data *data, void *user_data)
 static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 		    struct net_buf_simple *buf)
 {
+	int err;
 	adv_data_t adv_data;
 	/* Extract major_id, minor_id, tx rssi and uuid */
 	bt_data_parse(buf, data_cb, (void *)&adv_data);
 	if (adv_data.major == BEACON_MAJOR_ID &&
 	    adv_data.minor == BEACON_MINOR_ID) {
 		const uint32_t now = k_uptime_get_32();
-		beacon_process_event(now, addr, rssi, &adv_data);
-
-		/* Beacon found. Reset 60 seconds scan_stop countdown */
-		beacon_scanner_timer = k_uptime_get();
+		err = beacon_process_event(now, addr, rssi, &adv_data);
+		if (err == -EIO) {
+			/* Beacon is found but out of desired range */
+			struct ble_beacon_event *event = new_ble_beacon_event();
+			event->status = BEACON_STATUS_NOT_FOUND;
+			EVENT_SUBMIT(event);
+		} else {
+			/* Beacon found. Reset 60 seconds scan_stop countdown */
+			beacon_scanner_timer = k_uptime_get();
+		}
 	}
+
 	int delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
 	if (delta_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
 		/* Stop beacon scanner */

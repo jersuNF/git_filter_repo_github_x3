@@ -343,7 +343,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 
 	if (shortest_dist == UINT8_MAX) {
 		cross_type = CROSS_UNDEFINED;
-		event->status = BEACON_STATUS_NOT_FOUND;
+		event->status = BEACON_STATUS_NOT_FOUND; 
 
 	} else if (shortest_dist > CONFIG_BEACON_HIGH_LIMIT) {
 		cross_type = CROSS_UNDEFINED;

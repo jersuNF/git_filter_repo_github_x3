@@ -10,6 +10,11 @@
 #define STACK_SIZE 1024
 #define PRIORITY 7
 
+#define GPS_1SEC			1000
+#define GPS_5SEC			(GPS_1SEC * 5)
+#define GPS_10SEC			(GPS_1SEC * 10)
+#define GPS_20SEC			(GPS_1SEC * 20)
+
 K_SEM_DEFINE(new_data_sem, 0, 1);
 K_SEM_DEFINE(last_fix_sem, 0, 1);
 
@@ -18,20 +23,25 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_GNSS_CONTROLLER_LOG_LEVEL);
 
 #define MIN_GNSS_RATE CONFIG_MINIMUM_ALLOWED_GNSS_RATE
 
-void publish_gnss_data(void);
-void publish_last_fix(void);
+_Noreturn void publish_gnss_data(void);
+_Noreturn void publish_last_fix(void);
 void set_gnss_rate(enum gnss_data_rate);
 static int gnss_data_update_cb(const gnss_struct_t*);
 static int last_fix_update_cb(const gnss_last_fix_struct_t*);
+void check_gnss_age(uint32_t);
+
 static uint16_t current_rate;
 
 static gnss_struct_t gnss_data_buffer;
 static gnss_last_fix_struct_t last_fix_buffer;
+uint32_t gnss_age;
+enum gnss_mode current_mode;
 
 gnss_struct_t cached_gnss_data;
 gnss_last_fix_struct_t cached_last_fix;
 
 const struct device *gnss_dev = NULL;
+bool m_u8_GPSFresh;
 
 int gnss_controller_init(void){
 	printk("Initializing gnss controller!\n");
@@ -54,7 +64,7 @@ int gnss_controller_init(void){
 		nf_app_error(GPS_CONTROLLER, ret, msg, sizeof(*msg));
 		return ret;
 	}
-	ret = gnss_setup(gnss_dev, true);
+	ret = gnss_setup(gnss_dev, false);
 	if(ret != 0){
 		char* msg = "Failed to set up GNSS receiver!";
 		nf_app_error(GPS_CONTROLLER, ret, msg, sizeof(*msg));
@@ -63,6 +73,12 @@ int gnss_controller_init(void){
 	ret = gnss_get_rate(gnss_dev, &current_rate);
 	if(ret != 0){
 		char* msg = "Failed to get GNSS receiver data rate!";
+		nf_app_error(GPS_CONTROLLER, ret, msg, sizeof(*msg));
+		return ret;
+	}
+	ret = gnss_get_mode(gnss_dev, &current_mode);
+	if(ret != 0){
+		char* msg = "Failed to get GNSS receiver mode!";
 		nf_app_error(GPS_CONTROLLER, ret, msg, sizeof(*msg));
 		return ret;
 	}
@@ -76,9 +92,9 @@ K_THREAD_DEFINE(pub_fix, STACK_SIZE,
 		publish_last_fix, NULL, NULL, NULL,
 		PRIORITY, 0, 0);
 
-void publish_gnss_data(){
+
+_Noreturn void publish_gnss_data(){
 	while(true){
-//		K_SLEEP(K_SECONDS(0.1));
 		if(k_sem_take(&new_data_sem, K_FOREVER) == 0){
 			struct new_gnss_data* new_data = new_new_gnss_data();
 			new_data->gnss_data = gnss_data_buffer;
@@ -90,9 +106,11 @@ void publish_gnss_data(){
 	}
 }
 
-void publish_last_fix(){
+_Noreturn void publish_last_fix(){
 	while(true){
 		if(k_sem_take(&last_fix_sem, K_FOREVER) == 0){
+			gnss_age = k_uptime_get_32() - gnss_age;
+			check_gnss_age(gnss_age);
 			struct new_gnss_fix* new_fix = new_new_gnss_fix();
 			new_fix->fix = last_fix_buffer;
 			/* TODO: protect cached data */
@@ -120,7 +138,7 @@ static bool gnss_controller_event_handler(const struct event_header *eh)
 	if (is_gnss_rate(eh)) {
 		struct gnss_rate *ev =
 			cast_gnss_rate(eh);
-		if (ev->rate >= MIN_GNSS_RATE  && current_rate != ev->rate){
+			if (ev->rate >= MIN_GNSS_RATE  && current_rate != ev->rate){
 			int ret = gnss_set_rate(gnss_dev, ev->rate);
 			if (ret != 0){
 				char* msg = "Failed to set GNSS receiver data "
@@ -132,10 +150,31 @@ static bool gnss_controller_event_handler(const struct event_header *eh)
 		}
 		return false;
 	} else if (is_gnss_switch_off(eh)) {
+		int ret = gnss_switch_off(gnss_dev);
+		if (ret != 0){
+			char* msg = "Failed to switch OFF GNSS receiver!";
+			nf_app_error(GPS_CONTROLLER, ret, msg, sizeof(*msg));
+		}
 		return false;
 	} else if (is_gnss_switch_on(eh)) {
+		int ret = gnss_switch_on(gnss_dev);
+		if (ret != 0){
+			char* msg = "Failed to switch ON GNSS receiver!";
+			nf_app_error(GPS_CONTROLLER, ret, msg, sizeof(*msg));
+		}
 		return false;
 	} else if (is_gnss_set_mode(eh)) {
+		struct gnss_set_mode *ev =
+			cast_gnss_set_mode(eh);
+		if (ev->mode!= current_mode){
+			int ret = gnss_set_mode(gnss_dev, ev->mode);
+			if (ret != 0){
+				char* msg = "Failed to set GNSS receiver mode";
+				nf_app_error(GPS_CONTROLLER, ret, msg, sizeof(*msg));
+				return false;
+			}
+			current_mode = ev->mode;
+		}
 		return false;
 	}
 	return false;
@@ -147,29 +186,41 @@ EVENT_SUBSCRIBE(MODULE, gnss_switch_off);
 EVENT_SUBSCRIBE(MODULE, gnss_switch_on);
 EVENT_SUBSCRIBE(MODULE, gnss_set_mode);
 
-//void set_gnss_rate(enum gnss_data_rate new_rate){
-//	uint16_t *current_rate = NULL;
-//	int ret, err;
-//	err = gnss_get_rate(gnss_dev, current_rate);
-//	if(err){
-//		printk("Failed to get GNSS rate: %d\n", err);
-//		return;
-//	}
-//	switch (new_rate){
-//	case LOW:
-//		ret = gnss_set_rate(gnss_dev, 1000);
-//		if (ret){
-//			printk("Failed to set GNSS rate to 1000ms: %d\n", ret);
-//			return;
-//		}
-//		break;
-//	case HIGH:
-//		ret = gnss_set_rate(gnss_dev, 250);
-//		if (ret){
-//			printk("Failed to set GNSS rate to 250ms: %d\n", ret);
-//			return;
-//		}
-//		break;
-//	}
-//	return;
-//}
+// Name			:	gpsp_TestGPSData
+// Description	:	Tests GPS data, and resets GPS if the FixAge is too big
+//					If the GPS was reset, then the GPSFresh status is set to 0
+// Return value	:	None
+void check_gnss_age(uint32_t gnss_age) {
+	static uint8_t myGPSResetDone;
+
+	if (m_u8_GPSFresh) {
+		myGPSResetDone = 0;
+	}
+
+//	if ((GPS_GetProgressMode() == 0) && (GPS_GetMode() >= GPSMODE_CAUTION))
+		// Only if GPS runs in max performance mode
+	{
+
+		if ((gnss_age > GPS_5SEC) && (myGPSResetDone < 1)) {
+			myGPSResetDone++;
+			struct gnss_no_zone *noZone = new_gnss_no_zone();
+			EVENT_SUBMIT(noZone);
+			gnss_reset(gnss_dev, GNSS_RESET_MASK_HOT, mode);
+			//TODO increase counter to report how often this occurs
+		} else if (gnss_age > GPS_10SEC && myGPSResetDone < 2) {
+			myGPSResetDone++;
+			struct gnss_no_zone *noZone = new_gnss_no_zone();
+			EVENT_SUBMIT(noZone);
+			gnss_reset(gnss_dev, GNSS_RESET_MASK_WARM, mode);
+		} else if (gnss_age > GPS_20SEC && myGPSResetDone < 3) {
+			myGPSResetDone++;
+			struct gnss_no_zone *noZone = new_gnss_no_zone();
+			EVENT_SUBMIT(noZone);
+			gnss_reset(gnss_dev, GNSS_RESET_MASK_COLD, mode);
+		}
+	}
+
+	if (myGPSResetDone > 0) {
+		m_u8_GPSFresh = false;
+	}
+}

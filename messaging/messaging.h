@@ -9,10 +9,6 @@
 #include "event_manager.h"
 #include "collar_protocol.h"
 
-extern struct k_sem ble_ctrl_sem;
-extern struct k_sem ble_data_sem;
-extern struct k_sem lte_proto_sem;
-
 typedef struct {
 	Mode collar_mode;
 	CollarStatus collar_status;

@@ -82,9 +82,24 @@ int gnss_controller_init(void){
 		nf_app_error(GPS_CONTROLLER, ret, msg, sizeof(*msg));
 		return ret;
 	}
-	LOG_WRN("Attempting GNSS stop!\n");
-	gnss_reset(gnss_dev, GNSS_RESET_MASK_COLD, GNSS_RESET_MODE_GNSS_STOP);
-	LOG_WRN("Finished GNSS stop!\n");
+	while (true){
+		k_sleep(K_SECONDS(10));
+		LOG_WRN("Attempting GNSS stop!\n");
+		ret = gnss_reset(gnss_dev, GNSS_RESET_MASK_COLD,
+				 GNSS_RESET_MODE_GNSS_STOP);
+		if (ret != 0){
+			LOG_WRN("Finished GNSS stop!\n");
+		}
+
+		k_sleep(K_SECONDS(20));
+		LOG_WRN("Attempting GNSS start!\n");
+		ret = gnss_reset(gnss_dev, GNSS_RESET_MASK_COLD,
+				 GNSS_RESET_MODE_GNSS_START);
+		if (ret != 0){
+			LOG_WRN("Finished GNSS start!\n");
+		}
+	}
+
 	return 0;
 }
 K_THREAD_DEFINE(pub_gnss, STACK_SIZE,

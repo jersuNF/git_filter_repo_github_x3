@@ -73,10 +73,6 @@ static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
 bool m_confirm_acc_limits, m_confirm_ble_key, m_transfer_boot_params;
 bool send_out_ack, use_server_time;
 
-K_SEM_DEFINE(ble_ctrl_sem, 0, 1);
-K_SEM_DEFINE(ble_data_sem, 0, 1);
-K_SEM_DEFINE(lte_proto_sem, 0, 1);
-
 K_MUTEX_DEFINE(send_binary_mutex);
 
 #define MODULE messaging
@@ -379,8 +375,6 @@ static inline void process_ble_ctrl_event(void)
 		LOG_ERR("Error getting ble_ctrl_event: %d\n", err);
 		return;
 	}
-	LOG_INF("Processed ble_ctrl_event.\n");
-	k_sem_give(&ble_ctrl_sem);
 }
 
 static inline void process_ble_data_event(void)
@@ -392,8 +386,6 @@ static inline void process_ble_data_event(void)
 		LOG_ERR("Error getting ble_data_event: %d\n", err);
 		return;
 	}
-	LOG_INF("Processed ble_data_event.\n");
-	k_sem_give(&ble_data_sem);
 }
 
 static void process_lte_proto_event(void)
@@ -405,8 +397,6 @@ static void process_lte_proto_event(void)
 		LOG_ERR("Error getting lte_proto_event: %d\n", err);
 		return;
 	}
-	LOG_INF("Processed lte_proto_msgq.\n");
-	k_sem_give(&lte_proto_sem);
 
 	NofenceMessage proto;
 	err = collar_protocol_decode(ev.buf + 2, ev.len - 2, &proto);
@@ -417,9 +407,8 @@ static void process_lte_proto_event(void)
 		printk("\\x%02x", *buf);
 		buf++;
 	}
-	printk("\n");
 	if (err) {
-		LOG_ERR("Error decoding protobuf message.\n");
+		LOG_ERR("Error decoding protobuf message. %i", err);
 		return;
 	}
 	struct messaging_ack_event *ack = new_messaging_ack_event();

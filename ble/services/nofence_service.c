@@ -101,7 +101,7 @@ ssize_t write_command_char(struct bt_conn *conn,
 
 		/* Submit event to messaging module. */
 		struct ble_cmd_event *ev = new_ble_cmd_event();
-		ev->cmd = *cmd_char;
+		ev->cmd = nofence_data.cmd[0];
 		EVENT_SUBMIT(ev);
 	} else {
 		LOG_ERR("Size %d of written command char is too long", len);

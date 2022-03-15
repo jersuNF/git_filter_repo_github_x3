@@ -50,3 +50,11 @@ config BEACON_MAX_BROADCASTERS
 config BEACON_MAX_MEASUREMENT_AGE
 	int "Max age of measurements in buffer. Given in seconds"
 	default 10
+
+config BEACON_SCAN_DURATION
+	int "Set the beacon scan duration in seconds"
+	default 14
+
+config BEACON_SCAN_PERIODIC_INTERVAL
+	int "Set the periodic interval to start beacon scanner. In seconds"
+	default 60

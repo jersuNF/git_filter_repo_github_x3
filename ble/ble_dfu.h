@@ -8,7 +8,6 @@
 /**
  * @brief Initialize the SMP service to do BLE FOTA 
  * 
- * @param[in] dev Runtime device. Attribute unused
  * @return 0 on success, negative error code on faliure
  */
 int bt_dfu_init(void);

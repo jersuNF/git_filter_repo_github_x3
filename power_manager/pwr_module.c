@@ -87,8 +87,8 @@ static void battery_poll_work_fn()
 			if (charging_in_progress()) {
 				stop_charging();
 			}
-#endif
 		}
+#endif
 		break;
 
 	case PWR_LOW:

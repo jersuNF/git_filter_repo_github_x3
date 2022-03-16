@@ -28,11 +28,11 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_SERVICE_LOG_LEVEL);
 
 // Filled with dummy data for test
 struct nofence_service_data nofence_data = {
-	.cmd = { 1 },
-	.frame_char = { 1 },
-	.pb_response_char = { 1, 2, 3, 4, 5, 6, 7, 8 },
-	.pwd_char = { 1, 2, 3, 4, 5, 6, 7, 8 },
-	.version_char = { 1 }
+	.cmd = { 0 },
+	.frame_char = { 0 },
+	.pb_response_char = { 0, 0, 0, 0, 0, 0, 0, 0 },
+	.pwd_char = { 0, 0, 0, 0, 0, 0, 0, 0 },
+	.version_char = { 0 }
 };
 
 static struct bt_uuid_128 bt_uuid_nofence_service =

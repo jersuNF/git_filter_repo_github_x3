@@ -54,4 +54,10 @@ int current_sample_averaged(void);
  */
 int charging_setup(void);
 
+/** 
+ * @brief Check if charging is running
+ * @return true if charging is enabled, false otherwise
+ */
+bool charging_in_progress(void);
+
 #endif /* _CHARGING_H_ */

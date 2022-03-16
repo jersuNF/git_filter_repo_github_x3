@@ -35,6 +35,10 @@ if POWER_MANAGER
         int "Battery threshold defined in mV to enter critical state"
         default 3250
 
+        config BATTERY_HIGH
+        int "Battery threshold defined in mV where we should stop charging"
+        default 4200
+
         config BATTERY_MOVING_AVERAGE_SAMPLES
         int "Number of moving average samples to be considered. Higher number gives smoother voltage change"
         default 300

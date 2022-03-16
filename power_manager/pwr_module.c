@@ -49,6 +49,7 @@ static const struct battery_level_point levels[] = {
 
 };
 
+/* Define the workers for battery and charger */
 static struct k_work_delayable battery_poll_work;
 static struct k_work_delayable charging_poll_work;
 
@@ -79,6 +80,13 @@ static void battery_poll_work_fn()
 		    CONFIG_BATTERY_LOW - CONFIG_BATTERY_THRESHOLD) {
 			current_state = PWR_LOW;
 		}
+#if CONFIG_ADC_NRFX_SAADC
+		else if (batt_voltage > CONFIG_BATTERY_HIGH) {
+			if (charging_in_progress()) {
+				stop_charging();
+			}
+#endif
+		}
 		break;
 
 	case PWR_LOW:
@@ -91,6 +99,11 @@ static void battery_poll_work_fn()
 		}
 		break;
 	case PWR_CRITICAL:
+#if CONFIG_ADC_NRFX_SAADC
+		if (!charging_in_progress()) {
+			start_charging();
+		}
+#endif
 		if (batt_voltage >
 		    (CONFIG_BATTERY_CRITICAL + CONFIG_BATTERY_THRESHOLD)) {
 			current_state = PWR_LOW;

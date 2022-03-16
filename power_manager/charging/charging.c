@@ -34,6 +34,9 @@ static bool charging_ok;
 #define BUFFER_SIZE 6
 static int16_t raw_data;
 
+/* Atomic variable to check if charging is active or not */
+static atomic_t charging_active = false;
+
 #define CHARGING_ADC_DEVICE_NAME DT_LABEL(DT_ALIAS(charging_current))
 #define CHARGING_ADC_RESOLUTION 14
 #define CHARGING_ADC_GAIN ADC_GAIN_1
@@ -207,7 +210,7 @@ int start_charging(void)
 		LOG_ERR("Could not enable charging dcdc pin");
 		return err;
 	}
-
+	atomic_set(&charging_active, true);
 	return 0;
 }
 
@@ -238,7 +241,7 @@ int stop_charging(void)
 		LOG_ERR("Could not disable charging load pin");
 		return err;
 	}
-
+	atomic_set(&charging_active, false);
 	return 0;
 }
 
@@ -253,4 +256,12 @@ int current_sample_averaged(void)
 	uint16_t avg_current_value =
 		approx_moving_average(&IchrgSMA, current_ma);
 	return avg_current_value;
+}
+
+bool charging_in_progress(void)
+{
+	if (atomic_get(&charging_active)) {
+		return true;
+	}
+	return false;
 }

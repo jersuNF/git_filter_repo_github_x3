@@ -34,6 +34,9 @@
 
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
 
+static pasture_t *pasture_rec_cache;
+static size_t pasture_rec_size;
+
 uint32_t time_from_server;
 
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
@@ -106,6 +109,16 @@ K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_SIZE,
 		CONFIG_MESSAGING_THREAD_PRIORITY, 0, 0);
 
 K_KERNEL_STACK_DEFINE(messaging_send_thread, CONFIG_MESSAGING_SEND_THREAD_SIZE);
+
+void cleanup_pasture_cache(void)
+{
+	if (pasture_rec_cache == NULL) {
+		return;
+	}
+	for (int i = 0; i < pasture_rec_cache->m.ul_total_fences; i++) {
+		fence_t *target_fence = pasture_rec_cache->fences[i];
+	}
+}
 
 void build_log_message()
 {
@@ -814,11 +827,6 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	 * in a pasture request.
 	 */
 	if (frame == 0) {
-		/* Clear any previous pasture.. */
-		err = stg_clear_partition(STG_PARTITION_PASTURE);
-		if (err) {
-			return err;
-		}
 	}
 
 	/* Check for each frame, fence or pasture, or when finished?????
@@ -840,12 +848,12 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	fence->header.n_points = num_points;
 	fence->header.us_id = fenceResp->m.xFence.usId;
 
-	err = stg_write_pasture_data((uint8_t *)&fence, fence_size);
-	if (err) {
-		return err;
-	}
-
 	if (frame == fenceResp->ucTotalFrames - 1) {
+		/* Write entire pasture. This deleted any existing fences. */
+		err = stg_write_pasture_data((uint8_t *)&fence, fence_size);
+		if (err) {
+			return err;
+		}
 		return DOWNLOAD_COMPLETE;
 	}
 

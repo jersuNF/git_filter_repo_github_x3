@@ -34,8 +34,8 @@ static uint16_t current_rate;
 
 static gnss_struct_t gnss_data_buffer;
 static gnss_last_fix_struct_t last_fix_buffer;
-uint32_t gnss_age;
-enum gnss_mode current_mode;
+uint32_t gnss_age, temp_age;
+enum gnss_mode current_mode = GPSMODE_NOMODE;
 
 gnss_struct_t cached_gnss_data;
 gnss_last_fix_struct_t cached_last_fix;
@@ -127,7 +127,12 @@ _Noreturn void publish_gnss_data(){
 _Noreturn void publish_last_fix(){
 	while(true){
 		if(k_sem_take(&last_fix_sem, K_FOREVER) == 0){
-			gnss_age = k_uptime_get_32() - gnss_age;
+			temp_age = k_uptime_get_32();
+			if (temp_age > gnss_age){
+				gnss_age = temp_age - gnss_age;
+			} else{ //handle overflow
+				gnss_age = UINT32_MAX + temp_age - gnss_age;
+			}
 			check_gnss_age(&gnss_age);
 			struct new_gnss_fix* new_fix = new_new_gnss_fix();
 			new_fix->fix = last_fix_buffer;

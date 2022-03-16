@@ -50,6 +50,7 @@ static const struct battery_level_point levels[] = {
 };
 
 static struct k_work_delayable battery_poll_work;
+static struct k_work_delayable charging_poll_work;
 
 /** @brief Periodic battery voltage work function */
 static void battery_poll_work_fn()
@@ -110,18 +111,57 @@ static void battery_poll_work_fn()
 	k_work_reschedule(&battery_poll_work,
 			  K_SECONDS(CONFIG_BATTERY_POLLER_WORK_SEC));
 }
+#if CONFIG_ADC_NRFX_SAADC
+/** @brief Periodic solar charging work function */
+static void charging_poll_work_fn()
+{
+	int charging_current_avg = current_sample_averaged();
+	if (charging_current_avg < 0) {
+		LOG_ERR("Failed to fetch charging data %d",
+			charging_current_avg);
+		char *msg = "Unable fetch charging data";
+		nf_app_error(ERR_PWR_MODULE, charging_current_avg, msg,
+			     strlen(msg));
+		return;
+	}
+	LOG_INF("Solar charging current: %d mA", charging_current_avg);
+	struct pwr_status_event *event = new_pwr_status_event();
+	event->pwr_state = PWR_CHARGING;
+	event->charging_ma = charging_current_avg;
+	EVENT_SUBMIT(event);
+	k_work_reschedule(&charging_poll_work,
+			  K_SECONDS(CONFIG_CHARGING_POLLER_WORK_SEC));
+}
+#endif
 
 int pwr_module_init(void)
 {
+	int err;
 	/* Configure battery voltage and charging adc */
-	battery_setup();
+	err = battery_setup();
+	if (err) {
+		char *e_msg = "Failed to set up battery";
+		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
+		return err;
+	}
 
 #if CONFIG_ADC_NRFX_SAADC
-	charging_setup();
-
 	/* Initialize and start charging */
-	init_charging_module();
-	start_charging();
+	err = charging_setup();
+	err = init_charging_module();
+	if (err) {
+		LOG_ERR("Failed to init charging module %d", err);
+		char *e_msg = "Failed to configure or setup charging";
+		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
+		return err;
+	}
+	err = start_charging();
+	if (err) {
+		LOG_ERR("Failed to start charging %d", err);
+		char *e_msg = "Failed to start solar charging";
+		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
+		return err;
+	}
 #endif
 	/* Set PWR state to NORMAL as initial state */
 	struct pwr_status_event *event = new_pwr_status_event();
@@ -130,7 +170,7 @@ int pwr_module_init(void)
 	current_state = PWR_NORMAL;
 
 	/* NB: Battery is already initialized with SYS_INIT in battery.c */
-	int err = log_and_fetch_battery_voltage();
+	err = log_and_fetch_battery_voltage();
 	if (err < 0) {
 		char *e_msg = "Error in fetching battery voltage";
 		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
@@ -142,6 +182,12 @@ int pwr_module_init(void)
 	k_work_reschedule(&battery_poll_work,
 			  K_SECONDS(CONFIG_BATTERY_POLLER_WORK_SEC));
 
+#if CONFIG_ADC_NRFX_SAADC
+	/* Initialize and start periodic charging poll function */
+	k_work_init_delayable(&charging_poll_work, charging_poll_work_fn);
+	k_work_reschedule(&charging_poll_work,
+			  K_SECONDS(CONFIG_CHARGING_POLLER_WORK_SEC));
+#endif
 	return 0;
 }
 
@@ -159,11 +205,9 @@ int log_and_fetch_battery_voltage(void)
 	event->cmd = BLE_CTRL_BATTERY_UPDATE;
 	event->param.battery = batt_soc;
 	EVENT_SUBMIT(event);
-#if CONFIG_ADC_NRFX_SAADC
-	int charging_current_avg = current_sample_averaged();
 
-	LOG_INF("Voltage: %d mV; State Of Charge: %u precent; Current: %d",
-		batt_mV, batt_soc, charging_current_avg);
-#endif
+	LOG_INF("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
+		batt_soc);
+
 	return batt_mV;
 }

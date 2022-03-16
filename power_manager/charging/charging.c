@@ -125,7 +125,6 @@ int read_analog_charging_channel(void)
 	float result;
 
 	if (charging_ok) {
-		LOG_INF("Charging okay");
 		int ret = adc_read(charging_adc_dev, &sequence);
 		sequence.calibrate = false;
 		if (ret == 0) {
@@ -139,7 +138,6 @@ int read_analog_charging_channel(void)
 				   CURRENT_SENSE_RESISTOR)) -
 				 CURRENT_OFFSET;
 
-			LOG_INF("Charging: %f", result);
 			return (int)result;
 		}
 	} else {
@@ -179,6 +177,10 @@ int init_charging_module(void)
 int start_charging(void)
 {
 	int err;
+	if (!charging_ok) {
+		LOG_ERR("Could not start charging. Remember to call charging_setup() first");
+		return -EPIPE;
+	}
 	if (!device_is_ready(charging_load_dev)) {
 		/* Not ready, do not use */
 		LOG_ERR("CHARGING_LOAD_DEV not ready or proper initialized");

@@ -51,7 +51,9 @@ static const struct battery_level_point levels[] = {
 
 /* Define the workers for battery and charger */
 static struct k_work_delayable battery_poll_work;
+#if CONFIG_ADC_NRFX_SAADC
 static struct k_work_delayable charging_poll_work;
+#endif
 
 /** @brief Periodic battery voltage work function */
 static void battery_poll_work_fn()

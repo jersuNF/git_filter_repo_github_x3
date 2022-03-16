@@ -611,12 +611,24 @@ int stg_fcb_reset_and_init()
 
 bool stg_log_pointing_to_last()
 {
+	if (k_mutex_lock(&log_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+		return false;
+	}
+
+	if (fcb_is_empty(&log_fcb)) {
+		k_mutex_unlock(&log_mutex);
+		return false;
+	}
+
 	struct fcb_entry test_entry;
 	memcpy(&test_entry, &active_log_entry, sizeof(struct fcb_entry));
 
 	if (fcb_getnext(&log_fcb, &test_entry) != 0) {
+		k_mutex_unlock(log_mutex);
 		return true;
 	}
+
+	k_mutex_unlock(log_mutex);
 	return false;
 }
 

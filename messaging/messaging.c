@@ -162,7 +162,9 @@ void log_data_periodic_fn()
 		LOG_INF("No log data available on flash for sending.");
 	}
 
-	/* If all entries has been consumed, empty storage. */
+	/* If all entries has been consumed, empty storage
+	 * and we HAVE data on the partition. 
+	 */
 	if (stg_log_pointing_to_last()) {
 		err = stg_clear_partition(STG_PARTITION_LOG);
 		if (err) {
@@ -190,10 +192,10 @@ void modem_poll_work_fn()
 		LOG_DBG("Building poll request!\n");
 		build_poll_request(&new_poll_msg);
 		k_sem_give(&cache_lock_sem);
-	}
 
-	LOG_INF("Messaging - Sending new message!\n");
-	encode_and_send_message(&new_poll_msg);
+		LOG_INF("Messaging - Sending new message!\n");
+		encode_and_send_message(&new_poll_msg);
+	}
 
 	k_work_reschedule_for_queue(
 		&send_q, &modem_poll_work,
@@ -437,6 +439,7 @@ void messaging_thread_fn()
 void messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module!\n");
+
 	k_work_queue_init(&send_q);
 	k_work_queue_start(&send_q, messaging_send_thread,
 			   K_THREAD_STACK_SIZEOF(messaging_send_thread),

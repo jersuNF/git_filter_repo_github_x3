@@ -1,3 +1,9 @@
 menuconfig CELLULAR_CONTROLLER
 	bool "Cellular controller module"
 	default y
+
+if CELLULAR_CONTROLLER
+	config CELLULAR_CONTROLLER_VERBOSE
+		bool "Verbose output from cellular controller"
+		default n
+endif

@@ -12,7 +12,7 @@
 #include "lte_proto_event.h"
 
 #include "cellular_controller_events.h"
-#include "gps_controller_events.h"
+#include "gnss_controller_events.h"
 #include "request_events.h"
 #include "nf_version.h"
 #include "collar_protocol.h"
@@ -32,7 +32,7 @@ uint32_t time_from_server;
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
 
 collar_state_struct_t current_state;
-gps_last_fix_struct_t cached_fix;
+gnss_last_fix_struct_t cached_fix;
 
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
@@ -52,8 +52,8 @@ uint8_t process_ano_msg(UbxAnoReply *);
 int send_message(NofenceMessage *);
 void messaging_thread_fn(void);
 
-_DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *);
-bool proto_hasLastKnownDatePos(const gps_last_fix_struct_t *);
+_DatePos proto_getLastKnownDatePos(gnss_last_fix_struct_t *);
+bool proto_hasLastKnownDatePos(const gnss_last_fix_struct_t *);
 static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t,
 					    uint8_t);
 bool m_confirm_acc_limits, m_confirm_ble_key, m_transfer_boot_params;
@@ -184,26 +184,14 @@ static bool event_handler(const struct event_header *eh)
 		send_out_ack = true;
 		return false;
 	}
-	if (is_new_gps_fix(eh)) {
-		struct new_gps_fix *ev = cast_new_gps_fix(eh);
+	if (is_new_gnss_fix(eh)) {
+		struct new_gnss_fix *ev = cast_new_gnss_fix(eh);
 		if (!k_sem_take(&cache_lock_sem, K_SECONDS(0.1))) {
 			cached_fix = ev->fix;
 			k_sem_give(&cache_lock_sem);
 		}
 		return false;
 	}
-	if (is_request_ano_event(eh)) {
-		request_ano_frame(54, 0);
-		//request frame 0
-		first_ano_frame = true;
-		LOG_WRN("Requesting ano data!\n");
-		int ret = request_ano_frame(0, 0);
-		if (ret == 0){
-			first_ano_frame = false;
-		}
-		return false;
-	}
-
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -526,7 +514,7 @@ void proto_InitHeader(NofenceMessage *msg)
 		msg->header.ulUnixTimestamp = time_from_server;
 	}
 	else{
-		msg->header.ulUnixTimestamp = cached_fix.unixTimestamp;
+		msg->header.ulUnixTimestamp = cached_fix.unix_timestamp;
 	}
 }
 
@@ -705,25 +693,25 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 	return rec_ano_frames;
 }
 
-_DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *gpsLastFix)
+_DatePos proto_getLastKnownDatePos(gnss_last_fix_struct_t *gpsLastFix)
 {
 	bool valid_headVeh = (bool)(gpsLastFix->pvt_flags &
 				    GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK);
 	_DatePos a = {
-		.lLat = gpsLastFix->Lat,
-		.lLon = gpsLastFix->Lon,
-		.usHorizontalAccDm = gpsLastFix->hAccDm,
-		.ulUnixTimestamp = gpsLastFix->unixTimestamp,
+		.lLat = gpsLastFix->lat,
+		.lLon = gpsLastFix->lon,
+		.usHorizontalAccDm = gpsLastFix->h_acc_dm,
+		.ulUnixTimestamp = gpsLastFix->unix_timestamp,
 		.has_sHeadVeh = valid_headVeh,
-		.sHeadVeh = gpsLastFix->headVeh,
+		.sHeadVeh = gpsLastFix->head_veh,
 		.has_usHeadAcc = valid_headVeh,
-		.usHeadAcc = gpsLastFix->headAcc,
+		.usHeadAcc = gpsLastFix->head_acc,
 		.has_ucNumSV = true,
-		.ucNumSV = gpsLastFix->numSV,
+		.ucNumSV = gpsLastFix->num_sv,
 		.has_usHDOP = true,
-		.usHDOP = gpsLastFix->hdop,
+		.usHDOP = gpsLastFix->h_dop,
 		.has_lHeight = true,
-		.lHeight = gpsLastFix->Height,
+		.lHeight = gpsLastFix->height,
 #if defined(HW_BAROMETER)
 		.has_usHeight = true,
 		.usHeight = gpsLastFix->baro_Height,
@@ -734,9 +722,9 @@ _DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *gpsLastFix)
 	return a;
 }
 
-bool proto_hasLastKnownDatePos(const gps_last_fix_struct_t *gps)
+bool proto_hasLastKnownDatePos(const gnss_last_fix_struct_t *gps)
 {
-	return gps->unixTimestamp != 0;
+	return gps->unix_timestamp != 0;
 }
 
 static uint32_t ano_date_to_unixtime_midday(uint8_t year, uint8_t month, uint8_t day) {

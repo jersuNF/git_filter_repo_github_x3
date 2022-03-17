@@ -127,11 +127,13 @@ int socket_receive(struct data *data, char **msg)
 
 	if (received > 0) {
 		*msg = buf;
-		LOG_WRN("Socket received %d bytes!\n", received);
+#if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
+		LOG_DBG("Socket received %d bytes!\n", received);
 		for (int i = 0; i<received; i++){
 			printk("\\x%02x",buf[i]);
 		}
 		printk("\n");
+#endif
 		return received;
 	} else if (received < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {

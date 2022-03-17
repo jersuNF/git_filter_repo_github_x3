@@ -8,11 +8,13 @@ zephyr_include_directories(
     ./../../modules/storage_controller/
     ./../../events/messaging/
     ./../../events/buzzer/
+    ./../../lib/trigonometry/
     ./../../events/error_handler/)
 
 target_sources(app PRIVATE 
 ./amc_handler.c
 ./../../events/amc/request_events.c
+./../../lib/trigonometry/trigonometry.c
 ./../../modules/storage_controller/storage.c
 ./../../events/buzzer/sound_event.c
 ./../../events/messaging/messaging_module_events.c

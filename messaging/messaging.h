@@ -29,5 +29,6 @@ typedef struct {
 void messaging_module_init(void);
 
 int encode_and_send_message(NofenceMessage *msg_proto);
+uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp);
 
 #endif /* _MESSAGING_H_ */

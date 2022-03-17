@@ -20,8 +20,6 @@
 #define MODULE animal_monitor_control
 LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
 
-/* Used to notify messaging module that we have updated to the new fence. */
-atomic_t new_fence_version = ATOMIC_INIT(0);
 
 /* Thread stack area that we use for the calculation process. We add a work
  * item here when we have data available from GNSS.
@@ -54,16 +52,29 @@ void process_new_fence_fn(struct k_work *item)
 {
 	/* Update AMC cache. */
 	int err = update_pasture_from_stg();
+
+	/* Take pasture sem, since we need to access the version to send
+	 * to messaging module.
+	 */
+	err = k_sem_take(&fence_data_sem,
+			 K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
 	if (err) {
-		new_fence_version = 0;
+		LOG_ERR("Error taking pasture semaphore for version check.");
+		return;
+	}
+
+	if (err) {
+		pasture_cache.m.ul_fence_def_version = 0;
 		LOG_ERR("Error caching new pasture from storage controller.");
 		return;
 	}
 
 	/* Submit event that we have now began to use the new fence. */
 	struct update_fence_version *ver = new_update_fence_version();
-	ver->fence_version = (uint32_t)atomic_get(&new_fence_version);
+	ver->fence_version = pasture_cache.m.ul_fence_def_version;
 	EVENT_SUBMIT(ver);
+
+	k_sem_give(&fence_data_sem);
 }
 
 /**
@@ -132,9 +143,6 @@ int amc_module_init(void)
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_new_fence_available(eh)) {
-		struct new_fence_available *event =
-			cast_new_fence_available(eh);
-		atomic_set(&new_fence_version, event->fence_version);
 		k_work_submit_to_queue(&amc_work_q, &process_new_fence_work);
 		return false;
 	}

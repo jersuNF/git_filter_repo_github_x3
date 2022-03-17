@@ -624,11 +624,11 @@ bool stg_log_pointing_to_last()
 	memcpy(&test_entry, &active_log_entry, sizeof(struct fcb_entry));
 
 	if (fcb_getnext(&log_fcb, &test_entry) != 0) {
-		k_mutex_unlock(log_mutex);
+		k_mutex_unlock(&log_mutex);
 		return true;
 	}
 
-	k_mutex_unlock(log_mutex);
+	k_mutex_unlock(&log_mutex);
 	return false;
 }
 

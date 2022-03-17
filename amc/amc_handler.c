@@ -157,6 +157,11 @@ void calculate_work_fn(struct k_work *item)
 		atomic_set(&new_gnss_written, false);
 	}
 
+	/* Play sound event. */
+	struct sound_event *ev = new_sound_event();
+	ev->type = SND_WELCOME;
+	EVENT_SUBMIT(ev);
+
 	/* Calculation finished, give semaphore so we can swap memory region
 	 * on next GNSS request. 
 	 * As well as notifying we're not using fence data area. 

@@ -48,7 +48,7 @@ K_SEM_DEFINE(send_ack_sem, 0, 1);
 collar_state_struct_t current_state;
 gps_last_fix_struct_t cached_fix;
 
-static uint32_t new_fence_in_progress = 0;
+static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
 static bool first_frame, first_ano_frame;
 
@@ -545,7 +545,7 @@ int8_t request_fframe(uint32_t version, uint8_t frame)
 	fence_req.m.fence_definition_req.ucFrameNumber = frame;
 	int ret = encode_and_send_message(&fence_req);
 	if (ret) {
-		LOG_WRN("Failed to send request for frame %d\n", frame);
+		LOG_WRN("Failed to send request for frame %d, %d", frame, ret);
 		return -1;
 	}
 	return 0;

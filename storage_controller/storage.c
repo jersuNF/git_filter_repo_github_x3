@@ -219,6 +219,11 @@ int stg_init_storage_controller(void)
 {
 	int err;
 
+	/* Give mutexes. First come first served. */
+	k_mutex_unlock(&log_mutex);
+	k_mutex_unlock(&ano_mutex);
+	k_mutex_unlock(&pasture_mutex);
+
 	/* Initialize FCB on LOG and ANO partitions
 	 * based on pm_static.yml/.dts flash setup.
 	 */
@@ -338,7 +343,7 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 	}
 
 	if (fcb_is_empty(&log_fcb)) {
-		k_mutex_unlock(&ano_mutex);
+		k_mutex_unlock(&log_mutex);
 		return -ENODATA;
 	}
 
@@ -348,7 +353,7 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 
 	int err = fcb_getnext(&log_fcb, &start_entry);
 	if (err) {
-		k_mutex_unlock(&ano_mutex);
+		k_mutex_unlock(&log_mutex);
 		return -ENODATA;
 	}
 
@@ -480,6 +485,7 @@ int stg_read_pasture_data(fcb_read_cb cb)
 	struct fcb *fcb = get_fcb(STG_PARTITION_PASTURE);
 
 	if (fcb_is_empty(fcb)) {
+		k_mutex_unlock(&pasture_mutex);
 		return -ENODATA;
 	}
 
@@ -605,12 +611,24 @@ int stg_fcb_reset_and_init()
 
 bool stg_log_pointing_to_last()
 {
+	if (k_mutex_lock(&log_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+		return false;
+	}
+
+	if (fcb_is_empty(&log_fcb)) {
+		k_mutex_unlock(&log_mutex);
+		return false;
+	}
+
 	struct fcb_entry test_entry;
 	memcpy(&test_entry, &active_log_entry, sizeof(struct fcb_entry));
 
 	if (fcb_getnext(&log_fcb, &test_entry) != 0) {
+		k_mutex_unlock(log_mutex);
 		return true;
 	}
+
+	k_mutex_unlock(log_mutex);
 	return false;
 }
 

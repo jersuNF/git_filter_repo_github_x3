@@ -34,6 +34,9 @@
 
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
 
+static pasture_t *pasture_rec_cache;
+static size_t pasture_rec_size;
+
 uint32_t time_from_server;
 
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
@@ -41,11 +44,6 @@ K_SEM_DEFINE(send_ack_sem, 0, 1);
 
 collar_state_struct_t current_state;
 gps_last_fix_struct_t cached_fix;
-
-/* Cached fence for constructing the new fence from fence_download frames. */
-static fence_t *new_fence_points = NULL;
-static size_t new_fence_size;
-static size_t curr_copied_coords = 0;
 
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
@@ -72,10 +70,6 @@ bool proto_hasLastKnownDatePos(const gps_last_fix_struct_t *);
 static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
 bool m_confirm_acc_limits, m_confirm_ble_key, m_transfer_boot_params;
 bool send_out_ack, use_server_time;
-
-K_SEM_DEFINE(ble_ctrl_sem, 0, 1);
-K_SEM_DEFINE(ble_data_sem, 0, 1);
-K_SEM_DEFINE(lte_proto_sem, 0, 1);
 
 K_MUTEX_DEFINE(send_binary_mutex);
 
@@ -116,16 +110,14 @@ K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_SIZE,
 
 K_KERNEL_STACK_DEFINE(messaging_send_thread, CONFIG_MESSAGING_SEND_THREAD_SIZE);
 
-void cleanup_cached_fence_resources(void)
+void cleanup_pasture_cache(void)
 {
-	/* Free and cleanup the resources of the cached fence
-	 * as we have now verified that AMC has retrieved 
-	 * the new fence and started using it.
-	 */
-	k_free(new_fence_points);
-	new_fence_points = NULL;
-	new_fence_size = 0;
-	curr_copied_coords = 0;
+	if (pasture_rec_cache == NULL) {
+		return;
+	}
+	for (int i = 0; i < pasture_rec_cache->m.ul_total_fences; i++) {
+		fence_t *target_fence = pasture_rec_cache->fences[i];
+	}
 }
 
 void build_log_message()
@@ -183,7 +175,9 @@ void log_data_periodic_fn()
 		LOG_INF("No log data available on flash for sending.");
 	}
 
-	/* If all entries has been consumed, empty storage. */
+	/* If all entries has been consumed, empty storage
+	 * and we HAVE data on the partition. 
+	 */
 	if (stg_log_pointing_to_last()) {
 		err = stg_clear_partition(STG_PARTITION_LOG);
 		if (err) {
@@ -211,10 +205,10 @@ void modem_poll_work_fn()
 		LOG_DBG("Building poll request!\n");
 		build_poll_request(&new_poll_msg);
 		k_sem_give(&cache_lock_sem);
-	}
 
-	LOG_INF("Messaging - Sending new message!\n");
-	encode_and_send_message(&new_poll_msg);
+		LOG_INF("Messaging - Sending new message!\n");
+		encode_and_send_message(&new_poll_msg);
+	}
 
 	k_work_reschedule_for_queue(
 		&send_q, &modem_poll_work,
@@ -315,45 +309,43 @@ static bool event_handler(const struct event_header *eh)
 
 	return false;
 }
-
-int crc_check_msg_cached_fence()
+/*
+bool validate_crc(FenceDefinitionHeader resp)
 {
-	//uint16_t crc = 0xFFFF;
-	//uint16_t eepUint16;
-	//uint16_t receivedCRC = new_fence_points->
-	//
-	//if (receivedCRC == EMPTY_FENCE_CRC) {
-	//	//we received old fence definition without crc, or we have just migrated and the
-	//	// current fenceDef will not be validated until a new one is downloaded
-	//	return true;
-	//}
-	//
-	//uint8_t fenceCount = EEPROM_GetNumberOfFences();
-	//uint32_t eepUint32 = EEPROM_GetFenceConfigCrc();
-	//FenceHeader header = { 0 };
-	//
-	//crc = nf_crc16_uint32(eepUint32, &crc);
-	//eepUint32 = EEPROM_GetOriginLon();
-	//crc = nf_crc16_uint32(eepUint32, &crc);
-	//eepUint32 = EEPROM_GetOriginLat();
-	//crc = nf_crc16_uint32(eepUint32, &crc);
-	//eepUint16 = EEPROM_GetK_LON();
-	//crc = nf_crc16_uint16(eepUint16, &crc);
-	//eepUint16 = EEPROM_GetK_LAT();
-	//crc = nf_crc16_uint16(eepUint16, &crc);
-	//
-	//for (uint8_t fenceNo = 0; fenceNo < fenceCount; fenceNo++) {
-	//	EEPROM_ReadFenceHeader(fenceNo, &header);
-	//	for (uint8_t i = 0; i < header.nPoints; i++) {
-	//		eepUint32 = eeprom_read_dword((void *)(header.pC + i));
-	//		crc = nf_crc16_uint32(eepUint32, &crc);
-	//	}
-	//}
-	//
-	//return crc == receivedCRC;
-	//
+	uint16_t crc = 0xFFFF;
+
+	if (rec_crc == EMPTY_FENCE_CRC) {
+		//we received old fence definition without crc, or we have just migrated and the
+		// current fenceDef will not be validated until a new one is downloaded
+		return true;
+	}
+
+	uint8_t fenceCount = EEPROM_GetNumberOfFences();
+	uint32_t eepUint32 = EEPROM_GetFenceConfigCrc();
+	FenceHeader header = { 0 };
+
+	crc = nf_crc16_uint32(eepUint32, &crc);
+	eepUint32 = EEPROM_GetOriginLon();
+	crc = nf_crc16_uint32(eepUint32, &crc);
+	eepUint32 = EEPROM_GetOriginLat();
+	crc = nf_crc16_uint32(eepUint32, &crc);
+	eepUint16 = EEPROM_GetK_LON();
+	crc = nf_crc16_uint16(eepUint16, &crc);
+	eepUint16 = EEPROM_GetK_LAT();
+	crc = nf_crc16_uint16(eepUint16, &crc);
+
+	for (uint8_t fenceNo = 0; fenceNo < fenceCount; fenceNo++) {
+		EEPROM_ReadFenceHeader(fenceNo, &header);
+		for (uint8_t i = 0; i < header.nPoints; i++) {
+			eepUint32 = eeprom_read_dword((void *)(header.pC + i));
+			crc = nf_crc16_uint32(eepUint32, &crc);
+		}
+	}
+
+	return crc == receivedCRC;
+
 	return 0;
-}
+}*/
 
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
@@ -379,8 +371,6 @@ static inline void process_ble_ctrl_event(void)
 		LOG_ERR("Error getting ble_ctrl_event: %d\n", err);
 		return;
 	}
-	LOG_INF("Processed ble_ctrl_event.\n");
-	k_sem_give(&ble_ctrl_sem);
 }
 
 static inline void process_ble_data_event(void)
@@ -392,8 +382,6 @@ static inline void process_ble_data_event(void)
 		LOG_ERR("Error getting ble_data_event: %d\n", err);
 		return;
 	}
-	LOG_INF("Processed ble_data_event.\n");
-	k_sem_give(&ble_data_sem);
 }
 
 static void process_lte_proto_event(void)
@@ -405,8 +393,6 @@ static void process_lte_proto_event(void)
 		LOG_ERR("Error getting lte_proto_event: %d\n", err);
 		return;
 	}
-	LOG_INF("Processed lte_proto_msgq.\n");
-	k_sem_give(&lte_proto_sem);
 
 	NofenceMessage proto;
 	err = collar_protocol_decode(ev.buf + 2, ev.len - 2, &proto);
@@ -417,9 +403,8 @@ static void process_lte_proto_event(void)
 		printk("\\x%02x", *buf);
 		buf++;
 	}
-	printk("\n");
 	if (err) {
-		LOG_ERR("Error decoding protobuf message.\n");
+		LOG_ERR("Error decoding protobuf message. %i", err);
 		return;
 	}
 	struct messaging_ack_event *ack = new_messaging_ack_event();
@@ -467,6 +452,7 @@ void messaging_thread_fn()
 void messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module!\n");
+
 	k_work_queue_init(&send_q);
 	k_work_queue_start(&send_q, messaging_send_thread,
 			   K_THREAD_STACK_SIZEOF(messaging_send_thread),
@@ -580,26 +566,6 @@ void fence_download(uint8_t new_fframe)
 	}
 	if (new_fframe >= 0) {
 		if (new_fframe == DOWNLOAD_COMPLETE) {
-			int err = crc_check_msg_cached_fence();
-			if (err) {
-				/* CRC error, try again? */
-				expected_fframe = 0;
-				new_fence_in_progress = 0;
-				cleanup_cached_fence_resources();
-				return;
-			}
-
-			/* Write to storage controller. */
-			err = stg_write_pasture_data(
-				(uint8_t *)new_fence_points, new_fence_size);
-
-			if (err) {
-				LOG_ERR("Error storing new fence to external flash.");
-				return;
-			}
-
-			cleanup_cached_fence_resources();
-
 			/* Notify AMC that a new fence is available. */
 			struct new_fence_available *fence_ready =
 				new_new_fence_available();
@@ -623,12 +589,6 @@ void fence_download(uint8_t new_fframe)
 			LOG_WRN("Requesting frame %d of new fence: %d"
 				".\n",
 				expected_fframe, new_fence_in_progress);
-
-		} else {
-			expected_fframe = 0;
-			new_fence_in_progress = 0;
-			cleanup_cached_fence_resources();
-			return;
 		}
 	}
 }
@@ -849,9 +809,12 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 	return;
 }
 
+uint8_t cached_fence_points = 0;
+
 uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 {
 	uint8_t frame = fenceResp->ucFrameNumber;
+	int err = 0;
 	LOG_INF("Received fence frame number %d\n", frame);
 
 	if (new_fence_in_progress != fenceResp->ulFenceDefVersion) {
@@ -859,38 +822,38 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 		return 0;
 	}
 
+	/* It is not given that a frame is linked to a fence. One fence can
+	 * be sent over multiple frames, and we can have multiple fences
+	 * in a pasture request.
+	 */
 	if (frame == 0) {
-		if (new_fence_points != NULL || curr_copied_coords != 0 ||
-		    new_fence_size != 0) {
-			/* Something happend and the previous fence
-			 * has not yet been consumed/freed correctly.
-			 */
-			return 0;
-		}
-		/* Setup the new fence. */
-		new_fence_size =
-			sizeof(fence_t) + (sizeof(fence_coordinate_t) *
-					   fenceResp->m.xHeader.ulTotalFences);
-		new_fence_points = (fence_t *)k_malloc(new_fence_size);
-
-		new_fence_points->header.us_id = fenceResp->m.xFence.usId;
-		new_fence_points->header.n_points =
-			fenceResp->m.xHeader.ulTotalFences;
-		new_fence_points->header.e_fence_type =
-			fenceResp->m.xFence.eFenceType;
-
-		LOG_INF("Total number of fence frames = %d",
-			fenceResp->ucTotalFrames);
 	}
 
-	/* Copy up to 40 fence points from the frame to the cached fence. */
-	memcpy(&new_fence_points->p_c[curr_copied_coords],
-	       fenceResp->m.xFence.rgulPoints,
-	       sizeof(fence_coordinate_t) *
-		       fenceResp->m.xFence.rgulPoints_count);
-	curr_copied_coords += fenceResp->m.xFence.rgulPoints_count;
+	/* Check for each frame, fence or pasture, or when finished?????
+	if (resp->has_usFenceCRC) {
+		if (!validate_crc(fenceResp->usFenceCRC)) {
+			return -EIO;
+		}
+	}*/
+
+	size_t num_points = fenceResp->m.xFence.rgulPoints_count;
+	size_t fence_size =
+		sizeof(fence_t) + (num_points * sizeof(fence_coordinate_t));
+
+	fence_t *fence = (fence_t *)k_malloc((int)fence_size);
+
+	memcpy(fence->p_c, fenceResp->m.xFence.rgulPoints, num_points);
+
+	fence->header.e_fence_type = fenceResp->m.xFence.eFenceType;
+	fence->header.n_points = num_points;
+	fence->header.us_id = fenceResp->m.xFence.usId;
 
 	if (frame == fenceResp->ucTotalFrames - 1) {
+		/* Write entire pasture. This deleted any existing fences. */
+		err = stg_write_pasture_data((uint8_t *)&fence, fence_size);
+		if (err) {
+			return err;
+		}
 		return DOWNLOAD_COMPLETE;
 	}
 

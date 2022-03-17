@@ -8,10 +8,7 @@
 #include <zephyr.h>
 #include "event_manager.h"
 #include "collar_protocol.h"
-
-extern struct k_sem ble_ctrl_sem;
-extern struct k_sem ble_data_sem;
-extern struct k_sem lte_proto_sem;
+#include "embedded.pb.h"
 
 typedef struct {
 	Mode collar_mode;
@@ -30,4 +27,7 @@ typedef struct {
  * @return 0 on success, otherwise negative errno.
  */
 void messaging_module_init(void);
+
+int encode_and_send_message(NofenceMessage *msg_proto);
+
 #endif /* _MESSAGING_H_ */

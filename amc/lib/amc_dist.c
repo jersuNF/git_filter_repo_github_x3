@@ -27,32 +27,40 @@ static bool fnc_valid(fence_t *fence)
 	/** @todo: Also test timespan from eeprom fence definition here. */
 }
 
-// Name			:	fnc_PtInFnc
-// Description	:	Determent if the point is inside the defined closed polyline. NB: Does not consider if the fence is inverted. That
-// 					means, inside an inverted fence really means outside
-// Argument(s)	:	testx, testy	X- and y-coordinate of the test point.
-// Return value	:	True if inside
-
 /** @brief Determent if the point is inside the defined closed polyline.
-static uint8_t fnc_PtInClosedPolyline(uint8_t FncIndex, int16_t testx, int16_t testy)
+ * 
+ * @note Does not consider if the fence is inverted. That
+ *       means, inside an inverted fence really means outside.
+ * 
+ * @param fence fence(polygon) to check.
+ * @param testx x coordinate of test point.
+ * @param testy y coordinate of test point.
+ * 
+ * @returns True if inside.
+ */
+static uint8_t fnc_PtInClosedPolyline(fence_t *fence, int16_t testx,
+				      int16_t testy)
 {
 	uint8_t i, j;
 	uint8_t c = 0;
- 	int32_t myX[2];
- 	int32_t myY[2];
- 	int32_t mytestx;
- 	int32_t mytesty;
-	
+	int32_t myX[2];
+	int32_t myY[2];
+	int32_t mytestx;
+	int32_t mytesty;
+
 	mytestx = testx;
 	mytesty = testy;
-	
-	for (i = 0, j = (eep_FenceSize(FncIndex)-1); i < eep_FenceSize(FncIndex); j = i++)
-	{
+
+	for (i = 0, j = (fence->m.n_points - 1); i < fence->m.n_points;
+	     j = i++) {
 		myX[0] = eep_FenceX(FncIndex, i);
 		myX[1] = eep_FenceX(FncIndex, j);
 		myY[0] = eep_FenceY(FncIndex, i);
 		myY[1] = eep_FenceY(FncIndex, j);
- 		if ( ((myY[0]>mytesty) != (myY[1]>mytesty)) && (mytestx < ((myX[1]-myX[0]) * (mytesty-myY[0])) / (myY[1]-myY[0]) + myX[0]) ) {
+		if (((myY[0] > mytesty) != (myY[1] > mytesty)) &&
+		    (mytestx < ((myX[1] - myX[0]) * (mytesty - myY[0])) /
+					       (myY[1] - myY[0]) +
+				       myX[0])) {
 			// Toggle each time the test results in "cutting a fenceline"
 			c = !c;
 		}

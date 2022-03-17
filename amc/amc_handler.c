@@ -20,7 +20,6 @@
 #define MODULE animal_monitor_control
 LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
 
-
 /* Thread stack area that we use for the calculation process. We add a work
  * item here when we have data available from GNSS.
  * This thread can then use the calculation function algorithm to
@@ -51,27 +50,30 @@ static inline int update_pasture_from_stg(void)
 void process_new_fence_fn(struct k_work *item)
 {
 	/* Update AMC cache. */
-	int err = update_pasture_from_stg();
+	int cache_ret = update_pasture_from_stg();
 
 	/* Take pasture sem, since we need to access the version to send
 	 * to messaging module.
 	 */
-	err = k_sem_take(&fence_data_sem,
-			 K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
+	int err = k_sem_take(&fence_data_sem,
+			     K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
 		LOG_ERR("Error taking pasture semaphore for version check.");
 		return;
 	}
 
-	if (err) {
-		pasture_cache.m.ul_fence_def_version = 0;
+	pasture_t *pasture = NULL;
+	get_pasture_cache(pasture);
+
+	if (cache_ret) {
+		pasture->m.ul_fence_def_version = 0;
 		LOG_ERR("Error caching new pasture from storage controller.");
 		return;
 	}
 
 	/* Submit event that we have now began to use the new fence. */
 	struct update_fence_version *ver = new_update_fence_version();
-	ver->fence_version = pasture_cache.m.ul_fence_def_version;
+	ver->fence_version = pasture->m.ul_fence_def_version;
 	EVENT_SUBMIT(ver);
 
 	k_sem_give(&fence_data_sem);
@@ -91,11 +93,11 @@ void process_new_gnss_data_fn(struct k_work *item)
 	}
 
 	/* Fetch cached fence and size. */
-	fence_t *fence = NULL;
-	size_t fence_struct_size;
-	err = get_pasture_cache(fence, &fence_struct_size);
-	if (err) {
-		char *msg = "Error getting fence cahce.";
+	pasture_t *pasture = NULL;
+
+	err = get_pasture_cache(pasture);
+	if (err || pasture == NULL) {
+		char *msg = "Error getting fence cache.";
 		nf_app_fatal(ERR_SENDER_AMC, err, msg, strlen(msg));
 		return;
 	}
@@ -103,7 +105,7 @@ void process_new_gnss_data_fn(struct k_work *item)
 	/* Fetch new, cached gnss data. */
 	gnss_struct_t *gnss = NULL;
 	err = get_gnss_cache(gnss);
-	if (err) {
+	if (err || gnss == NULL) {
 		char *msg = "Error getting gnss cahce.";
 		nf_app_fatal(ERR_SENDER_AMC, err, msg, strlen(msg));
 		return;

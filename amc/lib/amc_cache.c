@@ -31,24 +31,23 @@ atomic_t new_gnss_written = ATOMIC_INIT(false);
  * region to the header. Important! Is set to NULL everytime it's free'd
  * to ensure that we're calculating with a valid cached fence.
  */
-static fence_t *cached_fence = NULL;
-static size_t cached_fence_size = 0;
+static pasture_t pasture_cache;
 
-int get_pasture_cache(fence_t *fence, size_t *len)
+int get_pasture_cache(pasture_t *pasture)
 {
-	if (cached_fence == NULL || cached_fence_size == 0 ||
-	    cached_fence->header.n_points == 0) {
+	if (pasture_cache.m.ul_total_fences == 0) {
 		return -ENODATA;
 	}
 
-	fence = cached_fence;
-	*len = cached_fence_size;
-
+	pasture = &pasture_cache;
 	return 0;
 }
 
-int set_pasture_cache(uint8_t *fence, size_t len)
+int set_pasture_cache(uint8_t *pasture, size_t len)
 {
+	if (len != sizeof(pasture_t)) {
+		return -EINVAL;
+	}
 	int err = k_sem_take(&fence_data_sem,
 			     K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
@@ -56,23 +55,11 @@ int set_pasture_cache(uint8_t *fence, size_t len)
 		return err;
 	}
 
-	/* Free previous fence if any. */
-	if (cached_fence != NULL) {
-		k_free(cached_fence);
-		cached_fence = NULL;
-		cached_fence_size = 0;
-	}
+	/* Clear any previous pasture cache. */
+	memset(&pasture_cache, 0, sizeof(pasture_t));
 
-	cached_fence = k_malloc(len);
-	cached_fence_size = len;
-
-	if (cached_fence == NULL) {
-		LOG_ERR("No memory left for caching the fence.");
-		k_sem_give(&fence_data_sem);
-		return -ENOMEM;
-	}
 	/* Memcpy the contents. */
-	memcpy(cached_fence, fence, len);
+	memcpy(&pasture_cache, pasture, sizeof(pasture_t));
 
 	k_sem_give(&fence_data_sem);
 	return 0;

@@ -17,14 +17,13 @@ extern struct k_sem fence_data_sem;
  * @note Semaphore locking when using the cached area must be handled outside
  *       this function, since we give the caller a pointer to the area.
  * 
- * @param[out] fence pointer to where the cached fence is stored.
- * @param[out] len length of the fence struct.
+ * @param[out] pasture pointer to where the cached pasture is stored.
+ * @param[in] len length of the pasture struct.
  * 
  * @return 0 on success.
- * @return -ENODATA if fence has 0 fence points
- * @return -ENODATA if fence cache is empty
+ * @return -ENODATA if pasture has 0 fences.
  */
-int get_pasture_cache(fence_t *fence, size_t *len);
+int get_pasture_cache(pasture_t *pasture);
 
 /**
  * @brief Free's previous fence cache and stores a new one based on
@@ -32,12 +31,12 @@ int get_pasture_cache(fence_t *fence, size_t *len);
  *        function is fed into the storage controller which reads out
  *        raw binary data.
  * 
- * @param[in] fence pointer to where the fence is buffered.
- * @param[in] len length of the fence struct.
+ * @param[in] pasture pointer to where the pasture is buffered.
+ * @param[in] len length of the pasture struct.
  * 
  * @return 0 on success, otherwise negative errno.
  */
-int set_pasture_cache(uint8_t *fence, size_t len);
+int set_pasture_cache(uint8_t *pasture, size_t len);
 
 /**
  * @brief Fetches the cached gnss data and outputs the

@@ -3,8 +3,8 @@
 #include "messaging_module_events.h"
 #include <zephyr.h>
 
-#define MY_STACK_SIZE 1024
-#define MY_PRIORITY 14
+#define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
+#define MY_PRIORITY CONFIG_RECV_THREAD_PRIORITY
 #define SOCKET_POLL_INTERVAL 0.25
 #define SOCK_RECV_TIMEOUT 60
 #define MODULE cellular_controller
@@ -38,7 +38,7 @@ void submit_error(int8_t cause, int8_t err_code)
 }
 
 void receive_tcp(struct data *);
-K_THREAD_DEFINE(my_tid, MY_STACK_SIZE,
+K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK,
 		receive_tcp, &conf.ipv4, NULL, NULL,
 		MY_PRIORITY, 0, 0);
 
@@ -56,17 +56,19 @@ void receive_tcp(struct data *sock_data)
 			received = socket_receive(sock_data, &buf);
 			if (received > 0) {
 				socket_idle_count = 0;
+#if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
 				LOG_WRN("received %d bytes!\n", received);
+#endif
 				if (messaging_ack ==
 				    false) { /* TODO: notify the error handler */
 					LOG_ERR("New message received while the messaging module "
 						"hasn't consumed the previous one!\n");
 				} else {
 					if (pMsgIn != NULL) {
-						free(pMsgIn);
+						k_free(pMsgIn);
 						pMsgIn = NULL;
 					}
-					pMsgIn = (uint8_t *)malloc(received);
+					pMsgIn = (uint8_t *) k_malloc(received);
 					memcpy(pMsgIn, buf, received);
 					messaging_ack = false;
 					struct cellular_proto_in_event *msgIn =
@@ -162,7 +164,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		}
 		/* make a local copy of the message to send.*/
 		uint8_t *CharMsgOut;
-		CharMsgOut = (char *)malloc(MsgOutLen);
+		CharMsgOut = (char *) k_malloc(MsgOutLen);
 		memcpy(CharMsgOut, pCharMsgOut, MsgOutLen);
 
 		if (*CharMsgOut == *pCharMsgOut) {
@@ -175,10 +177,10 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		int8_t err = send_tcp(CharMsgOut, MsgOutLen);
 		if (err < 0) { /* TODO: notify error handler! */
 			submit_error(SOCKET_SEND, err);
-			free(CharMsgOut);
+			k_free(CharMsgOut);
 			return false;
 		}
-		free(CharMsgOut);
+		k_free(CharMsgOut);
 		return true;
 	}
 	return false;

@@ -29,5 +29,5 @@ typedef struct {
  * 
  * @return 0 on success, otherwise negative errno.
  */
-void messaging_module_init(void);
+int messaging_module_init(void);
 #endif /* _MESSAGING_H_ */

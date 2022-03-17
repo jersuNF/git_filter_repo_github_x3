@@ -13,8 +13,8 @@ if MESSAGING
 		int "Log level for the messaging module"
 		default 4
 
-	config MESSAGING_THREAD_SIZE
-		int "Size of the message processing thread"
+	config MESSAGING_THREAD_STACK_SIZE
+		int "Stack size of the message processing thread"
 		default 2048
 
 	config MESSAGING_THREAD_PRIORITY
@@ -31,8 +31,8 @@ if MESSAGING
 		  or a preemptible thread of higher or equal priority, 
 		  becomes ready.
 
-	config MESSAGING_POLL_THREAD_SIZE
-		int "Size of the poll to server queue thread"
+	config MESSAGING_POLL_THREAD_STACK_SIZE
+		int "Stack size of the poll to server queue thread"
 		default 2048
 
 	config MESSAGING_POLL_THREAD_PRIORITY

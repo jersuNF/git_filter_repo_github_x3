@@ -90,11 +90,11 @@ struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
 static struct k_work_q poll_q;
 struct k_work_delayable modem_poll_work;
 
-K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_SIZE,
+K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE,
 		messaging_thread_fn, NULL, NULL, NULL,
 		CONFIG_MESSAGING_THREAD_PRIORITY, 0, 0);
 
-K_KERNEL_STACK_DEFINE(messaging_poll_thread, CONFIG_MESSAGING_POLL_THREAD_SIZE);
+K_KERNEL_STACK_DEFINE(messaging_poll_thread, CONFIG_MESSAGING_POLL_THREAD_STACK_SIZE);
 
 /**
  * @brief Build, send a poll request, and reschedule after
@@ -307,15 +307,19 @@ void messaging_thread_fn()
 	}
 }
 
-void messaging_module_init(void)
+int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module!\n");
 	k_work_queue_start(&poll_q, messaging_poll_thread,
 			   K_THREAD_STACK_SIZEOF(messaging_poll_thread),
 			   CONFIG_MESSAGING_POLL_THREAD_PRIORITY, NULL);
-
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
-	k_work_schedule_for_queue(&poll_q, &modem_poll_work, K_NO_WAIT);
+	int err;
+	err = k_work_schedule_for_queue(&poll_q, &modem_poll_work, K_NO_WAIT);
+	if (err != 0){
+		return err;
+	}
+	return 0;
 }
 
 void build_poll_request(NofenceMessage *poll_req)

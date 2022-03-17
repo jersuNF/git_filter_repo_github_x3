@@ -21,6 +21,8 @@
 #include "error_event.h"
 #include "helpers.h"
 
+#include "nf_crc16.h"
+
 #include "storage_event.h"
 
 #include "storage.h"
@@ -34,8 +36,9 @@
 
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
 
-static pasture_t *pasture_rec_cache;
-static size_t pasture_rec_size;
+#define EMPTY_FENCE_CRC 0xFFFF
+static pasture_t pasture_temp;
+static uint8_t current_fence_counter = 0;
 
 uint32_t time_from_server;
 
@@ -45,7 +48,7 @@ K_SEM_DEFINE(send_ack_sem, 0, 1);
 collar_state_struct_t current_state;
 gps_last_fix_struct_t cached_fix;
 
-static uint32_t new_fence_in_progress;
+static uint32_t new_fence_in_progress = 0;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
 static bool first_frame, first_ano_frame;
 
@@ -109,16 +112,6 @@ K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_SIZE,
 		CONFIG_MESSAGING_THREAD_PRIORITY, 0, 0);
 
 K_KERNEL_STACK_DEFINE(messaging_send_thread, CONFIG_MESSAGING_SEND_THREAD_SIZE);
-
-void cleanup_pasture_cache(void)
-{
-	if (pasture_rec_cache == NULL) {
-		return;
-	}
-	for (int i = 0; i < pasture_rec_cache->m.ul_total_fences; i++) {
-		fence_t *target_fence = pasture_rec_cache->fences[i];
-	}
-}
 
 void build_log_message()
 {
@@ -309,43 +302,42 @@ static bool event_handler(const struct event_header *eh)
 
 	return false;
 }
-/*
-bool validate_crc(FenceDefinitionHeader resp)
+
+bool validate_pasture()
 {
 	uint16_t crc = 0xFFFF;
 
-	if (rec_crc == EMPTY_FENCE_CRC) {
-		//we received old fence definition without crc, or we have just migrated and the
-		// current fenceDef will not be validated until a new one is downloaded
-		return true;
-	}
+	uint16_t pasture_value_16;
+	uint32_t pasture_value_32;
 
-	uint8_t fenceCount = EEPROM_GetNumberOfFences();
-	uint32_t eepUint32 = EEPROM_GetFenceConfigCrc();
-	FenceHeader header = { 0 };
+	pasture_value_32 = pasture_temp.m.ul_fence_def_version;
+	crc = nf_crc16_uint32(pasture_value_32, &crc);
 
-	crc = nf_crc16_uint32(eepUint32, &crc);
-	eepUint32 = EEPROM_GetOriginLon();
-	crc = nf_crc16_uint32(eepUint32, &crc);
-	eepUint32 = EEPROM_GetOriginLat();
-	crc = nf_crc16_uint32(eepUint32, &crc);
-	eepUint16 = EEPROM_GetK_LON();
-	crc = nf_crc16_uint16(eepUint16, &crc);
-	eepUint16 = EEPROM_GetK_LAT();
-	crc = nf_crc16_uint16(eepUint16, &crc);
+	pasture_value_32 = pasture_temp.m.l_origin_lon;
+	crc = nf_crc16_uint32(pasture_value_32, &crc);
 
-	for (uint8_t fenceNo = 0; fenceNo < fenceCount; fenceNo++) {
-		EEPROM_ReadFenceHeader(fenceNo, &header);
-		for (uint8_t i = 0; i < header.nPoints; i++) {
-			eepUint32 = eeprom_read_dword((void *)(header.pC + i));
-			crc = nf_crc16_uint32(eepUint32, &crc);
+	pasture_value_32 = pasture_temp.m.l_origin_lat;
+	crc = nf_crc16_uint32(pasture_value_32, &crc);
+
+	pasture_value_16 = pasture_temp.m.us_k_lon;
+	crc = nf_crc16_uint16(pasture_value_16, &crc);
+
+	pasture_value_16 = pasture_temp.m.us_k_lat;
+	crc = nf_crc16_uint16(pasture_value_16, &crc);
+
+	for (uint8_t i = 0; i < pasture_temp.m.ul_total_fences; i++) {
+		fence_t *target_fence = &pasture_temp.fences[i];
+		for (uint8_t j = 0; j < target_fence->m.n_points; j++) {
+			pasture_value_16 = target_fence->coordinates[i].s_x_dm;
+			crc = nf_crc16_uint16(pasture_value_16, &crc);
+
+			pasture_value_16 = target_fence->coordinates[i].s_y_dm;
+			crc = nf_crc16_uint16(pasture_value_16, &crc);
 		}
 	}
 
-	return crc == receivedCRC;
-
-	return 0;
-}*/
+	return crc == pasture_temp.m.us_pasture_crc;
+}
 
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
@@ -463,6 +455,10 @@ void messaging_module_init(void)
 
 	k_work_schedule_for_queue(&send_q, &modem_poll_work, K_NO_WAIT);
 	k_work_schedule_for_queue(&send_q, &log_work, K_NO_WAIT);
+
+	memset(&pasture_temp, 0, sizeof(pasture_temp));
+	current_fence_counter = 0;
+	pasture_temp.m.us_pasture_crc = EMPTY_FENCE_CRC;
 }
 
 void build_poll_request(NofenceMessage *poll_req)
@@ -569,7 +565,6 @@ void fence_download(uint8_t new_fframe)
 			/* Notify AMC that a new fence is available. */
 			struct new_fence_available *fence_ready =
 				new_new_fence_available();
-			fence_ready->fence_version = new_fence_in_progress;
 			EVENT_SUBMIT(fence_ready);
 
 			LOG_WRN("Fence %d download "
@@ -811,6 +806,19 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 
 uint8_t cached_fence_points = 0;
 
+/** @brief Process a fence frame and stores it into the cached pasture
+ *         so we can validate if its valid when we're done to further
+ *         store on external flash.
+ * 
+ * @param fenceResp fence frame received from server.
+ * 
+ * @returns 0 = requests the first frame again, something happened.
+ * @returns 1-254 = frame number processed. This is used
+ *          to know which frame to request next.
+ * @returns Do we need negative error code if error, I.e pasture
+ *          is not valid, or just return 0 and retry forever?
+ * @returns 255 if download is complete.
+ */
 uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 {
 	uint8_t frame = fenceResp->ucFrameNumber;
@@ -822,35 +830,62 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 		return 0;
 	}
 
-	/* It is not given that a frame is linked to a fence. One fence can
-	 * be sent over multiple frames, and we can have multiple fences
-	 * in a pasture request.
-	 */
 	if (frame == 0) {
+		memset(&pasture_temp, 0, sizeof(pasture_temp));
+		current_fence_counter = 0;
+		pasture_temp.m.us_pasture_crc = EMPTY_FENCE_CRC;
 	}
 
-	/* Check for each frame, fence or pasture, or when finished?????
-	if (resp->has_usFenceCRC) {
-		if (!validate_crc(fenceResp->usFenceCRC)) {
-			return -EIO;
-		}
-	}*/
+	/* Pasture header. */
+	if (fenceResp->m.xHeader.has_bKeepMode) {
+		pasture_temp.m.has_keep_mode = true;
+		pasture_temp.m.keep_mode = fenceResp->m.xHeader.bKeepMode;
+	}
 
-	size_t num_points = fenceResp->m.xFence.rgulPoints_count;
-	size_t fence_size =
-		sizeof(fence_t) + (num_points * sizeof(fence_coordinate_t));
+	if (fenceResp->has_usFenceCRC) {
+		pasture_temp.m.has_us_pasture_crc = true;
+		pasture_temp.m.us_pasture_crc = fenceResp->usFenceCRC;
+	}
 
-	fence_t *fence = (fence_t *)k_malloc((int)fence_size);
+	pasture_temp.m.l_origin_lat = fenceResp->m.xHeader.lOriginLat;
+	pasture_temp.m.l_origin_lon = fenceResp->m.xHeader.lOriginLon;
+	pasture_temp.m.us_k_lat = fenceResp->m.xHeader.usK_LAT;
+	pasture_temp.m.us_k_lon = fenceResp->m.xHeader.usK_LON;
+	pasture_temp.m.ul_total_fences = fenceResp->m.xHeader.ulTotalFences;
+	pasture_temp.m.ul_fence_def_version = fenceResp->ulFenceDefVersion;
 
-	memcpy(fence->p_c, fenceResp->m.xFence.rgulPoints, num_points);
+	/* Fence frame info to store into pasture's fence array. */
+	fence_t *loc = &pasture_temp.fences[pasture_temp.m.ul_total_fences];
 
-	fence->header.e_fence_type = fenceResp->m.xFence.eFenceType;
-	fence->header.n_points = num_points;
-	fence->header.us_id = fenceResp->m.xFence.usId;
+	/* Fence header. */
+	loc->m.n_points = fenceResp->m.xFence.rgulPoints_count;
+	loc->m.us_id = fenceResp->m.xFence.usId;
+	loc->m.e_fence_type = fenceResp->m.xFence.eFenceType;
+	loc->m.fence_no = fenceResp->m.xFence.fenceNo;
+
+	/* Fence coordinates. */
+	memcpy(loc->coordinates, fenceResp->m.xFence.rgulPoints,
+	       loc->m.n_points * sizeof(fence_coordinate_t));
+
+	/* Increment number of fences stored in pasture. */
+	pasture_temp.m.ul_total_fences++;
 
 	if (frame == fenceResp->ucTotalFrames - 1) {
-		/* Write entire pasture. This deleted any existing fences. */
-		err = stg_write_pasture_data((uint8_t *)&fence, fence_size);
+		/* Validate pasture. */
+		if (pasture_temp.m.ul_total_fences !=
+		    fenceResp->m.xHeader.ulTotalFences) {
+			LOG_ERR("A fence frame was corrupt or lost during requests!");
+			return 0;
+		}
+
+		if (!validate_pasture()) {
+			LOG_ERR("CRC was not correct for new pasture!");
+			return 0;
+		}
+
+		LOG_INF("Validated CRC for pasture and will write it to flash.");
+		err = stg_write_pasture_data((uint8_t *)&pasture_temp,
+					     sizeof(pasture_temp));
 		if (err) {
 			return err;
 		}

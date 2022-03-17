@@ -21,9 +21,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
  * region to the header. Important! Is set to NULL everytime it's free'd
  * to ensure that we're calculating with a valid cached fence.
  */
-static fence_t *cached_fence = NULL;
-static size_t cached_fence_size = 0;
-atomic_t new_fence_version = ATOMIC_INIT(0);
+static pasture_t pasture_cache;
 
 #define REQUEST_DATA_SEM_TIMEOUT_SEC 5
 K_SEM_DEFINE(fence_data_sem, 1, 1);
@@ -66,27 +64,17 @@ static inline int update_pasture_cache(uint8_t *data, size_t len)
 		return err;
 	}
 
-	/* Free previous fence if any. */
-	if (cached_fence != NULL) {
-		k_free(cached_fence);
-		cached_fence = NULL;
-		cached_fence_size = 0;
+	if (len != sizeof(pasture_cache)) {
+		LOG_ERR("Error reading pasture from flash, length not expected.");
+		return -EINVAL;
 	}
 
-	cached_fence = k_malloc(len);
-	cached_fence_size = len;
-
-	if (cached_fence == NULL) {
-		LOG_ERR("No memory left for caching the fence.");
-		k_sem_give(&fence_data_sem);
-		return -ENOMEM;
-	}
 	/* Memcpy the flash contents. */
-	memcpy(cached_fence, data, len);
+	memset(&pasture_cache, 0, sizeof(pasture_cache));
+	memcpy(&pasture_cache, data, len);
 
-	/* Can add calculation check if fence is valid if we want here. */
-	LOG_INF("Updated pasture cache to US_ID: %d",
-		cached_fence->header.us_id);
+	LOG_INF("Updated pasture cache to definition version: %d",
+		pasture_cache.m.ul_fence_def_version);
 
 	k_sem_give(&fence_data_sem);
 	return 0;
@@ -111,16 +99,29 @@ void process_new_fence_fn(struct k_work *item)
 {
 	/* Update AMC cache. */
 	int err = update_pasture_from_stg();
+
+	/* Take pasture sem, since we need to access the version to send
+	 * to messaging module.
+	 */
+	err = k_sem_take(&fence_data_sem,
+			 K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
 	if (err) {
-		new_fence_version = 0;
+		LOG_ERR("Error taking pasture semaphore for version check.");
+		return;
+	}
+
+	if (err) {
+		pasture_cache.m.ul_fence_def_version = 0;
 		LOG_ERR("Error caching new pasture from storage controller.");
 		return;
 	}
 
 	/* Submit event that we have now began to use the new fence. */
 	struct update_fence_version *ver = new_update_fence_version();
-	ver->fence_version = (uint32_t)atomic_get(&new_fence_version);
+	ver->fence_version = pasture_cache.m.ul_fence_def_version;
 	EVENT_SUBMIT(ver);
+
+	k_sem_give(&fence_data_sem);
 }
 
 /**
@@ -130,7 +131,7 @@ void process_new_fence_fn(struct k_work *item)
 void calculate_work_fn(struct k_work *item)
 {
 	/* Check if cached fence is valid. */
-	if (cached_fence == NULL) {
+	if (pasture_cache.m.ul_total_fences == 0) {
 		char *err_msg = "No fence data available during calculation.";
 		nf_app_fatal(ERR_SENDER_AMC, -ENODATA, err_msg,
 			     strlen(err_msg));
@@ -156,14 +157,10 @@ void calculate_work_fn(struct k_work *item)
 		atomic_set(&new_gnss_written, false);
 	}
 
-	/* Calculations here, REMOVE BELOW CODE. */
-	if (cached_fence->p_c[0].s_x_dm == 0xDE) {
-		if (current_gnssdata_area->lat == 1337) {
-			struct sound_event *ev = new_sound_event();
-			ev->type = SND_WELCOME;
-			EVENT_SUBMIT(ev);
-		}
-	}
+	/* Play sound event. */
+	struct sound_event *ev = new_sound_event();
+	ev->type = SND_WELCOME;
+	EVENT_SUBMIT(ev);
 
 	/* Calculation finished, give semaphore so we can swap memory region
 	 * on next GNSS request. 
@@ -199,9 +196,6 @@ int amc_module_init(void)
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_new_fence_available(eh)) {
-		struct new_fence_available *event =
-			cast_new_fence_available(eh);
-		atomic_set(&new_fence_version, event->fence_version);
 		k_work_submit_to_queue(&amc_work_q, &process_new_fence_work);
 		return false;
 	}

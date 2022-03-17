@@ -34,16 +34,21 @@ static uint16_t current_rate;
 
 static gnss_struct_t gnss_data_buffer;
 static gnss_last_fix_struct_t last_fix_buffer;
-uint32_t gnss_age, temp_age;
+uint32_t gnss_age, ts, previous_ts;
 enum gnss_mode current_mode = GPSMODE_NOMODE;
 
 gnss_struct_t cached_gnss_data;
 gnss_last_fix_struct_t cached_last_fix;
 
 const struct device *gnss_dev = NULL;
-bool m_u8_GPSFresh;
+uint8_t myGPSResetDone;
+
 
 int gnss_controller_init(void){
+	gnss_age = 0;
+	ts = 0;
+	previous_ts = 0;
+	myGPSResetDone = 0;
 	printk("Initializing gnss controller!\n");
 	gnss_dev = DEVICE_DT_GET(DT_ALIAS(gnss));
 	if (gnss_dev == NULL) {
@@ -82,8 +87,13 @@ int gnss_controller_init(void){
 		nf_app_error(GPS_CONTROLLER, ret, msg, sizeof(*msg));
 		return ret;
 	}
+
+/* power consumption crude test - begin
+	ret = gnss_set_rate(gnss_dev, MIN_GNSS_RATE);
+	if(ret != 0){
+		LOG_WRN("Switched to 4Hz!\n");
+	}
 	while (true){
-		k_sleep(K_SECONDS(10));
 		LOG_WRN("Attempting GNSS stop!\n");
 		ret = gnss_reset(gnss_dev, GNSS_RESET_MASK_COLD,
 				 GNSS_RESET_MODE_GNSS_STOP);
@@ -91,7 +101,7 @@ int gnss_controller_init(void){
 			LOG_WRN("Finished GNSS stop!\n");
 		}
 
-		k_sleep(K_SECONDS(20));
+		k_sleep(K_SECONDS(30));
 		LOG_WRN("Attempting GNSS start!\n");
 		ret = gnss_reset(gnss_dev, GNSS_RESET_MASK_COLD,
 				 GNSS_RESET_MODE_GNSS_START);
@@ -99,7 +109,7 @@ int gnss_controller_init(void){
 			LOG_WRN("Finished GNSS start!\n");
 		}
 	}
-
+power consumption crude test - end */
 	return 0;
 }
 K_THREAD_DEFINE(pub_gnss, STACK_SIZE,
@@ -127,13 +137,16 @@ _Noreturn void publish_gnss_data(){
 _Noreturn void publish_last_fix(){
 	while(true){
 		if(k_sem_take(&last_fix_sem, K_FOREVER) == 0){
-			temp_age = k_uptime_get_32();
-			if (temp_age > gnss_age){
-				gnss_age = temp_age - gnss_age;
+			ts = k_uptime_get_32();
+			if (ts >= previous_ts){
+				gnss_age = ts - previous_ts;
 			} else{ //handle overflow
-				gnss_age = UINT32_MAX + temp_age - gnss_age;
+				gnss_age = UINT32_MAX + ts - previous_ts;
 			}
+			LOG_DBG("gnss fix age = age:%d, ts:%d", gnss_age,
+				ts);
 			check_gnss_age(&gnss_age);
+			previous_ts = ts;
 			struct new_gnss_fix* new_fix = new_new_gnss_fix();
 			new_fix->fix = last_fix_buffer;
 			/* TODO: protect cached data */
@@ -219,10 +232,7 @@ EVENT_SUBSCRIBE(MODULE, gnss_set_mode);
  *
  */
 void check_gnss_age(uint32_t *gnss_age) {
-	static uint8_t myGPSResetDone;
-	if (m_u8_GPSFresh) {
-		myGPSResetDone = 0;
-	}
+	LOG_DBG("resets %d", myGPSResetDone);
 
 	if ((*gnss_age > GPS_5SEC) && (myGPSResetDone < 1)) {
 		myGPSResetDone++;
@@ -235,17 +245,19 @@ void check_gnss_age(uint32_t *gnss_age) {
 		struct gnss_no_zone *noZone = new_gnss_no_zone();
 		EVENT_SUBMIT(noZone);
 		gnss_reset(gnss_dev, GNSS_RESET_MASK_WARM, GNSS_RESET_MODE_HW_IMMEDIATELY);
-	} else if (*gnss_age > GPS_20SEC && myGPSResetDone < 3) {
+	} else if (*gnss_age > GPS_20SEC && myGPSResetDone >= 2) {
 		myGPSResetDone++;
 		struct gnss_no_zone *noZone = new_gnss_no_zone();
 		EVENT_SUBMIT(noZone);
 		gnss_reset(gnss_dev, GNSS_RESET_MASK_COLD, GNSS_RESET_MODE_HW_IMMEDIATELY);
 	}
-	else{
-		m_u8_GPSFresh = true;
+	else if (*gnss_age < GPS_5SEC){
+		myGPSResetDone = 0;
 	}
 
-	if (myGPSResetDone > 0) {
-		m_u8_GPSFresh = false;
+	if (myGPSResetDone >= 3){
+		LOG_DBG("OLD FIX ERROR!\n");
+		char* msg = "GNSS fix extremely old!";
+		nf_app_error(GPS_CONTROLLER, -ETIMEDOUT, msg, sizeof(*msg));
 	}
 }

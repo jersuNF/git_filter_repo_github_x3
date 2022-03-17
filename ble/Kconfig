@@ -10,7 +10,7 @@ source "subsys/logging/Kconfig.template.log_config"
 
 config NOFENCE_SERIAL_NUMBER
 	int "Nofence serial number"
-	default 1
+	default 81337
 
 
 config NOFENCE_FIRMWARE_NUMBER

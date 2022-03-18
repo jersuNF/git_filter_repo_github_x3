@@ -3,7 +3,7 @@
 #include "messaging_module_events.h"
 #include <zephyr.h>
 #include "nf_eeprom.h"
-
+#include "error_event.h"
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define MY_PRIORITY CONFIG_RECV_THREAD_PRIORITY
 #define SOCKET_POLL_INTERVAL 0.25
@@ -13,7 +13,8 @@ LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
 static bool messaging_ack = true;
 
-char server_address[EEP_HOST_PORT_BUF_SIZE];
+char server_address[EEP_HOST_PORT_BUF_SIZE-1];
+char server_address_tmp[EEP_HOST_PORT_BUF_SIZE-1];
 static int server_port;
 static char server_ip[15];
 
@@ -133,20 +134,37 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 	}else if (is_messaging_host_address_event(eh)) {
 		/*TODO: compare with host address in eeprom and store the new
 		 * one if needed. Restart might be needed then. */
+		int ret = eep_read_host_port(&server_address_tmp[0], EEP_HOST_PORT_BUF_SIZE-1);
+		if (ret != 0){
+			LOG_ERR("Failed to read host address from eeprom!\n");
+		}
 		struct messaging_host_address_event *event =
 			cast_messaging_host_address_event(eh);
 		memcpy(&server_address[0], event->address,
-		       sizeof(event->address));
-
+		       sizeof(event->address)-1);
 		char *ptr_port;
 		ptr_port = strchr(server_address, ':') + 1;
 		server_port = atoi(ptr_port);
 		if (server_port <= 0) {
-			return -1;
+			char *e_msg = "Failed to parse port number from new "
+				      "host address!";
+			nf_app_error(ERR_MESSAGING, -EILSEQ, e_msg, strlen
+				     (e_msg));
+			return false;
 		}
 		uint8_t ip_len;
 		ip_len = ptr_port - 1 - &server_address[0];
 		memcpy(&server_ip[0], &server_address[0], ip_len);
+		ret = memcmp(server_address, server_address_tmp, EEP_HOST_PORT_BUF_SIZE-1);
+		if (ret != 0){
+			LOG_INF("New host address received!\n");
+			ret = eep_write_host_port(server_address);
+			if (ret != 0){
+				LOG_ERR("Failed to write new host address to "
+					"eeprom!\n");
+			}
+		}
+		return false;
 	}else if (is_messaging_proto_out_event(eh)) {
 		/* Accessing event data. */
 		struct messaging_proto_out_event *event =

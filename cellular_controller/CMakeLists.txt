@@ -3,6 +3,7 @@ zephyr_include_directories(
         ./helpers
         ./../../events/cellular_controller/
         ./../../events/messaging/
+        ./../../events/error_handler/
         ../../include)
 
 target_sources(app PRIVATE

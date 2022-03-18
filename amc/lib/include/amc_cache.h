@@ -38,6 +38,20 @@ int get_pasture_cache(pasture_t **pasture);
  */
 int set_pasture_cache(uint8_t *pasture, size_t len);
 
+/** @brief Checks if a fence is valid with number of points and type..
+ * 
+ * @param fence pointer to fence(polygon) to chec.
+ * 
+ * @return true if valid, false if not valid.
+*/
+bool fnc_valid(fence_t *fence);
+
+/** @brief Checks if there's any valid fence in the pasture.
+ * 
+ * @return true if valid fence exists.
+*/
+bool fnc_any_valid_fence(void);
+
 /**
  * @brief Fetches the cached gnss data and outputs the
  *        pointer location to the cached gnss area.

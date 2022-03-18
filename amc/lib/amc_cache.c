@@ -8,6 +8,7 @@
 #include "pasture_structure.h"
 #include "amc_cache.h"
 #include "nf_common.h"
+#include "embedded.pb.h"
 
 LOG_MODULE_REGISTER(amc_cache, CONFIG_AMC_LIB_LOG_LEVEL);
 
@@ -121,4 +122,35 @@ int get_gnss_cache(gnss_struct_t **gnss)
 
 	k_sem_give(&gnss_data_sem);
 	return 0;
+}
+
+bool fnc_valid(fence_t *fence)
+{
+	return (fence->m.n_points > 2 && fence->m.n_points <= 40 &&
+		(fence->m.e_fence_type ==
+			 FenceDefinitionMessage_FenceType_Normal ||
+		 fence->m.e_fence_type ==
+			 FenceDefinitionMessage_FenceType_Inverted));
+	/** @todo: Also test timespan from eeprom fence definition here. */
+}
+
+bool fnc_any_valid_fence(void)
+{
+	/* Take mutex? */
+	pasture_t *pasture = NULL;
+
+	if (get_pasture_cache(&pasture)) {
+		return false;
+	}
+
+	if (pasture->m.status == FenceStatus_FenceStatus_Invalid ||
+	    pasture->m.status == FenceStatus_TurnedOffByBLE) {
+		return false;
+	}
+	for (int i = 0; i < pasture->m.ul_total_fences; i++) {
+		if (fnc_valid(&pasture->fences[i])) {
+			return true;
+		}
+	}
+	return false;
 }

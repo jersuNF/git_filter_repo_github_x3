@@ -9,10 +9,10 @@
 
 /** @brief Computes the distance from a point to any polygon in cached pasture.
  * 
- * @param pos_x x position from gps measurement.
- * @param pos_y y position from gps measurement.
- * @param p_fence_index pointer to which polygon is closest.
- * @param p_vertex_index pointer to which vertex is closest in closest polygon.
+ * @param[in] pos_x x position from gps measurement.
+ * @param[in] pos_y y position from gps measurement.
+ * @param[out] p_fence_index pointer to which polygon is closest.
+ * @param[out] p_vertex_index pointer to which vertex is closest in closest polygon.
  * 
  * @return <0 Inside fence distance
  * @return 0 On fence line.

@@ -12,22 +12,6 @@ LOG_MODULE_REGISTER(amc_dist, CONFIG_AMC_LIB_LOG_LEVEL);
 #include "embedded.pb.h"
 #include "trigonometry.h"
 
-/** @brief Checks if a fence is valid with number of points and type..
- * 
- * @param fence pointer to fence(polygon) to chec.
- * 
- * @return true if valid, false if not valid.
-*/
-static bool fnc_valid(fence_t *fence)
-{
-	return (fence->m.n_points > 2 && fence->m.n_points <= 40 &&
-		(fence->m.e_fence_type ==
-			 FenceDefinitionMessage_FenceType_Normal ||
-		 fence->m.e_fence_type ==
-			 FenceDefinitionMessage_FenceType_Inverted));
-	/** @todo: Also test timespan from eeprom fence definition here. */
-}
-
 /** @brief Determent if the point is inside the defined closed polyline.
  * 
  * @note Does not consider if the fence is inverted. That

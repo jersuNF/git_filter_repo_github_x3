@@ -132,8 +132,6 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		connected = false;
 		return true;
 	}else if (is_messaging_host_address_event(eh)) {
-		/*TODO: compare with host address in eeprom and store the new
-		 * one if needed. Restart might be needed then. */
 		int ret = eep_read_host_port(&server_address_tmp[0], EEP_HOST_PORT_BUF_SIZE-1);
 		if (ret != 0){
 			LOG_ERR("Failed to read host address from eeprom!\n");

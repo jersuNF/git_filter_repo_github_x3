@@ -20,6 +20,8 @@
 #include "ble_controller.h"
 #include "msg_data_event.h"
 
+#include "nf_version.h"
+
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_CONTROLLER_LOG_LEVEL);
 
 static void bt_send_work_handler(struct k_work *work);
@@ -41,7 +43,7 @@ static atomic_t active;
 static char bt_device_name[DEVICE_NAME_LEN + 1] = CONFIG_BT_DEVICE_NAME;
 
 // Shaddow register. Should be initialized with data from EEPROM or FLASH
-static uint16_t current_fw_ver = CONFIG_NOFENCE_FIRMWARE_NUMBER;
+static uint16_t current_fw_ver = NF_X25_VERSION_NUMBER;
 static uint32_t current_serial_numer = CONFIG_NOFENCE_SERIAL_NUMBER;
 static uint8_t current_battery_level;
 static uint8_t current_error_flags;

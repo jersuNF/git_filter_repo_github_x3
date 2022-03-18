@@ -33,6 +33,7 @@
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
+#include "nf_eeprom.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
@@ -479,6 +480,7 @@ static void process_lte_proto_event(void)
 	EVENT_SUBMIT(ack);
 	/* process poll response */
 	if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
+		LOG_INF("Process poll reponse");
 		process_poll_response(&proto);
 		return;
 	} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
@@ -582,10 +584,15 @@ void build_poll_request(NofenceMessage *poll_req)
 		//			EEPROM_GetOffAnimalTimeLimitSec();
 	}
 	if (m_confirm_ble_key) {
-		//		poll_req.m.poll_message_req.has_rgubcBleKey = true;
-		//		poll_req.m.poll_message_req.rgubcBleKey.size = EEP_BLE_SEC_KEY_LEN;
-		//		EEPROM_ReadBleSecKey(poll_req.m.poll_message_req.rgubcBleKey.bytes,
-		//				     EEP_BLE_SEC_KEY_LEN);
+		poll_req->m.poll_message_req.has_rgubcBleKey = true;
+		poll_req->m.poll_message_req.rgubcBleKey.size =
+			EEP_BLE_SEC_KEY_LEN;
+		int err = eep_read_ble_sec_key(
+			poll_req->m.poll_message_req.rgubcBleKey.bytes,
+			EEP_BLE_SEC_KEY_LEN);
+		if (err) {
+			LOG_ERR("Failed to read ble_sec_key, error: %d", err);
+		}
 	}
 	poll_req->m.poll_message_req.usGnssOnFixAgeSec = 123;
 	poll_req->m.poll_message_req.usGnssTTFFSec = 12;
@@ -723,7 +730,10 @@ void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
 
 void proto_InitHeader(NofenceMessage *msg)
 {
-	msg->header.ulId = 11500; //TODO: read from eeprom
+	uint32_t eeprom_stored_serial_nr;
+	eep_read_serial(&eeprom_stored_serial_nr);
+
+	msg->header.ulId = eeprom_stored_serial_nr;
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
 	if (use_server_time) {
@@ -840,8 +850,20 @@ void process_poll_response(NofenceMessage *proto)
 		/* TODO: submit pResp->usOffAnimalTimeLimitSec to AMC. */
 	}
 	if (pResp->has_rgubcBleKey) {
-		/* TODO: submit pResp->rgubcBleKey.bytes,pResp->rgubcBleKey
-		 * .size to BLE controller. */
+		LOG_INF("Received a ble_sec_key of size %d",
+			pResp->rgubcBleKey.size);
+		uint8_t current_ble_sec_key[EEP_BLE_SEC_KEY_LEN];
+		eep_read_ble_sec_key(current_ble_sec_key, EEP_BLE_SEC_KEY_LEN);
+		int ret = memcmp(pResp->rgubcBleKey.bytes, current_ble_sec_key,
+				 pResp->rgubcBleKey.size);
+		if (ret != 0) {
+			LOG_INF("New ble sec key is different. Will update eeprom");
+			ret = eep_write_ble_sec_key(pResp->rgubcBleKey.bytes,
+						    pResp->rgubcBleKey.size);
+			if (ret < 0) {
+				LOG_ERR("Failed to write ble sec key to EEPROM");
+			}
+		}
 	}
 	if (pResp->has_versionInfo) {
 		process_upgrade_request(&pResp->versionInfo);

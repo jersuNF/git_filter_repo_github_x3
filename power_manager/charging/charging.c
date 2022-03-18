@@ -49,11 +49,6 @@ static atomic_t charging_active = false;
 #define CURRENT_SENSE_GAIN 50.0f //MAX9634FEKS+
 #define CURRENT_OFFSET 3.5f // mA
 
-//***DO NOT CHANGE***
-#define MAX_CURRENT_VALUE_mA                                                   \
-	((Vdcdc / CURRENT_SENSE_GAIN) /                                        \
-	 CURRENT_SENSE_RESISTOR) //In mA -> for MAX9634TERS+ this value is 683mA
-
 /** @brief Moving average for current defined outside function */
 MovAvg IchrgSMA;
 

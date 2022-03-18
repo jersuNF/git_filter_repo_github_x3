@@ -33,13 +33,13 @@ atomic_t new_gnss_written = ATOMIC_INIT(false);
  */
 static pasture_t pasture_cache;
 
-int get_pasture_cache(pasture_t *pasture)
+int get_pasture_cache(pasture_t **pasture)
 {
 	if (pasture_cache.m.ul_total_fences == 0) {
 		return -ENODATA;
 	}
 
-	pasture = &pasture_cache;
+	*pasture = &pasture_cache;
 	return 0;
 }
 
@@ -59,7 +59,7 @@ int set_pasture_cache(uint8_t *pasture, size_t len)
 	memset(&pasture_cache, 0, sizeof(pasture_t));
 
 	/* Memcpy the contents. */
-	memcpy(&pasture_cache, pasture, sizeof(pasture_t));
+	memcpy(&pasture_cache, (pasture_t *)pasture, sizeof(pasture_t));
 
 	k_sem_give(&fence_data_sem);
 	return 0;
@@ -91,7 +91,7 @@ int set_gnss_cache(gnss_struct_t *gnss)
 	return 0;
 }
 
-int get_gnss_cache(gnss_struct_t *gnss)
+int get_gnss_cache(gnss_struct_t **gnss)
 {
 	int err = k_sem_take(&gnss_data_sem,
 			     K_SECONDS(CONFIG_GNSS_CACHE_TIMEOUT_SEC));
@@ -113,7 +113,7 @@ int get_gnss_cache(gnss_struct_t *gnss)
 		atomic_set(&new_gnss_written, false);
 	}
 
-	gnss = current_gnssdata_area;
+	*gnss = current_gnssdata_area;
 
 	if (gnss == NULL) {
 		return -ENODATA;

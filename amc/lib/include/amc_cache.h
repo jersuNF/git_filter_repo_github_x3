@@ -23,7 +23,7 @@ extern struct k_sem fence_data_sem;
  * @return 0 on success.
  * @return -ENODATA if pasture has 0 fences.
  */
-int get_pasture_cache(pasture_t *pasture);
+int get_pasture_cache(pasture_t **pasture);
 
 /**
  * @brief Free's previous fence cache and stores a new one based on
@@ -51,7 +51,7 @@ int set_pasture_cache(uint8_t *pasture, size_t len);
  * @return 0 on success.
  * @return -ENODATA if gnss cache has not been set.
  */
-int get_gnss_cache(gnss_struct_t *gnss);
+int get_gnss_cache(gnss_struct_t **gnss);
 
 /**
  * @brief Updates the gnss cache area that is not being read from. Locks

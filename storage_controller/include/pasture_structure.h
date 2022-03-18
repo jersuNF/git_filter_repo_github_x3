@@ -25,7 +25,7 @@ typedef struct {
 } fence_coordinate_t;
 
 typedef struct {
-	union {
+	struct {
 		/** Fence ID. */
 		uint16_t us_id;
 
@@ -47,7 +47,7 @@ typedef struct {
 		sizeof(fence_coordinate_t) * FENCE_MAX_TOTAL_COORDINATES
 
 typedef struct {
-	union {
+	struct {
 		uint32_t ul_fence_def_version;
 
 		bool has_us_pasture_crc;

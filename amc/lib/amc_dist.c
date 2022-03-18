@@ -141,7 +141,6 @@ static uint16_t fnc_ln_pt_dist(int16_t A_X, int16_t A_Y, int16_t B_X,
 	int64_t c1 = fnc_dot(&w, &v);
 	if (c1 <= 0) {
 		d = fnc_distance(C_X, C_Y, A_X, A_Y);
-
 	} else {
 		int64_t c2 = fnc_dot(&v, &v);
 		if (c2 <= c1) {
@@ -165,7 +164,7 @@ int16_t fnc_calc_dist(int16_t pos_x, int16_t pos_y, uint8_t *p_fence_index,
 {
 	/* Fetch pasture from cache. */
 	pasture_t *pasture = NULL;
-	get_pasture_cache(pasture);
+	get_pasture_cache(&pasture);
 
 	/* Fetch pasture info. */
 	uint8_t n_fences = pasture->m.ul_total_fences;
@@ -175,7 +174,6 @@ int16_t fnc_calc_dist(int16_t pos_x, int16_t pos_y, uint8_t *p_fence_index,
 
 	uint16_t my_tmp;
 	uint8_t i;
-
 	/* Find distance to all fences. */
 	for (uint8_t fence_index = 0; fence_index < n_fences; fence_index++) {
 		fence_t *cur_fence = &pasture->fences[fence_index];

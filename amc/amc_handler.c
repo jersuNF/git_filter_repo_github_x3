@@ -63,7 +63,7 @@ void process_new_fence_fn(struct k_work *item)
 	}
 
 	pasture_t *pasture = NULL;
-	get_pasture_cache(pasture);
+	get_pasture_cache(&pasture);
 
 	if (cache_ret) {
 		pasture->m.ul_fence_def_version = 0;
@@ -95,7 +95,7 @@ void process_new_gnss_data_fn(struct k_work *item)
 	/* Fetch cached fence and size. */
 	pasture_t *pasture = NULL;
 
-	err = get_pasture_cache(pasture);
+	err = get_pasture_cache(&pasture);
 	if (err || pasture == NULL) {
 		char *msg = "Error getting fence cache.";
 		nf_app_fatal(ERR_SENDER_AMC, err, msg, strlen(msg));
@@ -104,7 +104,7 @@ void process_new_gnss_data_fn(struct k_work *item)
 
 	/* Fetch new, cached gnss data. */
 	gnss_struct_t *gnss = NULL;
-	err = get_gnss_cache(gnss);
+	err = get_gnss_cache(&gnss);
 	if (err || gnss == NULL) {
 		char *msg = "Error getting gnss cahce.";
 		nf_app_fatal(ERR_SENDER_AMC, err, msg, strlen(msg));

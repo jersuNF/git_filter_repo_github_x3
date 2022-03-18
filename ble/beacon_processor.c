@@ -286,6 +286,10 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 
 	if (m > CONFIG_BEACON_DISTANCE_MAX || m > BEACON_DISTANCE_INFINITY) {
 		last_calculated_distance = UINT8_MAX;
+		/* Beacon is found but out of desired range */
+		struct ble_beacon_event *event_err = new_ble_beacon_event();
+		event_err->status = BEACON_STATUS_OUT_OF_RANGE;
+		EVENT_SUBMIT(event_err);
 		return -EIO;
 	}
 
@@ -343,7 +347,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 
 	if (shortest_dist == UINT8_MAX) {
 		cross_type = CROSS_UNDEFINED;
-		event->status = BEACON_STATUS_NOT_FOUND; 
+		event->status = BEACON_STATUS_NOT_FOUND;
 
 	} else if (shortest_dist > CONFIG_BEACON_HIGH_LIMIT) {
 		cross_type = CROSS_UNDEFINED;

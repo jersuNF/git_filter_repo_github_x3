@@ -526,12 +526,7 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 	    adv_data.minor == BEACON_MINOR_ID) {
 		const uint32_t now = k_uptime_get_32();
 		err = beacon_process_event(now, addr, rssi, &adv_data);
-		if (err == -EIO) {
-			/* Beacon is found but out of desired range */
-			struct ble_beacon_event *event = new_ble_beacon_event();
-			event->status = BEACON_STATUS_OUT_OF_RANGE;
-			EVENT_SUBMIT(event);
-		} else {
+		if (err != -EIO) {
 			/* Beacon found. Reset 60 seconds scan_stop countdown */
 			beacon_scanner_timer = k_uptime_get();
 		}
@@ -540,14 +535,14 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 	int delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
 	if (delta_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
 		/* Beacon is not found */
-		struct ble_beacon_event *event_err = new_ble_beacon_event();
-		event_err->status = BEACON_STATUS_NOT_FOUND;
-		EVENT_SUBMIT(event_err);
+		struct ble_beacon_event *bc_event = new_ble_beacon_event();
+		bc_event->status = BEACON_STATUS_NOT_FOUND;
+		EVENT_SUBMIT(bc_event);
 
 		/* Stop beacon scanner */
-		struct ble_ctrl_event *event = new_ble_ctrl_event();
-		event->cmd = BLE_CTRL_SCAN_STOP;
-		EVENT_SUBMIT(event);
+		struct ble_ctrl_event *ctrl_event = new_ble_ctrl_event();
+		ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
+		EVENT_SUBMIT(ctrl_event);
 	}
 }
 

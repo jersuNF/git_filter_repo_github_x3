@@ -326,7 +326,7 @@ int messaging_module_init(void)
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
 	int err;
 	err = k_work_schedule_for_queue(&poll_q, &modem_poll_work, K_NO_WAIT);
-	if (err != 0){
+	if (err != 1){
 		return err;
 	}
 	return 0;

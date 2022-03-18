@@ -540,9 +540,9 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 	int delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
 	if (delta_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
 		/* Beacon is not found */
-		struct ble_beacon_event *event = new_ble_beacon_event();
-		event->status = BEACON_STATUS_NOT_FOUND;
-		EVENT_SUBMIT(event);
+		struct ble_beacon_event *event_err = new_ble_beacon_event();
+		event_err->status = BEACON_STATUS_NOT_FOUND;
+		EVENT_SUBMIT(event_err);
 
 		/* Stop beacon scanner */
 		struct ble_ctrl_event *event = new_ble_ctrl_event();

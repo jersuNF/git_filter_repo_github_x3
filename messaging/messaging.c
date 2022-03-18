@@ -24,19 +24,21 @@
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
 #define SECONDS_IN_THREE_DAYS 259200
+#define SEND_OUT_ACK_TIMEOUT CONFIG_CC_ACK_TIMEOUT_SEC
 
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
 
 uint32_t time_from_server;
 
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
+K_SEM_DEFINE(send_out_ack, 0, 1);
 
 collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
 
-static uint32_t new_fence_in_progress;
-static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
-static bool first_frame, first_ano_frame;
+uint32_t new_fence_in_progress;
+uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
+bool first_frame, first_ano_frame;
 
 uint8_t poll_period_minutes = 5;
 void build_poll_request(NofenceMessage *);
@@ -52,12 +54,12 @@ uint8_t process_ano_msg(UbxAnoReply *);
 int send_message(NofenceMessage *);
 void messaging_thread_fn(void);
 
-_DatePos proto_getLastKnownDatePos(gnss_last_fix_struct_t *);
-bool proto_hasLastKnownDatePos(const gnss_last_fix_struct_t *);
+_DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *);
+bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *);
 static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t,
 					    uint8_t);
 bool m_confirm_acc_limits, m_confirm_ble_key, m_transfer_boot_params;
-bool send_out_ack, use_server_time;
+bool use_server_time;
 
 K_SEM_DEFINE(ble_ctrl_sem, 0, 1);
 K_SEM_DEFINE(ble_data_sem, 0, 1);
@@ -106,11 +108,19 @@ void modem_poll_work_fn()
 	LOG_WRN("Starting periodic poll work fn!\n");
 	NofenceMessage new_poll_msg;
 	memset(&new_poll_msg, 0, sizeof(new_poll_msg));
-	if (!k_sem_take(&cache_lock_sem, K_SECONDS(1))) {
+	if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
 		LOG_DBG("Building poll request!\n");
 		build_poll_request(&new_poll_msg);
 		k_sem_give(&cache_lock_sem);
 	}
+	else {
+		LOG_ERR("Cached state semaphore hanged, retrying in 1 "
+			"second!\n");
+		k_work_reschedule_for_queue(&poll_q, &modem_poll_work,
+					    K_SECONDS(1));
+		return;
+		}
+
 	LOG_WRN("Messaging - Sending new message!\n");
 	send_message(&new_poll_msg);
 	k_work_reschedule_for_queue(&poll_q, &modem_poll_work,
@@ -181,7 +191,7 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_cellular_ack_event(eh)) {
-		send_out_ack = true;
+		k_sem_give(&send_out_ack);
 		return false;
 	}
 	if (is_new_gnss_fix(eh)) {
@@ -327,9 +337,9 @@ void build_poll_request(NofenceMessage *poll_req)
 	proto_InitHeader(poll_req); /* fill up message header. */
 	poll_req->which_m = NofenceMessage_poll_message_req_tag;
 	poll_req->m.poll_message_req.datePos =
-		proto_getLastKnownDatePos(&cached_fix);
+		proto_get_last_known_date_pos(&cached_fix);
 	poll_req->m.poll_message_req.has_datePos =
-		proto_hasLastKnownDatePos(&cached_fix);
+		proto_has_last_known_date_pos(&cached_fix);
 	poll_req->m.poll_message_req.eMode = current_state.collar_mode;
 	poll_req->m.poll_message_req.usZapCount = current_state.zap_count;
 	poll_req->m.poll_message_req.eCollarStatus =
@@ -524,25 +534,26 @@ void proto_InitHeader(NofenceMessage *msg)
 
 int send_message(NofenceMessage *msg_proto)
 {
-	static uint8_t waiting_cycles;
 	uint8_t encoded_msg[NofenceMessage_size];
 	memset(encoded_msg, 0, sizeof(encoded_msg));
 	size_t encoded_size = 0;
 	LOG_DBG("Start message encoding!, size: %d, version: %u\n",
 		sizeof(msg_proto), msg_proto->header.ulVersion);
 
-	LOG_WRN("Input to proto encode: %p,%p,%u,%p\n", msg_proto,
+	LOG_DBG("Input to proto encode: %p,%p,%u,%p\n", msg_proto,
 		&encoded_msg[0], sizeof(encoded_msg), &encoded_size);
 
 	int ret = collar_protocol_encode(msg_proto, &encoded_msg[0],
 					 sizeof(encoded_msg), &encoded_size);
+#if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
 	for (int i = 0; i < encoded_size; i++) {
 		printk("\\x%02x", encoded_msg[i]);
 	}
 	printk("\n");
+#endif
 	/* add 16-bit uint: size of encoded message. */
 	char *tmp;
-	tmp = (char *)malloc(encoded_size + 2);
+	tmp = (char *)k_malloc(encoded_size + 2);
 	uint16_t size = BYTESWAP16(encoded_size);
 	memcpy(tmp, &size, 2);
 	memcpy(tmp + 2, &encoded_msg[0], encoded_size);
@@ -561,21 +572,16 @@ int send_message(NofenceMessage *msg_proto)
 
 	EVENT_SUBMIT(msg2send);
 	LOG_DBG("Submitted message event\n!\n");
-
-	while (!send_out_ack) {
-		k_sleep(K_SECONDS(0.1));
-		LOG_WRN("Waiting for ack!\n");
-		if (waiting_cycles++ > 10){
-			waiting_cycles = 0;
-			char *e_msg = "Timed out waiting for cellular ack!\n";
-			nf_app_error(ERR_MESSAGING, ETIME,
-				     e_msg, strlen(e_msg));
-			return -1;
-		}
+	LOG_WRN("Waiting for ack!\n");
+	int err = k_sem_take(&send_out_ack, K_SECONDS(SEND_OUT_ACK_TIMEOUT));
+	if(err != 0) {
+		char *e_msg = "Timed out waiting for cellular ack!\n";
+		nf_app_error(ERR_MESSAGING, ETIME,
+			     e_msg, strlen(e_msg));
+		k_free(tmp);
+		return -1;
 	}
-	send_out_ack = false;
-	waiting_cycles = 0;
-	free(tmp);
+	k_free(tmp);
 	return 0;
 }
 
@@ -585,7 +591,6 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_xServerIp && strlen(pResp->xServerIp) > 0) {
 		struct messaging_host_address_event *host_add_event =
 			new_messaging_host_address_event();
-		//		strcpy(host_add_event.address, pResp->xServerIp, sizeof(pResp->xServerIp));
 		strncpy(host_add_event->address, pResp->xServerIp,
 			sizeof(pResp->xServerIp));
 		EVENT_SUBMIT(host_add_event); /*cellular controller writes it
@@ -697,7 +702,7 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 	return rec_ano_frames;
 }
 
-_DatePos proto_getLastKnownDatePos(gnss_last_fix_struct_t *gpsLastFix)
+_DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix)
 {
 	bool valid_headVeh = (bool)(gpsLastFix->pvt_flags &
 				    GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK);
@@ -726,7 +731,7 @@ _DatePos proto_getLastKnownDatePos(gnss_last_fix_struct_t *gpsLastFix)
 	return a;
 }
 
-bool proto_hasLastKnownDatePos(const gnss_last_fix_struct_t *gps)
+bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *gps)
 {
 	return gps->unix_timestamp != 0;
 }

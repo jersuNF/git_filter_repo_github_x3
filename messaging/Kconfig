@@ -43,6 +43,10 @@ if MESSAGING
 		int "Seconds between modem poll"
 		default 900
 
+	config CC_ACK_TIMEOUT_SEC
+	    int "Timeout when waiting for ack from cellular controller"
+	    default 1
+
 	menu "Message Queues"
 		config MSGQ_BLE_CTRL_SIZE
 		int "Size of the bluetooth control command data received"

@@ -11,15 +11,8 @@
 #include <logging/log.h>
 LOG_MODULE_REGISTER(ble_dfu);
 
-/**
- * @brief Initialize the SMP service to do BLE FOTA 
- * 
- * @param[in] dev Runtime device. Attribute unused
- * @return 0 on success, negative error code on faliure
- */
-static int bt_dfu_init(const struct device *dev)
+int bt_dfu_init(void)
 {
-	ARG_UNUSED(dev);
 	int err = 0;
 
 	img_mgmt_register_group();
@@ -33,6 +26,3 @@ static int bt_dfu_init(const struct device *dev)
 
 	return err;
 }
-
-/* This will run bt_dfu_init at system boot */
-SYS_INIT(bt_dfu_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

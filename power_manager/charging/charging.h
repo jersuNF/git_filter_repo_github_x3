@@ -12,41 +12,41 @@
  *
  * @return 0 on success, otherwise negative error code.
  */
-int init_charging_module(void);
+int charging_init_module(void);
 
 /**
  * @brief Start charging, set GPIO to enable transistor
  *
  * @return 0 on success, otherwise negative error code.
  */
-int start_charging(void);
+int charging_start(void);
 
 /**
  * @brief Stop charging, disable GPIO
  *
  * @return 0 on success, otherwise negative error code.
  */
-int stop_charging(void);
+int charging_stop(void);
 
 /**
  * @brief Perform a current measurement
  *
  * @return 0 on success, otherwise negative error code.
  */
-int read_analog_charging_channel(void);
+int charging_read_analog_channel(void);
 
 /**
  * @brief Init the moving average struct for current measurements
  *
  */
-void init_current_moving_average(void);
+void charging_init_moving_average(void);
 
 /**
  * @brief Fetch the averaged current measurement
  *
  * @return current measurement given in mA. Return -ENOENT if reading fails.
  */
-int current_sample_averaged(void);
+int charging_current_sample_averaged(void);
 
 /** 
  * @brief Configure the solar panel charging adc

@@ -85,7 +85,7 @@ static void battery_poll_work_fn()
 #if CONFIG_ADC_NRFX_SAADC
 		else if (batt_voltage > CONFIG_BATTERY_HIGH) {
 			if (charging_in_progress()) {
-				stop_charging();
+				charging_stop();
 			}
 		}
 #endif
@@ -103,7 +103,7 @@ static void battery_poll_work_fn()
 	case PWR_CRITICAL:
 #if CONFIG_ADC_NRFX_SAADC
 		if (!charging_in_progress()) {
-			start_charging();
+			charging_start();
 		}
 #endif
 		if (batt_voltage >
@@ -130,7 +130,7 @@ static void battery_poll_work_fn()
 /** @brief Periodic solar charging work function */
 static void charging_poll_work_fn()
 {
-	int charging_current_avg = current_sample_averaged();
+	int charging_current_avg = charging_current_sample_averaged();
 	if (charging_current_avg < 0) {
 		LOG_ERR("Failed to fetch charging data %d",
 			charging_current_avg);
@@ -163,14 +163,14 @@ int pwr_module_init(void)
 #if CONFIG_ADC_NRFX_SAADC
 	/* Initialize and start charging */
 	err = charging_setup();
-	err = init_charging_module();
+	err = charging_init_module();
 	if (err) {
 		LOG_ERR("Failed to init charging module %d", err);
 		char *e_msg = "Failed to configure or setup charging";
 		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
 		return err;
 	}
-	err = start_charging();
+	err = charging_start();
 	if (err) {
 		LOG_ERR("Failed to start charging %d", err);
 		char *e_msg = "Failed to start solar charging";

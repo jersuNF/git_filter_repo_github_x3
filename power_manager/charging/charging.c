@@ -63,8 +63,10 @@ static struct adc_channel_cfg charging_channel_cfg = {
 #endif
 };
 
-// initialize the adc channel
-int init_charging_adc(void)
+/**
+ * @brief Init the adc channel
+ */
+static int charging_init_adc(void)
 {
 	int ret;
 	charging_adc_dev = device_get_binding(CHARGING_ADC_DEVICE_NAME);
@@ -88,7 +90,7 @@ int init_charging_adc(void)
 	return 0;
 }
 
-void init_current_moving_average(void)
+void charging_init_moving_average(void)
 {
 	IchrgSMA.average = 0;
 	IchrgSMA.N = 0;
@@ -98,15 +100,15 @@ void init_current_moving_average(void)
 
 int charging_setup(void)
 {
-	int err = init_charging_adc();
+	int err = charging_init_adc();
 	charging_ok = (err == 0);
 	LOG_INF("Charging ADC setup %s", charging_ok ? "complete" : "error");
-	init_current_moving_average();
+	charging_init_moving_average();
 
 	return err;
 }
 
-int read_analog_charging_channel(void)
+int charging_read_analog_channel(void)
 {
 	struct adc_sequence sequence = {
 		.options = NULL, // extra samples and callback
@@ -144,7 +146,7 @@ int read_analog_charging_channel(void)
 	return 0;
 }
 
-int init_charging_module(void)
+int charging_init_module(void)
 {
 	int err;
 	charging_load_dev = device_get_binding(CHARGING_LOAD_LABEL);
@@ -172,7 +174,7 @@ int init_charging_module(void)
 	return err;
 }
 
-int start_charging(void)
+int charging_start(void)
 {
 	int err;
 	if (!charging_ok) {
@@ -209,7 +211,7 @@ int start_charging(void)
 	return 0;
 }
 
-int stop_charging(void)
+int charging_stop(void)
 {
 	int err;
 	if (!device_is_ready(charging_dcdc_dev)) {
@@ -240,9 +242,9 @@ int stop_charging(void)
 	return 0;
 }
 
-int current_sample_averaged(void)
+int charging_current_sample_averaged(void)
 {
-	int current_ma = read_analog_charging_channel();
+	int current_ma = charging_read_analog_channel();
 	if (current_ma < 0) {
 		LOG_ERR("Failed to read solar charging current: %d",
 			current_ma);

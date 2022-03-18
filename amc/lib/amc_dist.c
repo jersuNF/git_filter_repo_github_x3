@@ -186,8 +186,8 @@ int16_t fnc_calc_dist(int16_t pos_x, int16_t pos_y, uint8_t *p_fence_index,
 				my_tmp = fnc_ln_pt_dist(
 					cur_fence->coordinates[i].s_x_dm,
 					cur_fence->coordinates[i].s_y_dm,
-					cur_fence->coordinates[i].s_x_dm - 1,
-					cur_fence->coordinates[i].s_y_dm - 1,
+					cur_fence->coordinates[i - 1].s_x_dm,
+					cur_fence->coordinates[i - 1].s_y_dm,
 					pos_x, pos_y);
 
 				if (my_tmp < my_dist[fence_index]) {

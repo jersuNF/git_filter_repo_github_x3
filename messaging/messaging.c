@@ -111,7 +111,6 @@ void modem_poll_work_fn()
 	if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
 		LOG_DBG("Building poll request!\n");
 		build_poll_request(&new_poll_msg);
-		k_sem_give(&cache_lock_sem);
 	}
 	else {
 		LOG_ERR("Cached state semaphore hanged, retrying in 1 "
@@ -123,6 +122,7 @@ void modem_poll_work_fn()
 
 	LOG_WRN("Messaging - Sending new message!\n");
 	send_message(&new_poll_msg);
+	k_sem_give(&cache_lock_sem);
 	k_work_reschedule_for_queue(&poll_q, &modem_poll_work,
 				    K_SECONDS(poll_period_minutes * 60));
 }
@@ -196,7 +196,7 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_new_gnss_fix(eh)) {
 		struct new_gnss_fix *ev = cast_new_gnss_fix(eh);
-		if (!k_sem_take(&cache_lock_sem, K_SECONDS(0.1))) {
+		if ( k_sem_take(&cache_lock_sem, K_MSEC(100)) == 0 ) {
 			cached_fix = ev->fix;
 			k_sem_give(&cache_lock_sem);
 		}
@@ -545,6 +545,12 @@ int send_message(NofenceMessage *msg_proto)
 
 	int ret = collar_protocol_encode(msg_proto, &encoded_msg[0],
 					 sizeof(encoded_msg), &encoded_size);
+	if(ret != 0) {
+		char *e_msg = "Failed to encode proto buf message!\n";
+		nf_app_error(ERR_MESSAGING, ret,
+			     e_msg, strlen(e_msg));
+		return -1;
+	}
 #if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
 	for (int i = 0; i < encoded_size; i++) {
 		printk("\\x%02x", encoded_msg[i]);

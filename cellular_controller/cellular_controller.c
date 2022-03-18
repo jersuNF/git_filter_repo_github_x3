@@ -2,6 +2,7 @@
 #include "cellular_helpers_header.h"
 #include "messaging_module_events.h"
 #include <zephyr.h>
+#include "nf_eeprom.h"
 
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define MY_PRIORITY CONFIG_RECV_THREAD_PRIORITY

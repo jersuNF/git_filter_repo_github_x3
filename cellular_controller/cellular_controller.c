@@ -9,9 +9,11 @@
 #define SOCKET_POLL_INTERVAL 0.25
 #define SOCK_RECV_TIMEOUT 60
 #define MODULE cellular_controller
+#define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_SEC
+
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
-static bool messaging_ack = true;
+K_SEM_DEFINE(messaging_ack, 0, 1);
 
 char server_address[EEP_HOST_PORT_BUF_SIZE-1];
 char server_address_tmp[EEP_HOST_PORT_BUF_SIZE-1];
@@ -61,10 +63,13 @@ void receive_tcp(struct data *sock_data)
 #if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
 				LOG_WRN("received %d bytes!\n", received);
 #endif
-				if (messaging_ack ==
-				    false) { /* TODO: notify the error handler */
+				LOG_WRN("will take semaphore!\n");
+				if (k_sem_take(&messaging_ack, K_SECONDS
+					       (MESSAGING_ACK_TIMEOUT)) !=0) {
+					/* TODO: notify the error handler */
 					LOG_ERR("New message received while the messaging module "
 						"hasn't consumed the previous one!\n");
+					submit_error(OTHER, -1);
 				} else {
 					if (pMsgIn != NULL) {
 						k_free(pMsgIn);
@@ -72,7 +77,6 @@ void receive_tcp(struct data *sock_data)
 					}
 					pMsgIn = (uint8_t *) k_malloc(received);
 					memcpy(pMsgIn, buf, received);
-					messaging_ack = false;
 					struct cellular_proto_in_event *msgIn =
 						new_cellular_proto_in_event();
 					msgIn->buf = pMsgIn;
@@ -124,7 +128,7 @@ int8_t start_tcp(void)
 static bool cellular_controller_event_handler(const struct event_header *eh)
 {
 	if (is_messaging_ack_event(eh)) {
-		messaging_ack = true;
+		k_sem_give(&messaging_ack);
 		LOG_WRN("ACK received!\n");
 		return true;
 	} else if (is_messaging_stop_connection_event(eh)) {
@@ -235,7 +239,7 @@ int8_t cache_server_address(void)
 
 int8_t cellular_controller_init(void)
 {
-	messaging_ack = true;
+	k_sem_give(&messaging_ack);
 	int8_t ret;
 	printk("Cellular controller starting!, %p\n", k_current_get());
 	connected = false;

@@ -414,22 +414,11 @@ static inline void process_ble_cmd_event(void)
 		break;
 	}
 	case CMD_REBOOT_AVR_MCU: {
-		uint32_t shutdown_time_sec = 5;
-
 		struct reboot_scheduled_event *r_ev =
 			new_reboot_scheduled_event();
-		r_ev->reboots_at =
-			k_uptime_get_32() + (shutdown_time_sec * MSEC_PER_SEC);
+		r_ev->reboots_at = k_uptime_get_32() +
+				   (CONFIG_SHUTDOWN_TIMER_SEC * MSEC_PER_SEC);
 		EVENT_SUBMIT(r_ev);
-
-		k_sleep(K_SECONDS(shutdown_time_sec));
-
-/* Add a check that we are using NRF board
- * since they are the ones supported by nordic's <power/reboot.h>
- */
-#ifdef CONFIG_BOARD_NF_X25_NRF52840
-		sys_reboot(SYS_REBOOT_COLD);
-#endif
 		break;
 	}
 	case CMD_PLAY_SOUND: {

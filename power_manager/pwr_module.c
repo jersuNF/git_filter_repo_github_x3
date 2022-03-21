@@ -7,6 +7,7 @@
 #include <device.h>
 #include <devicetree.h>
 #include <drivers/gpio.h>
+#include <power/reboot.h>
 
 #include <math.h>
 #include <stdio.h>
@@ -17,6 +18,7 @@
 #include "error_event.h"
 #include "battery.h"
 #include "ble_ctrl_event.h"
+#include "messaging_module_events.h"
 
 #define MODULE pwr_module
 #include <logging/log.h>
@@ -154,3 +156,38 @@ int log_and_fetch_battery_voltage(void)
 
 	return batt_mV;
 }
+
+/**
+ * @brief Event handler function
+ * @param[in] eh Pointer to event handler struct
+ * @return true to consume the event (event is not propagated to further
+ * listners), false otherwise
+ */
+static bool event_handler(const struct event_header *eh)
+{
+	/* Received reboot event */
+	if (is_reboot_scheduled_event(eh)) {
+		LOG_INF("Reboot event received!");
+		const struct reboot_scheduled_event *r_ev =
+			cast_reboot_scheduled_event(eh);
+
+		uint32_t time_to_wait_ms = r_ev->reboots_at - k_uptime_get_32();
+/* Add a check that we are using NRF board
+ * since they are the ones supported by nordic's <power/reboot.h>
+ */
+#ifdef CONFIG_BOARD_NF_X25_NRF52840
+		LOG_INF("Will reboot after %u milliseconds", time_to_wait_ms);
+		k_sleep(K_MSEC(time_to_wait_ms));
+		sys_reboot(SYS_REBOOT_COLD);
+#endif
+		return true;
+	}
+
+	/* If event is unhandled, unsubscribe. */
+	__ASSERT_NO_MSG(false);
+
+	return false;
+}
+
+EVENT_LISTENER(MODULE, event_handler);
+EVENT_SUBSCRIBE_FINAL(MODULE, reboot_scheduled_event);

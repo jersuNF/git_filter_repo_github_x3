@@ -150,7 +150,7 @@ int play_hz(const uint32_t freq, const uint32_t sustain, const uint8_t volume)
  * @return 0 on success, otherwise negative errno.
  * @return -EINTR if sound was aborted by another thread.
  */
-int play_sweep(int32_t start_freq, int32_t end_freq, uint32_t duration,
+int play_sweep(uint32_t start_freq, uint32_t end_freq, uint32_t duration,
 	       uint16_t step_count)
 {
 	if (step_count == 0 || start_freq == 0 || end_freq == 0 ||
@@ -162,8 +162,9 @@ int play_sweep(int32_t start_freq, int32_t end_freq, uint32_t duration,
 
 	for (uint16_t i = 0; i < step_count; i++) {
 		uint32_t freq = (uint32_t)(
-			start_freq +
-			(i * ((end_freq - start_freq) / (int32_t)step_count)));
+			start_freq + (int32_t)(i * (((int32_t)end_freq -
+						     (int32_t)start_freq) /
+						    (int32_t)step_count)));
 
 		int err = play_hz(freq, sustain, BUZZER_SOUND_VOLUME_PERCENT);
 		if (err) {
@@ -587,12 +588,18 @@ static bool event_handler(const struct event_header *eh)
 			atomic_set(&current_type_signal, ev->type);
 
 			if (ev->type == SND_WARN) {
+				/* We entered warn zone, initialize the frequency
+				 * to start at minimum and wait for AMC to
+				 * update it.
+				 */
+				atomic_set(&current_warn_zone_freq,
+					   WARN_FREQ_MS_PERIOD_INIT);
 				/* If current type is warn zone, start timeout timer
 			 	 * for getting a new frequency to play. */
 				k_timer_start(
 					&warn_zone_timeout_timer,
 					K_SECONDS(
-						CONFIG_BUZZER_UPDATE_WARN_FREQ_TIMEOUT_SEC),
+						CONFIG_BUZZER_UPDATE_WARN_FREQ_TIMEOUT),
 					K_NO_WAIT);
 			} else {
 				/* Stop any existing timeout timers if we have
@@ -620,7 +627,7 @@ static bool event_handler(const struct event_header *eh)
 			k_timer_start(
 				&warn_zone_timeout_timer,
 				K_SECONDS(
-					CONFIG_BUZZER_UPDATE_WARN_FREQ_TIMEOUT_SEC),
+					CONFIG_BUZZER_UPDATE_WARN_FREQ_TIMEOUT),
 				K_NO_WAIT);
 		} else {
 			k_timer_stop(&warn_zone_timeout_timer);

@@ -260,6 +260,12 @@ static int cellular_controller_connect(void* dev)
 	if (ret != 0) {
 		LOG_ERR("Failed caching server address from memory!");
 		goto exit;
+	} else { //172.31.36.11:4321
+		//172.31.33.243:9876
+		strcpy(server_ip,"172.31.36.11");
+		server_port = 4321;
+		LOG_WRN("Default server ip address will be "
+			"used. \n");
 	}
 
 	ret = start_tcp();
@@ -300,58 +306,26 @@ bool cellular_controller_is_connected(void)
 
 int8_t cellular_controller_init(void)
 {
-	messaging_ack = true;
-	int8_t ret;
 	printk("Cellular controller starting!, %p\n", k_current_get());
 	connected = false;
 	
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {
 		LOG_ERR("GSM driver was not found!\n");
-		submit_error(OTHER, -1);
-		goto exit_cellular_controller;
-	}
-	ret = lte_init();
-	if (ret == 1) {
-		LOG_INF("Cellular network interface ready!\n");
-
-		if (lte_is_ready()) {
-			ret = cache_server_address();
-			if (ret == 0) {
-				LOG_INF("Server ip address successfully cached from "
-					"eeprom!\n");
-			} else { //172.31.36.11:4321
-				//172.31.33.243:9876
-				strcpy(server_ip,"172.31.36.11");
-				server_port = 4321;
-				LOG_WRN("Default server ip address will be "
-					"used. \n");
-//				goto exit_cellular_controller;
-			}
-			ret = start_tcp();
-			if (ret == 0) {
-				LOG_INF("TCP connection started!\n");
-				connected = true;
-				return 0;
-			} else {
-				goto exit_cellular_controller;
-			}
-		} else {
-			LOG_ERR("Check LTE network configuration!");
-			/* TODO: notify error handler! */
-			goto exit_cellular_controller;
-		}
-	} else {
-		LOG_ERR("Failed to start LTE connection, check network interface!");
-		/* TODO: notify error handler! */
-		goto exit_cellular_controller;
+		return -1;
 	}
 
-exit_cellular_controller:
-	stop_tcp();
-	connected = false;
-	LOG_ERR("Cellular controller initialization failure!");
-	return -1;
+	/* Start connection keep-alive thread */
+	connection_is_alive = false;
+	k_sem_init(&connection_state_sem, 1, 1);
+	k_thread_create(&keep_alive_thread, keep_alive_stack,
+			K_KERNEL_STACK_SIZEOF(keep_alive_stack),
+			(k_thread_entry_t) cellular_controller_keep_alive,
+			(void*)gsm_dev, NULL, NULL, 
+			K_PRIO_COOP(CONFIG_CELLULAR_KEEP_ALIVE_THREAD_PRIORITY),
+			0, K_NO_WAIT);
+
+	return 0;
 }
 
 EVENT_LISTENER(MODULE, cellular_controller_event_handler);

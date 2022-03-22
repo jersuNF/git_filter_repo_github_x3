@@ -83,9 +83,13 @@ static void battery_poll_work_fn()
 			current_state = PWR_LOW;
 		}
 #if CONFIG_ADC_NRFX_SAADC
-		else if (batt_voltage > CONFIG_BATTERY_HIGH) {
+		if (batt_voltage > CONFIG_CHARGING_THRESHOLD_STOP) {
 			if (charging_in_progress()) {
 				charging_stop();
+			}
+		} else if (batt_voltage < CONFIG_CHARGING_THRESHOLD_START) {
+			if (!charging_in_progress()) {
+				charging_start();
 			}
 		}
 #endif
@@ -101,11 +105,6 @@ static void battery_poll_work_fn()
 		}
 		break;
 	case PWR_CRITICAL:
-#if CONFIG_ADC_NRFX_SAADC
-		if (!charging_in_progress()) {
-			charging_start();
-		}
-#endif
 		if (batt_voltage >
 		    (CONFIG_BATTERY_CRITICAL + CONFIG_BATTERY_THRESHOLD)) {
 			current_state = PWR_LOW;

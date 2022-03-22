@@ -9,3 +9,31 @@ config FENCE_CACHE_TIMEOUT_SEC
 config GNSS_CACHE_TIMEOUT_SEC
 	int "Timeout in seconds when we try to access the cache"
 	default 5
+
+config ZONE_CAUTION_DIST
+	int "Caution zone distance from border in dm"
+	default -110
+	
+config ZONE_CAUTION_HYST
+	int "Hysteresis of caution zone distance in dm"
+	default 10
+
+config ZONE_PREWARN_DIST
+	int "Prewarn zone distance from border in dm"
+	default -60
+	
+config ZONE_PREWARN_HYST
+	int "Hysteresis of prewarn zone distance in dm"
+	default 10
+
+config ZONE_WARN_DIST
+	int "Warn zone distance from border in dm"
+	default 0
+	help
+	  No corrections can be started with a distance-to-pasture less than this value.
+	  However, due to dynamic limits and GPS limitations, warnings can be started at
+	  a greater distance.
+	
+config ZONE_WARN_HYST
+	int "Hysteresis of warn zone distance in dm"
+	default 0

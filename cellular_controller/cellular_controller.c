@@ -13,7 +13,7 @@
 
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
-K_SEM_DEFINE(messaging_ack, 0, 1);
+K_SEM_DEFINE(messaging_ack, 1, 1);
 
 char server_address[EEP_HOST_PORT_BUF_SIZE-1];
 char server_address_tmp[EEP_HOST_PORT_BUF_SIZE-1];
@@ -239,7 +239,6 @@ int8_t cache_server_address(void)
 
 int8_t cellular_controller_init(void)
 {
-	k_sem_give(&messaging_ack);
 	int8_t ret;
 	printk("Cellular controller starting!, %p\n", k_current_get());
 	connected = false;

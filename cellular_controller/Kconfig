@@ -1,3 +1,11 @@
 menuconfig CELLULAR_CONTROLLER
 	bool "Cellular controller module"
 	default y
+
+if CELLULAR_CONTROLLER
+
+module = CELLULAR
+module-str = CELLULAR
+source "subsys/logging/Kconfig.template.log_config"
+
+endif

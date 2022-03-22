@@ -4,6 +4,7 @@
 
 #include <zephyr.h>
 #include <stdlib.h>
+#include <string.h>
 #include "messaging_module_events.h"
 #include "messaging.h"
 #include <logging/log.h>
@@ -38,7 +39,6 @@
 
 #define EMPTY_FENCE_CRC 0xFFFF
 static pasture_t pasture_temp;
-static uint8_t current_fence_counter = 0;
 
 uint32_t time_from_server;
 
@@ -456,8 +456,8 @@ void messaging_module_init(void)
 	k_work_schedule_for_queue(&send_q, &modem_poll_work, K_NO_WAIT);
 	k_work_schedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 
-	memset(&pasture_temp, 0, sizeof(pasture_temp));
-	current_fence_counter = 0;
+	memset(&pasture_temp, 0, sizeof(pasture_t));
+	pasture_temp.m.ul_total_fences = 0;
 	pasture_temp.m.us_pasture_crc = EMPTY_FENCE_CRC;
 }
 
@@ -821,9 +821,13 @@ uint8_t cached_fence_points = 0;
  */
 uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 {
-	uint8_t frame = fenceResp->ucFrameNumber;
+	if (fenceResp == NULL) {
+		return 0;
+	}
+
+	uint8_t frame = &fenceResp->ucFrameNumber;
+
 	int err = 0;
-	LOG_INF("Received fence frame number %d\n", frame);
 
 	if (new_fence_in_progress != fenceResp->ulFenceDefVersion) {
 		/* Something went wrong, restart fence request. */
@@ -831,8 +835,8 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	}
 
 	if (frame == 0) {
-		memset(&pasture_temp, 0, sizeof(pasture_temp));
-		current_fence_counter = 0;
+		memset(&pasture_temp, 0, sizeof(pasture_t));
+		pasture_temp.m.ul_total_fences = 0;
 		pasture_temp.m.us_pasture_crc = EMPTY_FENCE_CRC;
 	}
 
@@ -851,7 +855,6 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	pasture_temp.m.l_origin_lon = fenceResp->m.xHeader.lOriginLon;
 	pasture_temp.m.us_k_lat = fenceResp->m.xHeader.usK_LAT;
 	pasture_temp.m.us_k_lon = fenceResp->m.xHeader.usK_LON;
-	pasture_temp.m.ul_total_fences = fenceResp->m.xHeader.ulTotalFences;
 	pasture_temp.m.ul_fence_def_version = fenceResp->ulFenceDefVersion;
 
 	/* Fence frame info to store into pasture's fence array. */
@@ -870,6 +873,7 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	/* Increment number of fences stored in pasture. */
 	pasture_temp.m.ul_total_fences++;
 
+	LOG_INF("Cached fence frame %i successfully.", frame);
 	if (frame == fenceResp->ucTotalFrames - 1) {
 		/* Validate pasture. */
 		if (pasture_temp.m.ul_total_fences !=

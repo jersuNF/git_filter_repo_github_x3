@@ -7,8 +7,10 @@
 #define MY_PRIORITY 14
 #define SOCKET_POLL_INTERVAL 0.25
 #define SOCK_RECV_TIMEOUT 60
+
 #define MODULE cellular_controller
-LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
+#include <logging/log.h>
+LOG_MODULE_REGISTER(MODULE, CONFIG_CELLULAR_LOG_LEVEL);
 
 static bool messaging_ack = true;
 
@@ -38,21 +40,20 @@ void submit_error(int8_t cause, int8_t err_code)
 }
 
 void receive_tcp(struct data *);
-K_THREAD_DEFINE(my_tid, MY_STACK_SIZE,
-		receive_tcp, &conf.ipv4, NULL, NULL,
+K_THREAD_DEFINE(my_tid, MY_STACK_SIZE, receive_tcp, &conf.ipv4, NULL, NULL,
 		MY_PRIORITY, 0, 0);
 
 static APP_BMEM bool connected;
 
 void receive_tcp(struct data *sock_data)
 {
-	int  received;
+	int received;
 	char *buf = NULL;
 	uint8_t *pMsgIn = NULL;
 	static float socket_idle_count;
-	while(1){
+	while (1) {
 		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
-		if(connected){
+		if (connected) {
 			received = socket_receive(sock_data, &buf);
 			if (received > 0) {
 				socket_idle_count = 0;
@@ -78,9 +79,10 @@ void receive_tcp(struct data *sock_data)
 				}
 			} else if (received == 0) {
 				socket_idle_count += SOCKET_POLL_INTERVAL;
-				if (socket_idle_count > SOCK_RECV_TIMEOUT){
+				if (socket_idle_count > SOCK_RECV_TIMEOUT) {
 					LOG_ERR("Socket receive timed out!, "
-						"%f\n", socket_idle_count);
+						"%f\n",
+						socket_idle_count);
 					submit_error(SOCKET_RECV, received);
 					stop_tcp();
 					connected = false;
@@ -127,7 +129,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		stop_tcp();
 		connected = false;
 		return true;
-	}else if (is_messaging_host_address_event(eh)) {
+	} else if (is_messaging_host_address_event(eh)) {
 		/*TODO: compare with host address in eeprom and store the new
 		 * one if needed. Restart might be needed then. */
 		struct messaging_host_address_event *event =
@@ -144,17 +146,17 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		uint8_t ip_len;
 		ip_len = ptr_port - 1 - &server_address[0];
 		memcpy(&server_ip[0], &server_address[0], ip_len);
-	}else if (is_messaging_proto_out_event(eh)) {
+	} else if (is_messaging_proto_out_event(eh)) {
 		/* Accessing event data. */
 		struct messaging_proto_out_event *event =
 			cast_messaging_proto_out_event(eh);
 		uint8_t *pCharMsgOut = event->buf;
 		size_t MsgOutLen = event->len;
-		if(!connected){
-			int8_t  ret = start_tcp();
-			if (ret == 0){
+		if (!connected) {
+			int8_t ret = start_tcp();
+			if (ret == 0) {
 				connected = true;
-			}else{
+			} else {
 				LOG_WRN("Connection failed!");
 				stop_tcp();
 				/*TODO: notify error handler*/
@@ -238,11 +240,11 @@ int8_t cellular_controller_init(void)
 					"eeprom!\n");
 			} else { //172.31.36.11:4321
 				//172.31.33.243:9876
-				strcpy(server_ip,"172.31.36.11");
+				strcpy(server_ip, "172.31.36.11");
 				server_port = 4321;
 				LOG_WRN("Default server ip address will be "
 					"used. \n");
-//				goto exit_cellular_controller;
+				//				goto exit_cellular_controller;
 			}
 			ret = start_tcp();
 			if (ret == 0) {

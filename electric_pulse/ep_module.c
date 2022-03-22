@@ -110,6 +110,7 @@ static int ep_module_release(void)
 		LOG_WRN("Time between EP is shorter than allowed");
 		return -EACCES;
 	}
+	LOG_INF("Zapping now as all conditions are met!");
 	for (i = 0; i < EP_duration; i++) {
 		err = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_HIGH);
 		k_busy_wait(EP_ON_TIME);
@@ -146,7 +147,7 @@ static bool event_handler(const struct event_header *eh)
 				}
 			} else {
 				char *e_msg =
-					"Try to give EP outside Sound Max event";
+					"Tried to give EP outside sound max event";
 				nf_app_error(ERR_ELECTRIC_PULSE, -EACCES, e_msg,
 					     strlen(e_msg));
 			}
@@ -160,9 +161,13 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 
-	if (is_sound_event(eh)) {
-		const struct sound_event *event = cast_sound_event(eh);
-		if (event->type == SND_MAX) {
+	if (is_sound_status_event(eh)) {
+		/* Open up window for zapping since we recieved that
+		 * the sound controller is playing MAX warn freq.
+		 */
+		const struct sound_status_event *event =
+			cast_sound_status_event(eh);
+		if (event->status == SND_STATUS_PLAYING_MAX) {
 			trigger_ready = true;
 		} else {
 			trigger_ready = false;
@@ -177,4 +182,4 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(LOG_MODULE_NAME, event_handler);
 EVENT_SUBSCRIBE(LOG_MODULE_NAME, ep_status_event);
-EVENT_SUBSCRIBE(LOG_MODULE_NAME, sound_event);
+EVENT_SUBSCRIBE_EARLY(LOG_MODULE_NAME, sound_status_event);

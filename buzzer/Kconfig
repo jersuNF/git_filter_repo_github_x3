@@ -1,0 +1,42 @@
+menuconfig BUZZER
+	bool "Buzzer module"
+	help
+	  Buzzer module
+	default y
+
+if BUZZER
+	module = BUZZER
+	module-str = BUZZER Controller
+	source "subsys/logging/Kconfig.template.log_config"
+
+	config BUZZER_THREAD_SIZE
+		int "Size of the poller thread"
+		default 8192
+
+	config BUZZER_THREAD_PRIORITY
+		int "Priority of the poller thread"
+		default -2
+		help
+		  A cooperative thread has a negative priority value. 
+		  Once it becomes the current thread, a cooperative thread 
+		  remains the current thread until it performs an action 
+		  that makes it unready.
+		  A preemptible thread has a non-negative priority value. 
+		  Once it becomes the current thread, a preemptible thread 
+		  may be supplanted at any time if a cooperative thread, 
+		  or a preemptible thread of higher or equal priority, 
+		  becomes ready.
+
+	config BUZZER_UPDATE_WARN_FREQ_TIMEOUT
+		int "Timeout in sec if we do not get new warn zone freq from AMC."
+		default 1
+
+	config BUZZER_LONGEST_NOTE_SUSTAIN
+		int "Maximum length of sustain notes in s, prevents timeouts on sems."
+		default 10
+
+	menu "ERROR_HANDLER"
+    	rsource "./../../modules/error_handler/Kconfig"
+	endmenu # ERROR_HANDLER
+endif
+

@@ -19,7 +19,11 @@
 #include "ble_conn_event.h"
 #include "ble_controller.h"
 #include "msg_data_event.h"
-
+#include "beacon_processor.h"
+#include "ble_beacon_event.h"
+#if CONFIG_BOARD_NF_X25_NRF52840
+#include "ble_dfu.h"
+#endif
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_CONTROLLER_LOG_LEVEL);
 
 static void bt_send_work_handler(struct k_work *work);
@@ -35,8 +39,11 @@ static K_WORK_DEFINE(bt_send_work, bt_send_work_handler);
 static struct bt_conn *current_conn;
 static struct bt_gatt_exchange_params exchange_params;
 static uint32_t nus_max_send_len;
-static atomic_t ready;
-static atomic_t active;
+static atomic_t atomic_bt_ready;
+static atomic_t atomic_bt_adv_active;
+static atomic_t atomic_bt_scan_active;
+static int64_t beacon_scanner_timer;
+static struct k_work_delayable periodic_beacon_scanner_work;
 
 static char bt_device_name[DEVICE_NAME_LEN + 1] = CONFIG_BT_DEVICE_NAME;
 
@@ -143,6 +150,22 @@ static struct bt_conn_cb conn_callbacks = {
 };
 
 /**
+ * @brief Periodic beacon scanner work function
+ */
+static void periodic_beacon_scanner_work_fn()
+{
+	/* Start scanner again if not already running */
+	if (!atomic_get(&atomic_bt_scan_active)) {
+		struct ble_ctrl_event *event = new_ble_ctrl_event();
+		event->cmd = BLE_CTRL_SCAN_START;
+		EVENT_SUBMIT(event);
+	}
+	/* Reschedule worker to start again after given interval */
+	k_work_reschedule(&periodic_beacon_scanner_work,
+			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
+}
+
+/**
  * @brief Work function to send data from rx ring buffer with bt nus
  * @param[in] work work item
  *
@@ -245,9 +268,9 @@ static void adv_start(void)
 {
 	int err;
 
-	if (!atomic_get(&ready)) {
+	if (!atomic_get(&atomic_bt_ready)) {
 		/* Advertising will start when ready */
-		LOG_INF("Advertising not ready");
+		LOG_INF("Advertising not ready to start");
 		return;
 	}
 
@@ -329,7 +352,7 @@ static void collar_mode_update(uint8_t collar_mode)
 
 /**
  * @brief Function to update collar status in advertising array
- * @param[in] collar_status
+ * @param[in] collar_status new status of the collar
  */
 static void collar_status_update(uint8_t collar_status)
 {
@@ -439,12 +462,126 @@ static void bt_ready(int err)
 	mfg_data[BLE_MFG_IDX_ATMEGA_VER] = (atmega_ver & 0x00ff);
 	mfg_data[BLE_MFG_IDX_ATMEGA_VER + 1] = (atmega_ver & 0xff00) >> 8;
 
-	atomic_set(&ready, true);
+	atomic_set(&atomic_bt_ready, true);
 
-	atomic_set(&active, true);
+	atomic_set(&atomic_bt_adv_active, true);
 
-	if (atomic_get(&active)) {
+	if (atomic_get(&atomic_bt_adv_active)) {
 		adv_start();
+	}
+}
+
+/**
+ * @brief Callback for bt data parser.
+ *
+ * @param data Pointer to bt_data struct
+ * @param user_data Pointer to user data to return
+ */
+static bool data_cb(struct bt_data *data, void *user_data)
+{
+	adv_data_t *adv_data = user_data;
+	struct net_buf_simple net_buf;
+	if (data->type == BT_DATA_MANUFACTURER_DATA) {
+		net_buf_simple_init_with_data(&net_buf, (void *)data->data,
+					      data->data_len);
+		adv_data->manuf_id = net_buf_simple_pull_be16(&net_buf);
+		adv_data->beacon_dev_type = net_buf_simple_pull_u8(&net_buf);
+		uint8_t data_len = net_buf_simple_pull_u8(&net_buf);
+		if (data_len == BEACON_DATA_LEN) {
+			memcpy(&adv_data->uuid.val,
+			       net_buf_simple_pull_mem(&net_buf, 16), 16);
+			adv_data->major = net_buf_simple_pull_be16(&net_buf);
+			adv_data->minor = net_buf_simple_pull_be16(&net_buf);
+			adv_data->rssi = net_buf_simple_pull_u8(&net_buf); //197
+
+			LOG_DBG("Nofence beacon Major: %u Minor: %u RSSI: %u MANUF_ID: %u Beacon type: %u",
+				adv_data->major, adv_data->minor,
+				adv_data->rssi, adv_data->manuf_id,
+				adv_data->beacon_dev_type);
+		} else {
+			memset(adv_data, 0, sizeof(*adv_data));
+		}
+		return false;
+	} else {
+		return true;
+	}
+}
+
+/**
+ * @brief Callback for reporting LE scan results.
+ *
+ * @param addr Advertiser LE address and type.
+ * @param rssi Strength of advertiser signal.
+ * @param adv_type Type of advertising response from advertiser.
+ * @param buf Buffer containing advertiser data.
+ */
+static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
+		    struct net_buf_simple *buf)
+{
+	int err;
+	adv_data_t adv_data;
+	/* Extract major_id, minor_id, tx rssi and uuid */
+	bt_data_parse(buf, data_cb, (void *)&adv_data);
+	if (adv_data.major == BEACON_MAJOR_ID &&
+	    adv_data.minor == BEACON_MINOR_ID) {
+		const uint32_t now = k_uptime_get_32();
+		err = beacon_process_event(now, addr, rssi, &adv_data);
+		if (err != -EIO) {
+			/* Beacon found. Reset 60 seconds scan_stop countdown */
+			beacon_scanner_timer = k_uptime_get();
+		}
+	}
+
+	int delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
+	if (delta_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
+		/* Beacon is not found */
+		struct ble_beacon_event *bc_event = new_ble_beacon_event();
+		bc_event->status = BEACON_STATUS_NOT_FOUND;
+		EVENT_SUBMIT(bc_event);
+
+		/* Stop beacon scanner */
+		struct ble_ctrl_event *ctrl_event = new_ble_ctrl_event();
+		ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
+		EVENT_SUBMIT(ctrl_event);
+	}
+}
+
+static void scan_start(void)
+{
+	if (!atomic_get(&atomic_bt_ready)) {
+		/* Scan will start when bt is ready */
+		LOG_INF("Scanning not ready to start");
+		return;
+	}
+
+	/* Initialize the beacon list */
+	init_beacon_list();
+
+	/* Start beacon scanner subsystem */
+	struct bt_le_scan_param scan_param = {
+		.type = BT_HCI_LE_SCAN_PASSIVE,
+		.options = BT_LE_SCAN_OPT_NONE,
+		.interval = 0x003C,
+		.window = 0x0028,
+	};
+	int err = bt_le_scan_start(&scan_param, scan_cb);
+	if (err) {
+		LOG_ERR("Beacon scanning failed (err %d)", err);
+	} else {
+		LOG_INF("Starting scanning after beacons");
+
+		/* Start beacon scanner countdown */
+		beacon_scanner_timer = k_uptime_get();
+	}
+}
+
+static void scan_stop(void)
+{
+	int err = bt_le_scan_stop();
+	if (err) {
+		LOG_ERR("bt_le_scan_stop error: %d", err);
+	} else {
+		LOG_INF("Beacon scanning stopped");
 	}
 }
 
@@ -452,18 +589,35 @@ int ble_module_init()
 {
 	int err;
 
-	atomic_set(&active, false);
+	atomic_set(&atomic_bt_adv_active, false);
+	atomic_set(&atomic_bt_scan_active, false);
 
 	nus_max_send_len = ATT_MIN_PAYLOAD;
 
+	/* Enable ble subsystem and start advertisement */
 	err = bt_enable(bt_ready);
 	if (err) {
 		LOG_ERR("bt_enable: %d", err);
 		return err;
 	}
 
+	/* Callback to monitor connected/disconnected state */
 	bt_conn_cb_register(&conn_callbacks);
-	return err;
+#if CONFIG_BOARD_NF_X25_NRF52840
+	err = bt_dfu_init();
+#endif
+
+	/* Start scanning after beacons. Set flag to true */
+	if (!atomic_set(&atomic_bt_scan_active, true)) {
+		scan_start();
+	}
+
+	/* Init and start periodic scan work function */
+	k_work_init_delayable(&periodic_beacon_scanner_work,
+			      periodic_beacon_scanner_work_fn);
+	k_work_reschedule(&periodic_beacon_scanner_work,
+			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
+	return 0;
 }
 
 /** 
@@ -516,17 +670,17 @@ static bool event_handler(const struct event_header *eh)
 
 	/* Received ble control event */
 	if (is_ble_ctrl_event(eh)) {
-		LOG_INF("BLE CONTROL EVENT RECEIVED!");
+		LOG_DBG("BLE CONTROL EVENT RECEIVED!");
 		const struct ble_ctrl_event *event = cast_ble_ctrl_event(eh);
 
 		switch (event->cmd) {
 		case BLE_CTRL_ADV_ENABLE:
-			if (!atomic_set(&active, true)) {
+			if (!atomic_set(&atomic_bt_adv_active, true)) {
 				adv_start();
 			}
 			break;
 		case BLE_CTRL_ADV_DISABLE:
-			if (atomic_set(&active, false)) {
+			if (atomic_set(&atomic_bt_adv_active, false)) {
 				adv_stop();
 			}
 			break;
@@ -550,6 +704,16 @@ static bool event_handler(const struct event_header *eh)
 			break;
 		case BLE_CTRL_FENCE_DEF_VER_UPDATE:
 			fence_def_ver_update(event->param.fence_def_ver);
+			break;
+		case BLE_CTRL_SCAN_START:
+			if (!atomic_set(&atomic_bt_scan_active, true)) {
+				scan_start();
+			}
+			break;
+		case BLE_CTRL_SCAN_STOP:
+			if (atomic_set(&atomic_bt_scan_active, false)) {
+				scan_stop();
+			}
 			break;
 		default:
 			/* Unhandled control message */

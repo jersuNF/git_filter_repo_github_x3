@@ -644,6 +644,8 @@ void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
 
 void proto_InitHeader(NofenceMessage *msg)
 {
+	memset(msg, 0, sizeof(NofenceMessage));
+
 	msg->header.ulId = 11500; //TODO: read from eeprom
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
@@ -825,7 +827,7 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 		return 0;
 	}
 
-	uint8_t frame = &fenceResp->ucFrameNumber;
+	uint8_t frame = fenceResp->ucFrameNumber;
 
 	int err = 0;
 

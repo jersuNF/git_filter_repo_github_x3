@@ -6,32 +6,31 @@
 #include <logging/log.h>
 LOG_MODULE_REGISTER(amc_zone, CONFIG_AMC_LIB_LOG_LEVEL);
 
-#include "amc_cache.h"
 #include "amc_zone.h"
 
-/*
-const Mode mode = EEPROM_GetMode();
-const CollarStatus collarStatus = EEPROM_GetCollarStatus();
-const FenceStatus fenceStatus = EEPROM_GetFenceStatus();
-uint8_t myGpsMode = GPSMODE_CAUTION;
-*/
-
+/** Markers indicate start distance for each zone, where increasing index
+ *  indicates increasing level of zone where PSM_ZONE is lowest and
+ *  WARN_ZONE is max. */
 typedef struct {
 	int16_t distance;
 	int16_t hysteresis;
-	amc_zone_t zone;
 } zone_mark_t;
 
 static const zone_mark_t markers[] = {
+	 {.distance = INT16_MIN,
+	 .hysteresis = 0}, 
+
 	{.distance = CONFIG_ZONE_CAUTION_DIST, 
-	 .hysteresis = CONFIG_ZONE_CAUTION_HYST, 
-	 .zone = CAUTION_ZONE},
+	 .hysteresis = CONFIG_ZONE_CAUTION_HYST},
+
 	{.distance = CONFIG_ZONE_PREWARN_DIST, 
-	 .hysteresis = CONFIG_ZONE_PREWARN_HYST, 
-	 .zone = PREWARN_ZONE},
+	 .hysteresis = CONFIG_ZONE_PREWARN_HYST},
+
 	{.distance = CONFIG_ZONE_WARN_DIST, 
-	 .hysteresis = CONFIG_ZONE_WARN_HYST, 
-	 .zone = WARN_ZONE},
+	 .hysteresis = CONFIG_ZONE_WARN_HYST},
+
+	 {.distance = INT16_MAX,
+	 .hysteresis = 0}
 };
 
 static amc_zone_t zone = NO_ZONE;
@@ -41,30 +40,49 @@ void zone_reset(void)
 	zone = NO_ZONE;
 }
 
-amc_zone_t zone_calculate(amc_zone_t current_zone, int16_t instant_dist)
+/** @brief Calculates the zone based on distance and current zone. 
+ * 
+ * @param[in] current_zone Current zone. 
+ * @param[in] instant_dist Distance from fence. 
+ * 
+ * @returns Calculated zone. 
+ */
+static amc_zone_t zone_calculate(amc_zone_t current_zone, int16_t instant_dist)
 {
-	/* Zone is PSM zone unless found to be within another zone below */
-	amc_zone_t new_zone = PSM_ZONE;
+	amc_zone_t new_zone;
 
-	/* Loop through all zone markers */
-	for (uint32_t i = 0; i < sizeof(markers)/sizeof(zone_mark_t); i++) {
-		/* Calculate threshold, with hysteresis based on current zone */
-		int16_t threshold = markers[i].distance;
-		if (current_zone < markers[i].zone) {
-			threshold += markers[i].hysteresis;
-		} else {
-			threshold -= markers[i].hysteresis;
-		}
+	/* Find zone for given distance */
+	uint32_t markers_cnt = sizeof(markers)/sizeof(zone_mark_t);
+	for (uint32_t i = 0; i < markers_cnt-1; i++) {
+		new_zone = (i+PSM_ZONE);
+
+		/* Distance must be within [start,end> to be within zone */
+		int16_t start = markers[i].distance;
+		int16_t end = markers[i+1].distance;
 		
-		/* The zone has been found when distance is lower than threshold */
-		if (instant_dist < threshold) {
-			break;
+		/* Apply hysteresis depending on current zone */
+		if (current_zone == new_zone) {
+			start -= markers[i].hysteresis;
+			end += markers[i+1].hysteresis;
+		} else if (current_zone < new_zone) {
+			start += markers[i].hysteresis;
+			end += markers[i+1].hysteresis;
 		} else {
-			new_zone = markers[i].zone;
+			start -= markers[i].hysteresis;
+			end -= markers[i+1].hysteresis;
+		}
+
+		if ((instant_dist >= start) && (instant_dist < end)) {
+			break;
 		}
 	}
-
+	
 	return new_zone;
+}
+
+amc_zone_t zone_get(void)
+{
+	return zone;
 }
 
 amc_zone_t zone_update(int16_t instant_dist, bool distance_is_valid)

@@ -52,4 +52,9 @@ if STORAGE_CONTROLLER
 		  continuing, where this configuration decides how long to wait
 		  before giving up and returning an error, NOT rotating the FCB.
 
+
+	menu "ERROR_HANDLER"
+    	rsource "./../../modules/error_handler/Kconfig"
+	endmenu # ERROR_HANDLER
+
 endif

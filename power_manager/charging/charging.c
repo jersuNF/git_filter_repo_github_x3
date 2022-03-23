@@ -108,24 +108,24 @@ int charging_setup(void)
 	return err;
 }
 
+struct adc_sequence sequence = {
+	.options = NULL,
+	.channels = BIT(CHARGING_ADC_CHANNEL), 
+	.buffer = &raw_data, 
+	.buffer_size = sizeof(raw_data),
+	.resolution = CHARGING_ADC_RESOLUTION,
+	.oversampling = 8,
+	.calibrate = true
+};
+
 int charging_read_analog_channel(void)
 {
-	struct adc_sequence sequence = {
-		.options = NULL, // extra samples and callback
-		.channels = BIT(
-			CHARGING_ADC_CHANNEL), // bit mask of channels to read
-		.buffer = &raw_data, // where to put samples read
-		.buffer_size = sizeof(raw_data),
-		.resolution = CHARGING_ADC_RESOLUTION, // desired resolution
-		.oversampling = 8,
-		.calibrate = true // don't calibrate
-	};
-
 	int32_t sample_value;
 	float result;
 
 	if (charging_ok) {
 		int ret = adc_read(charging_adc_dev, &sequence);
+		/* Only do calibration on first sample */
 		sequence.calibrate = false;
 		if (ret == 0) {
 			sample_value = raw_data;

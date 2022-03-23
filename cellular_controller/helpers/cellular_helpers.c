@@ -8,6 +8,7 @@
 #include <net/net_event.h>
 #include <net/net_conn_mgr.h>
 #include <net/socket.h>
+#include <modem_nf.h>
 #include "cellular_helpers_header.h"
 
 #include <logging/log.h>
@@ -19,18 +20,18 @@ static struct net_if_config *cfg;
 
 int8_t lte_init(void)
 {
-	int rc = 1;
+	int rc = 0;
 
 	/* wait for network interface to be ready */
 	iface = net_if_get_default();
-	if (!iface) {
+	if (iface == NULL) {
 		LOG_ERR("Could not get iface (network interface)!");
 		rc = -1;
 		goto exit;
 	}
 
 	cfg = net_if_get_config(iface);
-	if (!cfg) {
+	if (cfg == NULL) {
 		LOG_ERR("Could not get iface config!");
 		rc = -2;
 		goto exit;
@@ -143,6 +144,11 @@ int socket_receive(struct data *data, char **msg)
 		}
 	}
 	return 0;
+}
+
+int reset_modem(void)
+{
+	return modem_nf_reset();
 }
 
 void stop_tcp(void)

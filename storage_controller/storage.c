@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Nofence AS
+ * Copyright (c) 2022 Nofence AS
  */
 
 #include <zephyr.h>

@@ -33,23 +33,26 @@
 #define MODULE storage_controller
 LOG_MODULE_REGISTER(MODULE, CONFIG_STORAGE_CONTROLLER_LOG_LEVEL);
 
-const struct flash_area *log_area;
-struct fcb log_fcb;
-struct flash_sector log_sectors[FLASH_LOG_NUM_SECTORS];
+static const struct flash_area *log_area;
+static struct fcb log_fcb;
+static struct flash_sector log_sectors[FLASH_LOG_NUM_SECTORS];
 
 static inline void update_ano_active_entry();
-const struct flash_area *ano_area;
-struct fcb ano_fcb;
-struct flash_sector ano_sectors[FLASH_ANO_NUM_SECTORS];
+static const struct flash_area *ano_area;
+static struct fcb ano_fcb;
+static struct flash_sector ano_sectors[FLASH_ANO_NUM_SECTORS];
 
-struct fcb_entry active_ano_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
-struct fcb_entry last_sent_ano_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
+static struct fcb_entry active_ano_entry = { .fe_sector = NULL,
+					     .fe_elem_off = 0 };
+static struct fcb_entry last_sent_ano_entry = { .fe_sector = NULL,
+						.fe_elem_off = 0 };
 
-struct fcb_entry active_log_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
+static struct fcb_entry active_log_entry = { .fe_sector = NULL,
+					     .fe_elem_off = 0 };
 
-const struct flash_area *pasture_area;
-struct fcb pasture_fcb;
-struct flash_sector pasture_sectors[FLASH_PASTURE_NUM_SECTORS];
+static const struct flash_area *pasture_area;
+static struct fcb pasture_fcb;
+static struct flash_sector pasture_sectors[FLASH_PASTURE_NUM_SECTORS];
 
 K_MUTEX_DEFINE(log_mutex);
 K_MUTEX_DEFINE(ano_mutex);
@@ -57,9 +60,9 @@ K_MUTEX_DEFINE(pasture_mutex);
 
 K_KERNEL_STACK_DEFINE(erase_flash_thread, CONFIG_STORAGE_THREAD_SIZE);
 
-void erase_flash_fn(struct k_work *item);
-struct k_work_q erase_q;
-struct k_work erase_work;
+static void erase_flash_fn(struct k_work *item);
+static struct k_work_q erase_q;
+static struct k_work erase_work;
 static bool queue_inited = false;
 
 void erase_flash_fn(struct k_work *item)
@@ -80,8 +83,6 @@ void erase_flash_fn(struct k_work *item)
 	struct update_flash_erase *ev = new_update_flash_erase();
 	EVENT_SUBMIT(ev);
 }
-
-static volatile bool has_inited = false;
 
 /** @brief Gets fcb structure based on partition.
  * 
@@ -211,7 +212,6 @@ static inline int init_fcb_on_partition(flash_partition_t partition)
 	LOG_INF("Setup FCB for partition %d: %d sectors with sizes %db.",
 		partition, fcb->f_sector_cnt, fcb->f_sectors[0].fs_size);
 
-	has_inited = true;
 	return err;
 }
 
@@ -281,8 +281,8 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 		if (err) {
 			LOG_ERR("Unable to recover in appending function, err %d",
 				err);
-			nf_app_error(ERR_SENDER_STORAGE_CONTROLLER,
-				     -ENOTRECOVERABLE, NULL, 0);
+			nf_app_error(ERR_STORAGE_CONTROLLER, -ENOTRECOVERABLE,
+				     NULL, 0);
 			return err;
 		}
 		LOG_INF("Rotated FCB since it's full.");
@@ -385,7 +385,7 @@ int check_if_ano_valid_cb(uint8_t *data, size_t len)
 	LOG_INF("Year %i, month %i, day %i", ano_frame->mga_ano.year,
 		ano_frame->mga_ano.month, ano_frame->mga_ano.day);
 
-	/* If age is valid, update ano sector. Fetch from somewhere! */
+	/** @todo If age is valid, update ano sector. Fetch from somewhere! */
 	if (ano_frame->mga_ano.year == 22) {
 		/* Done, we found oldest, valid timestamp, exit loop. */
 		return -EINTR;

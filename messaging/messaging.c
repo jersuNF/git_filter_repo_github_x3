@@ -108,11 +108,12 @@ struct k_work_delayable log_work;
 atomic_t poll_period_minutes = ATOMIC_INIT(5);
 atomic_t log_period_minutes = ATOMIC_INIT(30);
 
-K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_SIZE,
+K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE,
 		messaging_thread_fn, NULL, NULL, NULL,
 		CONFIG_MESSAGING_THREAD_PRIORITY, 0, 0);
 
-K_KERNEL_STACK_DEFINE(messaging_send_thread, CONFIG_MESSAGING_SEND_THREAD_SIZE);
+K_KERNEL_STACK_DEFINE(messaging_send_thread,
+		      CONFIG_MESSAGING_SEND_THREAD_STACK_SIZE);
 
 void build_log_message()
 {
@@ -264,9 +265,8 @@ static bool event_handler(const struct event_header *eh)
 		current_state.fence_version = ev->fence_version;
 
 		/* Notify server as soon as the new fence is activated. */
-		int err = k_work_reschedule_for_queue(&send_q, 
-					      &modem_poll_work, 
-					      K_NO_WAIT);
+		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
+						      K_NO_WAIT);
 		if (err < 0) {
 			LOG_ERR("Error starting modem poll worker: %d", err);
 		}

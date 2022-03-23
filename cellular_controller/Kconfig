@@ -1,3 +1,29 @@
 menuconfig CELLULAR_CONTROLLER
 	bool "Cellular controller module"
 	default y
+
+if CELLULAR_CONTROLLER
+	config CELLULAR_CONTROLLER_VERBOSE
+		bool "Verbose output from cellular controller"
+		default n
+
+	module = CELLULAR
+	module-str = CELLULAR
+	source "subsys/logging/Kconfig.template.log_config"
+
+	config MESSAGING_ACK_TIMEOUT_SEC
+	    int "Timeout when waiting for ack from messaging"
+        default 1
+
+	config RECV_BUF_MAX
+	    int "max size of messages to be received"
+	    default 386
+
+	config RECV_THREAD_STACK_SIZE
+	    int
+	    default 1024
+
+	config RECV_THREAD_PRIORITY
+	    int
+	    default 14
+endif

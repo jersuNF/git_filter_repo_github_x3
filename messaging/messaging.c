@@ -328,10 +328,10 @@ bool validate_pasture()
 	for (uint8_t i = 0; i < pasture_temp.m.ul_total_fences; i++) {
 		fence_t *target_fence = &pasture_temp.fences[i];
 		for (uint8_t j = 0; j < target_fence->m.n_points; j++) {
-			pasture_value_16 = target_fence->coordinates[i].s_x_dm;
+			pasture_value_16 = target_fence->coordinates[j].s_x_dm;
 			crc = nf_crc16_uint16(pasture_value_16, &crc);
 
-			pasture_value_16 = target_fence->coordinates[i].s_y_dm;
+			pasture_value_16 = target_fence->coordinates[j].s_y_dm;
 			crc = nf_crc16_uint16(pasture_value_16, &crc);
 		}
 	}

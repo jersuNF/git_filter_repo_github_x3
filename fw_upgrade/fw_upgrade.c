@@ -127,8 +127,7 @@ static bool event_handler(const struct event_header *eh)
 		if (err) {
 			LOG_ERR("fota_download_start() failed, err %d", err);
 			char *msg = "Unable to start FOTA DL";
-			nf_app_error(ERR_SENDER_FW_UPGRADE, err, msg,
-				     strlen(msg));
+			nf_app_error(ERR_FW_UPGRADE, err, msg, strlen(msg));
 			return false;
 		}
 

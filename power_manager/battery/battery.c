@@ -60,7 +60,7 @@ struct divider_config {
 };
 
 /** @brief Moving average for battery defined outside function */
-MovAvg VbattSMA;
+mov_avg_t v_batt_mov_avg;
 
 static bool battery_ok;
 
@@ -190,10 +190,10 @@ static int divider_setup(void)
  */
 static void init_battery_moving_average(void)
 {
-	VbattSMA.average = 0;
-	VbattSMA.N = 0;
-	VbattSMA.total = 0;
-	VbattSMA.MAX_SAMPLES = CONFIG_BATTERY_MOVING_AVERAGE_SAMPLES;
+	v_batt_mov_avg.average = 0;
+	v_batt_mov_avg.N = 0;
+	v_batt_mov_avg.total = 0;
+	v_batt_mov_avg.MAX_SAMPLES = CONFIG_BATTERY_MOVING_AVERAGE_SAMPLES;
 }
 
 int battery_setup(void)
@@ -266,7 +266,7 @@ unsigned int battery_level_soc(unsigned int batt_mV,
 	return batt_level_precentage;
 }
 
-uint16_t approx_moving_average(MovAvg *p, uint16_t val)
+uint16_t approx_moving_average(mov_avg_t *p, uint16_t val)
 {
 	p->total += (uint32_t)val; // add to total
 	if (p->N >= p->MAX_SAMPLES) {
@@ -286,6 +286,6 @@ int battery_sample_averaged(void)
 		LOG_ERR("Failed to read battery voltage: %d", batt_mV);
 		return -ENOENT;
 	}
-	uint16_t approx_batt_value = approx_moving_average(&VbattSMA, batt_mV);
+	uint16_t approx_batt_value = approx_moving_average(&v_batt_mov_avg, batt_mV);
 	return approx_batt_value;
 }

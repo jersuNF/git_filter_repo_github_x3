@@ -50,7 +50,7 @@ static atomic_t charging_active = false;
 #define CURRENT_OFFSET 3.5f // mA
 
 /** @brief Moving average for current defined outside function */
-MovAvg IchrgSMA;
+mov_avg_t i_charg_mov_avg;
 
 static struct adc_channel_cfg charging_channel_cfg = {
 	.gain = CHARGING_ADC_GAIN,
@@ -92,10 +92,10 @@ static int charging_init_adc(void)
 
 void charging_init_moving_average(void)
 {
-	IchrgSMA.average = 0;
-	IchrgSMA.N = 0;
-	IchrgSMA.total = 0;
-	IchrgSMA.MAX_SAMPLES = CONFIG_CURRENT_MOVING_AVERAGE_SAMPLES;
+	i_charg_mov_avg.average = 0;
+	i_charg_mov_avg.N = 0;
+	i_charg_mov_avg.total = 0;
+	i_charg_mov_avg.MAX_SAMPLES = CONFIG_CURRENT_MOVING_AVERAGE_SAMPLES;
 }
 
 int charging_setup(void)
@@ -108,15 +108,13 @@ int charging_setup(void)
 	return err;
 }
 
-struct adc_sequence sequence = {
-	.options = NULL,
-	.channels = BIT(CHARGING_ADC_CHANNEL), 
-	.buffer = &raw_data, 
-	.buffer_size = sizeof(raw_data),
-	.resolution = CHARGING_ADC_RESOLUTION,
-	.oversampling = 8,
-	.calibrate = true
-};
+struct adc_sequence sequence = { .options = NULL,
+				 .channels = BIT(CHARGING_ADC_CHANNEL),
+				 .buffer = &raw_data,
+				 .buffer_size = sizeof(raw_data),
+				 .resolution = CHARGING_ADC_RESOLUTION,
+				 .oversampling = 8,
+				 .calibrate = true };
 
 int charging_read_analog_channel(void)
 {
@@ -251,7 +249,7 @@ int charging_current_sample_averaged(void)
 		return -ENOENT;
 	}
 	uint16_t avg_current_value =
-		approx_moving_average(&IchrgSMA, current_ma);
+		approx_moving_average(&i_charg_mov_avg, current_ma);
 	return avg_current_value;
 }
 

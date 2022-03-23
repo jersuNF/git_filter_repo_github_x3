@@ -56,7 +56,7 @@ typedef struct {
 	uint16_t average;
 	uint16_t N; // working number of samples
 	uint16_t MAX_SAMPLES;
-} MovAvg;
+} mov_avg_t;
 
 /** 
  * @brief Calculate the estimated battery level based on a measured voltage.
@@ -64,7 +64,7 @@ typedef struct {
  * @param val value to add
  * @return Moving average
  */
-uint16_t approx_moving_average(MovAvg *p, uint16_t val);
+uint16_t approx_moving_average(mov_avg_t *p, uint16_t val);
 
 /** 
  * @brief Set up the battery divider

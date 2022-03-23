@@ -16,12 +16,12 @@
 int collar_protocol_decode(uint8_t *src_data, size_t src_data_size,
 			   NofenceMessage *dst_msg)
 {
-	memset(dst_msg, 0, sizeof(NofenceMessage));
-
 	/* Check that input parameters are valid. */
 	if ((src_data == NULL) || (src_data_size == 0) || (dst_msg == NULL)) {
 		return -EINVAL;
 	}
+
+	memset(dst_msg, 0, sizeof(NofenceMessage));
 
 	/* Decoding a message requires a stream buffer to be defined, which
 	 * uses source data as the input of the stream. 

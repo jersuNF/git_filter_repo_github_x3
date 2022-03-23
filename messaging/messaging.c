@@ -13,7 +13,7 @@
 #include "lte_proto_event.h"
 
 #include "cellular_controller_events.h"
-#include "gps_controller_events.h"
+#include "gnss_controller_events.h"
 #include "request_events.h"
 #include "nf_version.h"
 #include "collar_protocol.h"
@@ -39,14 +39,15 @@
 
 #define EMPTY_FENCE_CRC 0xFFFF
 static pasture_t pasture_temp;
+static uint8_t cached_fences_counter = 0;
 
 uint32_t time_from_server;
 
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
-K_SEM_DEFINE(send_ack_sem, 0, 1);
+K_SEM_DEFINE(send_out_ack, 0, 1);
 
 collar_state_struct_t current_state;
-gps_last_fix_struct_t cached_fix;
+gnss_last_fix_struct_t cached_fix;
 
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
@@ -68,11 +69,11 @@ int send_binary_message(uint8_t *, size_t);
 
 void messaging_thread_fn(void);
 
-_DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *);
-bool proto_hasLastKnownDatePos(const gps_last_fix_struct_t *);
+_DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *);
+bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *);
 static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
 bool m_confirm_acc_limits, m_confirm_ble_key, m_transfer_boot_params;
-bool send_out_ack, use_server_time;
+bool use_server_time;
 
 K_MUTEX_DEFINE(send_binary_mutex);
 
@@ -191,16 +192,18 @@ void log_data_periodic_fn()
 void modem_poll_work_fn()
 {
 	/* Add logic for the periodic protobuf modem poller. */
-	LOG_INF("Starting periodic poll work fn!\n");
+	LOG_INF("Starting periodic poll work and building poll request.");
 	NofenceMessage new_poll_msg;
 
-	if (!k_sem_take(&cache_lock_sem, K_SECONDS(1))) {
-		LOG_DBG("Building poll request!\n");
+	if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
 		build_poll_request(&new_poll_msg);
-		k_sem_give(&cache_lock_sem);
-
-		LOG_INF("Messaging - Sending new message!\n");
 		encode_and_send_message(&new_poll_msg);
+		k_sem_give(&cache_lock_sem);
+	} else {
+		LOG_ERR("Cached state semaphore hanged, retrying in 1 second.");
+		k_work_reschedule_for_queue(&send_q, &modem_poll_work,
+					    K_SECONDS(1));
+		return;
 	}
 
 	k_work_reschedule_for_queue(
@@ -274,29 +277,17 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_cellular_ack_event(eh)) {
-		k_sem_give(&send_ack_sem);
+		k_sem_give(&send_out_ack);
 		return false;
 	}
-	if (is_new_gps_fix(eh)) {
-		struct new_gps_fix *ev = cast_new_gps_fix(eh);
-		if (!k_sem_take(&cache_lock_sem, K_SECONDS(0.1))) {
+	if (is_new_gnss_fix(eh)) {
+		struct new_gnss_fix *ev = cast_new_gnss_fix(eh);
+		if (k_sem_take(&cache_lock_sem, K_MSEC(500)) == 0) {
 			cached_fix = ev->fix;
 			k_sem_give(&cache_lock_sem);
 		}
 		return false;
 	}
-	if (is_request_ano_event(eh)) {
-		request_ano_frame(54, 0);
-		//request frame 0
-		first_ano_frame = true;
-		LOG_WRN("Requesting ano data!\n");
-		int ret = request_ano_frame(0, 0);
-		if (ret == 0) {
-			first_ano_frame = false;
-		}
-		return false;
-	}
-
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -360,7 +351,7 @@ static inline void process_ble_ctrl_event(void)
 
 	int err = k_msgq_get(&ble_ctrl_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting ble_ctrl_event: %d\n", err);
+		LOG_ERR("Error getting ble_ctrl_event: %d", err);
 		return;
 	}
 }
@@ -371,7 +362,7 @@ static inline void process_ble_data_event(void)
 
 	int err = k_msgq_get(&ble_data_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting ble_data_event: %d\n", err);
+		LOG_ERR("Error getting ble_data_event: %d", err);
 		return;
 	}
 }
@@ -382,19 +373,24 @@ static void process_lte_proto_event(void)
 
 	int err = k_msgq_get(&lte_proto_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting lte_proto_event: %d\n", err);
+		LOG_ERR("Error getting lte_proto_event: %d", err);
 		return;
 	}
 
 	NofenceMessage proto;
 	err = collar_protocol_decode(ev.buf + 2, ev.len - 2, &proto);
-	LOG_WRN("Number of received bytes = %d\n", ev.len);
 
-	char *buf = ev.buf;
-	for (int i = 0; i < ev.len; i++) {
-		printk("\\x%02x", *buf);
-		buf++;
-	}
+	/** @note Bytes debug?
+	 *
+	 * LOG_INF("Number of received bytes = %d", ev.len);
+ 	 * 
+	 * char *buf = ev.buf;
+	 * for (int i = 0; i < ev.len; i++) {
+	 * 	printk("\\x%02x", *buf);
+	 * 	buf++;
+	 * }
+	 */
+
 	if (err) {
 		LOG_ERR("Error decoding protobuf message. %i", err);
 		return;
@@ -441,9 +437,9 @@ void messaging_thread_fn()
 	}
 }
 
-void messaging_module_init(void)
+int messaging_module_init(void)
 {
-	LOG_INF("Initializing messaging module!\n");
+	LOG_INF("Initializing messaging module.");
 
 	k_work_queue_init(&send_q);
 	k_work_queue_start(&send_q, messaging_send_thread,
@@ -453,12 +449,22 @@ void messaging_module_init(void)
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
 	k_work_init_delayable(&log_work, log_data_periodic_fn);
 
-	k_work_schedule_for_queue(&send_q, &modem_poll_work, K_NO_WAIT);
-	k_work_schedule_for_queue(&send_q, &log_work, K_NO_WAIT);
-
 	memset(&pasture_temp, 0, sizeof(pasture_t));
-	pasture_temp.m.ul_total_fences = 0;
+	cached_fences_counter = 0;
 	pasture_temp.m.us_pasture_crc = EMPTY_FENCE_CRC;
+
+	int err = 0;
+
+	err = k_work_schedule_for_queue(&send_q, &modem_poll_work, K_NO_WAIT);
+	if (err < 0) {
+		return err;
+	}
+	err = k_work_schedule_for_queue(&send_q, &log_work, K_NO_WAIT);
+	if (err < 0) {
+		return err;
+	}
+
+	return 0;
 }
 
 void build_poll_request(NofenceMessage *poll_req)
@@ -466,9 +472,9 @@ void build_poll_request(NofenceMessage *poll_req)
 	proto_InitHeader(poll_req); /* fill up message header. */
 	poll_req->which_m = NofenceMessage_poll_message_req_tag;
 	poll_req->m.poll_message_req.datePos =
-		proto_getLastKnownDatePos(&cached_fix);
+		proto_get_last_known_date_pos(&cached_fix);
 	poll_req->m.poll_message_req.has_datePos =
-		proto_hasLastKnownDatePos(&cached_fix);
+		proto_has_last_known_date_pos(&cached_fix);
 	poll_req->m.poll_message_req.eMode = current_state.collar_mode;
 	poll_req->m.poll_message_req.usZapCount = current_state.zap_count;
 	poll_req->m.poll_message_req.eCollarStatus =
@@ -545,7 +551,8 @@ int8_t request_fframe(uint32_t version, uint8_t frame)
 	fence_req.m.fence_definition_req.ucFrameNumber = frame;
 	int ret = encode_and_send_message(&fence_req);
 	if (ret) {
-		LOG_WRN("Failed to send request for frame %d, %d", frame, ret);
+		LOG_ERR("Failed to send request for fence frame %d, %d", frame,
+			ret);
 		return -1;
 	}
 	return 0;
@@ -567,22 +574,17 @@ void fence_download(uint8_t new_fframe)
 				new_new_fence_available();
 			EVENT_SUBMIT(fence_ready);
 
-			LOG_WRN("Fence %d download "
-				"complete!\n",
+			LOG_INF("Fence ver %d download complete and notified AMC.",
 				new_fence_in_progress);
+
 			expected_fframe = 0;
-			/* trigger ano download for the sake of testing only
-			first_ano_frame = true;
-			request_ano_frame(0, 0);
-			 */
 			return;
 		}
 		if (new_fframe == expected_fframe) {
 			expected_fframe++;
 			/* TODO: handle failure to send request!*/
 			request_fframe(new_fence_in_progress, expected_fframe);
-			LOG_WRN("Requesting frame %d of new fence: %d"
-				".\n",
+			LOG_INF("Requesting frame %d of new fence: %d",
 				expected_fframe, new_fence_in_progress);
 		}
 	}
@@ -597,7 +599,7 @@ int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 	ano_req.m.ubx_ano_req.usStartAno = ano_start;
 	int ret = encode_and_send_message(&ano_req);
 	if (ret) {
-		LOG_WRN("Failed to send request for ano %d\n", ano_start);
+		LOG_ERR("Failed to send request for ano %d", ano_start);
 		return -1;
 	}
 	return 0;
@@ -605,32 +607,27 @@ int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 
 void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
 {
-	LOG_WRN("ano_id = %d, ano_frame = %d\n", ano_id, new_ano_frame);
 	if (first_ano_frame) {
 		new_ano_in_progress = ano_id;
 		expected_ano_frame = 0;
 		first_ano_frame = false;
-	} else if (new_ano_frame == 0 &&
-		   !first_ano_frame) { //something went bad
+	} else if (new_ano_frame == 0 && !first_ano_frame) {
 		expected_ano_frame = 0;
 		new_ano_in_progress = 0;
 		return;
 	}
 	if (new_ano_frame >= 0) {
 		if (new_ano_frame == DOWNLOAD_COMPLETE) {
-			LOG_INF("ANO %d download "
-				"complete!\n",
+			LOG_INF("ANO %d download complete.",
 				new_ano_in_progress);
 			return;
 		}
 
 		expected_ano_frame += new_ano_frame;
-		LOG_INF("expected ano frame = %d\n", expected_ano_frame);
 		/* TODO: handle failure to send request!*/
 		int ret = request_ano_frame(ano_id, expected_ano_frame);
 
-		LOG_INF("Requesting frame %d of new ano: %d"
-			".\n",
+		LOG_INF("Requesting frame %d of new ano: %d.",
 			expected_ano_frame, new_ano_in_progress);
 
 		if (ret != 0) {
@@ -652,7 +649,7 @@ void proto_InitHeader(NofenceMessage *msg)
 	if (use_server_time) {
 		msg->header.ulUnixTimestamp = time_from_server;
 	} else {
-		msg->header.ulUnixTimestamp = cached_fix.unixTimestamp;
+		msg->header.ulUnixTimestamp = cached_fix.unix_timestamp;
 	}
 }
 
@@ -667,7 +664,7 @@ int send_binary_message(uint8_t *data, size_t len)
 {
 	/* We can only send 1 message at a time, use mutex. */
 	if (k_mutex_lock(&send_binary_mutex,
-			 K_SECONDS(CONFIG_BINARY_SEND_TIMEOUT_SEC * 2)) == 0) {
+			 K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC * 2)) == 0) {
 		uint16_t byteswap_size = BYTESWAP16(len - 2);
 		memcpy(&data[0], &byteswap_size, 2);
 
@@ -677,10 +674,10 @@ int send_binary_message(uint8_t *data, size_t len)
 		msg2send->len = len;
 		EVENT_SUBMIT(msg2send);
 
-		int err = k_sem_take(&send_ack_sem,
-				     K_SECONDS(CONFIG_BINARY_SEND_TIMEOUT_SEC));
+		int err = k_sem_take(&send_out_ack,
+				     K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC));
 		if (err) {
-			char *e_msg = "Timed out waiting for cellular ack!";
+			char *e_msg = "Timed out waiting for cellular ack";
 			nf_app_error(ERR_MESSAGING, -ETIMEDOUT, e_msg,
 				     strlen(e_msg));
 			k_mutex_unlock(&send_binary_mutex);
@@ -691,6 +688,7 @@ int send_binary_message(uint8_t *data, size_t len)
 	} else {
 		return -ETIMEDOUT;
 	}
+	return 0;
 }
 
 int encode_and_send_message(NofenceMessage *msg_proto)
@@ -699,7 +697,7 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 	memset(encoded_msg, 0, sizeof(encoded_msg));
 	size_t encoded_size = 0;
 
-	LOG_INF("Start message encoding!, size: %d, version: %u\n",
+	LOG_INF("Start message encoding, size: %d, version: %u",
 		sizeof(msg_proto), msg_proto->header.ulVersion);
 	int ret = collar_protocol_encode(msg_proto, &encoded_msg[2],
 					 NofenceMessage_size, &encoded_size);
@@ -716,7 +714,6 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_xServerIp && strlen(pResp->xServerIp) > 0) {
 		struct messaging_host_address_event *host_add_event =
 			new_messaging_host_address_event();
-		//		strcpy(host_add_event.address, pResp->xServerIp, sizeof(pResp->xServerIp));
 		strncpy(host_add_event->address, pResp->xServerIp,
 			sizeof(pResp->xServerIp));
 		EVENT_SUBMIT(host_add_event); /*cellular controller writes it
@@ -737,7 +734,7 @@ void process_poll_response(NofenceMessage *proto)
 		/* TODO: publish enable ANO event to GPS controller */
 	}
 	if (pResp->has_bUseServerTime && pResp->bUseServerTime) {
-		LOG_WRN("Server time will be used!\n");
+		LOG_INF("Server time will be used.");
 		time_from_server = proto->header.ulUnixTimestamp;
 		use_server_time = true;
 	}
@@ -748,7 +745,7 @@ void process_poll_response(NofenceMessage *proto)
 		k_work_reschedule_for_queue(
 			&send_q, &modem_poll_work,
 			K_MINUTES(atomic_get(&poll_period_minutes)));
-		LOG_WRN("Poll period of %d minutes will be used!\n",
+		LOG_INF("Poll period of %d minutes will be used.",
 			atomic_get(&poll_period_minutes));
 	}
 	if (pResp->has_usAccSigmaSleepLimit) {
@@ -775,7 +772,7 @@ void process_poll_response(NofenceMessage *proto)
 		 * to AMC */
 		//request frame 0
 		first_frame = true;
-		LOG_WRN("Requesting frame 0 of fence: %d!\n",
+		LOG_INF("Requesting frame 0 for fence version %i.",
 			pResp->ulFenceDefVersion);
 		int ret = request_fframe(pResp->ulFenceDefVersion, 0);
 		if (ret == 0) {
@@ -798,15 +795,12 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 		ev->version = app_ver;
 		EVENT_SUBMIT(ev);
 	} else {
-		LOG_INF("Requested firmware version is \
-			 same or older than current");
+		LOG_INF("FW ver from server is same or older than current.");
 		return;
 	}
 
 	return;
 }
-
-static uint8_t cached_fences_counter = 0;
 
 /** @brief Process a fence frame and stores it into the cached pasture
  *         so we can validate if its valid when we're done to further
@@ -892,7 +886,7 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	if (frame == fenceResp->ucTotalFrames - 1) {
 		/* Validate pasture. */
 		if (cached_fences_counter != pasture_temp.m.ul_total_fences) {
-			LOG_ERR("Cached %i frames, but expected %i!",
+			LOG_ERR("Cached %i frames, but expected %i.",
 				cached_fences_counter,
 				pasture_temp.m.ul_total_fences);
 			return 0;
@@ -904,7 +898,7 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 		}
 
 		if (!validate_pasture()) {
-			LOG_ERR("CRC was not correct for new pasture!");
+			LOG_ERR("CRC was not correct for new pasture.");
 			return 0;
 		}
 
@@ -922,7 +916,6 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 
 uint8_t process_ano_msg(UbxAnoReply *anoResp)
 {
-	LOG_DBG("Ano response received!\n");
 	uint8_t rec_ano_frames =
 		anoResp->rgucBuf.size / sizeof(UBX_MGA_ANO_RAW_t);
 	UBX_MGA_ANO_RAW_t *temp = NULL;
@@ -932,7 +925,7 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 	uint32_t age = ano_date_to_unixtime_midday(
 		temp->mga_ano.year, temp->mga_ano.month, temp->mga_ano.day);
 
-	LOG_WRN("Relative age of received ANO frame = %d, %d \n", age,
+	LOG_INF("Relative age of received ANO frame = %d, %d", age,
 		time_from_server);
 
 	/* Write to storage controller's ANO WRITE partition. */
@@ -947,30 +940,28 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 	if (age > time_from_server + SECONDS_IN_THREE_DAYS) {
 		return DOWNLOAD_COMPLETE;
 	}
-
-	LOG_DBG("Number of received ano buffer = %d!\n", rec_ano_frames);
 	return rec_ano_frames;
 }
 
-_DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *gpsLastFix)
+_DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix)
 {
 	bool valid_headVeh = (bool)(gpsLastFix->pvt_flags &
 				    GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK);
 	_DatePos a = {
-		.lLat = gpsLastFix->Lat,
-		.lLon = gpsLastFix->Lon,
-		.usHorizontalAccDm = gpsLastFix->hAccDm,
-		.ulUnixTimestamp = gpsLastFix->unixTimestamp,
+		.lLat = gpsLastFix->lat,
+		.lLon = gpsLastFix->lon,
+		.usHorizontalAccDm = gpsLastFix->h_acc_dm,
+		.ulUnixTimestamp = gpsLastFix->unix_timestamp,
 		.has_sHeadVeh = valid_headVeh,
-		.sHeadVeh = gpsLastFix->headVeh,
+		.sHeadVeh = gpsLastFix->head_veh,
 		.has_usHeadAcc = valid_headVeh,
-		.usHeadAcc = gpsLastFix->headAcc,
+		.usHeadAcc = gpsLastFix->head_acc,
 		.has_ucNumSV = true,
-		.ucNumSV = gpsLastFix->numSV,
+		.ucNumSV = gpsLastFix->num_sv,
 		.has_usHDOP = true,
-		.usHDOP = gpsLastFix->hdop,
+		.usHDOP = gpsLastFix->h_dop,
 		.has_lHeight = true,
-		.lHeight = gpsLastFix->Height,
+		.lHeight = gpsLastFix->height,
 #if defined(HW_BAROMETER)
 		.has_usHeight = true,
 		.usHeight = gpsLastFix->baro_Height,
@@ -981,9 +972,9 @@ _DatePos proto_getLastKnownDatePos(gps_last_fix_struct_t *gpsLastFix)
 	return a;
 }
 
-bool proto_hasLastKnownDatePos(const gps_last_fix_struct_t *gps)
+bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *gps)
 {
-	return gps->unixTimestamp != 0;
+	return gps->unix_timestamp != 0;
 }
 
 static uint32_t ano_date_to_unixtime_midday(uint8_t year, uint8_t month,

@@ -21,9 +21,10 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BUZZER_LOG_LEVEL);
 #define PWM_CHANNEL DT_PWMS_CHANNEL(DT_ALIAS(pwm_buzzer))
 #endif
 
-const struct device *buzzer_pwm;
+static const struct device *buzzer_pwm;
 
-#define TIME_PER_STEP_USEC 30
+/* Variable used to play sweep sounds, taken from old code. */
+#define SWEEP_TIME_PER_STEP_USEC 30
 
 atomic_t current_warn_zone_freq = ATOMIC_INIT(0);
 atomic_t current_type_signal = ATOMIC_INIT(SND_READY_FOR_NEXT_TYPE);
@@ -37,7 +38,7 @@ K_SEM_DEFINE(abort_sound_sem, 0, 1);
 void warn_zone_timeout_handler(struct k_timer *dummy);
 K_TIMER_DEFINE(warn_zone_timeout_timer, warn_zone_timeout_handler, NULL);
 
-/* Check power consumption for this PWM set. */
+/** @todo Check power consumption for this PWM set. */
 int set_pwm_to_idle(void)
 {
 	int err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, 0, 0, 0);
@@ -59,26 +60,26 @@ static void inline end_current_sound(void)
 }
 
 /** @brief Calculates the necessary duty cycle to receive the wanted volume
- *         level percent given and gives pulse width.
+ *         level percent given, and outputs pulse width.
  * 
- * @param freq frequency period to take into account in us
- * @param volume loudness of the played frequency, ranging from 0-100%
- *               This is simply having a ratio for a duty cycle between 0%-50%.
+ * @param[in] period microseconds period of wanted frequency.
+ * @param[in] volume loudness of the played frequency, ranging from 0-100%
+ *            This is simply having a ratio for a duty cycle between 0%-50%.
  * 
  * @return pulse width to output target loudness level.
  */
-static inline uint32_t get_pulse_width(uint32_t freq, uint8_t volume)
+static inline uint32_t get_pulse_width(uint32_t period, uint8_t volume)
 {
-	return (freq / 2) * ((float)volume / 100);
+	return (period / 2) * ((float)volume / 100);
 }
 
 /** @brief Plays a frequency for given duration.
  * 
- * @param period period delay in us of pulses.
- * @param sustain length/duration of the note/frequency to be played in us.
- *                If UINT32_MAX, sound is played infinite.
- * @param volume loudness of the played frequency, ranging from 0%-100%
- *               This is simply having a ratio for a duty cycle between 0%-50%.
+ * @param[in] period period delay in us of pulses.
+ * @param[in] sustain length/duration of the note/frequency to be played in us.
+ *            If UINT32_MAX, sound is played infinite.
+ * @param[in] volume loudness of the played frequency, ranging from 0%-100%
+ *            This is simply having a ratio for a duty cycle between 0%-50%.
  * 
  * @return 0 on success, otherwise negative errno.
  * @return -EINTR if sound was aborted by another thread.
@@ -93,7 +94,7 @@ int play_from_ms(const uint32_t period, const uint32_t sustain,
 	err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, period, pulse, 0);
 	if (err) {
 		LOG_ERR("Error %d: failed to set pulse width", err);
-		goto set_to_idle;
+		return err;
 	}
 
 	/* Clamp sustain to config to prevent semaphores to timeout
@@ -103,39 +104,30 @@ int play_from_ms(const uint32_t period, const uint32_t sustain,
 	if (sustain == UINT32_MAX) {
 		dur = K_FOREVER;
 	} else {
-		uint32_t us;
-		if (sustain >
-		    USEC_PER_SEC * CONFIG_BUZZER_LONGEST_NOTE_SUSTAIN) {
-			us = (USEC_PER_SEC *
-			      CONFIG_BUZZER_LONGEST_NOTE_SUSTAIN) -
-			     1;
-		} else {
-			us = sustain;
-		}
-		dur = K_USEC(us);
+		dur = K_USEC(MIN(
+			sustain,
+			USEC_PER_SEC * CONFIG_BUZZER_LONGEST_NOTE_SUSTAIN - 1));
 	}
 
 	if (k_sem_take(&abort_sound_sem, dur) == 0) {
 		err = -EINTR;
 	}
 
-set_to_idle : {
 	int pwm_idle_err = set_pwm_to_idle();
 	if (pwm_idle_err) {
 		return pwm_idle_err;
 	}
 	return err;
 }
-}
 
 /** @brief Helper function to convert hz frequency to ms delay used by
  *         pwm_pin_set_usec.
  * 
- * @param freq frequency of the note to be played in HZ. 0 = off.
- * @param sustain length/duration of the note/frequency to be played in us.
- *                If UINT32_MAX, sound is played infinite.
- * @param volume loudness of the played frequency, ranging from 0%-100%
- *               This is simply having a ratio for a duty cycle between 0%-50%.
+ * @param[in] freq frequency of the note to be played in HZ. 0 = off.
+ * @param[in] sustain length/duration of the note/frequency to be played in us.
+ *            If UINT32_MAX, sound is played infinite.
+ * @param[in] volume loudness of the played frequency, ranging from 0%-100%
+ *            This is simply having a ratio for a duty cycle between 0%-50%.
  * 
  * @return 0 on success
  *         -EINTR if sound thread aborted.
@@ -150,15 +142,15 @@ int play_hz(const uint32_t freq, const uint32_t sustain, const uint8_t volume)
 /** @brief Plays a set of frequencies from start to end with steps. Accepts
  *         sweeps in both directions (start>end or start<end)
  * 
- * @param start_freq start frequency of sweep in hz.
- * @param end_freq end frequency of sweep in hz.
- * @param duration duration of sweep in us.
- * @param step_count number of steps to reach end_freq from start_freq.
+ * @param[in] start_freq start frequency of sweep in hz.
+ * @param[in] end_freq end frequency of sweep in hz.
+ * @param[in] duration duration of sweep in us.
+ * @param[in] step_count number of steps to reach end_freq from start_freq.
  * 
  * @return 0 on success, otherwise negative errno.
  * @return -EINTR if sound was aborted by another thread.
  */
-int play_sweep(int32_t start_freq, int32_t end_freq, uint32_t duration,
+int play_sweep(uint32_t start_freq, uint32_t end_freq, uint32_t duration,
 	       uint16_t step_count)
 {
 	if (step_count == 0 || start_freq == 0 || end_freq == 0 ||
@@ -170,8 +162,9 @@ int play_sweep(int32_t start_freq, int32_t end_freq, uint32_t duration,
 
 	for (uint16_t i = 0; i < step_count; i++) {
 		uint32_t freq = (uint32_t)(
-			start_freq +
-			(i * ((end_freq - start_freq) / (int32_t)step_count)));
+			start_freq + (int32_t)(i * (((int32_t)end_freq -
+						     (int32_t)start_freq) /
+						    (int32_t)step_count)));
 
 		int err = play_hz(freq, sustain, BUZZER_SOUND_VOLUME_PERCENT);
 		if (err) {
@@ -235,7 +228,7 @@ void play_welcome(void)
 	}
 
 	int steps = 750;
-	err = play_sweep(1000, 4000, TIME_PER_STEP_USEC * steps, steps);
+	err = play_sweep(1000, 4000, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
 		return;
@@ -254,7 +247,7 @@ void play_welcome(void)
 	}
 
 	steps = 1650;
-	err = play_sweep(700, 4000, TIME_PER_STEP_USEC * steps, steps);
+	err = play_sweep(700, 4000, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
 		return;
@@ -267,14 +260,14 @@ void play_welcome(void)
 	}
 
 	steps = 2500;
-	err = play_sweep(4000, 1500, TIME_PER_STEP_USEC * steps, steps);
+	err = play_sweep(4000, 1500, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
 		return;
 	}
 
 	steps = 450;
-	err = play_sweep(1500, 600, TIME_PER_STEP_USEC * steps, steps);
+	err = play_sweep(1500, 600, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
 		return;
@@ -595,12 +588,18 @@ static bool event_handler(const struct event_header *eh)
 			atomic_set(&current_type_signal, ev->type);
 
 			if (ev->type == SND_WARN) {
+				/* We entered warn zone, initialize the frequency
+				 * to start at minimum and wait for AMC to
+				 * update it.
+				 */
+				atomic_set(&current_warn_zone_freq,
+					   WARN_FREQ_MS_PERIOD_INIT);
 				/* If current type is warn zone, start timeout timer
 			 	 * for getting a new frequency to play. */
 				k_timer_start(
 					&warn_zone_timeout_timer,
 					K_SECONDS(
-						CONFIG_BUZZER_UPDATE_WARN_FREQ_TIMEOUT_SEC),
+						CONFIG_BUZZER_UPDATE_WARN_FREQ_TIMEOUT),
 					K_NO_WAIT);
 			} else {
 				/* Stop any existing timeout timers if we have
@@ -628,7 +627,7 @@ static bool event_handler(const struct event_header *eh)
 			k_timer_start(
 				&warn_zone_timeout_timer,
 				K_SECONDS(
-					CONFIG_BUZZER_UPDATE_WARN_FREQ_TIMEOUT_SEC),
+					CONFIG_BUZZER_UPDATE_WARN_FREQ_TIMEOUT),
 				K_NO_WAIT);
 		} else {
 			k_timer_stop(&warn_zone_timeout_timer);

@@ -14,7 +14,7 @@
 #include "nf_eeprom.h"
 #define INVALID_SOCK (-1)
 #define PEER_PORT CONFIG_SERVER_PORT
-#define RECV_BUF_SIZE 386
+#define RECV_BUF_SIZE CONFIG_RECV_BUF_MAX
 
 #define SOCKS5_PROXY_V4_ADDR ""
 #define SOCKS5_PROXY_PORT 1080
@@ -72,6 +72,7 @@ struct configs {
      */
 extern struct configs conf;
 
+int reset_modem(void);
 int8_t send_tcp(char *, size_t);
 void stop_tcp(void);
 const struct device *bind_modem(void);

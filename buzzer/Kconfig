@@ -27,16 +27,8 @@ if BUZZER
 		  or a preemptible thread of higher or equal priority, 
 		  becomes ready.
 
-	config BUZZER_WARN_ZONE_FREQ_INTERVAL
-		int "How often and long we play the NORMAL warn zone frequency in ms."
-		default 2000
-
-	config BUZZER_MAX_WARN_ZONE_FREQ_INTERVAL
-		int "How often and long we play the MAX warn zone frequency in ms."
-		default 2000
-
-	config BUZZER_UPDATE_WARN_FREQ_TIMEOUT_SEC
-		int "Timeout if we do not get new warn zone freq from AMC."
+	config BUZZER_UPDATE_WARN_FREQ_TIMEOUT
+		int "Timeout in sec if we do not get new warn zone freq from AMC."
 		default 1
 
 	config BUZZER_LONGEST_NOTE_SUSTAIN

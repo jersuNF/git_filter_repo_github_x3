@@ -7,6 +7,7 @@
 #include <device.h>
 #include <devicetree.h>
 #include <drivers/gpio.h>
+#include <power/reboot.h>
 
 #include <math.h>
 #include <stdio.h>
@@ -17,6 +18,7 @@
 #include "error_event.h"
 #include "battery.h"
 #include "ble_ctrl_event.h"
+#include "messaging_module_events.h"
 
 #define MODULE pwr_module
 #include <logging/log.h>
@@ -47,6 +49,7 @@ static const struct battery_level_point levels[] = {
 };
 
 static struct k_work_delayable battery_poll_work;
+static struct k_work_delayable power_reboot;
 
 /** @brief Periodic battery voltage work function */
 static void battery_poll_work_fn()
@@ -108,6 +111,17 @@ static void battery_poll_work_fn()
 			  K_SECONDS(CONFIG_BATTERY_POLLER_WORK_SEC));
 }
 
+static void reboot_work_fn()
+{
+#ifdef CONFIG_BOARD_NF_X25_NRF52840
+	/* Add a check that we are using NRF board
+	* since they are the ones supported by nordic's <power/reboot.h>
+	*/
+	/* Add logic to shutdown modules if necessary. */
+	sys_reboot(SYS_REBOOT_COLD);
+#endif
+}
+
 int pwr_module_init(void)
 {
 	init_moving_average();
@@ -130,6 +144,8 @@ int pwr_module_init(void)
 	k_work_init_delayable(&battery_poll_work, battery_poll_work_fn);
 	k_work_reschedule(&battery_poll_work,
 			  K_SECONDS(CONFIG_BATTERY_POLLER_WORK_SEC));
+
+	k_work_init_delayable(&power_reboot, reboot_work_fn);
 
 	return 0;
 }
@@ -154,3 +170,33 @@ int log_and_fetch_battery_voltage(void)
 
 	return batt_mV;
 }
+
+/**
+ * @brief Event handler function
+ * @param[in] eh Pointer to event handler struct
+ * @return true to consume the event (event is not propagated to further
+ * listners), false otherwise
+ */
+static bool event_handler(const struct event_header *eh)
+{
+	/* Received reboot event */
+	if (is_reboot_scheduled_event(eh)) {
+		LOG_INF("Reboot event received!");
+		const struct reboot_scheduled_event *r_ev =
+			cast_reboot_scheduled_event(eh);
+
+		uint32_t time_to_wait_ms = r_ev->reboots_at - k_uptime_get_32();
+
+		LOG_INF("Will reboot after %u milliseconds", time_to_wait_ms);
+		k_work_reschedule(&power_reboot, K_MSEC(time_to_wait_ms));
+		return false;
+	}
+
+	/* If event is unhandled, unsubscribe. */
+	__ASSERT_NO_MSG(false);
+
+	return false;
+}
+
+EVENT_LISTENER(MODULE, event_handler);
+EVENT_SUBSCRIBE_FINAL(MODULE, reboot_scheduled_event);

@@ -1,0 +1,11 @@
+menuconfig MOVE_CONTROLLER
+	bool "Movement controller"
+	help
+	  Movement controller module
+	default y
+
+if MOVE_CONTROLLER
+	module = MOVE_CONTROLLER
+	module-str = MOVEMENT Controller
+	source "subsys/logging/Kconfig.template.log_config"
+endif

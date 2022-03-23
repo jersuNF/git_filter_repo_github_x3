@@ -806,7 +806,7 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 	return;
 }
 
-uint8_t cached_fence_points = 0;
+static uint8_t cached_fences_counter = 0;
 
 /** @brief Process a fence frame and stores it into the cached pasture
  *         so we can validate if its valid when we're done to further
@@ -838,49 +838,68 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 
 	if (frame == 0) {
 		memset(&pasture_temp, 0, sizeof(pasture_t));
-		pasture_temp.m.ul_total_fences = 0;
+		cached_fences_counter = 0;
 		pasture_temp.m.us_pasture_crc = EMPTY_FENCE_CRC;
 	}
 
-	/* Pasture header. */
-	if (fenceResp->m.xHeader.has_bKeepMode) {
-		pasture_temp.m.has_keep_mode = true;
-		pasture_temp.m.keep_mode = fenceResp->m.xHeader.bKeepMode;
+	if (fenceResp->which_m == FenceDefinitionResponse_xHeader_tag) {
+		if (frame != 0) {
+			/* We always expect the header to be the first frame. */
+			LOG_ERR("Unexpected frame count for pasture header.");
+			return 0;
+		}
+
+		/* Pasture header. */
+		if (fenceResp->m.xHeader.has_bKeepMode) {
+			pasture_temp.m.has_keep_mode = true;
+			pasture_temp.m.keep_mode =
+				fenceResp->m.xHeader.bKeepMode;
+		}
+
+		if (fenceResp->has_usFenceCRC) {
+			pasture_temp.m.has_us_pasture_crc = true;
+			pasture_temp.m.us_pasture_crc = fenceResp->usFenceCRC;
+		}
+
+		pasture_temp.m.l_origin_lat = fenceResp->m.xHeader.lOriginLat;
+		pasture_temp.m.l_origin_lon = fenceResp->m.xHeader.lOriginLon;
+		pasture_temp.m.us_k_lat = fenceResp->m.xHeader.usK_LAT;
+		pasture_temp.m.us_k_lon = fenceResp->m.xHeader.usK_LON;
+		pasture_temp.m.ul_fence_def_version =
+			fenceResp->ulFenceDefVersion;
+		pasture_temp.m.ul_total_fences =
+			fenceResp->m.xHeader.ulTotalFences;
+
+	} else if (FenceDefinitionResponse_xFence_tag) {
+		/* Fence frame info to store into pasture's fence array. */
+		fence_t *loc = &pasture_temp.fences[cached_fences_counter];
+
+		/* Fence header. */
+		loc->m.n_points = fenceResp->m.xFence.rgulPoints_count;
+		loc->m.us_id = fenceResp->m.xFence.usId;
+		loc->m.e_fence_type = fenceResp->m.xFence.eFenceType;
+		loc->m.fence_no = fenceResp->m.xFence.fenceNo;
+
+		/* Fence coordinates. */
+		memcpy(loc->coordinates, fenceResp->m.xFence.rgulPoints,
+		       loc->m.n_points * sizeof(fence_coordinate_t));
+
+		/* Increment number of fences stored in pasture. */
+		cached_fences_counter++;
 	}
-
-	if (fenceResp->has_usFenceCRC) {
-		pasture_temp.m.has_us_pasture_crc = true;
-		pasture_temp.m.us_pasture_crc = fenceResp->usFenceCRC;
-	}
-
-	pasture_temp.m.l_origin_lat = fenceResp->m.xHeader.lOriginLat;
-	pasture_temp.m.l_origin_lon = fenceResp->m.xHeader.lOriginLon;
-	pasture_temp.m.us_k_lat = fenceResp->m.xHeader.usK_LAT;
-	pasture_temp.m.us_k_lon = fenceResp->m.xHeader.usK_LON;
-	pasture_temp.m.ul_fence_def_version = fenceResp->ulFenceDefVersion;
-
-	/* Fence frame info to store into pasture's fence array. */
-	fence_t *loc = &pasture_temp.fences[pasture_temp.m.ul_total_fences];
-
-	/* Fence header. */
-	loc->m.n_points = fenceResp->m.xFence.rgulPoints_count;
-	loc->m.us_id = fenceResp->m.xFence.usId;
-	loc->m.e_fence_type = fenceResp->m.xFence.eFenceType;
-	loc->m.fence_no = fenceResp->m.xFence.fenceNo;
-
-	/* Fence coordinates. */
-	memcpy(loc->coordinates, fenceResp->m.xFence.rgulPoints,
-	       loc->m.n_points * sizeof(fence_coordinate_t));
-
-	/* Increment number of fences stored in pasture. */
-	pasture_temp.m.ul_total_fences++;
 
 	LOG_INF("Cached fence frame %i successfully.", frame);
 	if (frame == fenceResp->ucTotalFrames - 1) {
 		/* Validate pasture. */
-		if (pasture_temp.m.ul_total_fences !=
-		    fenceResp->m.xHeader.ulTotalFences) {
-			LOG_ERR("A fence frame was corrupt or lost during requests!");
+		if (cached_fences_counter != pasture_temp.m.ul_total_fences) {
+			LOG_ERR("Cached %i frames, but expected %i!",
+				cached_fences_counter,
+				pasture_temp.m.ul_total_fences);
+			return 0;
+		}
+
+		if (pasture_temp.m.ul_total_fences == 0) {
+			LOG_ERR("Error, pasture cached is empty.");
 			return 0;
 		}
 

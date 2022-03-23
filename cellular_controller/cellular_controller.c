@@ -286,7 +286,7 @@ static void cellular_controller_keep_alive(void* dev)
 	while (true) {
 		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
 			if (!cellular_controller_is_ready()) {
-				//stop_tcp();
+				stop_tcp();
 				int ret = reset_modem();
 
 				/* Connection is up, but we need to wait for IP */
@@ -297,6 +297,19 @@ static void cellular_controller_keep_alive(void* dev)
 					ret = cellular_controller_connect(dev);
 					if (ret == 0) {
 						modem_is_ready = true;
+					}
+				}
+			}
+
+			if (cellular_controller_is_ready()) {
+				if(!connected){
+					int8_t  ret = start_tcp();
+					if (ret == 0){
+						connected = true;
+					}else{
+						LOG_WRN("Connection failed!");
+						stop_tcp();
+						/*TODO: notify error handler*/
 					}
 				}
 			}
@@ -317,6 +330,7 @@ int8_t cellular_controller_init(void)
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {
 		LOG_ERR("GSM driver was not found!\n");
+		submit_error(OTHER, -1);
 		return -1;
 	}
 

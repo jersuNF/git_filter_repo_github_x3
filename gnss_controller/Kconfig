@@ -1,0 +1,17 @@
+
+menuconfig GNSS_CONTROLLER
+	bool "gnss controller"
+	select GNSS_Drivers
+	help
+	  Enable gnss controller
+	default y
+
+
+if GNSS_CONTROLLER
+	config GNSS_CONTROLLER_LOG_LEVEL
+		int "Log level for the gnss controller"
+		default 4
+    config MINIMUM_ALLOWED_GNSS_RATE
+        int "Minimum allowable rate for GNSS receiver (milliseconds)"
+        default 250
+endif

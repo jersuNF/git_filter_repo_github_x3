@@ -975,7 +975,7 @@ _DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix)
 		.usHeight = gpsLastFix->baro_Height,
 #endif
 		.has_ucGpsMode = true,
-		.ucGpsMode = gpsLastFix->gps_mode
+		.ucGpsMode = gpsLastFix->mode
 	};
 	return a;
 }

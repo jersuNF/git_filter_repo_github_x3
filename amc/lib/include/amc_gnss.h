@@ -19,12 +19,12 @@ typedef int (*gnss_timeout_cb)(void);
  */
 int gnss_init(gnss_timeout_cb timeout_cb);
 
-/** @brief Push new GNSS position update to
+/** @brief Validate that GNSS fix is good enough, and update timeout
  * 
- * @param[in] timeout_cb Callback to call on timeout. 
+ * @param[in] gnss_data Position data from GNSS
  * 
  * @returns 0 on success, error code otherwise. 
  */
-int gnss_update(gnss_struct_t* gnss_data);
+int gnss_validate_and_update(gnss_t* gnss_data);
 
 #endif /* _AMC_GNSS_H_ */

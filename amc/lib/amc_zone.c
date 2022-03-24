@@ -35,19 +35,7 @@ static const zone_mark_t markers[] = {
 
 static amc_zone_t zone = NO_ZONE;
 
-void zone_reset(void)
-{
-	zone = NO_ZONE;
-}
-
-/** @brief Calculates the zone based on distance and current zone. 
- * 
- * @param[in] current_zone Current zone. 
- * @param[in] instant_dist Distance from fence. 
- * 
- * @returns Calculated zone. 
- */
-static amc_zone_t zone_calculate(amc_zone_t current_zone, int16_t instant_dist)
+amc_zone_t zone_update(int16_t instant_dist)
 {
 	amc_zone_t new_zone;
 
@@ -61,10 +49,10 @@ static amc_zone_t zone_calculate(amc_zone_t current_zone, int16_t instant_dist)
 		int16_t end = markers[i+1].distance;
 		
 		/* Apply hysteresis depending on current zone */
-		if (current_zone == new_zone) {
+		if (zone == new_zone) {
 			start -= markers[i].hysteresis;
 			end += markers[i+1].hysteresis;
-		} else if (current_zone < new_zone) {
+		} else if (zone < new_zone) {
 			start += markers[i].hysteresis;
 			end += markers[i+1].hysteresis;
 		} else {
@@ -77,7 +65,9 @@ static amc_zone_t zone_calculate(amc_zone_t current_zone, int16_t instant_dist)
 		}
 	}
 	
-	return new_zone;
+	zone_set(new_zone);
+
+	return zone;
 }
 
 amc_zone_t zone_get(void)
@@ -85,13 +75,12 @@ amc_zone_t zone_get(void)
 	return zone;
 }
 
-amc_zone_t zone_update(int16_t instant_dist, bool distance_is_valid)
+int zone_set(amc_zone_t new_zone)
 {
-	if (distance_is_valid) {
-		zone = zone_calculate(zone, instant_dist);
-	} else {
-		zone = NO_ZONE;
+	if (new_zone > WARN_ZONE) {
+		return -EINVAL;
 	}
+	zone = new_zone;
 
-	return zone;
+	return 0;
 }

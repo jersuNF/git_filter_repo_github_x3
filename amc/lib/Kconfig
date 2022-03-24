@@ -30,10 +30,14 @@ config ZONE_WARN_DIST
 	int "Warn zone distance from border in dm"
 	default 0
 	help
-	  No corrections can be started with a distance-to-pasture less than this value.
-	  However, due to dynamic limits and GPS limitations, warnings can be started at
-	  a greater distance.
+	  No corrections can be started with a distance-to-pasture less than 
+	  this value. However, due to dynamic limits and GPS limitations, 
+	  warnings can be started at a greater distance.
 	
 config ZONE_WARN_HYST
 	int "Hysteresis of warn zone distance in dm"
 	default 0
+
+config GNSS_TIMEOUT
+	int "Timeout in milliseconds before position data is considered unreliable"
+	default 1500

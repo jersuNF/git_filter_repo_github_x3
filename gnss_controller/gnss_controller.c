@@ -33,7 +33,7 @@ static uint16_t current_rate;
 
 static gnss_t gnss_data_buffer;
 uint32_t gnss_age, ts, previous_ts;
-enum gnss_mode current_mode = GNSSMODE_NOMODE;
+gnss_mode current_mode = GNSSMODE_NOMODE;
 
 gnss_t cached_gnss_data;
 

@@ -727,6 +727,7 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_bEraseFlash && pResp->bEraseFlash) {
 		struct request_flash_erase_event *flash_erase_event =
 			new_request_flash_erase_event();
+		flash_erase_event->magic = STORAGE_ERASE_MAGIC;
 		EVENT_SUBMIT(flash_erase_event);
 	}
 	// If we are asked to, reboot

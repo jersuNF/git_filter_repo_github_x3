@@ -285,11 +285,13 @@ static bool event_handler(const struct event_header *eh)
 		k_sem_give(&send_out_ack);
 		return false;
 	}
-	if (is_new_gnss_fix(eh)) {
-		struct new_gnss_fix *ev = cast_new_gnss_fix(eh);
-		if (k_sem_take(&cache_lock_sem, K_MSEC(500)) == 0) {
-			cached_fix = ev->fix;
-			k_sem_give(&cache_lock_sem);
+	if (is_gnss_data(eh)) {
+		struct gnss_data *ev = cast_gnss_data(eh);
+		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
+			if (k_sem_take(&cache_lock_sem, K_MSEC(500)) == 0) {
+				cached_fix = ev->gnss_data.lastfix;
+				k_sem_give(&cache_lock_sem);
+			}
 		}
 		return false;
 	}

@@ -20,43 +20,24 @@ struct wdt_data_storage {
 	struct k_work_delayable system_workqueue_work;
 };
 
-static watchdog_evt_handler_t app_evt_handler;
-
 /* Flag set when the library has been initialized and started. */
 static bool init_and_start;
 
-static void watchdog_notify_event(const struct watchdog_evt *evt)
-{
-	__ASSERT(evt != NULL, "Library event not found");
-
-	if (app_evt_handler != NULL) {
-		app_evt_handler(evt);
-	}
-}
-
 static struct wdt_data_storage wdt_data;
 
-static void primary_feed_worker(struct k_work *work_desc)
+static void primary_feed_worker()
 {
-	struct watchdog_evt evt = {
-		.type = WATCHDOG_EVT_FEED,
-	};
-
 	int err = wdt_feed(wdt_data.wdt_drv, wdt_data.wdt_channel_id);
-
-	LOG_INF("Feeding watchdog");
 
 	if (err) {
 		LOG_ERR("Cannot feed watchdog. Error code: %d", err);
-	} else {
-		k_work_reschedule(&wdt_data.system_workqueue_work,
-				  K_MSEC(WDT_FEED_WORKER_DELAY_MS));
+		return;
 	}
 
-	watchdog_notify_event(&evt);
+	LOG_INF("Feeding watchdog.");
 }
 
-static int watchdog_timeout_install(struct wdt_data_storage *data)
+static int watchdog_timeout_install(void)
 {
 	static const struct wdt_timeout_cfg wdt_settings = {
 		.window = {
@@ -66,90 +47,76 @@ static int watchdog_timeout_install(struct wdt_data_storage *data)
 		.callback = NULL,
 		.flags = WDT_FLAG_RESET_SOC
 	};
-	struct watchdog_evt evt = { .type = WATCHDOG_EVT_TIMEOUT_INSTALLED,
-				    .timeout = WATCHDOG_TIMEOUT_MSEC };
 
-	__ASSERT_NO_MSG(data != NULL);
-
-	data->wdt_channel_id =
-		wdt_install_timeout(data->wdt_drv, &wdt_settings);
-	if (data->wdt_channel_id < 0) {
+	wdt_data.wdt_channel_id =
+		wdt_install_timeout(wdt_data.wdt_drv, &wdt_settings);
+	if (wdt_data.wdt_channel_id < 0) {
 		LOG_ERR("Cannot install watchdog timer! Error code: %d",
-			data->wdt_channel_id);
+			wdt_data.wdt_channel_id);
 		return -EFAULT;
 	}
-
-	watchdog_notify_event(&evt);
 
 	LOG_INF("Watchdog timeout set. Timeout: %d seconds",
 		CONFIG_WATCHDOG_TIMEOUT_SEC);
 	return 0;
 }
 
-static int watchdog_start(struct wdt_data_storage *data)
+static int watchdog_start(void)
 {
-	__ASSERT_NO_MSG(data != NULL);
-
-	int err = wdt_setup(data->wdt_drv, WDT_OPT_PAUSE_HALTED_BY_DBG);
+	int err = wdt_setup(wdt_data.wdt_drv, WDT_OPT_PAUSE_HALTED_BY_DBG);
 
 	if (err) {
 		LOG_ERR("Cannot start watchdog! Error code: %d", err);
 	} else {
-		LOG_DBG("Watchdog started");
+		LOG_INF("Watchdog started");
 	}
 	return err;
 }
 
-static int watchdog_feed_enable(struct wdt_data_storage *data)
+void external_watchdog_feed(void)
 {
-	__ASSERT_NO_MSG(data != NULL);
+	if (init_and_start) {
+		k_work_schedule(&wdt_data.system_workqueue_work,
+				K_MSEC(WDT_FEED_WORKER_DELAY_MS));
+	}
+}
 
-	struct watchdog_evt evt = {
-		.type = WATCHDOG_EVT_FEED,
-	};
-
-	k_work_init_delayable(&data->system_workqueue_work,
+static int watchdog_feed_enable(void)
+{
+	k_work_init_delayable(&wdt_data.system_workqueue_work,
 			      primary_feed_worker);
 
-	int err = wdt_feed(data->wdt_drv, data->wdt_channel_id);
+	int err = wdt_feed(wdt_data.wdt_drv, wdt_data.wdt_channel_id);
 
 	if (err) {
 		LOG_ERR("Cannot feed watchdog. Error code: %d", err);
 		return err;
 	}
 
-	watchdog_notify_event(&evt);
-
-	k_work_schedule(&data->system_workqueue_work,
-			K_MSEC(WDT_FEED_WORKER_DELAY_MS));
-	LOG_DBG("Watchdog feed enabled. Timeout: %d", WDT_FEED_WORKER_DELAY_MS);
-
 	return err;
 }
 
-static int watchdog_enable(struct wdt_data_storage *data)
+static int watchdog_enable(void)
 {
-	__ASSERT_NO_MSG(data != NULL);
-
 	int err = -ENXIO;
 
-	data->wdt_drv = device_get_binding(DT_LABEL(DT_NODELABEL(wdt)));
-	if (data->wdt_drv == NULL) {
-		LOG_ERR("Cannot bind watchdog driver");
+	wdt_data.wdt_drv = device_get_binding(DT_LABEL(DT_NODELABEL(wdt)));
+	if (wdt_data.wdt_drv == NULL) {
+		LOG_ERR("Cannot bind watchdog driver, %d", err);
 		return err;
 	}
 
-	err = watchdog_timeout_install(data);
+	err = watchdog_timeout_install();
 	if (err) {
 		return err;
 	}
 
-	err = watchdog_start(data);
+	err = watchdog_start();
 	if (err) {
 		return err;
 	}
 
-	err = watchdog_feed_enable(data);
+	err = watchdog_feed_enable();
 	if (err) {
 		return err;
 	}
@@ -160,49 +127,13 @@ static int watchdog_enable(struct wdt_data_storage *data)
 int watchdog_init_and_start(void)
 {
 	int err;
-	struct watchdog_evt evt = { .type = WATCHDOG_EVT_START };
 
-	err = watchdog_enable(&wdt_data);
+	err = watchdog_enable();
 	if (err) {
 		LOG_ERR("Failed to enable watchdog, error: %d", err);
 		return err;
 	}
 
-	watchdog_notify_event(&evt);
-
 	init_and_start = true;
 	return 0;
-}
-
-void watchdog_register_handler(watchdog_evt_handler_t evt_handler)
-{
-	if (evt_handler == NULL) {
-		app_evt_handler = NULL;
-
-		LOG_DBG("Previously registered handler %p de-registered",
-			app_evt_handler);
-
-		return;
-	}
-
-	LOG_DBG("Registering handler %p", evt_handler);
-
-	app_evt_handler = evt_handler;
-
-	/* If the application watchdog already has been initialized and started prior to an
-	 * external module registering a handler, the newly registered handler is notified that
-	 * the library has been started and that a watchdog timeout has been installed.
-	 */
-	if (init_and_start) {
-		struct watchdog_evt evt = {
-			.type = WATCHDOG_EVT_START,
-		};
-
-		watchdog_notify_event(&evt);
-
-		evt.type = WATCHDOG_EVT_TIMEOUT_INSTALLED;
-		evt.timeout = WATCHDOG_TIMEOUT_MSEC;
-
-		watchdog_notify_event(&evt);
-	}
 }

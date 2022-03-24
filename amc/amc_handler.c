@@ -14,6 +14,7 @@
 #include "event_manager.h"
 #include "error_event.h"
 #include "messaging_module_events.h"
+#include "gnss_controller_events.h"
 
 #include "storage.h"
 
@@ -103,7 +104,7 @@ void process_new_gnss_data_fn(struct k_work *item)
 	}
 
 	/* Fetch new, cached gnss data. */
-	gnss_struct_t *gnss = NULL;
+	gnss_t *gnss = NULL;
 	err = get_gnss_cache(&gnss);
 	if (err || gnss == NULL) {
 		char *msg = "Error getting gnss cahce.";
@@ -151,10 +152,10 @@ static bool event_handler(const struct event_header *eh)
 		k_work_submit_to_queue(&amc_work_q, &process_new_fence_work);
 		return false;
 	}
-	if (is_gnssdata_event(eh)) {
-		struct gnssdata_event *event = cast_gnssdata_event(eh);
+	if (is_gnss_data(eh)) {
+		struct gnss_data *event = cast_gnss_data(eh);
 
-		int err = set_gnss_cache(&event->gnss);
+		int err = set_gnss_cache(&event->gnss_data);
 		if (err) {
 			char *msg = "Could not set gnss cahce.";
 			nf_app_error(ERR_AMC, err, msg, strlen(msg));
@@ -171,5 +172,5 @@ static bool event_handler(const struct event_header *eh)
 }
 
 EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE(MODULE, gnssdata_event);
+EVENT_SUBSCRIBE(MODULE, gnss_data);
 EVENT_SUBSCRIBE(MODULE, new_fence_available);

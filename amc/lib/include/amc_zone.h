@@ -10,14 +10,23 @@
 #include <collar_protocol.h>
 
 typedef enum {
+	/* Collar is in a state where zone information is irrelevant */
 	NO_ZONE = 0,
+
+	/* Collar is well inside fence borders */
 	PSM_ZONE = 1,
+
+	/* Collar is inside fence borders, but tolerance for position inaccuracies is lower */
 	CAUTION_ZONE = 2,
+
+	/* Collar is barely inside fence borders */
 	PREWARN_ZONE = 3,
+
+	/* Collar is outside of fence borders */
 	WARN_ZONE = 4
 } amc_zone_t;
 
-/** @brief Resets the state of the zone calculator to initial values. 
+/** @brief Resets the state of the zone calculator to initial value; NO_ZONE. 
 */
 void zone_reset(void);
 

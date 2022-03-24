@@ -65,7 +65,7 @@ bool fnc_any_valid_fence(void);
  * @return 0 on success.
  * @return -ENODATA if gnss cache has not been set.
  */
-int get_gnss_cache(gnss_struct_t **gnss);
+int get_gnss_cache(gnss_t **gnss);
 
 /**
  * @brief Updates the gnss cache area that is not being read from. Locks
@@ -75,6 +75,6 @@ int get_gnss_cache(gnss_struct_t **gnss);
  * 
  * @return 0 on success, otherwise negative errno on semaphore error.
  */
-int set_gnss_cache(gnss_struct_t *gnss);
+int set_gnss_cache(gnss_t *gnss);
 
 #endif /* _AMC_CACHE_H_ */

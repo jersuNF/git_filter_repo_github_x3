@@ -22,9 +22,9 @@ K_SEM_DEFINE(gnss_data_sem, 1, 1);
  * 
  * @note Need to include correct GNSS header.
  */
-static gnss_struct_t cached_gnssdata_area_1;
-static gnss_struct_t cached_gnssdata_area_2;
-static gnss_struct_t *current_gnssdata_area = &cached_gnssdata_area_1;
+static gnss_t cached_gnssdata_area_1;
+static gnss_t cached_gnssdata_area_2;
+static gnss_t *current_gnssdata_area = &cached_gnssdata_area_1;
 atomic_t new_gnss_written = ATOMIC_INIT(false);
 
 /* Cached fence data header and a max coordinate region. Links the coordinate
@@ -65,7 +65,7 @@ int set_pasture_cache(uint8_t *pasture, size_t len)
 	return 0;
 }
 
-int set_gnss_cache(gnss_struct_t *gnss)
+int set_gnss_cache(gnss_t *gnss)
 {
 	/* We only need to take semaphore if AMC have not yet consumed
          * the previous GNSS data, which means we have to wait until it
@@ -81,9 +81,9 @@ int set_gnss_cache(gnss_struct_t *gnss)
 	}
 
 	if (current_gnssdata_area == &cached_gnssdata_area_1) {
-		memcpy(&cached_gnssdata_area_2, &gnss, sizeof(gnss_struct_t));
+		memcpy(&cached_gnssdata_area_2, &gnss, sizeof(gnss_t));
 	} else {
-		memcpy(&cached_gnssdata_area_1, &gnss, sizeof(gnss_struct_t));
+		memcpy(&cached_gnssdata_area_1, &gnss, sizeof(gnss_t));
 	}
 
 	atomic_set(&new_gnss_written, true);
@@ -91,7 +91,7 @@ int set_gnss_cache(gnss_struct_t *gnss)
 	return 0;
 }
 
-int get_gnss_cache(gnss_struct_t **gnss)
+int get_gnss_cache(gnss_t **gnss)
 {
 	int err = k_sem_take(&gnss_data_sem,
 			     K_SECONDS(CONFIG_GNSS_CACHE_TIMEOUT_SEC));

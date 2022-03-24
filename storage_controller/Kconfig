@@ -12,7 +12,7 @@ if STORAGE_CONTROLLER
 
 	config STORAGE_THREAD_SIZE
 		int "Size of thread stack size"
-		default 8192
+		default 1024
 
 	config STORAGE_THREAD_PRIORITY
 		int "Priority of the storage work function threads"
@@ -32,29 +32,8 @@ if STORAGE_CONTROLLER
 		hex "Size of the sectors that FCB uses for log/ano/pasture data"
 		default 0x1000
 
-	config MSGQ_WRITE_EVENT_SIZE
-		int "Size of write event message queue."
-		default 4
-
-	config MSGQ_READ_EVENT_SIZE
-		int "Size of read event message queue."
-		default 4
-
-	config WALK_CONSUME_TIMEOUT_SEC
-		int "Seconds to wait before giving up during walk process."
-		default 5
-		help
-		  This configuration sets how long the storage controller
-		  waits before timing out durin the walk process. The walk
-		  process simply iterates all the new entires since
-		  the f_oldest entry and sends out read acks in the callback.
-		  It waits for the requester to consume the data before
-		  continuing, where this configuration decides how long to wait
-		  before giving up and returning an error, NOT rotating the FCB.
-
-
-	menu "ERROR_HANDLER"
-    	rsource "./../../modules/error_handler/Kconfig"
-	endmenu # ERROR_HANDLER
+	config MUTEX_READ_WRITE_TIMEOUT
+		int "Number of ms before we timeout waiting for semaphore."
+		default 10000
 
 endif

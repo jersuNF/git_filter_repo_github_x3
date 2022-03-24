@@ -22,7 +22,7 @@ if ANIMAL_MONITOR_CONTROL
 
 	config AMC_CALCULATION_SIZE
 		int "Stack size of the calculation thread"
-		default 2048
+		default 4096
 
 	config AMC_CALCULATION_PRIORITY
 		int "Priority of the calculation thread"

@@ -13,13 +13,15 @@
 	message size is inacceptable - could crash client"
 #endif
 
-int collar_protocol_decode(uint8_t *src_data, size_t src_data_size, 
-			NofenceMessage *dst_msg)
+int collar_protocol_decode(uint8_t *src_data, size_t src_data_size,
+			   NofenceMessage *dst_msg)
 {
 	/* Check that input parameters are valid. */
 	if ((src_data == NULL) || (src_data_size == 0) || (dst_msg == NULL)) {
 		return -EINVAL;
 	}
+
+	memset(dst_msg, 0, sizeof(NofenceMessage));
 
 	/* Decoding a message requires a stream buffer to be defined, which
 	 * uses source data as the input of the stream. 
@@ -33,18 +35,18 @@ int collar_protocol_decode(uint8_t *src_data, size_t src_data_size,
 }
 
 int collar_protocol_encode(NofenceMessage *src_msg, uint8_t *dst_data,
-			size_t dst_data_max_size, size_t *dst_data_size)
+			   size_t dst_data_max_size, size_t *dst_data_size)
 {
 	/* Check that input parameters are valid. */
-	if ((src_msg == NULL) || (dst_data == NULL) || 
-		(dst_data_max_size == 0) || (dst_data_size == NULL)) {
+	if ((src_msg == NULL) || (dst_data == NULL) ||
+	    (dst_data_max_size == 0) || (dst_data_size == NULL)) {
 		return -EINVAL;
 	}
 
 	/* Encoding a message requires a stream buffer to be defined, which
 	 * uses destination data as the output of the stream. 
 	 */
-	pb_ostream_t stream = 
+	pb_ostream_t stream =
 		pb_ostream_from_buffer(dst_data, dst_data_max_size);
 	if (!pb_encode(&stream, NofenceMessage_fields, src_msg)) {
 		return -EMSGSIZE;

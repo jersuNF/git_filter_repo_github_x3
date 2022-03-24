@@ -8,10 +8,10 @@
 #include <zephyr.h>
 
 #define FENCE_MAX 10
-#define FENCE_MAX_TOTAL_COORDINATES 300
 
-/** @todo Currently, we must put Y before X.
- */
+/** From embedded.pb.h rgulPoints_count */
+#define FENCE_MAX_TOTAL_COORDINATES 40
+
 typedef struct {
 	/** Relative coordinates of fence pole 
          *  in DECIMETERS from global origin.
@@ -34,15 +34,34 @@ typedef struct {
 
 		/** Fence type. */
 		uint8_t e_fence_type;
-	} header;
 
-	/** Coordinates. An example of how to dynamically allocate 
-	 *  fence coordinates is found at tests/storage_controller and
-	 *  storage_helper.c and look for get_simulated_fence_data()
-	*/
-	fence_coordinate_t p_c[];
+		/** Fence number. */
+		uint32_t fence_no;
+	} m;
+
+	fence_coordinate_t coordinates[FENCE_MAX_TOTAL_COORDINATES];
 } fence_t;
 
-#define FENCE_MAX_DEFINITION_SIZE FENCE_MAX * sizeof(fence_t)
+typedef struct {
+	struct {
+		uint32_t ul_fence_def_version;
+
+		bool has_us_pasture_crc;
+		uint16_t us_pasture_crc;
+
+		bool has_keep_mode;
+		bool keep_mode;
+
+		int32_t l_origin_lat;
+		int32_t l_origin_lon;
+
+		uint32_t ul_total_fences;
+
+		uint16_t us_k_lat;
+		uint16_t us_k_lon;
+	} m;
+
+	fence_t fences[FENCE_MAX];
+} pasture_t;
 
 #endif /* _PASTURE_DEF_H_ */

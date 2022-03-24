@@ -540,7 +540,7 @@ void proto_InitHeader(NofenceMessage *msg)
 
 int send_message(NofenceMessage *msg_proto)
 {
-	int ret = k_sem_take(&connection_ready, K_SECONDS(3));
+	int ret = k_sem_take(&connection_ready, K_MINUTES(1));
 	if (ret != 0){
 		LOG_ERR("Connection not ready, can't send message now!");
 		return -1;

@@ -284,7 +284,7 @@ exit:
 static int check_ip(){
 	char* collar_ip = NULL;
 	uint8_t timeout_counter = 0;
-	while(timeout_counter++ > 20){
+	while(timeout_counter++ <= 20){
 		int ret = get_ip(&collar_ip);
 		if (ret != 0){
 			LOG_ERR("Failed to get ip from sara r4 driver!");

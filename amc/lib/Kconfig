@@ -41,3 +41,19 @@ config ZONE_WARN_HYST
 config GNSS_TIMEOUT
 	int "Timeout in milliseconds before position data is considered unreliable"
 	default 1500
+
+config GNSS_NUMSV_LIMIT
+	int "Minimum number of satellites required"
+	default 6
+
+config GNSS_HDOP_LIMIT
+	int "Maximum horizontal dilution of precision in dm"
+	default 200
+
+config GNSS_HACC_LIMIT
+	int "Maximum horizontal accuracy in dm"
+	default 35
+
+config GNSS_CACC_LIMIT
+	int "Maximum course heading accuracy in centidegrees, deg*100"
+	default 36000

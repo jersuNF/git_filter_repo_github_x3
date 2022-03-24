@@ -7,6 +7,7 @@ zephyr_include_directories(
     ./../../events/amc/
     ./../../modules/storage_controller/
     ./../../events/messaging/
+    ./../../events/gnss_controller/
     ./../../events/buzzer/
     ./../../lib/trigonometry/
     ./../../events/error_handler/)
@@ -18,6 +19,7 @@ target_sources(app PRIVATE
 ./../../modules/storage_controller/storage.c
 ./../../events/buzzer/sound_event.c
 ./../../events/messaging/messaging_module_events.c
+./../../events/gnss_controller/gnss_controller_events.c
 ./../../events/error_handler/error_event.c
 )
 

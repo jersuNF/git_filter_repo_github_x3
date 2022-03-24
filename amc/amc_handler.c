@@ -111,6 +111,9 @@ void process_new_gnss_data_fn(struct k_work *item)
 		return;
 	}
 
+	/* Validate position */
+	
+
 	/* Calculation finished, give semaphore so we can swap memory region
 	 * on next GNSS request. 
 	 * As well as notifying we're not using fence data area. 

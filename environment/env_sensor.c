@@ -81,12 +81,11 @@ static inline int sensor_sanity_check(enum sensor_channel sc, double value)
 		/* Check if should keep it but issue a warning. */
 		if (value > max || value < min) {
 			char *msg = "Detected a sensor value error range";
-			nf_app_error(ERR_SENDER_ENV_SENSOR, -ERANGE, msg,
-				     strlen(msg));
+			nf_app_error(ERR_ENV_SENSOR, -ERANGE, msg, strlen(msg));
 			return -ERANGE;
 		} else {
 			char *msg = "Detected a sensor value warning range";
-			nf_app_warning(ERR_SENDER_ENV_SENSOR, -ERANGE, msg,
+			nf_app_warning(ERR_ENV_SENSOR, -ERANGE, msg,
 				       strlen(msg));
 			return 0;
 		}
@@ -100,7 +99,7 @@ static inline void update_env_sensor_event_values(void)
 
 	if (bme_dev == NULL) {
 		char *msg = "No BME device.";
-		nf_app_error(ERR_SENDER_ENV_SENSOR, -ENODEV, msg, strlen(msg));
+		nf_app_error(ERR_ENV_SENSOR, -ENODEV, msg, strlen(msg));
 		return;
 	}
 
@@ -109,28 +108,28 @@ static inline void update_env_sensor_event_values(void)
 	int err = sensor_sample_fetch(bme_dev);
 	if (err) {
 		char *msg = "Error fetching BME values.";
-		nf_app_error(ERR_SENDER_ENV_SENSOR, err, msg, strlen(msg));
+		nf_app_error(ERR_ENV_SENSOR, err, msg, strlen(msg));
 		return;
 	}
 
 	err = sensor_channel_get(bme_dev, SENSOR_CHAN_AMBIENT_TEMP, &temp);
 	if (err) {
 		char *msg = "Error fetching temperature value.";
-		nf_app_error(ERR_SENDER_ENV_SENSOR, err, msg, strlen(msg));
+		nf_app_error(ERR_ENV_SENSOR, err, msg, strlen(msg));
 		return;
 	}
 
 	err = sensor_channel_get(bme_dev, SENSOR_CHAN_PRESS, &press);
 	if (err) {
 		char *msg = "Error fetching pressure value.";
-		nf_app_error(ERR_SENDER_ENV_SENSOR, err, msg, strlen(msg));
+		nf_app_error(ERR_ENV_SENSOR, err, msg, strlen(msg));
 		return;
 	}
 
 	err = sensor_channel_get(bme_dev, SENSOR_CHAN_HUMIDITY, &humidity);
 	if (err) {
 		char *msg = "Error fetching humidity value.";
-		nf_app_error(ERR_SENDER_ENV_SENSOR, err, msg, strlen(msg));
+		nf_app_error(ERR_ENV_SENSOR, err, msg, strlen(msg));
 		return;
 	}
 

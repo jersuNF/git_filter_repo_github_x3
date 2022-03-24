@@ -14,7 +14,7 @@ if MOVE_CONTROLLER
 
 	config MOVEMENT_THREAD_STACK_SIZE
 		int "Stack size of the movement processing thread"
-		default 512
+		default 2048
 
 	config MOVEMENT_THREAD_PRIORITY
 		int "Priority of the movement processing thread"

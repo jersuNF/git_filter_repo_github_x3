@@ -22,6 +22,11 @@ K_MSGQ_DEFINE(acc_data_msgq, sizeof(raw_acc_data_t), CONFIG_ACC_MSGQ_SIZE, 4);
 
 int process_acc_data(raw_acc_data_t *acc)
 {
+	if (acc == NULL) {
+		LOG_ERR("No data available.");
+		return -ENODATA;
+	}
+
 	uint16_t stepcount = 0;
 	acc_mode_t mode = ACTIVITY_NO;
 
@@ -39,8 +44,7 @@ void movement_thread_fn()
 {
 	while (true) {
 		raw_acc_data_t raw_data;
-		int err = k_msgq_get(&acc_data_msgq, (void *)&raw_data,
-				     K_FOREVER);
+		int err = k_msgq_get(&acc_data_msgq, &raw_data, K_FOREVER);
 		if (err) {
 			LOG_ERR("Error retrieving accelerometer message queue %i",
 				err);
@@ -75,7 +79,7 @@ void fetch_and_display(const struct device *sensor)
 	data.y = sensor_value_to_double(&accel[1]);
 	data.z = sensor_value_to_double(&accel[2]);
 
-	LOG_INF("Acc X: %f, Y: %f, Z: %f", data.x, data.y, data.z);
+	LOG_DBG("Acc X: %f, Y: %f, Z: %f", data.x, data.y, data.z);
 
 	while (k_msgq_put(&acc_data_msgq, &data, K_NO_WAIT) != 0) {
 		/* Message queue is full: purge old data & try again */

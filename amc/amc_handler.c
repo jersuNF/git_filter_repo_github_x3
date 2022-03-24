@@ -84,13 +84,7 @@ void process_new_fence_fn(struct k_work *item)
  */
 void process_new_gnss_data_fn(struct k_work *item)
 {
-	/* Check if cached fence is valid. */
-	if (pasture_cache.m.ul_total_fences == 0) {
-		char *err_msg = "No fence data available during calculation.";
-		nf_app_fatal(ERR_AMC, -ENODATA, err_msg, strlen(err_msg));
-		return;
-	}
-
+	/* Take fence semaphore since we're going to use the cached area. */
 	int err = k_sem_take(&fence_data_sem,
 			     K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
@@ -104,7 +98,7 @@ void process_new_gnss_data_fn(struct k_work *item)
 	err = get_pasture_cache(&pasture);
 	if (err || pasture == NULL) {
 		char *msg = "Error getting fence cache.";
-		nf_app_fatal(ERR_SENDER_AMC, err, msg, strlen(msg));
+		nf_app_fatal(ERR_AMC, err, msg, strlen(msg));
 		return;
 	}
 
@@ -113,7 +107,7 @@ void process_new_gnss_data_fn(struct k_work *item)
 	err = get_gnss_cache(&gnss);
 	if (err || gnss == NULL) {
 		char *msg = "Error getting gnss cahce.";
-		nf_app_fatal(ERR_SENDER_AMC, err, msg, strlen(msg));
+		nf_app_fatal(ERR_AMC, err, msg, strlen(msg));
 		return;
 	}
 
@@ -160,7 +154,7 @@ static bool event_handler(const struct event_header *eh)
 		int err = set_gnss_cache(&event->gnss);
 		if (err) {
 			char *msg = "Could not set gnss cahce.";
-			nf_app_error(ERR_SENDER_AMC, err, msg, strlen(msg));
+			nf_app_error(ERR_AMC, err, msg, strlen(msg));
 			return false;
 		}
 

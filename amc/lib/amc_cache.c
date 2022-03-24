@@ -7,7 +7,6 @@
 
 #include "pasture_structure.h"
 #include "amc_cache.h"
-#include "nf_common.h"
 #include "embedded.pb.h"
 
 LOG_MODULE_REGISTER(amc_cache, CONFIG_AMC_LIB_LOG_LEVEL);

@@ -6,7 +6,7 @@
 
 #include <zephyr.h>
 #include "pasture_structure.h"
-#include "nf_common.h"
+#include "gnss.h"
 
 extern struct k_sem fence_data_sem;
 

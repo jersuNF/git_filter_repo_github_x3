@@ -32,6 +32,7 @@ uint32_t time_from_server;
 
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
 K_SEM_DEFINE(send_out_ack, 0, 1);
+K_SEM_DEFINE(connection_ready, 0, 1);
 
 collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
@@ -202,6 +203,10 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	if (is_connection_ready_event(eh)) {
+		k_sem_give(&connection_ready);
+		return false;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -222,6 +227,7 @@ EVENT_SUBSCRIBE(MODULE, update_flash_erase);
 EVENT_SUBSCRIBE(MODULE, update_zap_count);
 EVENT_SUBSCRIBE(MODULE, animal_warning_event);
 EVENT_SUBSCRIBE(MODULE, animal_escape_event);
+EVENT_SUBSCRIBE(MODULE, connection_ready_event);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -534,6 +540,11 @@ void proto_InitHeader(NofenceMessage *msg)
 
 int send_message(NofenceMessage *msg_proto)
 {
+	int ret = k_sem_take(&connection_ready, K_SECONDS(3));
+	if (ret != 0){
+		LOG_ERR("Connection not ready, can't send message now!");
+		return -1;
+	}
 	uint8_t encoded_msg[NofenceMessage_size];
 	memset(encoded_msg, 0, sizeof(encoded_msg));
 	size_t encoded_size = 0;
@@ -543,7 +554,7 @@ int send_message(NofenceMessage *msg_proto)
 	LOG_DBG("Input to proto encode: %p,%p,%u,%p\n", msg_proto,
 		&encoded_msg[0], sizeof(encoded_msg), &encoded_size);
 
-	int ret = collar_protocol_encode(msg_proto, &encoded_msg[0],
+	ret = collar_protocol_encode(msg_proto, &encoded_msg[0],
 					 sizeof(encoded_msg), &encoded_size);
 	if(ret != 0) {
 		char *e_msg = "Failed to encode proto buf message!\n";

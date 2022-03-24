@@ -151,6 +151,13 @@ int reset_modem(void)
 	return modem_nf_reset();
 }
 
+int get_ip(char** collar_ip)
+{
+	get_pdp_addr(collar_ip);
+	LOG_WRN("collar ip address: %s", *collar_ip);
+	return 0;
+}
+
 void stop_tcp(void)
 {
 	if (IS_ENABLED(CONFIG_NET_IPV6)) {

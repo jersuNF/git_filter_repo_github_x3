@@ -37,11 +37,11 @@ static inline int update_pasture_from_stg(void)
 	int err = stg_read_pasture_data(set_pasture_cache);
 	if (err == -ENODATA) {
 		char *err_msg = "No pasture found on external flash.";
-		nf_app_warning(ERR_SENDER_AMC, err, err_msg, strlen(err_msg));
+		nf_app_warning(ERR_AMC, err, err_msg, strlen(err_msg));
 		return 0;
 	} else if (err) {
 		char *err_msg = "Couldn't update pasture cache in AMC.";
-		nf_app_fatal(ERR_SENDER_AMC, err, err_msg, strlen(err_msg));
+		nf_app_fatal(ERR_AMC, err, err_msg, strlen(err_msg));
 		return err;
 	}
 	return 0;
@@ -84,7 +84,13 @@ void process_new_fence_fn(struct k_work *item)
  */
 void process_new_gnss_data_fn(struct k_work *item)
 {
-	/* Take fence semaphore since we're going to use the cached area. */
+	/* Check if cached fence is valid. */
+	if (pasture_cache.m.ul_total_fences == 0) {
+		char *err_msg = "No fence data available during calculation.";
+		nf_app_fatal(ERR_AMC, -ENODATA, err_msg, strlen(err_msg));
+		return;
+	}
+
 	int err = k_sem_take(&fence_data_sem,
 			     K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {

@@ -13,7 +13,7 @@ if MESSAGING
 		int "Log level for the messaging module"
 		default 4
 
-	config MESSAGING_THREAD_SIZE
+	config MESSAGING_THREAD_STACK_SIZE
 		int "Size of the message processing thread"
 		default 2048
 
@@ -31,7 +31,7 @@ if MESSAGING
 		  or a preemptible thread of higher or equal priority, 
 		  becomes ready.
 
-	config MESSAGING_SEND_THREAD_SIZE
+	config MESSAGING_SEND_THREAD_STACK_SIZE
 		int "Size of the send to server queue thread"
 		default 2048
 
@@ -39,9 +39,9 @@ if MESSAGING
 		int "Priority of the send to server queue thread"
 		default 1
 
-	config BINARY_SEND_TIMEOUT_SEC
-		int "Seconds to wait for cellular ack"
-		default 1
+	config CC_ACK_TIMEOUT_SEC
+	    int "Timeout when waiting for ack from cellular controller"
+	    default 1
 
 	menu "Message Queues"
 		config MSGQ_BLE_CTRL_SIZE

@@ -281,32 +281,6 @@ exit:
 	return ret;
 }
 
-static int check_ip(){
-	char* collar_ip = NULL;
-	uint8_t timeout_counter = 0;
-	while(timeout_counter++ <= 20){
-		int ret = get_ip(&collar_ip);
-		if (ret != 0){
-			LOG_ERR("Failed to get ip from sara r4 driver!");
-			return -1;
-			/*TODO: reset modem?*/
-		}else {
-			LOG_WRN("ip address: %s",collar_ip);
-			ret = memcmp(collar_ip,"\"0.0.0.0\"",
-				     9);
-			LOG_WRN("mem compare returns "
-				"%d", ret);
-			if (ret != 0){
-				LOG_INF("Successfully acquired an ip!");
-				return 0;
-			}
-		}
-		k_sleep(K_MSEC(500));
-	}
-	LOG_ERR("Failed to acquire ip!");
-	return -1;
-};
-
 static void cellular_controller_keep_alive(void* dev)
 {
 	while (true) {
@@ -341,23 +315,27 @@ static void cellular_controller_keep_alive(void* dev)
 							new_connection_ready_event();
 						EVENT_SUBMIT(ev);
 					}else{
-						LOG_WRN("Connection failed!");
+						LOG_ERR("Socket connection "
+							"failed!");
 						stop_tcp();
 						/*TODO: notify error handler*/
 					}
+				} else{
+					k_sleep(K_SECONDS(1));
+					int ret = check_ip();
+					if (ret != 0){
+						LOG_ERR("Failed to get ip "
+							"address!");
+						/*TODO: notify error handler*/
+					}
+					struct connection_ready_event *ev
+						= new_connection_ready_event();
+					EVENT_SUBMIT(ev);
 				}
-				k_sleep(K_MSEC(500));
-				int ret = check_ip();
-				if (ret != 0){
-					LOG_ERR("Failed to get ip "
-						"address!");
-					/*TODO: notify error handler*/
-				}
-				struct connection_ready_event *ev
-					= new_connection_ready_event();
-				EVENT_SUBMIT(ev);
 			}
 		}
+		k_sleep(K_MSEC(200));
+		k_sem_give(&connection_state_sem);
 	}
 }
 

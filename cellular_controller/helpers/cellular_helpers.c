@@ -154,7 +154,6 @@ int reset_modem(void)
 int get_ip(char** collar_ip)
 {
 	get_pdp_addr(collar_ip);
-	LOG_WRN("collar ip address: %s", *collar_ip);
 	return 0;
 }
 
@@ -194,3 +193,25 @@ const struct device *bind_modem(void)
 {
 	return device_get_binding(GSM_DEVICE);
 }
+
+int check_ip(void){
+	char* collar_ip = NULL;
+	uint8_t timeout_counter = 0;
+	while(timeout_counter++ <= 40){
+		int ret = get_ip(&collar_ip);
+		if (ret != 0){
+			LOG_ERR("Failed to get ip from sara r4 driver!");
+			return -1;
+			/*TODO: reset modem?*/
+		}else {
+			ret = memcmp(collar_ip,"\"0.0.0.0\"",
+				     9);
+			if (ret != 0){
+				return 0;
+			}
+		}
+		k_sleep(K_MSEC(500));
+	}
+	LOG_ERR("Failed to acquire ip!");
+	return -1;
+};

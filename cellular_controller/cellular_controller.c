@@ -219,8 +219,10 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			err = -EINVAL;
 			submit_error(SOCKET_SEND, err);
 		}
-
-		return true;
+		return false;
+	}else if(is_check_connection(eh)){
+		k_sem_give(&connection_state_sem);
+		return false;
 	}
 	return false;
 }
@@ -335,8 +337,6 @@ static void cellular_controller_keep_alive(void* dev)
 				}
 			}
 		}
-		k_sleep(K_MSEC(200));
-		k_sem_give(&connection_state_sem);
 	}
 }
 
@@ -374,3 +374,4 @@ EVENT_SUBSCRIBE(MODULE, messaging_ack_event);
 EVENT_SUBSCRIBE(MODULE, messaging_proto_out_event);
 EVENT_SUBSCRIBE(MODULE, messaging_stop_connection_event);
 EVENT_SUBSCRIBE(MODULE, messaging_host_address_event);
+EVENT_SUBSCRIBE(MODULE, check_connection);

@@ -296,6 +296,9 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	if (is_connection_ready_event(eh)) {
+		k_sem_give(&connection_ready);
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -671,10 +674,12 @@ void proto_InitHeader(NofenceMessage *msg)
  */
 int send_binary_message(uint8_t *data, size_t len)
 {
+	struct check_connection *ev = new_check_connection();
+	EVENT_SUBMIT(ev);
 	int ret = k_sem_take(&connection_ready, K_MINUTES(1));
 	if (ret != 0){
 		LOG_ERR("Connection not ready, can't send message now!");
-		return -1;
+		return -ETIMEDOUT;
 	}
 	/* We can only send 1 message at a time, use mutex. */
 	if (k_mutex_lock(&send_binary_mutex,

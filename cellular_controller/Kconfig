@@ -19,6 +19,10 @@ if CELLULAR_CONTROLLER
 		bool "Verbose output from cellular controller"
 		default n
 
+	module = CELLULAR
+	module-str = CELLULAR
+	source "subsys/logging/Kconfig.template.log_config"
+
 	config MESSAGING_ACK_TIMEOUT_SEC
 	    int "Timeout when waiting for ack from messaging"
         default 1

@@ -247,7 +247,7 @@ int8_t cache_server_address(void)
 	ip_len = ptr_port - 1 - &server_address[0];
 	memcpy(&server_ip[0], &server_address[0], ip_len);
 	if (server_ip[0] != '\0') {
-		LOG_DBG("Host address read from eeprom: %s : %d", &server_ip[0],
+		LOG_INF("Host address read from eeprom: %s : %d", &server_ip[0],
 			server_port);
 		return 0;
 	} else {
@@ -271,8 +271,8 @@ static int cellular_controller_connect(void* dev)
 		//172.31.33.243:9876
 		strcpy(server_ip,"172.31.36.11");
 		server_port = 4321;
-		LOG_WRN("Default server ip address will be "
-			"used. \n");
+		LOG_INF("Default server ip address will be "
+			"used.");
 	}
 
 	ret = 0;
@@ -291,6 +291,7 @@ static void cellular_controller_keep_alive(void* dev)
 
 				/* Connection is up, but we need to wait for IP */
 				/* TODO - Use smarter mechanisms to poll for state */
+
 				if (ret == 0) {
 					ret = check_ip();
 					if (ret != 0){
@@ -306,6 +307,7 @@ static void cellular_controller_keep_alive(void* dev)
 					}
 				}
 			}
+
 			if (cellular_controller_is_ready()) {
 				if(!connected){
 					int8_t  ret = start_tcp();
@@ -315,8 +317,7 @@ static void cellular_controller_keep_alive(void* dev)
 							new_connection_ready_event();
 						EVENT_SUBMIT(ev);
 					}else{
-						LOG_ERR("Socket connection "
-							"failed!");
+						LOG_WRN("Connection failed!");
 						stop_tcp();
 						/*TODO: notify error handler*/
 					}
@@ -346,7 +347,6 @@ bool cellular_controller_is_ready(void)
 
 int8_t cellular_controller_init(void)
 {
-	printk("Cellular controller starting!, %p\n", k_current_get());
 	connected = false;
 	
 	const struct device *gsm_dev = bind_modem();

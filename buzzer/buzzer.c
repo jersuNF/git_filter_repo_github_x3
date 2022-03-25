@@ -398,8 +398,7 @@ void warn_zone_timeout_handler(struct k_timer *dummy)
 
 	/* Warning here. */
 	char *msg = "Timeout on getting a new warn zone freq";
-	nf_app_warning(ERR_SENDER_SOUND_CONTROLLER, -ETIMEDOUT, msg,
-		       strlen(msg));
+	nf_app_warning(ERR_SOUND_CONTROLLER, -ETIMEDOUT, msg, strlen(msg));
 }
 
 /** @brief Plays the frequency forever. The conditions that

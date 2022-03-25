@@ -15,8 +15,8 @@
  *
  * @return 0 on success, otherwise negative error code.
  */
-int collar_protocol_decode(uint8_t *src_data, size_t src_data_size, 
-			NofenceMessage *dst_msg);
+int collar_protocol_decode(uint8_t *src_data, size_t src_data_size,
+			   NofenceMessage *dst_msg);
 
 /**
  * @brief Encodes a NofenceMessage data structure into
@@ -32,4 +32,4 @@ int collar_protocol_decode(uint8_t *src_data, size_t src_data_size,
  * @return 0 on success, otherwise negative error code.
  */
 int collar_protocol_encode(NofenceMessage *src_msg, uint8_t *dst_data,
-			size_t dst_data_max_size, size_t *dst_data_size);
+			   size_t dst_data_max_size, size_t *dst_data_size);

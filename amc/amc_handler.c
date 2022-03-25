@@ -41,8 +41,6 @@ static int16_t mean_dist = INT16_MIN;
 static int16_t instant_dist = INT16_MIN;
 static uint8_t fifo_dist_elem_count = 0;
 static uint8_t fifo_avg_dist_elem_count = 0;
-//static uint16_t zone_timestamp;
-static amc_zone_t last_zone;
 
 #define MODULE animal_monitor_control
 LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
@@ -143,7 +141,7 @@ void process_new_gnss_data_fn(struct k_work *item)
 	uint8_t dist_inc_count = 0;
 
 	/* Update static variables pre-fix check. */
-	last_zone = zone_get();
+	amc_zone_t last_zone = zone_get();
 
 	/* Validate position */
 	err = gnss_update(gnss);
@@ -175,9 +173,9 @@ void process_new_gnss_data_fn(struct k_work *item)
 	 	*/
 		if (gnss_has_accepted_fix()) {
 			/* Accepted position. Fill FIFOs. */
-			fifo_put(gnss->latest.h_acc_dm, acc_array,
+			fifo_put(gnss->lastfix.h_acc_dm, acc_array,
 				 FIFO_ELEMENTS);
-			fifo_put(gnss->latest.height, height_avg_array,
+			fifo_put(gnss->lastfix.height, height_avg_array,
 				 FIFO_ELEMENTS);
 			fifo_put(instant_dist, dist_array, FIFO_ELEMENTS);
 
@@ -225,10 +223,9 @@ void process_new_gnss_data_fn(struct k_work *item)
 
 		int16_t dist_incr_slope_lim = 0;
 		uint8_t dist_incr_count = 0;
-		Mode mode = get_amc_mode();
 
 		/* Set slopes and count based on mode. */
-		if (mode == Mode_Teach) {
+		if (get_mode() == Mode_Teach) {
 			dist_incr_slope_lim = TEACHMODE_DIST_INCR_SLOPE_LIM;
 			dist_incr_count = TEACHMODE_DIST_INCR_COUNT;
 		} else {
@@ -241,17 +238,50 @@ void process_new_gnss_data_fn(struct k_work *item)
 					     dist_incr_slope_lim,
 					     dist_inc_count, dist_incr_count,
 					     height_delta, acc_delta, mean_dist,
-					     gnss->latest.h_acc_dm);
+					     gnss->lastfix.h_acc_dm);
 		if (err) {
 			/* Error handle. */
 			goto cleanup;
 		}
 
-		//zone_update(dist);
-		//amc_states(); // Collar, fence, mode
-		//amc_gnss_set_mode();
-		//amc_process_correction();
+		/* Update zone. */
+		amc_zone_t cur_zone = zone_update(instant_dist);
+
+		/* Start correction and set states based on fence status.
+		 * Should we have this is another loop, or just perform
+		 * whenever we get new postion data?
+		 */
+		Mode amc_mode = get_mode();
+		FenceStatus fence_status = get_fence_status();
+		CollarStatus collar_status = get_collar_status();
+
+		/* Check for gnss->haslastfix? */
+		gnss_mode_t gnss_mode = gnss->lastfix.mode;
+
+		err = set_sensor_modes(amc_mode, gnss_mode, fence_status,
+				       collar_status);
+		if (err) {
+			/* Error handle. */
+			goto cleanup;
+		}
+
+		/* GNSS set mode HERE! 
+		 *
+		 * err = set_gnss_mode(amc_mode, fence_status, collar_status);
+		 * if (err) {
+		 * 	goto cleanup;
+		 * }
+		 */
+
+		err = process_correction(amc_mode, gnss->lastfix, fence_status,
+					 cur_zone, mean_dist, dist_change);
+		if (err) {
+			/* Error handle. */
+			goto cleanup;
+		}
 	} else {
+		fifo_dist_elem_count = 0;
+		fifo_avg_dist_elem_count = 0;
 		zone_set(NO_ZONE);
 	}
 

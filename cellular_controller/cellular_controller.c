@@ -324,7 +324,6 @@ static void cellular_controller_keep_alive(void* dev)
 						/*TODO: notify error handler*/
 					}
 				} else{
-					k_sleep(K_SECONDS(1));
 					int ret = check_ip();
 					if (ret != 0){
 						LOG_ERR("Failed to get ip "

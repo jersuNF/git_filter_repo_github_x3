@@ -27,7 +27,7 @@ K_KERNEL_STACK_DEFINE(keep_alive_stack,
 struct k_thread keep_alive_thread;
 static struct k_sem connection_state_sem;
 
-int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
+int socket_connect(struct data *, struct sockaddr *, socklen_t);
 int socket_receive(struct data *, char **);
 int8_t lte_init(void);
 bool lte_is_ready(void);
@@ -114,9 +114,15 @@ void receive_tcp(struct data *sock_data)
 	}
 }
 
-int8_t start_tcp(void)
+int start_tcp(void)
 {
-	int8_t ret = -1;
+	int ret = check_ip();
+	if (ret != 0){
+		LOG_ERR("Failed to get ip "
+			"address!");
+		/*TODO: notify error handler*/
+		return ret;
+	}
 	struct sockaddr_in addr4;
 
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
@@ -185,17 +191,6 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		
 		int8_t err;
 		if(cellular_controller_is_ready()){
-			if(!connected){
-				int8_t  ret = start_tcp();
-				if (ret == 0){
-					connected = true;
-				}else{
-					LOG_WRN("Connection failed!");
-					stop_tcp();
-					/*TODO: notify error handler*/
-				}
-			}
-
 			/* make a local copy of the message to send.*/
 			uint8_t *CharMsgOut;
 			CharMsgOut = (char *) k_malloc(MsgOutLen);
@@ -295,7 +290,6 @@ static void cellular_controller_keep_alive(void* dev)
 				/* TODO - Use smarter mechanisms to poll for state */
 
 				if (ret == 0) {
-					ret = check_ip();
 					if (ret != 0){
 						LOG_ERR("Failed to get ip "
 							"address!");
@@ -315,24 +309,17 @@ static void cellular_controller_keep_alive(void* dev)
 					int8_t  ret = start_tcp();
 					if (ret == 0){
 						connected = true;
-						struct connection_ready_event *ev =
-							new_connection_ready_event();
-						EVENT_SUBMIT(ev);
 					}else{
 						LOG_WRN("Connection failed!");
 						stop_tcp();
 						/*TODO: notify error handler*/
 					}
-				} else{
-					int ret = check_ip();
-					if (ret != 0){
-						LOG_ERR("Failed to get ip "
-							"address!");
-						/*TODO: notify error handler*/
+				}else{
+					if(check_ip() == 0){
+						struct connection_ready_event *ev
+							= new_connection_ready_event();
+						EVENT_SUBMIT(ev);
 					}
-					struct connection_ready_event *ev
-						= new_connection_ready_event();
-					EVENT_SUBMIT(ev);
 				}
 			}
 		}

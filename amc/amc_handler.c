@@ -4,6 +4,11 @@
 #include "amc_cache.h"
 #include "amc_dist.h"
 #include "amc_zone.h"
+#include "amc_gnss.h"
+#include "amc_states.h"
+#include "amc_correction.h"
+#include "amc_const.h"
+#include "nf_fifo.h"
 
 #include <zephyr.h>
 #include "amc_handler.h"
@@ -17,6 +22,27 @@
 #include "gnss_controller_events.h"
 
 #include "storage.h"
+
+/* Distance arrays. */
+static int16_t dist_array[FIFO_ELEMENTS];
+static int16_t dist_avg_array[FIFO_AVG_DISTANCE_ELEMENTS];
+
+/* Array to discover unstable position accuracy. */
+static int16_t acc_array[FIFO_ELEMENTS];
+
+/* Array used to discover abnormal height changes that might happen
+ * if gps signals gets reflected.
+ */
+static int16_t height_avg_array[FIFO_ELEMENTS];
+
+/* Static variables used in AMC logic. */
+static int16_t dist_change;
+static int16_t mean_dist = INT16_MIN;
+static int16_t instant_dist = INT16_MIN;
+static uint8_t fifo_dist_elem_count = 0;
+static uint8_t fifo_avg_dist_elem_count = 0;
+//static uint16_t zone_timestamp;
+static amc_zone_t last_zone;
 
 #define MODULE animal_monitor_control
 LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
@@ -90,7 +116,7 @@ void process_new_gnss_data_fn(struct k_work *item)
 			     K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
 		LOG_ERR("Error waiting for fence data semaphore to release.");
-		return;
+		goto cleanup;
 	}
 
 	/* Fetch cached fence and size. */
@@ -98,23 +124,138 @@ void process_new_gnss_data_fn(struct k_work *item)
 
 	err = get_pasture_cache(&pasture);
 	if (err || pasture == NULL) {
-		char *msg = "Error getting fence cache.";
-		nf_app_fatal(ERR_AMC, err, msg, strlen(msg));
-		return;
+		/* Error handle. */
+		goto cleanup;
 	}
 
 	/* Fetch new, cached gnss data. */
 	gnss_t *gnss = NULL;
 	err = get_gnss_cache(&gnss);
 	if (err || gnss == NULL) {
-		char *msg = "Error getting gnss cahce.";
-		nf_app_fatal(ERR_AMC, err, msg, strlen(msg));
-		return;
+		/* Error handle. */
+		goto cleanup;
 	}
 
-	/* Validate position */
-	
+	/* Set local variables used in AMC logic. */
+	int16_t height_delta = INT16_MAX;
+	int16_t acc_delta = INT16_MAX;
+	int16_t dist_avg_change = 0;
+	uint8_t dist_inc_count = 0;
 
+	/* Update static variables pre-fix check. */
+	last_zone = zone_get();
+
+	/* Validate position */
+	err = gnss_update(gnss);
+	if (err) {
+		/* Error handle. */
+		goto cleanup;
+	}
+
+	/* If any fence (pasture?) is valid and we have fix. */
+	if (gnss_has_fix() && fnc_any_valid_fence()) {
+		/* Fetch x and y position based on gnss data. What
+		 * should the initialliy be set to? Since I guess [0,0]
+		 * is a valid position?
+		 */
+		int32_t pos_x = 0, pos_y = 0;
+		/*gnss_calc_xy(&pos_x, &pos_y);*/
+
+		/* Calculate distance to closest polygon. */
+		uint8_t fence_index = 0;
+		uint8_t vertex_index = 0;
+		instant_dist = fnc_calc_dist(pos_x, pos_y, &fence_index,
+					     &vertex_index);
+
+		/* Reset dist_change since we acquired a new distance. */
+		dist_change = 0;
+
+		/* if ((GPS_GetMode() == GPSMODE_MAX) 
+		*  && TestBits(m_u16_PosAccuracy, GPSFIXOK_MASK)) { ??????
+	 	*/
+		if (gnss_has_accepted_fix()) {
+			/* Accepted position. Fill FIFOs. */
+			fifo_put(gnss->latest.h_acc_dm, acc_array,
+				 FIFO_ELEMENTS);
+			fifo_put(gnss->latest.height, height_avg_array,
+				 FIFO_ELEMENTS);
+			fifo_put(instant_dist, dist_array, FIFO_ELEMENTS);
+
+			/* If we have filled the distance FIFO, calculate
+			 * the average and store that value into
+			 * another avg_dist FIFO.
+			 */
+			if (++fifo_dist_elem_count >= FIFO_ELEMENTS) {
+				fifo_dist_elem_count = 0;
+				fifo_put(fifo_avg(dist_array, FIFO_ELEMENTS),
+					 dist_avg_array,
+					 FIFO_AVG_DISTANCE_ELEMENTS);
+
+				if (++fifo_avg_dist_elem_count >=
+				    FIFO_AVG_DISTANCE_ELEMENTS) {
+					fifo_avg_dist_elem_count =
+						FIFO_AVG_DISTANCE_ELEMENTS;
+				}
+			}
+		} else {
+			fifo_dist_elem_count = 0;
+			fifo_avg_dist_elem_count = 0;
+		}
+
+		if (fifo_avg_dist_elem_count > 0) {
+			/* Fill avg/mean/delta fifos as we have collected
+			 * valid data over a short period.
+			 */
+			mean_dist = fifo_avg(dist_array, FIFO_ELEMENTS);
+			dist_change = fifo_slope(dist_array, FIFO_ELEMENTS);
+			dist_inc_count =
+				fifo_inc_cnt(dist_array, FIFO_ELEMENTS);
+
+			acc_delta = fifo_delta(acc_array, FIFO_ELEMENTS);
+			height_delta =
+				fifo_delta(height_avg_array, FIFO_ELEMENTS);
+
+			if (fifo_avg_dist_elem_count >=
+			    FIFO_AVG_DISTANCE_ELEMENTS) {
+				dist_avg_change =
+					fifo_slope(dist_avg_array,
+						   FIFO_AVG_DISTANCE_ELEMENTS);
+			}
+		}
+
+		int16_t dist_incr_slope_lim = 0;
+		uint8_t dist_incr_count = 0;
+		Mode mode = get_amc_mode();
+
+		/* Set slopes and count based on mode. */
+		if (mode == Mode_Teach) {
+			dist_incr_slope_lim = TEACHMODE_DIST_INCR_SLOPE_LIM;
+			dist_incr_count = TEACHMODE_DIST_INCR_COUNT;
+		} else {
+			dist_incr_slope_lim = DIST_INCR_SLOPE_LIM;
+			dist_incr_count = DIST_INCR_COUNT;
+		}
+
+		/* Set final accuracy flags based on previous calculations. */
+		err = gnss_update_dist_flags(dist_avg_change, dist_change,
+					     dist_incr_slope_lim,
+					     dist_inc_count, dist_incr_count,
+					     height_delta, acc_delta, mean_dist,
+					     gnss->latest.h_acc_dm);
+		if (err) {
+			/* Error handle. */
+			goto cleanup;
+		}
+
+		//zone_update(dist);
+		//amc_states(); // Collar, fence, mode
+		//amc_gnss_set_mode();
+		//amc_process_correction();
+	} else {
+		zone_set(NO_ZONE);
+	}
+
+cleanup:
 	/* Calculation finished, give semaphore so we can swap memory region
 	 * on next GNSS request. 
 	 * As well as notifying we're not using fence data area. 

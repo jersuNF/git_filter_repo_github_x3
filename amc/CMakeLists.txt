@@ -10,12 +10,14 @@ zephyr_include_directories(
     ./../../events/gnss_controller/
     ./../../events/buzzer/
     ./../../lib/trigonometry/
+    ./../../lib/fifo/
     ./../../events/error_handler/)
 
 target_sources(app PRIVATE 
 ./amc_handler.c
 ./../../events/amc/request_events.c
 ./../../lib/trigonometry/trigonometry.c
+./../../lib/fifo/nf_fifo.c
 ./../../modules/storage_controller/storage.c
 ./../../events/buzzer/sound_event.c
 ./../../events/messaging/messaging_module_events.c

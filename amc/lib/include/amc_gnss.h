@@ -40,7 +40,31 @@ gnss_mode_t gnss_get_mode(void);
  * 
  * @returns 0 on success, error code otherwise. 
  */
-int gnss_update(gnss_t* gnss_data);
+int gnss_update(gnss_t *gnss_data);
+
+/** @brief Validate that GNSS fix is as good as possible and update flags.
+ * 
+ * @param[in] dist_avg_change Average distance change.
+ * 
+ * @param[in] dist_change Slope of previous distances.
+ * @param[in] dist_incr_slope_lim Slope limit for dist_change.
+ * 
+ * @param[in] dist_inc_count Count for increasing elements in distance fifo.
+ * @param[in] dist_incr_count Limit of increasing elements in distance fifo.
+ * 
+ * @param[in] height_delta MAX(height_arr) - MIN(height_arr).
+ * @param[in] acc_delta MAX(acc_arr) - MIN(acc_arr)
+ * 
+ * @param[in] mean_dist Mean distance of distance array.
+ * @param[in] h_acc_dm height accuracy of GNSS data.
+ * 
+ * @returns 0 on success, error code otherwise. 
+ */
+int gnss_update_dist_flags(int16_t dist_avg_change, int16_t dist_change,
+			   int16_t dist_incr_slope_lim, uint8_t dist_inc_count,
+			   uint8_t dist_incr_count, int16_t height_delta,
+			   int16_t acc_delta, int16_t mean_dist,
+			   uint16_t h_acc_dm);
 
 /** @brief Check if GNSS has fix
  * 

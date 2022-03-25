@@ -11,6 +11,8 @@ target_sources(app PRIVATE
 ./amc_dist.c
 ./amc_zone.c
 ./amc_gnss.c
+./amc_states.c
+./amc_correction.c
 )
 
 add_dependencies(${ZEPHYR_CURRENT_LIBRARY}

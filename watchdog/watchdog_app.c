@@ -7,6 +7,7 @@
 #include <drivers/watchdog.h>
 
 #include "watchdog_app.h"
+#include "watchdog_event.h"
 
 #include <logging/log.h>
 LOG_MODULE_REGISTER(watchdog, CONFIG_WATCHDOG_LOG_LEVEL);
@@ -73,14 +74,6 @@ static int watchdog_start(void)
 	return err;
 }
 
-void external_watchdog_feed(void)
-{
-	if (init_and_start) {
-		k_work_schedule(&wdt_data.system_workqueue_work,
-				K_MSEC(WDT_FEED_WORKER_DELAY_MS));
-	}
-}
-
 static int watchdog_feed_enable(void)
 {
 	k_work_init_delayable(&wdt_data.system_workqueue_work,
@@ -137,3 +130,41 @@ int watchdog_init_and_start(void)
 	init_and_start = true;
 	return 0;
 }
+
+uint8_t module_alive_array[ERR_END_OF_LIST] = { 0 };
+
+static bool event_handler(const struct event_header *eh)
+{
+	if (is_watchdog_alive_event(eh)) {
+		struct watchdog_alive_event *ev = cast_watchdog_alive_event(eh);
+		module_alive_array[ev->sender] = 1;
+
+		for (int i = 0; i < ERR_END_OF_LIST; i++) {
+			if (module_alive_array[i] != 1) {
+				/* List is not complete */
+				break;
+			}
+			/* Feed watchdog through main system thread.
+			 * System is fully operational. 
+		 	 */
+			if (init_and_start) {
+				k_work_schedule(
+					&wdt_data.system_workqueue_work,
+					K_MSEC(WDT_FEED_WORKER_DELAY_MS));
+			}
+			/* Clear alive array */
+			memset(module_alive_array, 0,
+			       sizeof(module_alive_array));
+		}
+
+		return true;
+	}
+
+	/* If event is unhandled, unsubscribe. */
+	__ASSERT_NO_MSG(false);
+
+	return false;
+}
+
+EVENT_LISTENER(MODULE, event_handler);
+EVENT_SUBSCRIBE(MODULE, watchdog_alive_event);

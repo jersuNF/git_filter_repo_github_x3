@@ -309,10 +309,13 @@ static void cellular_controller_keep_alive(void* dev)
 					int8_t  ret = start_tcp();
 					if (ret == 0){
 						connected = true;
+						struct connection_ready_event *ev
+							= new_connection_ready_event();
+						EVENT_SUBMIT(ev);
 					}else{
 						LOG_WRN("Connection failed!");
 						stop_tcp();
-						/*TODO: notify error handler*/
+						/*TODO: notify error handler */
 					}
 				}else{
 					if(check_ip() == 0){

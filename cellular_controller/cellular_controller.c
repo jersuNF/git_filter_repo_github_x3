@@ -337,7 +337,7 @@ int8_t cellular_controller_init(void)
 
 	/* Start connection keep-alive thread */
 	modem_is_ready = false;
-	k_sem_init(&connection_state_sem, 1, 1);
+	k_sem_init(&connection_state_sem, 0, 1);
 	k_thread_create(&keep_alive_thread, keep_alive_stack,
 			K_KERNEL_STACK_SIZEOF(keep_alive_stack),
 			(k_thread_entry_t) cellular_controller_keep_alive,

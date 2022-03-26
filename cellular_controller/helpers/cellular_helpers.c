@@ -66,7 +66,7 @@ static size_t sendall(int sock, const void *buf, size_t len)
 	return to_send;
 }
 
-int socket_connect(struct data *data, struct sockaddr *addr,
+int8_t socket_connect(struct data *data, struct sockaddr *addr,
 		      socklen_t addrlen)
 {
 	int ret;

@@ -20,7 +20,6 @@
 #include "UBX.h"
 #include "unixTime.h"
 #include "error_event.h"
-#include "helpers.h"
 
 #include "nf_crc16.h"
 
@@ -159,6 +158,9 @@ int read_log_data_cb(uint8_t *data, size_t len)
  */
 void log_data_periodic_fn()
 {
+	/* Reschedule. */
+	k_work_reschedule_for_queue(&send_q, &log_work,
+				    K_MINUTES(atomic_get(&log_period_minutes)));
 	/* Construct log data and write to storage controller. */
 	build_log_message();
 
@@ -181,10 +183,6 @@ void log_data_periodic_fn()
 		}
 		LOG_INF("Emptied LOG partition data as we have read everything.");
 	}
-
-	/* Reschedule. */
-	k_work_reschedule_for_queue(&send_q, &log_work,
-				    K_MINUTES(atomic_get(&log_period_minutes)));
 }
 
 /**
@@ -193,6 +191,9 @@ void log_data_periodic_fn()
  */
 void modem_poll_work_fn()
 {
+	k_work_reschedule_for_queue(
+		&send_q, &modem_poll_work,
+		K_MINUTES(atomic_get(&poll_period_minutes)));
 	/* Add logic for the periodic protobuf modem poller. */
 	LOG_INF("Starting periodic poll work and building poll request.");
 	NofenceMessage new_poll_msg;
@@ -207,10 +208,6 @@ void modem_poll_work_fn()
 					    K_SECONDS(1));
 		return;
 	}
-
-	k_work_reschedule_for_queue(
-		&send_q, &modem_poll_work,
-		K_MINUTES(atomic_get(&poll_period_minutes)));
 }
 
 /**
@@ -676,7 +673,7 @@ int send_binary_message(uint8_t *data, size_t len)
 {
 	struct check_connection *ev = new_check_connection();
 	EVENT_SUBMIT(ev);
-	int ret = k_sem_take(&connection_ready, K_MINUTES(1));
+	int ret = k_sem_take(&connection_ready, K_MINUTES(2));
 	if (ret != 0){
 		LOG_ERR("Connection not ready, can't send message now!");
 		return -ETIMEDOUT;

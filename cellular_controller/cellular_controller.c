@@ -8,7 +8,7 @@
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define MY_PRIORITY CONFIG_RECV_THREAD_PRIORITY
 #define SOCKET_POLL_INTERVAL 0.25
-#define SOCK_RECV_TIMEOUT 60
+#define SOCK_RECV_TIMEOUT 15
 #define MODULE cellular_controller
 #define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_SEC
 
@@ -27,7 +27,7 @@ K_KERNEL_STACK_DEFINE(keep_alive_stack,
 struct k_thread keep_alive_thread;
 static struct k_sem connection_state_sem;
 
-int socket_connect(struct data *, struct sockaddr *, socklen_t);
+int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
 int socket_receive(struct data *, char **);
 int8_t lte_init(void);
 bool lte_is_ready(void);
@@ -98,7 +98,7 @@ void receive_tcp(struct data *sock_data)
 				if (socket_idle_count > SOCK_RECV_TIMEOUT){
 					LOG_ERR("Socket receive timed out!, "
 						"%f\n", socket_idle_count);
-					submit_error(SOCKET_RECV, received);
+					submit_error(SOCKET_RECV, -ETIMEDOUT);
 					stop_tcp();
 					connected = false;
 					socket_idle_count = 0;
@@ -190,30 +190,24 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		size_t MsgOutLen = event->len;
 		
 		int8_t err;
-		if(cellular_controller_is_ready()){
-			/* make a local copy of the message to send.*/
-			uint8_t *CharMsgOut;
-			CharMsgOut = (char *) k_malloc(MsgOutLen);
-			memcpy(CharMsgOut, pCharMsgOut, MsgOutLen);
-
-			if (*CharMsgOut == *pCharMsgOut) {
-				LOG_DBG("Publishing ack to messaging!\n");
-				struct cellular_ack_event *ack =
-					new_cellular_ack_event();
-				EVENT_SUBMIT(ack);
-			}
-
-			err = send_tcp(CharMsgOut, MsgOutLen);
-			if (err < 0) { /* TODO: notify error handler! */
-				submit_error(SOCKET_SEND, err);
-				k_free(CharMsgOut);
-				return false;
-			}
-			k_free(CharMsgOut);
-		} else {
-			err = -EINVAL;
-			submit_error(SOCKET_SEND, err);
+		
+		/* make a local copy of the message to send.*/
+		uint8_t *CharMsgOut;
+		CharMsgOut = (char *) k_malloc(MsgOutLen);
+		if (CharMsgOut == memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
+			LOG_DBG("Publishing ack to messaging!\n");
+			struct cellular_ack_event *ack =
+				new_cellular_ack_event();
+			EVENT_SUBMIT(ack);
 		}
+
+		err = send_tcp(CharMsgOut, MsgOutLen);
+		if (err < 0) { /* TODO: notify error handler! */
+			submit_error(SOCKET_SEND, err);
+			k_free(CharMsgOut);
+			return false;
+		}
+		k_free(CharMsgOut);
 		return false;
 	}else if(is_check_connection(eh)){
 		k_sem_give(&connection_state_sem);
@@ -285,48 +279,44 @@ static void cellular_controller_keep_alive(void* dev)
 			if (!cellular_controller_is_ready()) {
 				stop_tcp();
 				int ret = reset_modem();
-
-				/* Connection is up, but we need to wait for IP */
-				/* TODO - Use smarter mechanisms to poll for state */
-
 				if (ret == 0) {
+					ret = cellular_controller_connect(dev);
+					if (ret == 0) {
+						modem_is_ready = true;
+					}
+				}
+			}
+			if (cellular_controller_is_ready()) {
+				if(!connected){//check_ip takes place in start_tcp()
+					// in this case.
+					int  ret = start_tcp();
+					if (ret == 0){
+						connected = true;
+						announce_connection_up();
+					}else {
+						LOG_WRN("Connection failed!");
+						stop_tcp();
+						/*TODO: notify error handler*/
+					}
+				} else {
+					int ret = check_ip();
 					if (ret != 0){
 						LOG_ERR("Failed to get ip "
 							"address!");
 						/*TODO: notify error handler*/
-					}
-					else{
-						ret = cellular_controller_connect(dev);
-						if (ret == 0) {
-							modem_is_ready = true;
-						}
-					}
-				}
-			}
-
-			if (cellular_controller_is_ready()) {
-				if(!connected){
-					int8_t  ret = start_tcp();
-					if (ret == 0){
-						connected = true;
-						struct connection_ready_event *ev
-							= new_connection_ready_event();
-						EVENT_SUBMIT(ev);
-					}else{
-						LOG_WRN("Connection failed!");
-						stop_tcp();
-						/*TODO: notify error handler */
-					}
-				}else{
-					if(check_ip() == 0){
-						struct connection_ready_event *ev
-							= new_connection_ready_event();
-						EVENT_SUBMIT(ev);
+					}else {
+						announce_connection_up();
 					}
 				}
 			}
 		}
 	}
+}
+
+void announce_connection_up(void){
+	struct connection_ready_event *ev
+		= new_connection_ready_event();
+	EVENT_SUBMIT(ev);
 }
 
 bool cellular_controller_is_ready(void)

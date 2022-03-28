@@ -8,7 +8,7 @@
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define MY_PRIORITY CONFIG_RECV_THREAD_PRIORITY
 #define SOCKET_POLL_INTERVAL 0.25
-#define SOCK_RECV_TIMEOUT 15
+#define SOCK_RECV_TIMEOUT 45
 #define MODULE cellular_controller
 #define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_SEC
 
@@ -28,6 +28,7 @@ struct k_thread keep_alive_thread;
 static struct k_sem connection_state_sem;
 
 int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
+int8_t socket_listen(struct data *, uint16_t);
 int socket_receive(struct data *, char **);
 int8_t lte_init(void);
 bool lte_is_ready(void);
@@ -134,6 +135,27 @@ int start_tcp(void)
 				     sizeof(addr4));
 		if (ret < 0) {
 			submit_error(SOCKET_CONNECT, ret);
+			return ret;
+		}
+	}
+	return ret;
+}
+
+int listen_tcp(void)
+{
+	int ret = check_ip();
+	if (ret != 0){
+		LOG_ERR("Failed to get ip "
+			"address!");
+		/*TODO: notify error handler*/
+		return ret;
+	}
+	if (IS_ENABLED(CONFIG_NET_IPV4)) {
+		uint16_t listen_port = 0U;
+		ret = socket_listen(&conf.ipv4, listen_port);
+		if (ret < 0) {
+			/*TODO: notify error handler*/
+			LOG_DBG("Failed to start listening socket!");
 			return ret;
 		}
 	}
@@ -266,7 +288,7 @@ static int cellular_controller_connect(void* dev)
 			"used.");
 	}
 
-	ret = 0;
+	ret = listen_tcp();
 
 exit:
 	return ret;
@@ -287,10 +309,12 @@ static void cellular_controller_keep_alive(void* dev)
 				}
 			}
 			if (cellular_controller_is_ready()) {
+				/*TODO: check socket connection status from
+				 * through the modem driver.*/
 				if(!connected){//check_ip takes place in start_tcp()
 					// in this case.
 					int  ret = start_tcp();
-					if (ret == 0){
+					if (ret >= 0){
 						connected = true;
 						announce_connection_up();
 					}else {

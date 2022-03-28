@@ -72,9 +72,9 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 	int ret;
 
 	data->tcp.sock = socket(addr->sa_family, SOCK_STREAM, IPPROTO_TCP);
-	if (data->tcp.sock > 0){ /* socket 0 already created!*/
-		data->tcp.sock = 0;
-		}
+//	if (data->tcp.sock > 0){ /* socket 0 already created!*/
+//		data->tcp.sock = 0;
+//		}
 
 	if (data->tcp.sock < 0) {
 		LOG_ERR("Failed to create TCP socket (%s): %d", data->proto,
@@ -112,6 +112,44 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 	ret = connect(data->tcp.sock, addr, addrlen);
 	if (ret < 0) {
 		LOG_ERR("Cannot connect to TCP remote (%s): %d", data->proto,
+			errno);
+		ret = -errno;
+	}else{
+		ret = data->tcp.sock;
+	}
+	return ret;
+}
+
+int8_t socket_listen(struct data *data, uint16_t port)
+{
+	int ret;
+	struct sockaddr_in bind_addr;
+
+	data->tcp.sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+	if (data->tcp.sock < 0) {
+		LOG_ERR("Failed to create TCP listening socket (%s): %d",
+			data->proto,
+			errno);
+		return -errno;
+	} else {
+		LOG_INF("Created TCP listening socket (%s): %d\n", data->proto,
+			data->tcp.sock);
+	}
+//	bind_addr.sin_family = AF_INET;
+//	bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+//	bind_addr.sin_port = htons(port);
+//
+//	if (bind(data->tcp.sock, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0) {
+//		printf("error: bind: %d\n", errno);
+//		exit(1);
+//	}
+	k_sleep(K_MSEC(50));
+	ret = listen(data->tcp.sock, 1); //2nd parameter is backlog size, not
+	// important as we are not interested in the incoming data.
+	if (ret < 0) {
+		LOG_ERR("Cannot start TCP listening socket (%s): %d",
+			data->proto,
 			errno);
 		ret = -errno;
 	}else{
@@ -195,6 +233,7 @@ const struct device *bind_modem(void)
 }
 
 int check_ip(void){
+	k_sleep(K_MSEC(500));
 	char* collar_ip = NULL;
 	uint8_t timeout_counter = 0;
 	while(timeout_counter++ <= 40){

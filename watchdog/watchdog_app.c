@@ -12,7 +12,6 @@
 #include <logging/log.h>
 LOG_MODULE_REGISTER(watchdog, CONFIG_WATCHDOG_LOG_LEVEL);
 
-#define WDT_FEED_WORKER_DELAY_MS ((CONFIG_WATCHDOG_TIMEOUT_SEC * 1000) / 2)
 #define WATCHDOG_TIMEOUT_MSEC (CONFIG_WATCHDOG_TIMEOUT_SEC * 1000)
 
 struct wdt_data_storage {
@@ -131,26 +130,26 @@ int watchdog_init_and_start(void)
 	return 0;
 }
 
-uint8_t module_alive_array[ERR_END_OF_LIST] = { 0 };
+uint8_t module_alive_array[WDG_END_OF_LIST] = { 0 };
 
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_watchdog_alive_event(eh)) {
 		struct watchdog_alive_event *ev = cast_watchdog_alive_event(eh);
-		module_alive_array[ev->sender] = 1;
+		module_alive_array[ev->module] = 1;
 
 		for (int i = 0; i < ERR_END_OF_LIST; i++) {
 			if (module_alive_array[i] != 1) {
 				/* List is not complete */
 				break;
 			}
-			/* Feed watchdog through main system thread.
+			/* Check first if watchdog is running.
+			 * Feed watchdog through main system thread.
 			 * System is fully operational. 
 		 	 */
 			if (init_and_start) {
-				k_work_schedule(
-					&wdt_data.system_workqueue_work,
-					K_MSEC(WDT_FEED_WORKER_DELAY_MS));
+				k_work_schedule(&wdt_data.system_workqueue_work,
+						K_NO_WAIT);
 			}
 			/* Clear alive array */
 			memset(module_alive_array, 0,

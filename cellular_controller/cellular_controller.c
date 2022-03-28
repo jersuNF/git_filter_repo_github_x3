@@ -28,7 +28,7 @@ struct k_thread keep_alive_thread;
 static struct k_sem connection_state_sem;
 
 int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
-int8_t socket_listen(struct data *, uint16_t);
+int socket_listen(struct data *, uint16_t);
 int socket_receive(struct data *, char **);
 int8_t lte_init(void);
 bool lte_is_ready(void);
@@ -287,8 +287,7 @@ static int cellular_controller_connect(void* dev)
 		LOG_INF("Default server ip address will be "
 			"used.");
 	}
-
-	ret = listen_tcp();
+	ret = start_tcp();
 
 exit:
 	return ret;
@@ -302,9 +301,13 @@ static void cellular_controller_keep_alive(void* dev)
 				stop_tcp();
 				int ret = reset_modem();
 				if (ret == 0) {
-					ret = cellular_controller_connect(dev);
-					if (ret == 0) {
-						modem_is_ready = true;
+					ret = listen_tcp();
+					LOG_WRN("listen returns %d", ret);
+					if(ret == 0) {
+						ret = cellular_controller_connect(dev);
+						if (ret == 0) {
+							modem_is_ready = true;
+						}
 					}
 				}
 			}

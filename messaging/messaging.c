@@ -652,7 +652,7 @@ void proto_InitHeader(NofenceMessage *msg)
 {
 	memset(msg, 0, sizeof(NofenceMessage));
 
-	msg->header.ulId = 11500; //TODO: read from eeprom
+	msg->header.ulId = 11501; //TODO: read from eeprom
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
 	if (use_server_time) {

@@ -142,6 +142,8 @@ void process_new_gnss_data_fn(struct k_work *item)
 
 	/* Update static variables pre-fix check. */
 	amc_zone_t last_zone = zone_get();
+	/* Avoiding not used warning treated as error in test */
+	(void)last_zone;
 
 	/* Validate position */
 	err = gnss_update(gnss);
@@ -156,8 +158,17 @@ void process_new_gnss_data_fn(struct k_work *item)
 		 * should the initialliy be set to? Since I guess [0,0]
 		 * is a valid position?
 		 */
-		int32_t pos_x = 0, pos_y = 0;
-		/*gnss_calc_xy(&pos_x, &pos_y);*/
+		/** @todo Response to above: 0,0 is ok, but the error code 
+		  * from calc can indicate overflow which affects later 
+		  * processing steps. See gps_processor.c line 257 in legacy 
+		  * code. */
+		int16_t pos_x = 0, pos_y = 0;
+		err = gnss_calc_xy(gnss, &pos_x, &pos_y,
+				   pasture->m.l_origin_lon, pasture->m.l_origin_lat,
+				   pasture->m.us_k_lon, pasture->m.us_k_lat);
+		bool overflow_xy = err == -EOVERFLOW;
+		/* Avoiding not used warning treated as error in test */
+		(void)overflow_xy;
 
 		/* Calculate distance to closest polygon. */
 		uint8_t fence_index = 0;
@@ -171,6 +182,9 @@ void process_new_gnss_data_fn(struct k_work *item)
 		/* if ((GPS_GetMode() == GPSMODE_MAX) 
 		*  && TestBits(m_u16_PosAccuracy, GPSFIXOK_MASK)) { ??????
 	 	*/
+		/** @todo We should do something about that GPS_GetMode thing 
+		  * here. Either add check to has_accepted_fix, or explicit 
+		  * call to gnss_get_mode */
 		if (gnss_has_accepted_fix()) {
 			/* Accepted position. Fill FIFOs. */
 			fifo_put(gnss->lastfix.h_acc_dm, acc_array,
@@ -245,6 +259,12 @@ void process_new_gnss_data_fn(struct k_work *item)
 		}
 
 		/* Update zone. */
+		/** @todo Should zone_update handle everything related to 
+		  * "myZoneTimestamp"? The if tests involving this also 
+		  * includes gnss milliseconds since startup, and affects 
+		  * fifo. Alt1: Do timeout/zone check in zone_update, return
+		  * error code instead of zone, check err here. Alt2: Do all 
+		  * checking here using accessor functions. */
 		amc_zone_t cur_zone = zone_update(instant_dist);
 
 		/* Start correction and set states based on fence status.

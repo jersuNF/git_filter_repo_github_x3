@@ -49,4 +49,10 @@ int zone_set(amc_zone_t new_zone);
  */
 amc_zone_t zone_update(int16_t instant_dist);
 
+/** @brief Get the time since last zone change. 
+ * 
+ * @returns Time since last zone change in milliseconds.
+ */
+uint64_t zone_get_time_since_update(void);
+
 #endif /* _AMC_ZONE_H_ */

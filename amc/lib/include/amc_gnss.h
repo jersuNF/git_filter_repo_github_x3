@@ -35,12 +35,27 @@ gnss_mode_t gnss_get_mode(void);
 
 /** @brief Validate that GNSS fix is good enough, and update flags
  * 
- * @param[in] mode Collar mode value.
  * @param[in] gnss_data Position data from GNSS
  * 
  * @returns 0 on success, error code otherwise. 
  */
 int gnss_update(gnss_t *gnss_data);
+
+/** @brief Convert latitude&longitude into X&Y coordinates based on origins
+ * 
+ * @param[in] gnss_data Position data from GNSS
+ * @param[out] x_dm Pointer to variable to update with X coordinate
+ * @param[out] y_dm Pointer to variable to update with Y coordinate
+ * @param[in] origin_lon Longitude origin
+ * @param[in] origin_lat Latitude origin
+ * @param[in] k_lon longitude parameter
+ * @param[in] k_lat Latitude parameter
+ * 
+ * @returns 0 on success, error code otherwise. 
+ */
+int gnss_calc_xy(gnss_t *gnss_data, int16_t* x_dm, int16_t* y_dm,
+		  int32_t origin_lon, int32_t origin_lat, 
+		  uint16_t k_lon, uint16_t k_lat);
 
 /** @brief Validate that GNSS fix is as good as possible and update flags.
  * 

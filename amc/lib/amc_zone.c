@@ -35,6 +35,8 @@ static const zone_mark_t markers[] = {
 
 static amc_zone_t zone = NO_ZONE;
 
+static uint64_t zone_updated_at = 0;
+
 amc_zone_t zone_update(int16_t instant_dist)
 {
 	amc_zone_t new_zone;
@@ -80,7 +82,20 @@ int zone_set(amc_zone_t new_zone)
 	if (new_zone > WARN_ZONE) {
 		return -EINVAL;
 	}
-	zone = new_zone;
+
+	if (zone != new_zone) {
+		zone = new_zone;
+		zone_updated_at = k_uptime_get();
+	}
 
 	return 0;
+}
+
+uint64_t zone_get_time_since_update(void)
+{
+	uint64_t time_since_update;
+
+	time_since_update = k_uptime_get() - zone_updated_at;
+
+	return time_since_update;
 }

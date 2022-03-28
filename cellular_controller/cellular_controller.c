@@ -30,6 +30,7 @@ static struct k_sem connection_state_sem;
 int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
 int socket_listen(struct data *, uint16_t);
 int socket_receive(struct data *, char **);
+void listen_sock_poll(void);
 int8_t lte_init(void);
 bool lte_is_ready(void);
 
@@ -54,6 +55,11 @@ void submit_error(int8_t cause, int8_t err_code)
 void receive_tcp(struct data *);
 K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK,
 		receive_tcp, &conf.ipv4, NULL, NULL,
+		MY_PRIORITY, 0, 0);
+
+void listen_sock_receive_tcp(void);
+K_THREAD_DEFINE(listen_recv_tid, RCV_THREAD_STACK,
+		listen_sock_poll, NULL, NULL, NULL,
 		MY_PRIORITY, 0, 0);
 
 static APP_BMEM bool connected;
@@ -111,6 +117,19 @@ void receive_tcp(struct data *sock_data)
 				connected = false;
 				socket_idle_count = 0;
 			}
+		}
+	}
+}
+
+void listen_sock_poll(void)
+{
+	while(1){
+		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
+		if (query_listen_sock()) {
+			LOG_WRN("Waking up!");
+			struct send_poll_request_now* wake_up =
+				new_send_poll_request_now();
+			EVENT_SUBMIT(wake_up);
 		}
 	}
 }
@@ -287,7 +306,7 @@ static int cellular_controller_connect(void* dev)
 		LOG_INF("Default server ip address will be "
 			"used.");
 	}
-	ret = start_tcp();
+	ret = 0;
 
 exit:
 	return ret;
@@ -301,13 +320,10 @@ static void cellular_controller_keep_alive(void* dev)
 				stop_tcp();
 				int ret = reset_modem();
 				if (ret == 0) {
-					ret = listen_tcp();
-					LOG_WRN("listen returns %d", ret);
-					if(ret == 0) {
-						ret = cellular_controller_connect(dev);
-						if (ret == 0) {
-							modem_is_ready = true;
-						}
+					ret = cellular_controller_connect(dev);
+					if (ret == 0) {
+						listen_tcp();
+						modem_is_ready = true;
 					}
 				}
 			}

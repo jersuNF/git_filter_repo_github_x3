@@ -295,6 +295,15 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_connection_ready_event(eh)) {
 		k_sem_give(&connection_ready);
+		return false;
+	}
+	if (is_send_poll_request_now(eh)) {
+		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
+						      K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Error starting modem poll worker: %d", err);
+		}
+		return false;
 	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);

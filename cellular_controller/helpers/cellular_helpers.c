@@ -195,17 +195,22 @@ int get_ip(char** collar_ip)
 	return 0;
 }
 
+bool query_listen_sock(void)
+{
+	return poll_listen_socket();
+}
+
 void stop_tcp(void)
 {
 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
-		if (conf.ipv6.tcp.sock >= 0) {
+		if (conf.ipv6.tcp.sock > 0) {
 			(void)close(conf.ipv6.tcp.sock);
 			memset(&conf, 0, sizeof(conf));
 		}
 	}
 
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
-		if (conf.ipv4.tcp.sock >= 0) {
+		if (conf.ipv4.tcp.sock > 0) {
 			(void)close(conf.ipv4.tcp.sock);
 			memset(&conf, 0, sizeof(conf));
 		}

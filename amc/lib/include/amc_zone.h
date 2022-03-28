@@ -7,6 +7,7 @@
 
 #include <zephyr.h>
 
+#include "gnss.h"
 #include <collar_protocol.h>
 
 typedef enum {
@@ -44,10 +45,14 @@ int zone_set(amc_zone_t new_zone);
  *         Internal zone variable is set and value returned.
  * 
  * @param[in] instant_dist Distance from fence. 
+ * @param[in] gnss_data GNSS data. 
+ * @param[out] updated_zone Pointer to update zone.
  * 
- * @returns Calculated zone. 
+ * @returns 0 if ok, error code otherwise.
  */
-amc_zone_t zone_update(int16_t instant_dist);
+int zone_update(int16_t instant_dist, 
+		gnss_t *gnss_data, 
+		amc_zone_t* updated_zone);
 
 /** @brief Get the time since last zone change. 
  * 

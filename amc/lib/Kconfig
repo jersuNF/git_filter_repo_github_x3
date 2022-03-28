@@ -38,6 +38,22 @@ config ZONE_WARN_HYST
 	int "Hysteresis of warn zone distance in dm"
 	default 0
 
+config MAX_PSM_FIX_AGE
+	int "Maximum number of seconds before PSM fix lead to no zone"
+	default 3
+
+config ZONE_MIN_TIME_SINCE_RESET
+	int "Minimum time in milliseconds since GNSS reset for further processing of position"
+	default 10000
+
+config ZONE_PSM_LEAST_TIME
+	int "Minimum time in milliseconds for changing from PSM mode"
+	default 15000
+
+config ZONE_LEAST_TIME
+	int "Minimum time in milliseconds for zone duration before resetting after position is uncertain"
+	default 6000
+
 config GNSS_TIMEOUT
 	int "Timeout in milliseconds before position data is considered unreliable"
 	default 1500

@@ -37,39 +37,59 @@ static amc_zone_t zone = NO_ZONE;
 
 static uint64_t zone_updated_at = 0;
 
-amc_zone_t zone_update(int16_t instant_dist)
+int zone_update(int16_t instant_dist, 
+		gnss_t *gnss_data, 
+		amc_zone_t* updated_zone)
 {
+	int ret = 0;
 	amc_zone_t new_zone;
 
-	/* Find zone for given distance */
-	uint32_t markers_cnt = sizeof(markers)/sizeof(zone_mark_t);
-	for (uint32_t i = 0; i < markers_cnt-1; i++) {
-		new_zone = (i+PSM_ZONE);
+	if ((gnss_data->latest.msss > CONFIG_ZONE_MIN_TIME_SINCE_RESET) &&
+	    ((zone != PSM_ZONE) || \
+	     (zone_get_time_since_update() > CONFIG_ZONE_PSM_LEAST_TIME))) {
 
-		/* Distance must be within [start,end> to be within zone */
-		int16_t start = markers[i].distance;
-		int16_t end = markers[i+1].distance;
-		
-		/* Apply hysteresis depending on current zone */
-		if (zone == new_zone) {
-			start -= markers[i].hysteresis;
-			end += markers[i+1].hysteresis;
-		} else if (zone < new_zone) {
-			start += markers[i].hysteresis;
-			end += markers[i+1].hysteresis;
-		} else {
-			start -= markers[i].hysteresis;
-			end -= markers[i+1].hysteresis;
+		/* Find zone for given distance */
+		uint32_t markers_cnt = sizeof(markers)/sizeof(zone_mark_t);
+		for (uint32_t i = 0; i < markers_cnt-1; i++) {
+			new_zone = (i+PSM_ZONE);
+
+			/* Distance must be within [start,end> to be within zone */
+			int16_t start = markers[i].distance;
+			int16_t end = markers[i+1].distance;
+			
+			/* Apply hysteresis depending on current zone */
+			if (zone == new_zone) {
+				start -= markers[i].hysteresis;
+				end += markers[i+1].hysteresis;
+			} else if (zone < new_zone) {
+				start += markers[i].hysteresis;
+				end += markers[i+1].hysteresis;
+			} else {
+				start -= markers[i].hysteresis;
+				end -= markers[i+1].hysteresis;
+			}
+
+			if ((instant_dist >= start) && (instant_dist < end)) {
+				break;
+			}
 		}
+		
+		zone_set(new_zone);
+	} else {
+		ret = -ETIME;
 
-		if ((instant_dist >= start) && (instant_dist < end)) {
-			break;
+		if ((zone_get_time_since_update() > CONFIG_ZONE_LEAST_TIME) &&
+		    (gnss_data->latest.msss > CONFIG_ZONE_MIN_TIME_SINCE_RESET) &&
+		    ((zone != PSM_ZONE) ||
+		     ((k_uptime_get_32() - gnss_data->latest.updated_at) > 
+				CONFIG_MAX_PSM_FIX_AGE))) {
+			
+			zone = NO_ZONE;
 		}
 	}
-	
-	zone_set(new_zone);
 
-	return zone;
+	*updated_zone = zone;
+	return ret;
 }
 
 amc_zone_t zone_get(void)

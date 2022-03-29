@@ -635,7 +635,12 @@ bool stg_log_pointing_to_last()
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_request_flash_erase_event(eh)) {
-		k_work_submit_to_queue(&erase_q, &erase_work);
+		struct request_flash_erase_event *ev =
+			cast_request_flash_erase_event(eh);
+
+		if (ev->magic == STORAGE_ERASE_MAGIC) {
+			k_work_submit_to_queue(&erase_q, &erase_work);
+		}
 		return true;
 	}
 

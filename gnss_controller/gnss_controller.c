@@ -17,8 +17,7 @@
 #define GNSS_DATA_TIMEOUT 		(GNSS_1SEC * 25)
 
 K_SEM_DEFINE(new_data_sem, 0, 1);
-K_SEM_DEFINE(last_fix_sem, 0, 1);
-K_SEM_DEFINE(cached_fix_sem, 0, 1);
+K_SEM_DEFINE(cached_fix_sem, 1, 1);
 
 #define MODULE gnss_controller
 LOG_MODULE_REGISTER(MODULE, CONFIG_GNSS_CONTROLLER_LOG_LEVEL);
@@ -26,21 +25,17 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_GNSS_CONTROLLER_LOG_LEVEL);
 #define MIN_GNSS_RATE CONFIG_MINIMUM_ALLOWED_GNSS_RATE
 
 _Noreturn void publish_gnss_data(void);
-_Noreturn void publish_last_fix(void);
 void set_gnss_rate(enum gnss_data_rate);
-static int gnss_data_update_cb(const gnss_struct_t*);
-static int last_fix_update_cb(const gnss_last_fix_struct_t*);
+static int gnss_data_update_cb(const gnss_t*);
 void check_gnss_age(uint32_t);
 
 static uint16_t current_rate;
 
-static gnss_struct_t gnss_data_buffer;
-static gnss_last_fix_struct_t last_fix_buffer;
+static gnss_t gnss_data_buffer;
 uint32_t gnss_age, ts, previous_ts;
 enum gnss_mode current_mode = GNSSMODE_NOMODE;
 
-gnss_struct_t cached_gnss_data;
-gnss_last_fix_struct_t cached_last_fix;
+gnss_t cached_gnss_data;
 
 const struct device *gnss_dev = NULL;
 uint8_t gnss_reset_count;
@@ -62,12 +57,6 @@ int gnss_controller_init(void){
 	int ret = gnss_set_data_cb(gnss_dev, gnss_data_update_cb);
 	if(ret != 0){
 		char* msg = "Failed to register data CB!";
-		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
-		return ret;
-	}
-	ret = gnss_set_lastfix_cb(gnss_dev, last_fix_update_cb);
-	if(ret != 0){
-		char* msg = "Failed to register last fix CB!";
 		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
 		return ret;
 	}
@@ -118,15 +107,24 @@ K_THREAD_DEFINE(pub_gnss, STACK_SIZE,
 		publish_gnss_data, NULL, NULL, NULL,
 		PRIORITY, 0, 0);
 
-K_THREAD_DEFINE(pub_fix, STACK_SIZE,
-		publish_last_fix, NULL, NULL, NULL,
-		PRIORITY, 0, 0);
-
 
 _Noreturn void publish_gnss_data(){
 	while(true){
-		if(k_sem_take(&new_data_sem, K_SECONDS(25)) == 0){
-			struct new_gnss_data* new_data = new_new_gnss_data();
+		if(k_sem_take(&new_data_sem, K_SECONDS(25)) == 0) {
+			if (gnss_data_buffer.fix_ok) {
+				ts = k_uptime_get_32();
+				if (ts >= previous_ts){
+					gnss_age = ts - previous_ts;
+				} else{ //handle overflow
+					gnss_age = UINT32_MAX + ts - previous_ts;
+				}
+				LOG_DBG("gnss fix age = age:%d, ts:%d", gnss_age,
+					ts);
+				check_gnss_age(gnss_age);
+				previous_ts = ts;
+			}
+
+			struct gnss_data* new_data = new_gnss_data();
 			new_data->gnss_data = gnss_data_buffer;
 			LOG_INF("New GNSS data received!\n");
 			EVENT_SUBMIT(new_data);
@@ -146,38 +144,9 @@ _Noreturn void publish_gnss_data(){
 	}
 }
 
-_Noreturn void publish_last_fix(){
-	while(true){
-		if(k_sem_take(&last_fix_sem, K_FOREVER) == 0){
-			ts = k_uptime_get_32();
-			if (ts >= previous_ts){
-				gnss_age = ts - previous_ts;
-			} else{ //handle overflow
-				gnss_age = UINT32_MAX + ts - previous_ts;
-			}
-			LOG_DBG("gnss fix age = age:%d, ts:%d", gnss_age,
-				ts);
-			check_gnss_age(gnss_age);
-			previous_ts = ts;
-			struct new_gnss_fix* new_fix = new_new_gnss_fix();
-			new_fix->fix = last_fix_buffer;
-			/* TODO: protect cached data */
-			cached_last_fix = last_fix_buffer;
-			EVENT_SUBMIT(new_fix);
-			LOG_WRN("New GNSS fix received!\n");
-		}
-	}
-}
-
-static int gnss_data_update_cb(const gnss_struct_t* data) {
-	memcpy(&gnss_data_buffer, data, sizeof(gnss_struct_t));
+static int gnss_data_update_cb(const gnss_t* data) {
+	memcpy(&gnss_data_buffer, data, sizeof(gnss_t));
 	k_sem_give(&new_data_sem);
-	return 0;
-}
-
-static int last_fix_update_cb(const gnss_last_fix_struct_t* fix) {
-	memcpy(&last_fix_buffer, fix, sizeof(gnss_last_fix_struct_t));
-	k_sem_give(&last_fix_sem);
 	return 0;
 }
 

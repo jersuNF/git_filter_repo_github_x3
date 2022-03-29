@@ -5,6 +5,8 @@
 #include "commander.h"
 #include "cobs.h"
 
+#include "buzzer.h"
+
 #include "sound_event.h"
 #include "ep_event.h"
 #include "event_manager.h"
@@ -74,9 +76,13 @@ uint32_t commander_handle(enum diagnostics_interface interface,
 		if (cobs_buffer[0] == 'N') {
 			if (cobs_buffer[1] == 0x20) {
 				/* Simulate the highest tone event */
-				struct sound_event *sound_event_high = new_sound_event();
-				sound_event_high->type = SND_MAX;
-				EVENT_SUBMIT(sound_event_high);
+				struct sound_event *sound_event_warn = new_sound_event();
+				sound_event_warn->type = SND_WARN;
+				EVENT_SUBMIT(sound_event_warn);
+				
+				struct sound_set_warn_freq_event *sound_warn_freq = new_sound_set_warn_freq_event();
+				sound_warn_freq->freq = WARN_FREQ_MS_PERIOD_MAX;
+				EVENT_SUBMIT(sound_warn_freq);
 
 				cmd = 0x20;
 				ack = true;

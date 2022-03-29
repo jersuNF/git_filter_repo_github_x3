@@ -20,7 +20,6 @@
 #include "UBX.h"
 #include "unixTime.h"
 #include "error_event.h"
-#include "helpers.h"
 
 #include "nf_crc16.h"
 
@@ -45,6 +44,7 @@ uint32_t time_from_server;
 
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
 K_SEM_DEFINE(send_out_ack, 0, 1);
+K_SEM_DEFINE(connection_ready, 0, 1);
 
 collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
@@ -158,6 +158,9 @@ int read_log_data_cb(uint8_t *data, size_t len)
  */
 void log_data_periodic_fn()
 {
+	/* Reschedule. */
+	k_work_reschedule_for_queue(&send_q, &log_work,
+				    K_MINUTES(atomic_get(&log_period_minutes)));
 	/* Construct log data and write to storage controller. */
 	build_log_message();
 
@@ -180,10 +183,6 @@ void log_data_periodic_fn()
 		}
 		LOG_INF("Emptied LOG partition data as we have read everything.");
 	}
-
-	/* Reschedule. */
-	k_work_reschedule_for_queue(&send_q, &log_work,
-				    K_MINUTES(atomic_get(&log_period_minutes)));
 }
 
 /**
@@ -192,6 +191,9 @@ void log_data_periodic_fn()
  */
 void modem_poll_work_fn()
 {
+	k_work_reschedule_for_queue(
+		&send_q, &modem_poll_work,
+		K_MINUTES(atomic_get(&poll_period_minutes)));
 	/* Add logic for the periodic protobuf modem poller. */
 	LOG_INF("Starting periodic poll work and building poll request.");
 	NofenceMessage new_poll_msg;
@@ -206,10 +208,6 @@ void modem_poll_work_fn()
 					    K_SECONDS(1));
 		return;
 	}
-
-	k_work_reschedule_for_queue(
-		&send_q, &modem_poll_work,
-		K_MINUTES(atomic_get(&poll_period_minutes)));
 }
 
 /**
@@ -295,6 +293,16 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	if (is_connection_state_event(eh)) {
+		struct connection_state_event *ev = cast_connection_state_event(eh);
+		if (ev->state){
+			k_sem_give(&connection_ready);
+		} else{
+			/*TODO: take some action while waiting for cellular
+			 * controller to recover the connection.*/
+		}
+		return false;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -351,6 +359,7 @@ EVENT_SUBSCRIBE(MODULE, update_flash_erase);
 EVENT_SUBSCRIBE(MODULE, update_zap_count);
 EVENT_SUBSCRIBE(MODULE, animal_warning_event);
 EVENT_SUBSCRIBE(MODULE, animal_escape_event);
+EVENT_SUBSCRIBE(MODULE, connection_state_event);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -565,11 +574,11 @@ int8_t request_fframe(uint32_t version, uint8_t frame)
 	return 0;
 }
 
-void fence_download(uint8_t new_fframe)
-{
-	if (new_fframe == 0 && first_frame) {
+void fence_download( uint8_t new_fframe){
+	if (new_fframe == 0 && first_frame){
 		first_frame = false;
-	} else if (new_fframe == 0 && !first_frame) { //something went bad
+	}
+	else if (new_fframe == 0 && !first_frame){ //something went bad
 		expected_fframe = 0;
 		new_fence_in_progress = 0;
 		return;
@@ -669,6 +678,13 @@ void proto_InitHeader(NofenceMessage *msg)
  */
 int send_binary_message(uint8_t *data, size_t len)
 {
+	struct check_connection *ev = new_check_connection();
+	EVENT_SUBMIT(ev);
+	int ret = k_sem_take(&connection_ready, K_MINUTES(2));
+	if (ret != 0){
+		LOG_ERR("Connection not ready, can't send message now!");
+		return -ETIMEDOUT;
+	}
 	/* We can only send 1 message at a time, use mutex. */
 	if (k_mutex_lock(&send_binary_mutex,
 			 K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC * 2)) == 0) {
@@ -780,8 +796,8 @@ void process_poll_response(NofenceMessage *proto)
 		 * to AMC */
 		//request frame 0
 		first_frame = true;
-		LOG_INF("Requesting frame 0 for fence version %i.",
-			pResp->ulFenceDefVersion);
+		LOG_WRN("Requesting frame 0 of fence: %d!\n"
+			,pResp->ulFenceDefVersion);
 		int ret = request_fframe(pResp->ulFenceDefVersion, 0);
 		if (ret == 0) {
 			first_frame = true;

@@ -52,7 +52,7 @@ static int commander_send_ack(enum diagnostics_interface interface, bool ack, ui
 
 static int commander_send_data(enum diagnostics_interface interface, 
 			       uint8_t cmd, 
-			       uint8_t* data, uint8_t size)
+			       uint8_t* data, uint8_t data_size)
 {
 	int ret = 0;
 
@@ -60,12 +60,12 @@ static int commander_send_data(enum diagnostics_interface interface,
 	resp_data[0] = 'N';
 	resp_data[1] = 'D';
 	resp_data[2] = cmd;
-	resp_data[3] = size;
-	memcpy(&resp_data[4], data, size);
+	resp_data[3] = data_size;
+	memcpy(&resp_data[4], data, data_size);
 
 	cobs_encode_result cobs_res;
 	cobs_res = cobs_encode(cobs_buffer, sizeof(cobs_buffer)-1,
-			       resp_data, size+4);
+			       resp_data, data_size+4);
 	if (cobs_res.status == COBS_ENCODE_OK) {
 		uint32_t size = cobs_res.out_len;
 		cobs_buffer[size++] = '\x00';
@@ -166,18 +166,17 @@ static int commander_settings_handler(enum diagnostics_interface interface,
 			goto cleanup;
 		}
 	}
-	
 
 	switch (settings_id) {
 		case COMMANDER_SETTINGS_SERIAL:
 		{
 			if (write_request) {
 				/* Must be exactly 4 bytes for uint32_t */
-				if ((size-1) == 4) {
-					uint32_t serial = (data[1+0]<<0) + 
-							  (data[1+1]<<8) +
-							  (data[1+2]<<16) +
-							  (data[1+3]<<24);
+				if ((size-2) == 4) {
+					uint32_t serial = (data[2+0]<<0) + 
+							  (data[2+1]<<8) +
+							  (data[2+2]<<16) +
+							  (data[2+3]<<24);
 					err = eep_write_serial(serial);
 				}
 			} else {

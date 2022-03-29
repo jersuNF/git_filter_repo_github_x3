@@ -151,8 +151,16 @@ int reset_modem(void)
 	return modem_nf_reset();
 }
 
+/**
+ * Reads a 17 byte string potentially with an ipv4 address "xxx.xxx.xxx.xxx",
+ * representing the ip address given to the sim card. The string will
+ * have garbage bytes if the quoted ip address is shorter than 17 bytes. e.g:
+ * for "10.12.225.223" we would have 2 garbage bytes.
+ * @param collar_ip
+ * @return
+ */
 int get_ip(char** collar_ip)
-{
+{/*TODO: extract the quoted address if needed and return the exact length. */
 	get_pdp_addr(collar_ip);
 	return 0;
 }

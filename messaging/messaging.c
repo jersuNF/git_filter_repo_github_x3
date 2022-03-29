@@ -293,8 +293,15 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-	if (is_connection_ready_event(eh)) {
-		k_sem_give(&connection_ready);
+	if (is_connection_state_event(eh)) {
+		struct connection_state_event *ev = cast_connection_state_event(eh);
+		if (ev->state){
+			k_sem_give(&connection_ready);
+		} else{
+			/*TODO: take some action while waiting for cellular
+			 * controller to recover the connection.*/
+		}
+		return false;
 	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
@@ -352,7 +359,7 @@ EVENT_SUBSCRIBE(MODULE, update_flash_erase);
 EVENT_SUBSCRIBE(MODULE, update_zap_count);
 EVENT_SUBSCRIBE(MODULE, animal_warning_event);
 EVENT_SUBSCRIBE(MODULE, animal_escape_event);
-EVENT_SUBSCRIBE(MODULE, connection_ready_event);
+EVENT_SUBSCRIBE(MODULE, connection_state_event);
 
 static inline void process_ble_ctrl_event(void)
 {

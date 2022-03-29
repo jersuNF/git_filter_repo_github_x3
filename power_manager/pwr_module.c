@@ -17,6 +17,7 @@
 #include "error_event.h"
 #include "battery.h"
 #include "ble_ctrl_event.h"
+#include "watchdog_event.h"
 
 #define MODULE pwr_module
 #include <logging/log.h>
@@ -51,6 +52,10 @@ static struct k_work_delayable battery_poll_work;
 /** @brief Periodic battery voltage work function */
 static void battery_poll_work_fn()
 {
+#if defined(CONFIG_WATCHDOG_ENABLE)
+	/* Report alive */
+	watchdog_report_module_alive(WDG_PWR_MODULE);
+#endif
 	/* Periodic log and update ble adv array */
 	int batt_voltage = log_and_fetch_battery_voltage();
 	if (batt_voltage < 0) {

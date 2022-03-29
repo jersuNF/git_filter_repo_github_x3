@@ -9,8 +9,9 @@
 #include "watchdog_app.h"
 #include "watchdog_event.h"
 
+#define MODULE watchdog
 #include <logging/log.h>
-LOG_MODULE_REGISTER(watchdog, CONFIG_WATCHDOG_LOG_LEVEL);
+LOG_MODULE_REGISTER(MODULE, CONFIG_WATCHDOG_LOG_LEVEL);
 
 #define WATCHDOG_TIMEOUT_MSEC (CONFIG_WATCHDOG_TIMEOUT_SEC * 1000)
 
@@ -25,16 +26,16 @@ static bool init_and_start;
 
 static struct wdt_data_storage wdt_data;
 
-static void primary_feed_worker()
+static void primary_feed_worker(struct k_work *work_desc)
 {
 	int err = wdt_feed(wdt_data.wdt_drv, wdt_data.wdt_channel_id);
+
+	LOG_INF("Feeding watchdog.");
 
 	if (err) {
 		LOG_ERR("Cannot feed watchdog. Error code: %d", err);
 		return;
 	}
-
-	LOG_INF("Feeding watchdog.");
 }
 
 static int watchdog_timeout_install(void)
@@ -84,6 +85,7 @@ static int watchdog_feed_enable(void)
 		LOG_ERR("Cannot feed watchdog. Error code: %d", err);
 		return err;
 	}
+	k_work_schedule(&wdt_data.system_workqueue_work, K_NO_WAIT);
 
 	return err;
 }
@@ -116,6 +118,8 @@ static int watchdog_enable(void)
 	return 0;
 }
 
+uint8_t module_alive_array[WDG_END_OF_LIST];
+
 int watchdog_init_and_start(void)
 {
 	int err;
@@ -125,43 +129,40 @@ int watchdog_init_and_start(void)
 		LOG_ERR("Failed to enable watchdog, error: %d", err);
 		return err;
 	}
-
+	memset(module_alive_array, 0, sizeof(module_alive_array));
 	init_and_start = true;
+
 	return 0;
 }
 
-uint8_t module_alive_array[WDG_END_OF_LIST] = { 0 };
+/** @brief Compare the alive array with this expected array */
+uint8_t expected_array[WDG_END_OF_LIST] = { [0 ... WDG_END_OF_LIST - 1] = 1 };
 
 static bool event_handler(const struct event_header *eh)
 {
+	int ret;
 	if (is_watchdog_alive_event(eh)) {
 		struct watchdog_alive_event *ev = cast_watchdog_alive_event(eh);
 		module_alive_array[ev->module] = 1;
-
-		for (int i = 0; i < ERR_END_OF_LIST; i++) {
-			if (module_alive_array[i] != 1) {
-				/* List is not complete */
-				break;
-			}
-			/* Check first if watchdog is running.
-			 * Feed watchdog through main system thread.
-			 * System is fully operational. 
-		 	 */
+		ret = memcmp(module_alive_array, expected_array,
+			     WDG_END_OF_LIST);
+		if (ret == 0) {
 			if (init_and_start) {
-				k_work_schedule(&wdt_data.system_workqueue_work,
-						K_NO_WAIT);
+				LOG_INF("Array is equal");
+				k_work_reschedule(
+					&wdt_data.system_workqueue_work,
+					K_NO_WAIT);
+				/* Clear alive array */
+				memset(module_alive_array, 0,
+				       sizeof(module_alive_array));
 			}
-			/* Clear alive array */
-			memset(module_alive_array, 0,
-			       sizeof(module_alive_array));
 		}
-
+		/* Consume event */
 		return true;
 	}
 
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
-
 	return false;
 }
 

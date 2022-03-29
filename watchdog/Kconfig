@@ -7,7 +7,7 @@ if WATCHDOG_ENABLE
 
 config WATCHDOG_TIMEOUT_SEC
 	int "Application watchdog timeout in seconds"
-	default 600
+	default 300
 
 endif # WATCHDOG_ENABLE
 

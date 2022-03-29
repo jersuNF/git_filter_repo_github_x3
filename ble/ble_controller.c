@@ -21,6 +21,8 @@
 #include "msg_data_event.h"
 #include "beacon_processor.h"
 #include "ble_beacon_event.h"
+#include "watchdog_event.h"
+
 #if CONFIG_BOARD_NF_X25_NRF52840
 #include "ble_dfu.h"
 #endif
@@ -154,6 +156,10 @@ static struct bt_conn_cb conn_callbacks = {
  */
 static void periodic_beacon_scanner_work_fn()
 {
+#if defined(CONFIG_WATCHDOG_ENABLE)
+	/* Report alive */
+	watchdog_report_module_alive(WDG_BLE_SCAN);
+#endif
 	/* Start scanner again if not already running */
 	if (!atomic_get(&atomic_bt_scan_active)) {
 		struct ble_ctrl_event *event = new_ble_ctrl_event();

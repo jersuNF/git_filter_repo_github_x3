@@ -11,7 +11,7 @@
 #include "ble_ctrl_event.h"
 #include "ble_data_event.h"
 #include "lte_proto_event.h"
-
+#include "watchdog_event.h"
 #include "cellular_controller_events.h"
 #include "gnss_controller_events.h"
 #include "request_events.h"
@@ -192,6 +192,11 @@ void log_data_periodic_fn()
  */
 void modem_poll_work_fn()
 {
+#if defined(CONFIG_WATCHDOG_ENABLE)
+	/* Report alive */
+	watchdog_report_module_alive(WDG_MESSAGING);
+#endif
+
 	/* Add logic for the periodic protobuf modem poller. */
 	LOG_INF("Starting periodic poll work and building poll request.");
 	NofenceMessage new_poll_msg;

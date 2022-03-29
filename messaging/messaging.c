@@ -862,7 +862,9 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 	// compare versions and start update when needed.//
 	uint32_t app_ver = fw_ver_from_server->ulNRF52AppVersion;
 
-	if (app_ver > NF_X25_VERSION_NUMBER) {
+	LOG_INF("Received app version from server %i", app_ver);
+
+	if (app_ver != NF_X25_VERSION_NUMBER) {
 		struct start_fota_event *ev = new_start_fota_event();
 		ev->override_default_host = false;
 		ev->version = app_ver;

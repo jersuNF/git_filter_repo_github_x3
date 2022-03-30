@@ -237,13 +237,13 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 				timestamp = k_uptime_get_32();
 
 				if (amc_mode == Mode_Teach) {
-					inc_tone_slope +=
+					inc_tone_slope =
 						TEACHMODE_DIST_INCR_SLOPE_LIM;
-					dec_tone_slope +=
+					dec_tone_slope =
 						TEACHMODE_DIST_DECR_SLOPE_LIM;
 				} else {
-					inc_tone_slope += DIST_INCR_SLOPE_LIM;
-					dec_tone_slope += DIST_DECR_SLOPE_LIM;
+					inc_tone_slope = DIST_INCR_SLOPE_LIM;
+					dec_tone_slope = DIST_DECR_SLOPE_LIM;
 				}
 
 				if (dist_change > inc_tone_slope) {
@@ -317,7 +317,7 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 				if (try_zap) {
 					uint32_t delta_max = k_uptime_get_32() -
 							     max_freq_timestamp;
-					/* Check if we've played max freq for
+					/** @todo Check if we've played max freq for
 					 * at least 5 seconds.
 					 */
 					if (delta_max > WARN_MIN_DURATION_MS) {

@@ -266,6 +266,11 @@ void process_new_gnss_data_fn(struct k_work *item)
 
 		/** @todo CollarStatus collar_status = get_collar_status();
 		 */
+		CollarStatus collar_status = CollarStatus_CollarStatus_Normal;
+		struct update_collar_status *collar_ev =
+			new_update_collar_status();
+		collar_ev->collar_status = collar_status;
+		EVENT_SUBMIT(collar_ev);
 
 		/** @todo 
 		 * 

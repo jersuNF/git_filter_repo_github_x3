@@ -192,7 +192,7 @@ int charging_start(void)
 	}
 
 	/* Wait to give switch time to enable */
-	k_sleep(K_MSEC(50));
+	k_sleep(K_MSEC(20));
 
 	if (!device_is_ready(charging_dcdc_dev)) {
 		/* Not ready, do not use */
@@ -223,7 +223,7 @@ int charging_stop(void)
 		return err;
 	}
 	/* Wait to give switch time to disable */
-	k_sleep(K_MSEC(50));
+	k_sleep(K_MSEC(20));
 
 	if (!device_is_ready(charging_load_dev)) {
 		/* Not ready, do not use */

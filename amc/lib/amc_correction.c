@@ -289,13 +289,11 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 					 *    is the default value at least).
 					 * 2. A new sound event has been submitted 
 					 *    i.e. FIND_ME, or OFF, in which case 
-					 *    we have to @b RESUBMIT the 
+					 *    we have to resubmit the 
 					 *    SND_WARN event. This is currently 
-					 *    implemented at when we update the 
-					 *    frequency, where we check if the 
-					 *    sound buzzer is in WARN event. 
-					 *    We submit the warn sound event 
-					 *    if it isn't.
+					 *    implemented when we update the freq.
+					 *    Where we submit the event if the
+					 *    buzzer is IDLE.
 					 * 3. It gets a frequency that is outside 
 					 *    the freq range for instance below 
 					 *    WARN_SOUND_INIT or higher than
@@ -306,6 +304,7 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 						new_sound_event();
 					snd_ev->type = SND_WARN;
 					EVENT_SUBMIT(snd_ev);
+					LOG_INF("AMC notified buzzer to enter WARN");
 				}
 
 				/** Update buzzer frequency event. */

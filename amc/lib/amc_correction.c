@@ -24,7 +24,6 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change);
 static bool zap_eval_doing;
 static uint32_t zap_timestamp;
 static uint32_t correction_pause_timestamp;
-static uint16_t max_freq_timestamp;
 static uint16_t last_warn_freq;
 
 /* Distance from fence where the last warning was started. */
@@ -201,7 +200,7 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 	static uint32_t timestamp;
 
 	if (zap_eval_doing) {
-		uint16_t delta_zap_eval =
+		uint32_t delta_zap_eval =
 			(k_uptime_get_32() / MSEC_PER_SEC) - zap_timestamp;
 
 		if (delta_zap_eval >= ZAP_EVALUATION_TIME) {
@@ -314,40 +313,30 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 				freq_ev->freq = last_warn_freq;
 				EVENT_SUBMIT(freq_ev);
 
-				if (try_zap) {
-					uint32_t delta_max = k_uptime_get_32() -
-							     max_freq_timestamp;
-					/** @todo Check if we've played max freq for
-					 * at least 5 seconds.
-					 */
-					if (delta_max > WARN_MIN_DURATION_MS) {
-						correction_pause(
-							Reason_WARNPAUSEREASON_ZAP,
-							mean_dist);
-						struct ep_status_event *ep_ev =
-							new_ep_status_event();
-						ep_ev->ep_status = EP_RELEASE;
-						EVENT_SUBMIT(ep_ev);
-						zap_eval_doing = 1;
-						zap_timestamp =
-							k_uptime_get_32();
-						increment_zap_count();
-						LOG_INF("AMC notified EP to zap!");
+				/** @note It will zap immediately once we 
+				 *  reach WARN_FREQ_MAX, and wait 200ms 
+				 *  (ZAP_EVALUATION_TIME) until next zap
+				 *  up to 3 times untill it is considered
+				 *  "escaped."
+				 */
 
-						/* Wait 5 more sec until
-						 * next zap.
-						 */
-						max_freq_timestamp =
-							k_uptime_get_32();
-					}
-				} else {
-					max_freq_timestamp = k_uptime_get_32();
+				if (try_zap) {
+					correction_pause(
+						Reason_WARNPAUSEREASON_ZAP,
+						mean_dist);
+					struct ep_status_event *ep_ev =
+						new_ep_status_event();
+					ep_ev->ep_status = EP_RELEASE;
+					EVENT_SUBMIT(ep_ev);
+					zap_eval_doing = 1;
+					zap_timestamp = k_uptime_get_32();
+					increment_zap_count();
+					LOG_INF("AMC notified EP to zap!");
 				}
 			}
 		} else {
 			last_warn_dist = mean_dist + _LAST_DIST_ADD;
 		}
-
 		return;
 	}
 	return;

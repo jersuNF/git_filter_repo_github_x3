@@ -153,6 +153,7 @@ Mode calc_mode(void)
 		new_mode = Mode_Mode_UNKNOWN;
 		break;
 	}
+	current_mode = new_mode;
 	return new_mode;
 }
 
@@ -273,6 +274,7 @@ FenceStatus calc_fence_status()
 		LOG_INF("?->Unknown");
 		break;
 	}
+	current_fence_status = new_fence_status;
 	return new_fence_status;
 }
 

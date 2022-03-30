@@ -135,7 +135,6 @@ bool fnc_valid(fence_t *fence)
 
 bool fnc_any_valid_fence(void)
 {
-	/* Take mutex? */
 	pasture_t *pasture = NULL;
 
 	if (get_pasture_cache(&pasture)) {
@@ -152,4 +151,14 @@ bool fnc_any_valid_fence(void)
 		}
 	}
 	return false;
+}
+
+bool fnc_valid_def(void)
+{
+	pasture_t *pasture = NULL;
+
+	if (get_pasture_cache(&pasture)) {
+		return false;
+	}
+	return pasture->m.ul_fence_def_version != 0;
 }

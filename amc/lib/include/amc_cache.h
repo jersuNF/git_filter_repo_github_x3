@@ -46,11 +46,21 @@ int set_pasture_cache(uint8_t *pasture, size_t len);
 */
 bool fnc_valid(fence_t *fence);
 
-/** @brief Checks if there's any valid fence in the pasture.
+/** @brief Checks if there's any valid fence in the pasture. 
+ * 
+ * @note Mutex must be taken outside of this function.
  * 
  * @return true if valid fence exists.
 */
 bool fnc_any_valid_fence(void);
+
+/** @brief Checks if the cached pasture has valid definition.
+ * 
+ * @note Mutex must be taken outside of this function.
+ * 
+ * @return true if valid definition. (def != 0)
+*/
+bool fnc_valid_def(void);
 
 /**
  * @brief Fetches the cached gnss data and outputs the

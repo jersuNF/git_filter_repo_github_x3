@@ -6,6 +6,7 @@ zephyr_include_directories(
     .
     ./../../events/amc/
     ./../../modules/storage_controller/
+    ./../../events/ble/
     ./../../events/messaging/
     ./../../events/gnss_controller/
     ./../../events/buzzer/

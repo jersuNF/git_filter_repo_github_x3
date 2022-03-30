@@ -21,6 +21,8 @@
 #include "messaging_module_events.h"
 #include "gnss_controller_events.h"
 
+#include "ble_beacon_event.h"
+
 #include "storage.h"
 
 /* Distance arrays. */
@@ -152,14 +154,13 @@ void process_new_gnss_data_fn(struct k_work *item)
 
 	/* Fetch x and y position based on gnss data */
 	int16_t pos_x = 0, pos_y = 0;
-	err = gnss_calc_xy(gnss, &pos_x, &pos_y,
-				pasture->m.l_origin_lon, pasture->m.l_origin_lat,
-				pasture->m.us_k_lon, pasture->m.us_k_lat);
+	err = gnss_calc_xy(gnss, &pos_x, &pos_y, pasture->m.l_origin_lon,
+			   pasture->m.l_origin_lat, pasture->m.us_k_lon,
+			   pasture->m.us_k_lat);
 	bool overflow_xy = err == -EOVERFLOW;
 
 	/* If any fence (pasture?) is valid and we have fix. */
 	if (gnss_has_fix() && fnc_any_valid_fence() && !overflow_xy) {
-
 		/* Calculate distance to closest polygon. */
 		uint8_t fence_index = 0;
 		uint8_t vertex_index = 0;
@@ -259,21 +260,24 @@ void process_new_gnss_data_fn(struct k_work *item)
 		 * Should we have this is another loop, or just perform
 		 * whenever we get new postion data?
 		 */
-		Mode amc_mode = get_mode();
-		FenceStatus fence_status = get_fence_status();
-		CollarStatus collar_status = get_collar_status();
+		Mode amc_mode = calc_mode();
+		FenceStatus fence_status = calc_fence_status(k_uptime_get_32());
 
-		/* Check for gnss->haslastfix? */
-		gnss_mode_t gnss_mode = gnss->lastfix.mode;
+		/** @todo CollarStatus collar_status = get_collar_status();
+		 */
 
-		err = set_sensor_modes(amc_mode, gnss_mode, fence_status,
-				       collar_status);
-		if (err) {
-			/* Error handle. */
-			goto cleanup;
-		}
+		/** @todo 
+		 * 
+		 * Check for gnss->haslastfix?
+		 * gnss_mode_t gnss_mode = gnss->lastfix.mode;
+		 * err = set_sensor_modes(amc_mode, gnss_mode, fence_status,
+		 * 		       collar_status);
+		 * if (err) {
+		 * 	goto cleanup;
+		 * }
+		 */
 
-		/* GNSS set mode HERE! 
+		/** @todo GNSS set mode HERE! 
 		 *
 		 * err = set_gnss_mode(amc_mode, fence_status, collar_status);
 		 * if (err) {
@@ -313,6 +317,9 @@ int amc_module_init(void)
 	k_work_init(&process_new_gnss_work, process_new_gnss_data_fn);
 	k_work_init(&process_new_fence_work, process_new_fence_fn);
 
+	/* Checks and inits the mode we're in. */
+	init_mode_status();
+
 	/* Fetch the fence from external flash and update fence cache. */
 	return update_pasture_from_stg();
 }
@@ -344,6 +351,12 @@ static bool event_handler(const struct event_header *eh)
 		k_work_submit_to_queue(&amc_work_q, &process_new_gnss_work);
 		return false;
 	}
+	if (is_ble_beacon_event(eh)) {
+		struct ble_beacon_event *event = cast_ble_beacon_event(eh);
+
+		set_beacon_status(event->status);
+		return false;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -353,3 +366,4 @@ static bool event_handler(const struct event_header *eh)
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, gnss_data);
 EVENT_SUBSCRIBE(MODULE, new_fence_available);
+EVENT_SUBSCRIBE(MODULE, ble_beacon_event);

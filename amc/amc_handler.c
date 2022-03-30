@@ -261,8 +261,14 @@ void process_new_gnss_data_fn(struct k_work *item)
 		 * whenever we get new postion data?
 		 */
 		Mode amc_mode = calc_mode();
-		FenceStatus fence_status =
-			calc_fence_status(k_uptime_get_32() / MSEC_PER_SEC);
+
+		/** @todo if (cur_zone != WARN_ZONE || SndState() == 2 ||
+		    fenceStatus == FenceStatus_NotStarted ||
+		    fenceStatus == FenceStatus_Escaped) {
+			m_u16_MaybeOutOfFenceTimestamp = get16secTimer();
+		} */
+
+		FenceStatus fence_status = calc_fence_status();
 
 		/** @todo CollarStatus collar_status = get_collar_status();
 		 */

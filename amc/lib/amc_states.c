@@ -171,15 +171,17 @@ void set_beacon_status(enum beacon_status_type status)
 	LOG_DBG("Updated beacon status to enum ID %i", status);
 }
 
-FenceStatus calc_fence_status(uint16_t maybe_out_of_fence_timestamp)
+FenceStatus calc_fence_status()
 {
 	FenceStatus new_fence_status = current_fence_status;
 
 	enum beacon_status_type beacon_status =
 		atomic_get(&current_beacon_status);
 
-	uint32_t maybe_out_of_fence_delta = (k_uptime_get_32() / MSEC_PER_SEC) -
-					    maybe_out_of_fence_timestamp;
+	/** @todo uint32_t maybe_out_of_fence_delta = (k_uptime_get_32() / MSEC_PER_SEC) -
+					    maybe_out_of_fence_timestamp;*/
+
+	uint32_t maybe_out_of_fence_delta = 0;
 
 	switch (current_fence_status) {
 	case FenceStatus_FenceStatus_UNKNOWN:

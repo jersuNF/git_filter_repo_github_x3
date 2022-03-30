@@ -384,19 +384,18 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 	/* Start main correction procedure. */
 	correction(amc_mode, mean_dist, dist_change);
 
+	uint32_t delta_gnss_fix = k_uptime_get_32() - gnss->updated_at;
+
 	/* Checks for pausing correction. */
 	if ((amc_mode != Mode_Teach && amc_mode != Mode_Fence) ||
 	    zone == NO_ZONE) {
 		correction_pause(Reason_WARNSTOPREASON_MODE, mean_dist);
 	} else if (fs == FenceStatus_Escaped) {
 		correction_pause(Reason_WARNSTOPREASON_ESCAPED, mean_dist);
-	} /** } @todo Why is gnss->age removed???? Where to fetch? Ano related?
-	   *  else if (gnss-> > GNSS_1SEC) {
-	   *	correction_pause(
-	   *		Reason_WARNPAUSEREASON_MISSGPSDATA,
-	   *		mean_dist); // Warning pause as result of missing GNSS.
-	   */
-	else if (!gnss_has_accepted_fix()) {
+	} else if (delta_gnss_fix > GNSS_1SEC) {
+		/* Warning pause as result of missing GNSS. */
+		correction_pause(Reason_WARNPAUSEREASON_MISSGPSDATA, mean_dist);
+	} else if (!gnss_has_accepted_fix()) {
 		/* Warning pause as result of bad position accuracy. */
 		correction_pause(Reason_WARNPAUSEREASON_BADFIX, mean_dist);
 	} else if (amc_mode == Mode_Fence) {

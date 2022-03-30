@@ -23,7 +23,8 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change);
 
 static bool zap_eval_doing;
 static uint32_t zap_timestamp;
-static uint16_t correction_pause_timestamp;
+static uint32_t correction_pause_timestamp;
+static uint16_t max_freq_timestamp;
 static uint16_t last_warn_freq;
 
 /* Distance from fence where the last warning was started. */
@@ -314,17 +315,33 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 				EVENT_SUBMIT(freq_ev);
 
 				if (try_zap) {
-					correction_pause(
-						Reason_WARNPAUSEREASON_ZAP,
-						mean_dist);
-					struct ep_status_event *ep_ev =
-						new_ep_status_event();
-					ep_ev->ep_status = EP_RELEASE;
-					EVENT_SUBMIT(ep_ev);
-					zap_eval_doing = 1;
-					zap_timestamp = k_uptime_get_32();
-					increment_zap_count();
-					LOG_INF("AMC notified EP to zap!");
+					uint32_t delta_max = k_uptime_get_32() -
+							     max_freq_timestamp;
+					/* Check if we've played max freq for
+					 * at least 5 seconds.
+					 */
+					if (delta_max > WARN_MIN_DURATION_MS) {
+						correction_pause(
+							Reason_WARNPAUSEREASON_ZAP,
+							mean_dist);
+						struct ep_status_event *ep_ev =
+							new_ep_status_event();
+						ep_ev->ep_status = EP_RELEASE;
+						EVENT_SUBMIT(ep_ev);
+						zap_eval_doing = 1;
+						zap_timestamp =
+							k_uptime_get_32();
+						increment_zap_count();
+						LOG_INF("AMC notified EP to zap!");
+
+						/* Wait 5 more sec until
+						 * next zap.
+						 */
+						max_freq_timestamp =
+							k_uptime_get_32();
+					}
+				} else {
+					max_freq_timestamp = k_uptime_get_32();
 				}
 			}
 		} else {

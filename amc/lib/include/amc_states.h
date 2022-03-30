@@ -64,11 +64,11 @@ Mode get_mode(void);
 
 /** @brief Calculates and gives the current fencestatus.
  * 
- * @param WIP.
+ * @param maybe_out_of_fence_timestamp Seconds we've maybe been out of fence.
  * 
  * @returns Mode that we're currently in.
  */
-FenceStatus calc_fence_status(uint32_t maybe_out_of_fence_timestamp);
+FenceStatus calc_fence_status(uint16_t maybe_out_of_fence_timestamp);
 
 /** @brief Calculates and gives the current collarstatus.
  * 

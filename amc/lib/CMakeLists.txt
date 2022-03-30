@@ -4,7 +4,9 @@ list(APPEND ZEPHYR_EXTRA_MODULES
 
 zephyr_include_directories(
     ./include/
-    ./../../../modules/storage_controller/include/)
+    ./../../../modules/storage_controller/include/
+    ./../../../events/buzzer
+    ./../../../events/electric_pulse)
 
 target_sources(app PRIVATE 
 ./amc_cache.c

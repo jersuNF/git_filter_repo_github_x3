@@ -16,6 +16,14 @@
  */
 #define ACTIVITY_UPDATERATE 30
 
+/* Time between every tone update when tone increase/decrease [ms]. */
+#define WARN_TONE_SPEED_MS                                                     \
+	((WARN_FREQ_MAX - WARN_FREQ_INIT) / WARN_TONE_SPEED_HZ /               \
+	 (WARN_MIN_DURATION_MS / 1000))
+
+/* Steps of the tone update in hz. */
+#define WARN_TONE_SPEED_HZ 11
+
 /* Defined update rate (msec) on GPS at max "intensity" (5Hz). */
 #define GPS_RATE_MAX 250
 
@@ -140,5 +148,20 @@
 #else
 #define GNSS_HACC_UPPER_LIM_DM 35
 #endif
+
+#define ZAP_EVALUATION_TIME 200
+
+#define ZAP_DURATION_0 300 /* 160. */
+#define ZAP_DURATION_1 0 /* 250. */
+#define ZAP_DURATION_2 300
+
+/**
+ * When warning ends (pauses) as a result of returning movement 
+ * or orientation towards fence, the 
+ * "new fence line" will be placed this distance further away [dm].
+ * If 0, the fence already warned about will still be on the same distance,
+ * but if 1 the warning tone will be Restarted at this very distance.
+ */
+#define _LAST_DIST_ADD 1
 
 #endif /* _AMC_CONST_H_ */

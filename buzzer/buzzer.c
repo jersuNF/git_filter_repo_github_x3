@@ -411,7 +411,7 @@ void warn_zone_timeout_handler(struct k_timer *dummy)
  *            within 1 second occured.
  *        
  * @note The the frequency recevied from AMC must be exactly equal to
- *       WARN_FREQ_MS_PERIOD_MAX in order to publish the
+ *       WARN_FREQ_MAX in order to publish the
  *       SND_STATUS_PLAYING_MAX event for the EP module to subscribe to
  *       for instance.
  * @return 0 if successful and sound finished.
@@ -421,15 +421,14 @@ int play_warn_zone_from_freq(void)
 {
 	uint32_t cur_freq = atomic_get(&current_warn_zone_freq);
 
-	if (cur_freq == WARN_FREQ_MS_PERIOD_MAX) {
+	if (cur_freq == WARN_FREQ_MAX) {
 		/* Submit event to EP that we're now playing
 		 * max freq warn zone.
 		 */
 		struct sound_status_event *ev = new_sound_status_event();
 		ev->status = SND_STATUS_PLAYING_MAX;
 		EVENT_SUBMIT(ev);
-	} else if (cur_freq > WARN_FREQ_MS_PERIOD_MAX ||
-		   cur_freq < WARN_FREQ_MS_PERIOD_INIT) {
+	} else if (cur_freq > WARN_FREQ_MAX || cur_freq < WARN_FREQ_INIT) {
 		/* Not a valid frequency, exit entire SND_WARN event. */
 		return -ERANGE;
 	} else {
@@ -592,7 +591,7 @@ static bool event_handler(const struct event_header *eh)
 				 * update it.
 				 */
 				atomic_set(&current_warn_zone_freq,
-					   WARN_FREQ_MS_PERIOD_INIT);
+					   WARN_FREQ_INIT);
 				/* If current type is warn zone, start timeout timer
 			 	 * for getting a new frequency to play. */
 				k_timer_start(

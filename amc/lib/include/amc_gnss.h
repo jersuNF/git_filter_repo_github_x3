@@ -9,6 +9,11 @@
 
 #include "gnss.h"
 
+#define GNSS_1SEC 1000
+#define GNSS_5SEC (GNSS_1SEC * 5)
+#define GNSS_10SEC (GNSS_1SEC * 10)
+#define GNSS_20SEC (GNSS_1SEC * 20)
+
 typedef int (*gnss_timeout_cb)(void);
 
 /** @brief Initialize GNSS validator
@@ -53,9 +58,9 @@ int gnss_update(gnss_t *gnss_data);
  * 
  * @returns 0 on success, error code otherwise. 
  */
-int gnss_calc_xy(gnss_t *gnss_data, int16_t* x_dm, int16_t* y_dm,
-		  int32_t origin_lon, int32_t origin_lat, 
-		  uint16_t k_lon, uint16_t k_lat);
+int gnss_calc_xy(gnss_t *gnss_data, int16_t *x_dm, int16_t *y_dm,
+		 int32_t origin_lon, int32_t origin_lat, uint16_t k_lon,
+		 uint16_t k_lat);
 
 /** @brief Validate that GNSS fix is as good as possible and update flags.
  * 

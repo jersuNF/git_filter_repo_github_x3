@@ -12,6 +12,7 @@ LOG_MODULE_REGISTER(amc_states, CONFIG_AMC_LIB_LOG_LEVEL);
 #include "pasture_structure.h"
 #include "amc_zone.h"
 #include "amc_gnss.h"
+#include "amc_const.h"
 
 #include "ble_beacon_event.h"
 
@@ -21,6 +22,7 @@ static uint16_t zap_count_day = 0;
 static bool teach_mode_finished = false;
 static uint16_t teach_mode_saved_warn_cnt = 0;
 static uint16_t teach_mode_saved_zap_cnt = 0;
+static uint16_t total_zap_cnt;
 
 /* Fence status related variables. */
 static FenceStatus current_fence_status;
@@ -57,14 +59,23 @@ void reset_zap_pain_cnt(void)
 	zap_pain_cnt = 0;
 }
 
-/** @todo Move these to EP module? Move these to another amc_* file? */
+/** @todo Move these to another amc_* file? */
 void increment_zap_count(void)
 {
+	/** @todo Write some of these to eeprom */
 	teach_zap_cnt++;
 	zap_pain_cnt++;
 
+	total_zap_cnt++;
+
 	/** @todo Add reset for the day. */
 	zap_count_day++;
+}
+
+void init_eeprom_variables(void)
+{
+	/** @todo fetch from eeprom. */
+	total_zap_cnt = 0;
 }
 
 void increment_warn_count(void)
@@ -75,8 +86,8 @@ void increment_warn_count(void)
 static void enter_teach_mode()
 {
 	/** @todo fetch from eeprom. */
-	teach_mode_saved_warn_cnt = 0;
-	teach_mode_saved_zap_cnt = 0;
+	teach_mode_saved_warn_cnt = 0; /* EEPROM_TEACH_MODE_WARN_COUNT. */
+	teach_mode_saved_zap_cnt = 0; /* EEPROM_TEACH_MODE_ZAP_COUNT. */
 	teach_mode_finished = false;
 }
 
@@ -160,16 +171,15 @@ void set_beacon_status(enum beacon_status_type status)
 	LOG_DBG("Updated beacon status to enum ID %i", status);
 }
 
-FenceStatus calc_fence_status(uint32_t maybe_out_of_fence_timestamp)
+FenceStatus calc_fence_status(uint16_t maybe_out_of_fence_timestamp)
 {
 	FenceStatus new_fence_status = current_fence_status;
 
 	enum beacon_status_type beacon_status =
 		atomic_get(&current_beacon_status);
 
-	uint32_t maybe_out_of_fence_delta =
-		(k_uptime_get_32() - maybe_out_of_fence_timestamp) /
-		MSEC_PER_SEC;
+	uint32_t maybe_out_of_fence_delta = (k_uptime_get_32() / MSEC_PER_SEC) -
+					    maybe_out_of_fence_timestamp;
 
 	switch (current_fence_status) {
 	case FenceStatus_FenceStatus_UNKNOWN:

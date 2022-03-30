@@ -15,7 +15,7 @@
  *         parameters.
  * 
  * @param amc_mode Mode of the amc, i.e teach or not.
- * @param gnss last fix struct.
+ * @param gnss pointer to last fix struct.
  * @param fs status of the fence (i.e animal location relative to pasture).
  * @param zone which zone we're currently in.
  * @param mean_dist mean distance to border.
@@ -23,8 +23,26 @@
  * 
  * @returns 0 on success, otherwise negative errno.
  */
-int process_correction(Mode amc_mode, gnss_last_fix_struct_t gnss,
-		       FenceStatus fs, amc_zone_t zone, int16_t mean_dist,
-		       int16_t dist_change);
+void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
+			FenceStatus fs, amc_zone_t zone, int16_t mean_dist,
+			int16_t dist_change);
+
+/** @brief Gets the correction status.
+ * 
+ * @returns 0 if correction hasn't started.
+ * @returns 1 if correction has started, but not the warn zone.
+ * @returns 2 if correction and warn zone has started.
+ */
+uint8_t get_correction_status(void);
+
+/** @brief Function called by event handler to notify correction if buzzer is
+ *         in OFF event, meaning no sound is played. This happens if we enter
+ *         WARN event and starts playing frequencies, but someone triggers
+ *         the FIND_ME tune, in which case we have to re-enter the 
+ *         WARN sound event if we're still in the warn zone and the other
+ *         conditions are still met. The most logical place to have this is
+ *         where we update the frequency which is what is currently implemented.
+ */
+void update_buzzer_off(bool is_buzzer_off);
 
 #endif /* _AMC_CORRECTION_H_ */

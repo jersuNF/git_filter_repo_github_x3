@@ -261,7 +261,8 @@ void process_new_gnss_data_fn(struct k_work *item)
 		 * whenever we get new postion data?
 		 */
 		Mode amc_mode = calc_mode();
-		FenceStatus fence_status = calc_fence_status(k_uptime_get_32());
+		FenceStatus fence_status =
+			calc_fence_status(k_uptime_get_32() / MSEC_PER_SEC);
 
 		/** @todo CollarStatus collar_status = get_collar_status();
 		 */
@@ -285,12 +286,9 @@ void process_new_gnss_data_fn(struct k_work *item)
 		 * }
 		 */
 
-		err = process_correction(amc_mode, gnss->lastfix, fence_status,
-					 cur_zone, mean_dist, dist_change);
-		if (err) {
-			/* Error handle. */
-			goto cleanup;
-		}
+		/** @todo Error handle? */
+		process_correction(amc_mode, &gnss->lastfix, fence_status,
+				   cur_zone, mean_dist, dist_change);
 	} else {
 		fifo_dist_elem_count = 0;
 		fifo_avg_dist_elem_count = 0;
@@ -356,6 +354,15 @@ static bool event_handler(const struct event_header *eh)
 
 		set_beacon_status(event->status);
 		return false;
+	}
+	if (is_sound_status_event(eh)) {
+		struct sound_status_event *snd_status_ev =
+			cast_sound_status_event(eh);
+		if (snd_status_ev->status == SND_STATUS_IDLE) {
+			update_buzzer_off(true);
+		} else {
+			update_buzzer_off(false);
+		}
 	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);

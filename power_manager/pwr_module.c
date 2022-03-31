@@ -185,10 +185,10 @@ int log_and_fetch_battery_voltage(void)
 static bool event_handler(const struct event_header *eh)
 {
 	/* Received reboot event */
-	if (is_reboot_scheduled_event(eh)) {
+	if (is_pwr_reboot_scheduled_event(eh)) {
 		LOG_INF("Reboot event received!");
-		const struct reboot_scheduled_event *r_ev =
-			cast_reboot_scheduled_event(eh);
+		const struct pwr_reboot_scheduled_event *r_ev =
+			cast_pwr_reboot_scheduled_event(eh);
 
 		uint32_t time_to_wait_ms = r_ev->reboots_at - k_uptime_get_32();
 
@@ -204,4 +204,4 @@ static bool event_handler(const struct event_header *eh)
 }
 
 EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE_FINAL(MODULE, reboot_scheduled_event);
+EVENT_SUBSCRIBE_FINAL(MODULE, pwr_reboot_scheduled_event);

@@ -34,6 +34,7 @@
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
+#include "pwr_event.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
@@ -428,8 +429,8 @@ static inline void process_ble_cmd_event(void)
 		break;
 	}
 	case CMD_REBOOT_AVR_MCU: {
-		struct reboot_scheduled_event *r_ev =
-			new_reboot_scheduled_event();
+		struct pwr_reboot_scheduled_event *r_ev =
+			new_pwr_reboot_scheduled_event();
 		r_ev->reboots_at = k_uptime_get_32() +
 				   (CONFIG_SHUTDOWN_TIMER_SEC * MSEC_PER_SEC);
 		EVENT_SUBMIT(r_ev);

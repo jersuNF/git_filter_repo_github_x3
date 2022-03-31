@@ -3,7 +3,9 @@
 zephyr_include_directories(
     .
     ./../../events/error_handler/
-    ./../../events/watchdog/)
+    ./../../events/watchdog/
+    ./../../events/pwr_event/
+    )
 
 target_sources(app PRIVATE 
 error_handler.c

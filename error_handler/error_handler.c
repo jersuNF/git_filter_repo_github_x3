@@ -4,6 +4,7 @@
 
 #include <zephyr.h>
 #include "error_event.h"
+#include "pwr_event.h"
 #include <logging/log.h>
 #include <power/reboot.h>
 
@@ -28,11 +29,10 @@ static inline void process_fatal(enum error_sender_module sender, int code,
 	case ERR_GNSS_CONTROLLER:
 	case ERR_SOUND_CONTROLLER:
 	case ERR_MESSAGING:
-
 		LOG_INF("Received a fatal event.");
-#ifdef CONFIG_BOARD_NF_X25_NRF52840
-		sys_reboot(SYS_REBOOT_COLD);
-#endif
+		struct pwr_reboot_scheduled_event *r_ev =
+			new_pwr_reboot_scheduled_event();
+		EVENT_SUBMIT(r_ev);
 		break;
 
 	default:;

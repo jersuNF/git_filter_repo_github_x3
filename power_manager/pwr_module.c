@@ -187,13 +187,8 @@ static bool event_handler(const struct event_header *eh)
 	/* Received reboot event */
 	if (is_pwr_reboot_scheduled_event(eh)) {
 		LOG_INF("Reboot event received!");
-		const struct pwr_reboot_scheduled_event *r_ev =
-			cast_pwr_reboot_scheduled_event(eh);
-
-		uint32_t time_to_wait_ms = r_ev->reboots_at - k_uptime_get_32();
-
-		LOG_INF("Will reboot after %u milliseconds", time_to_wait_ms);
-		k_work_reschedule(&power_reboot, K_MSEC(time_to_wait_ms));
+		k_work_reschedule(&power_reboot,
+				  K_MSEC(CONFIG_SHUTDOWN_TIMER_SEC));
 		return false;
 	}
 

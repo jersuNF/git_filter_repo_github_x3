@@ -431,8 +431,6 @@ static inline void process_ble_cmd_event(void)
 	case CMD_REBOOT_AVR_MCU: {
 		struct pwr_reboot_scheduled_event *r_ev =
 			new_pwr_reboot_scheduled_event();
-		r_ev->reboots_at = k_uptime_get_32() +
-				   (CONFIG_SHUTDOWN_TIMER_SEC * MSEC_PER_SEC);
 		EVENT_SUBMIT(r_ev);
 		break;
 	}

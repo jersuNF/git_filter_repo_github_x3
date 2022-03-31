@@ -1,3 +1,4 @@
+#include "cellular_controller.h"
 #include "cellular_controller_events.h"
 #include "cellular_helpers_header.h"
 #include "messaging_module_events.h"
@@ -7,7 +8,7 @@
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define MY_PRIORITY CONFIG_RECV_THREAD_PRIORITY
 #define SOCKET_POLL_INTERVAL 0.25
-#define SOCK_RECV_TIMEOUT 60
+#define SOCK_RECV_TIMEOUT 15
 #define MODULE cellular_controller
 #define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_SEC
 
@@ -20,10 +21,18 @@ char server_address_tmp[EEP_HOST_PORT_BUF_SIZE-1];
 static int server_port;
 static char server_ip[15];
 
+/* Connection keep-alive thread structures */
+K_KERNEL_STACK_DEFINE(keep_alive_stack,
+		      CONFIG_CELLULAR_KEEP_ALIVE_STACK_SIZE);
+struct k_thread keep_alive_thread;
+static struct k_sem connection_state_sem;
+
 int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
 int socket_receive(struct data *, char **);
 int8_t lte_init(void);
 bool lte_is_ready(void);
+
+static bool modem_is_ready = false;
 
 APP_DMEM struct configs conf = {
 	.ipv4 = {
@@ -89,7 +98,7 @@ void receive_tcp(struct data *sock_data)
 				if (socket_idle_count > SOCK_RECV_TIMEOUT){
 					LOG_ERR("Socket receive timed out!, "
 						"%f\n", socket_idle_count);
-					submit_error(SOCKET_RECV, received);
+					submit_error(SOCKET_RECV, -ETIMEDOUT);
 					stop_tcp();
 					connected = false;
 					socket_idle_count = 0;
@@ -105,9 +114,15 @@ void receive_tcp(struct data *sock_data)
 	}
 }
 
-int8_t start_tcp(void)
+int start_tcp(void)
 {
-	int8_t ret = -1;
+	int ret = check_ip();
+	if (ret != 0){
+		LOG_ERR("Failed to get ip "
+			"address!");
+		/*TODO: notify error handler*/
+		return ret;
+	}
 	struct sockaddr_in addr4;
 
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
@@ -173,36 +188,30 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			cast_messaging_proto_out_event(eh);
 		uint8_t *pCharMsgOut = event->buf;
 		size_t MsgOutLen = event->len;
-		if(!connected){
-			int8_t  ret = start_tcp();
-			if (ret == 0){
-				connected = true;
-			}else{
-				LOG_WRN("Connection failed!");
-				stop_tcp();
-				/*TODO: notify error handler*/
-			}
-		}
+		
+		int8_t err;
+		
 		/* make a local copy of the message to send.*/
 		uint8_t *CharMsgOut;
 		CharMsgOut = (char *) k_malloc(MsgOutLen);
-		memcpy(CharMsgOut, pCharMsgOut, MsgOutLen);
-
-		if (*CharMsgOut == *pCharMsgOut) {
+		if (CharMsgOut == memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
 			LOG_DBG("Publishing ack to messaging!\n");
 			struct cellular_ack_event *ack =
 				new_cellular_ack_event();
 			EVENT_SUBMIT(ack);
 		}
 
-		int8_t err = send_tcp(CharMsgOut, MsgOutLen);
+		err = send_tcp(CharMsgOut, MsgOutLen);
 		if (err < 0) { /* TODO: notify error handler! */
 			submit_error(SOCKET_SEND, err);
 			k_free(CharMsgOut);
 			return false;
 		}
 		k_free(CharMsgOut);
-		return true;
+		return false;
+	}else if(is_check_connection(eh)){
+		k_sem_give(&connection_state_sem);
+		return false;
 	}
 	return false;
 }
@@ -229,7 +238,7 @@ int8_t cache_server_address(void)
 	ip_len = ptr_port - 1 - &server_address[0];
 	memcpy(&server_ip[0], &server_address[0], ip_len);
 	if (server_ip[0] != '\0') {
-		LOG_DBG("Host address read from eeprom: %s : %d", &server_ip[0],
+		LOG_INF("Host address read from eeprom: %s : %d", &server_ip[0],
 			server_port);
 		return 0;
 	} else {
@@ -237,59 +246,111 @@ int8_t cache_server_address(void)
 	}
 }
 
+static int cellular_controller_connect(void* dev)
+{
+	int ret = lte_init();
+	if (ret != 0) {
+		LOG_ERR("Failed to start LTE connection, "
+			"check network interface!");
+		goto exit;
+	}
+
+	LOG_INF("Cellular network interface ready!\n");
+
+	ret = cache_server_address();
+	if (ret != 0) { //172.31.36.11:4321
+		//172.31.33.243:9876
+		strcpy(server_ip,"172.31.36.11");
+		server_port = 4321;
+		LOG_INF("Default server ip address will be "
+			"used.");
+	}
+
+	ret = 0;
+
+exit:
+	return ret;
+}
+
+static void cellular_controller_keep_alive(void* dev)
+{
+	while (true) {
+		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
+			if (!cellular_controller_is_ready()) {
+				stop_tcp();
+				int ret = reset_modem();
+				if (ret == 0) {
+					ret = cellular_controller_connect(dev);
+					if (ret == 0) {
+						modem_is_ready = true;
+					}
+				}
+			}
+			if (cellular_controller_is_ready()) {
+				if(!connected){//check_ip takes place in start_tcp()
+					// in this case.
+					int  ret = start_tcp();
+					if (ret == 0){
+						connected = true;
+						announce_connection_state(true);
+					}else {
+						LOG_WRN("Connection failed!");
+						stop_tcp();
+						announce_connection_state
+							(false);
+						/*TODO: notify error handler*/
+					}
+				} else {
+					int ret = check_ip();
+					if (ret != 0){
+						LOG_ERR("Failed to get ip "
+							"address!");
+						announce_connection_state
+							(false);
+						/*TODO: notify error handler*/
+					}else {
+						announce_connection_state(true);
+					}
+				}
+			}
+		}
+	}
+}
+
+void announce_connection_state(bool state){
+	struct connection_state_event *ev
+		= new_connection_state_event();
+	ev->state = state;
+	EVENT_SUBMIT(ev);
+}
+
+bool cellular_controller_is_ready(void)
+{
+	return modem_is_ready;
+}
+
 int8_t cellular_controller_init(void)
 {
-	int8_t ret;
-	printk("Cellular controller starting!, %p\n", k_current_get());
 	connected = false;
-
+	
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {
 		LOG_ERR("GSM driver was not found!\n");
 		submit_error(OTHER, -1);
-		goto exit_cellular_controller;
-	}
-	ret = lte_init();
-	if (ret == 1) {
-		LOG_INF("Cellular network interface ready!\n");
-
-		if (lte_is_ready()) {
-			ret = cache_server_address();
-			if (ret == 0) {
-				LOG_INF("Server ip address successfully cached from "
-					"eeprom!\n");
-			} else { //172.31.36.11:4321
-				//172.31.33.243:9876
-				strcpy(server_ip,"172.31.36.11");
-				server_port = 4321;
-				LOG_WRN("Default server ip address will be "
-					"used. \n");
-//				goto exit_cellular_controller;
-			}
-			ret = start_tcp();
-			if (ret == 0) {
-				LOG_INF("TCP connection started!\n");
-				connected = true;
-				return 0;
-			} else {
-				goto exit_cellular_controller;
-			}
-		} else {
-			LOG_ERR("Check LTE network configuration!");
-			/* TODO: notify error handler! */
-			goto exit_cellular_controller;
-		}
-	} else {
-		LOG_ERR("Failed to start LTE connection, check network interface!");
-		/* TODO: notify error handler! */
-		goto exit_cellular_controller;
+		return -1;
 	}
 
-exit_cellular_controller:
-	stop_tcp();
-	connected = false;
-	LOG_ERR("Cellular controller initialization failure!");
-	return -1;
+	/* Start connection keep-alive thread */
+	modem_is_ready = false;
+	k_sem_init(&connection_state_sem, 0, 1);
+	k_thread_create(&keep_alive_thread, keep_alive_stack,
+			K_KERNEL_STACK_SIZEOF(keep_alive_stack),
+			(k_thread_entry_t) cellular_controller_keep_alive,
+			(void*)gsm_dev, NULL, NULL, 
+			K_PRIO_COOP(CONFIG_CELLULAR_KEEP_ALIVE_THREAD_PRIORITY),
+			0, K_NO_WAIT);
+
+	return 0;
 }
 
 EVENT_LISTENER(MODULE, cellular_controller_event_handler);
@@ -297,3 +358,4 @@ EVENT_SUBSCRIBE(MODULE, messaging_ack_event);
 EVENT_SUBSCRIBE(MODULE, messaging_proto_out_event);
 EVENT_SUBSCRIBE(MODULE, messaging_stop_connection_event);
 EVENT_SUBSCRIBE(MODULE, messaging_host_address_event);
+EVENT_SUBSCRIBE(MODULE, check_connection);

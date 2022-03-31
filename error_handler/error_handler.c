@@ -18,7 +18,7 @@ static inline void process_fatal(enum error_sender_module sender, int code,
 {
 	/* Process fatal errors here. */
 	switch (sender) {
-	case ERR_SENDER_FW_UPGRADE: {
+	case ERR_FW_UPGRADE: {
 		break;
 	}
 	default:;
@@ -34,7 +34,7 @@ static inline void process_error(enum error_sender_module sender, int code,
 {
 	/* Process normal errors here. */
 	switch (sender) {
-	case ERR_SENDER_FW_UPGRADE: {
+	case ERR_FW_UPGRADE: {
 		break;
 	}
 	default:;
@@ -49,7 +49,7 @@ static inline void process_warning(enum error_sender_module sender, int code,
 {
 	/* Process warnings here. */
 	switch (sender) {
-	case ERR_SENDER_FW_UPGRADE: {
+	case ERR_FW_UPGRADE: {
 		break;
 	}
 	default:;

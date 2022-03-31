@@ -664,9 +664,13 @@ void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
 void proto_InitHeader(NofenceMessage *msg)
 {
 	memset(msg, 0, sizeof(NofenceMessage));
+#if DT_NODE_HAS_STATUS(DT_ALIAS(eeprom), okay)
 	uint32_t eeprom_stored_serial_nr;
 	eep_read_serial(&eeprom_stored_serial_nr);
 	msg->header.ulId = eeprom_stored_serial_nr;
+#else
+	msg->header.ulId = 11500;
+#endif
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
 	if (use_server_time) {

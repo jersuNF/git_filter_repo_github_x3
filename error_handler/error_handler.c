@@ -5,6 +5,7 @@
 #include <zephyr.h>
 #include "error_event.h"
 #include <logging/log.h>
+#include <power/reboot.h>
 
 #define LOG_MODULE_NAME error_handler
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_ERROR_HANDLER_LOG_LEVEL);
@@ -18,9 +19,22 @@ static inline void process_fatal(enum error_sender_module sender, int code,
 {
 	/* Process fatal errors here. */
 	switch (sender) {
-	case ERR_FW_UPGRADE: {
+	case ERR_FW_UPGRADE:
+	case ERR_AMC:
+	case ERR_STORAGE_CONTROLLER:
+	case ERR_ENV_SENSOR:
+	case ERR_ELECTRIC_PULSE:
+	case ERR_PWR_MODULE:
+	case ERR_GNSS_CONTROLLER:
+	case ERR_SOUND_CONTROLLER:
+	case ERR_MESSAGING:
+
+		LOG_INF("Received a fatal event.");
+#ifdef CONFIG_BOARD_NF_X25_NRF52840
+		sys_reboot(SYS_REBOOT_COLD);
+#endif
 		break;
-	}
+
 	default:;
 	}
 }

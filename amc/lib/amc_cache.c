@@ -81,9 +81,9 @@ int set_gnss_cache(gnss_t *gnss)
 	}
 
 	if (current_gnssdata_area == &cached_gnssdata_area_1) {
-		memcpy(&cached_gnssdata_area_2, &gnss, sizeof(gnss_t));
+		memcpy(&cached_gnssdata_area_2, gnss, sizeof(gnss_t));
 	} else {
-		memcpy(&cached_gnssdata_area_1, &gnss, sizeof(gnss_t));
+		memcpy(&cached_gnssdata_area_1, gnss, sizeof(gnss_t));
 	}
 
 	atomic_set(&new_gnss_written, true);

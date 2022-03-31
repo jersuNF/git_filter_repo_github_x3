@@ -42,7 +42,7 @@ static atomic_t buzzer_off = ATOMIC_INIT(true);
 static void correction_start(int16_t mean_dist)
 {
 	uint32_t delta_correction_pause =
-		(k_uptime_get_32() / MSEC_PER_SEC) - correction_pause_timestamp;
+		(k_uptime_get_32() - correction_pause_timestamp) / 1000;
 
 	if (delta_correction_pause > CORRECTION_PAUSE_MIN_TIME) {
 		if (!correction_started) {
@@ -200,8 +200,7 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 	static uint32_t timestamp;
 
 	if (zap_eval_doing) {
-		uint32_t delta_zap_eval =
-			(k_uptime_get_32() / MSEC_PER_SEC) - zap_timestamp;
+		uint32_t delta_zap_eval = k_uptime_get_32() - zap_timestamp;
 
 		if (delta_zap_eval >= ZAP_EVALUATION_TIME) {
 			/** @todo Notify server and log, i.e submit event to 
@@ -328,7 +327,7 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 						new_ep_status_event();
 					ep_ev->ep_status = EP_RELEASE;
 					EVENT_SUBMIT(ep_ev);
-					zap_eval_doing = 1;
+					zap_eval_doing = true;
 					zap_timestamp = k_uptime_get_32();
 					increment_zap_count();
 					LOG_INF("AMC notified EP to zap!");
@@ -337,9 +336,7 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 		} else {
 			last_warn_dist = mean_dist + _LAST_DIST_ADD;
 		}
-		return;
 	}
-	return;
 }
 
 uint8_t get_correction_status(void)
@@ -375,45 +372,53 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 
 	uint32_t delta_gnss_fix = k_uptime_get_32() - gnss->updated_at;
 
-	/* Checks for pausing correction. */
-	if ((amc_mode != Mode_Teach && amc_mode != Mode_Fence) ||
-	    zone == NO_ZONE) {
-		correction_pause(Reason_WARNSTOPREASON_MODE, mean_dist);
-	} else if (fs == FenceStatus_Escaped) {
-		correction_pause(Reason_WARNSTOPREASON_ESCAPED, mean_dist);
-	} else if (delta_gnss_fix > GNSS_1SEC) {
-		/* Warning pause as result of missing GNSS. */
-		correction_pause(Reason_WARNPAUSEREASON_MISSGPSDATA, mean_dist);
-	} else if (!gnss_has_accepted_fix()) {
-		/* Warning pause as result of bad position accuracy. */
-		correction_pause(Reason_WARNPAUSEREASON_BADFIX, mean_dist);
-	} else if (amc_mode == Mode_Fence) {
-		if (mean_dist - last_warn_dist <= CORRECTION_PAUSE_DIST) {
-			correction_pause(Reason_WARNPAUSEREASON_NODIST,
+	/* Checks for pausing correction only if we have started it. */
+	if (correction_started || correction_warn_on) {
+		if ((amc_mode != Mode_Teach && amc_mode != Mode_Fence) ||
+		    zone == NO_ZONE) {
+			correction_pause(Reason_WARNSTOPREASON_MODE, mean_dist);
+		} else if (fs == FenceStatus_Escaped) {
+			correction_pause(Reason_WARNSTOPREASON_ESCAPED,
 					 mean_dist);
-		}
-	} else if (amc_mode == Mode_Teach) {
-		/* [LEGACY] see: https://youtrack.axbit.com/youtrack/issue/NOF-307
+		} else if (delta_gnss_fix > GNSS_1SEC) {
+			/* Warning pause as result of missing GNSS. */
+			correction_pause(Reason_WARNPAUSEREASON_MISSGPSDATA,
+					 mean_dist);
+		} else if (!gnss_has_accepted_fix()) {
+			/* Warning pause as result of bad position accuracy. */
+			correction_pause(Reason_WARNPAUSEREASON_BADFIX,
+					 mean_dist);
+		} else if (amc_mode == Mode_Fence) {
+			if (mean_dist - last_warn_dist <=
+			    CORRECTION_PAUSE_DIST) {
+				correction_pause(Reason_WARNPAUSEREASON_NODIST,
+						 mean_dist);
+			}
+		} else if (amc_mode == Mode_Teach) {
+			/* [LEGACY] see: https://youtrack.axbit.com/youtrack/issue/NOF-307
 		 * 		if (acc_RawAmplitude(ACC_Y) > ACC_STOP_AMPLITUDE){			// This makes it easier for the animal to understand that it is in control and that it acctually is possible to turn off the warning
 		 * 			correction_pause(Reason_WARNPAUSEREASON_ACC);			// Warning pause as result of that the accelerometer values shows sound reaction
 		 * 		}
 		 */
-		if (mean_dist - last_warn_dist <=
-		    TEACHMODE_CORRECTION_PAUSE_DIST) {
-			correction_pause(Reason_WARNPAUSEREASON_NODIST,
-					 mean_dist);
+			if (mean_dist - last_warn_dist <=
+			    TEACHMODE_CORRECTION_PAUSE_DIST) {
+				correction_pause(Reason_WARNPAUSEREASON_NODIST,
+						 mean_dist);
+			}
+			if (dist_change <= TEACHMODE_DIST_DECR_SLOPE_OFF_LIM) {
+				/* Then animal has moved back, closer to fence. */
+				correction_pause(
+					Reason_WARNPAUSEREASON_MOVEBACK,
+					mean_dist);
+			}
 		}
-		if (dist_change <= TEACHMODE_DIST_DECR_SLOPE_OFF_LIM) {
-			/* Then animal has moved back, closer to fence. */
-			correction_pause(Reason_WARNPAUSEREASON_MOVEBACK,
-					 mean_dist);
-		}
-	}
-	/* [LEGACY CODE] See http://youtrack.axbit.no/youtrack/issue/NOF-213. */
-	if ((get_correction_status() < 2) && zone != WARN_ZONE) {
-		/* Turn off warning only if it is already 
+		/* [LEGACY CODE] See http://youtrack.axbit.no/youtrack/issue/NOF-213. */
+		if ((get_correction_status() < 2) && zone != WARN_ZONE) {
+			/* Turn off warning only if it is already 
 		 * paused when inside the pasture. 
 		 */
-		correction_pause(Reason_WARNSTOPREASON_INSIDE, mean_dist);
+			correction_pause(Reason_WARNSTOPREASON_INSIDE,
+					 mean_dist);
+		}
 	}
 }

@@ -43,7 +43,7 @@ atomic_t current_beacon_status = ATOMIC_INIT(BEACON_STATUS_NOT_FOUND);
 
 static bool trace_mode_conditions()
 {
-	if (!fnc_any_valid_fence()) {
+	if (!fnc_valid_fence()) {
 		return true;
 	}
 
@@ -115,7 +115,7 @@ Mode calc_mode(void)
 	Mode new_mode = current_mode;
 	switch (current_mode) {
 	case Mode_Mode_UNKNOWN:
-		if (fnc_any_valid_fence()) {
+		if (fnc_valid_fence()) {
 			new_mode = Mode_Teach;
 		} else if (fnc_valid_def()) {
 			new_mode = Mode_Trace;
@@ -161,7 +161,7 @@ static inline bool is_inside_fence_relaxed()
 {
 	amc_zone_t cur_zone = zone_get();
 	/** @todo gpsp_isGpsFresh()??????? */
-	return fnc_any_valid_fence() /*&& gpsp_isGpsFresh()*/ &&
+	return fnc_valid_fence() /*&& gpsp_isGpsFresh()*/ &&
 	       gnss_has_accepted_fix() &&
 	       !(cur_zone == WARN_ZONE || cur_zone == NO_ZONE);
 }
@@ -242,7 +242,7 @@ FenceStatus calc_fence_status()
 
 	case FenceStatus_BeaconContact:
 		if (beacon_status != BEACON_STATUS_REGION_NEAR) {
-			if (fnc_any_valid_fence()) {
+			if (fnc_valid_fence()) {
 				new_fence_status = FenceStatus_NotStarted;
 				LOG_INF("BeaconContact->NotStarted");
 			} else {

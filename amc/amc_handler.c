@@ -160,7 +160,7 @@ void process_new_gnss_data_fn(struct k_work *item)
 	bool overflow_xy = err == -EOVERFLOW;
 
 	/* If any fence (pasture?) is valid and we have fix. */
-	if (gnss_has_fix() && fnc_any_valid_fence() && !overflow_xy) {
+	if (gnss_has_fix() && fnc_valid_fence() && !overflow_xy) {
 		/* Calculate distance to closest polygon. */
 		uint8_t fence_index = 0;
 		uint8_t vertex_index = 0;
@@ -266,7 +266,7 @@ void process_new_gnss_data_fn(struct k_work *item)
 		    fenceStatus == FenceStatus_NotStarted ||
 		    fenceStatus == FenceStatus_Escaped) {
 			m_u16_MaybeOutOfFenceTimestamp = get16secTimer();
-		} */
+		}*/
 
 		FenceStatus fence_status = calc_fence_status();
 
@@ -304,6 +304,7 @@ void process_new_gnss_data_fn(struct k_work *item)
 		fifo_dist_elem_count = 0;
 		fifo_avg_dist_elem_count = 0;
 		zone_set(NO_ZONE);
+		/** @todo stop buzzer? */
 	}
 
 cleanup:

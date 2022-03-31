@@ -133,7 +133,7 @@ bool fnc_valid(fence_t *fence)
 	/** @todo: Also test timespan from eeprom fence definition here. */
 }
 
-bool fnc_any_valid_fence(void)
+bool fnc_valid_fence(void)
 {
 	pasture_t *pasture = NULL;
 
@@ -145,12 +145,13 @@ bool fnc_any_valid_fence(void)
 	    pasture->m.status == FenceStatus_TurnedOffByBLE) {
 		return false;
 	}
+	bool valid = true;
 	for (int i = 0; i < pasture->m.ul_total_fences; i++) {
-		if (fnc_valid(&pasture->fences[i])) {
-			return true;
+		if (!fnc_valid(&pasture->fences[i])) {
+			return false;
 		}
 	}
-	return false;
+	return pasture->m.ul_total_fences != 0 && valid;
 }
 
 bool fnc_valid_def(void)

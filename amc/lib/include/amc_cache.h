@@ -52,7 +52,7 @@ bool fnc_valid(fence_t *fence);
  * 
  * @return true if valid fence exists.
 */
-bool fnc_any_valid_fence(void);
+bool fnc_valid_fence(void);
 
 /** @brief Checks if the cached pasture has valid definition.
  * 

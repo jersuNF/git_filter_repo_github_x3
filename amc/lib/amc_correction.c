@@ -37,8 +37,6 @@ static uint8_t correction_started = 0;
 /* True from function correction start to correction_pause. (Sound is ON). */
 static uint8_t correction_warn_on = 0;
 
-static atomic_t buzzer_off = ATOMIC_INIT(true);
-
 static void correction_start(int16_t mean_dist)
 {
 	uint32_t delta_correction_pause =
@@ -54,18 +52,39 @@ static void correction_start(int16_t mean_dist)
 			 *  g_i16_WarnStartWayP[0] = GPS()->X;
 			 *  g_i16_WarnStartWayP[1] = GPS()->Y;
 			 */
-
-			LOG_INF("Starting correction.");
+			LOG_INF("Correction started.");
 		}
 		if (!correction_warn_on) {
-			/** Typically we would start the buzzer warn sound
-			 *  event here, but we can rather submit that
-			 *  if buzzer is OFF AND we are sending it a new warn
-			 *  frequency.
-		 	*/
+			/** Submit warn zone event to buzzer. 
+			 * 
+			 * @note This warn zone event 
+			 * will play indefinitly
+			 * unless one of the three happens and 
+			 * it will turn off:
+			 * 1. amc_correction doesn't update the 
+			 *    warn frequency with a new value 
+			 *    within 1 second  timeout (1 sec 
+			 *    is the default value at least).
+			 * 2. A new sound event has been submitted 
+			 *    i.e. FIND_ME, or OFF, in which case 
+			 *    we have to resubmit the 
+			 *    SND_WARN event. This is currently 
+			 *    implemented when we update the freq.
+			 *    Where we submit the event if the
+			 *    buzzer is IDLE.
+			 * 3. It gets a frequency that is outside 
+			 *    the freq range for instance below 
+			 *    WARN_SOUND_INIT or higher than
+			 *    WARN_SOUND_MAX, in which case 
+			 *    it turns OFF.
+			 */
+			struct sound_event *snd_ev = new_sound_event();
+			snd_ev->type = SND_WARN;
+			EVENT_SUBMIT(snd_ev);
+
 			/** @todo log_WriteCorrectionMessage(true); */
 			increment_warn_count();
-			LOG_INF("Incremented warn zone counter.");
+			LOG_INF("Warn zone counter++ and told buzzer to enter WARN");
 		}
 		correction_started = 1;
 		correction_warn_on = 1;
@@ -188,11 +207,6 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 	}
 }
 
-void update_buzzer_off(bool is_buzzer_off)
-{
-	atomic_set(&buzzer_off, is_buzzer_off);
-}
-
 static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 {
 	/* Variables used in the correction setup, calculation and end. */
@@ -265,47 +279,6 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 			/* We check if we're within valid frequency ranges. */
 			if (last_warn_freq >= WARN_FREQ_INIT &&
 			    last_warn_freq <= WARN_FREQ_MAX) {
-				/** Check if buzzer is in warn event or was
-				 *  interrupted playing other sounds in between.
-				 *  We check if the variable is OFF, in which
-				 *  case we know the buzzer is finished playing
-				 *  what it had to play and we can continue with
-				 *  warn zone event.
-				 *  @note We might see multiple sound events being
-				 *  published to event manager, since the atomic 
-				 *  flag might not have been updated fast enough.
-				 */
-				if (atomic_get(&buzzer_off)) {
-					/** Submit warn zone event to buzzer. 
-					 * 
-					 * @note This warn zone event 
-					 * will play indefinitly
-					 * unless one of the three happens and 
-					 * it will turn off:
-					 * 1. amc_correction doesn't update the 
-					 *    warn frequency with a new value 
-					 *    within 1 second  timeout (1 sec 
-					 *    is the default value at least).
-					 * 2. A new sound event has been submitted 
-					 *    i.e. FIND_ME, or OFF, in which case 
-					 *    we have to resubmit the 
-					 *    SND_WARN event. This is currently 
-					 *    implemented when we update the freq.
-					 *    Where we submit the event if the
-					 *    buzzer is IDLE.
-					 * 3. It gets a frequency that is outside 
-					 *    the freq range for instance below 
-					 *    WARN_SOUND_INIT or higher than
-					 *    WARN_SOUND_MAX, in which case 
-					 *    it turns OFF.
-					 */
-					struct sound_event *snd_ev =
-						new_sound_event();
-					snd_ev->type = SND_WARN;
-					EVENT_SUBMIT(snd_ev);
-					LOG_INF("AMC notified buzzer to enter WARN");
-				}
-
 				/** Update buzzer frequency event. */
 				struct sound_set_warn_freq_event *freq_ev =
 					new_sound_set_warn_freq_event();

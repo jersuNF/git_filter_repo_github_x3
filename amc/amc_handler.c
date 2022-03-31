@@ -367,15 +367,6 @@ static bool event_handler(const struct event_header *eh)
 		set_beacon_status(event->status);
 		return false;
 	}
-	if (is_sound_status_event(eh)) {
-		struct sound_status_event *snd_status_ev =
-			cast_sound_status_event(eh);
-		if (snd_status_ev->status == SND_STATUS_IDLE) {
-			update_buzzer_off(true);
-		} else {
-			update_buzzer_off(false);
-		}
-	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 

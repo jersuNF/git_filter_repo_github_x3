@@ -35,14 +35,4 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
  */
 uint8_t get_correction_status(void);
 
-/** @brief Function called by event handler to notify correction if buzzer is
- *         in OFF event, meaning no sound is played. This happens if we enter
- *         WARN event and starts playing frequencies, but someone triggers
- *         the FIND_ME tune, in which case we have to re-enter the 
- *         WARN sound event if we're still in the warn zone and the other
- *         conditions are still met. The most logical place to have this is
- *         where we update the frequency which is what is currently implemented.
- */
-void update_buzzer_off(bool is_buzzer_off);
-
 #endif /* _AMC_CORRECTION_H_ */

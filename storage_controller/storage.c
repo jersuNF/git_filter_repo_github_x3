@@ -26,6 +26,8 @@
 #include "embedded.pb.h"
 #include "UBX.h"
 
+#include <date_time.h>
+
 /* Get sizes and offset definitions from pm_static.yml. */
 #include <pm_config.h>
 
@@ -381,9 +383,15 @@ int check_if_ano_valid_cb(uint8_t *data, size_t len)
 {
 	UBX_MGA_ANO_RAW_t *ano_frame = (UBX_MGA_ANO_RAW_t *)(data);
 
-	/* Age logic here. */
-	LOG_INF("Year %i, month %i, day %i", ano_frame->mga_ano.year,
-		ano_frame->mga_ano.month, ano_frame->mga_ano.day);
+	/* Fetch unix timestamp. */
+	int64_t unixtime = 0;
+
+	if (date_time_now(&unixtime) != 0) {
+		/* Time is not yet acquired, keep all ANO entries
+		 * as they still might be valid. 
+		 */
+		return -EINTR;
+	}
 
 	/** @todo If age is valid, update ano sector. Fetch from somewhere! */
 	if (ano_frame->mga_ano.year == 22) {

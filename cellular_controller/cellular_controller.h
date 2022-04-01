@@ -21,6 +21,6 @@ int8_t cellular_controller_init(void);
  * @return True if ready, false otherwise.
  */
 bool cellular_controller_is_ready(void);
-void announce_connection_up(void);
+void announce_connection_state(bool);
 
 #endif //X3_FW_CELLULAR_CONTROLLER_H

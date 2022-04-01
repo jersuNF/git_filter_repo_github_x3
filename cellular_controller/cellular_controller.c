@@ -328,17 +328,19 @@ static void cellular_controller_keep_alive(void* dev)
 				}
 			}
 			if (cellular_controller_is_ready()) {
-				/*TODO: check socket connection status from
-				 * through the modem driver.*/
+				/*TODO: check actual socket connection
+				 * statusto determine the value of connected.*/
 				if(!connected){//check_ip takes place in start_tcp()
 					// in this case.
 					int  ret = start_tcp();
 					if (ret >= 0){
 						connected = true;
-						announce_connection_up();
+						announce_connection_state(true);
 					}else {
 						LOG_WRN("Connection failed!");
 						stop_tcp();
+						announce_connection_state
+							(false);
 						/*TODO: notify error handler*/
 					}
 				} else {
@@ -346,9 +348,11 @@ static void cellular_controller_keep_alive(void* dev)
 					if (ret != 0){
 						LOG_ERR("Failed to get ip "
 							"address!");
+						announce_connection_state
+							(false);
 						/*TODO: notify error handler*/
 					}else {
-						announce_connection_up();
+						announce_connection_state(true);
 					}
 				}
 			}
@@ -356,9 +360,10 @@ static void cellular_controller_keep_alive(void* dev)
 	}
 }
 
-void announce_connection_up(void){
-	struct connection_ready_event *ev
-		= new_connection_ready_event();
+void announce_connection_state(bool state){
+	struct connection_state_event *ev
+		= new_connection_state_event();
+	ev->state = state;
 	EVENT_SUBMIT(ev);
 }
 

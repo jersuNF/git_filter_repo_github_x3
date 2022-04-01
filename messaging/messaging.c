@@ -429,8 +429,8 @@ static inline void process_ble_cmd_event(void)
 		break;
 	}
 	case CMD_REBOOT_AVR_MCU: {
-		struct pwr_reboot_scheduled_event *r_ev =
-			new_pwr_reboot_scheduled_event();
+		struct pwr_reboot_event *r_ev =
+			new_pwr_reboot_event();
 		EVENT_SUBMIT(r_ev);
 		break;
 	}

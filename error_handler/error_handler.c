@@ -30,8 +30,8 @@ static inline void process_fatal(enum error_sender_module sender, int code,
 	case ERR_SOUND_CONTROLLER:
 	case ERR_MESSAGING:
 		LOG_INF("Received a fatal event.");
-		struct pwr_reboot_scheduled_event *r_ev =
-			new_pwr_reboot_scheduled_event();
+		struct pwr_reboot_event *r_ev =
+			new_pwr_reboot_event();
 		EVENT_SUBMIT(r_ev);
 		break;
 

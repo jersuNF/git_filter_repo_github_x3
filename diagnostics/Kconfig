@@ -28,23 +28,29 @@ if DIAGNOSTICS
 	config DIAGNOSTICS_STACK_SIZE
 		int "Memory to allocate stack of handler."
 		default 1024
-	
+
 	config DIAGNOSTICS_THREAD_PRIORITY
 		int "Execution priority level for thread running diagnostics communication."
 		default 7
-	
-	config DIAGNOSTICS_PROFILE_EVENTS
-		bool "Use the diagnostics module to profile event manager event submits and execution start/stop."
-		default n
-	
+
 	config DIAGNOSTICS_RECEIVE_BUFFER_LENGTH
 		int "Maximum number of bytes in receive buffer. This sets a limits to how long each command and accompanying data can be."
 		default 128
-	
+
+	config DIAGNOSTICS_TEXT_PARSER
+		bool "Enable to use text-based communication"
+		default n
+
+	config DIAGNOSTICS_PROFILE_EVENTS
+		bool "Use the diagnostics module to profile event manager event submits and execution start/stop."
+		default n
+		depends on DEBUG
+		depends on DIAGNOSTICS_TEXT_PARSER
+
 	config DIAGNOSTICS_PASSTHROUGH_BUFFER_SIZE
 		int "Memory to allocate for passthrough buffering."
 		default 256
-	
+
 	config DIAGNOSTICS_PASSTHROUGH_IMPLICIT_NEWLINE
 		bool "Enabling this will cause the passthrough to convert any CR or LF into CRLF."
 		default y

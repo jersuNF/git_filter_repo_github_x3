@@ -4,8 +4,13 @@
 
 #include "diagnostics.h"
 #include "diagnostics_types.h"
-#include "parser.h"
 #include "passthrough.h"
+
+#if CONFIG_DIAGNOSTICS_TEXT_PARSER
+#include "parser.h"
+#else
+#include "commander.h"
+#endif
 
 #include "diagnostics_events.h"
 #include "msg_data_event.h"
@@ -156,11 +161,19 @@ int diagnostics_module_init()
 	diagnostics_rtt_set_active();
 	k_thread_start(diag_handler_id);
 
+#if CONFIG_DIAGNOSTICS_TEXT_PARSER
 	struct parser_action actions = {
 		.send_resp = diagnostics_send,
 		.thru_enable = passthrough_enable
 	};
 	parser_init(&actions);
+#else
+	struct commander_action actions = {
+		.send_resp = diagnostics_send,
+		.thru_enable = passthrough_enable
+	};
+	commander_init(&actions);
+#endif
 
 	return 0;
 }
@@ -186,7 +199,14 @@ static uint32_t diagnostics_process_input(enum diagnostics_interface interface,
 	if (passthrough_interface != DIAGNOSTICS_NONE) {
 		bytes_parsed = passthrough_write_data(data, size);
 	} else {
+#if CONFIG_DIAGNOSTICS_TEXT_PARSER
 		bytes_parsed = parser_handle(interface, data, size);
+#else
+		bytes_parsed = commander_handle(interface, data, size);
+		///* Echo for now */
+		//bytes_parsed = size;
+		//diagnostics_send(interface, data, size);
+#endif
 	}
 	return bytes_parsed;
 }
@@ -359,6 +379,7 @@ K_THREAD_DEFINE(diag_handler_id,
  * @param[in] msg Message for the log entry. 
  * 
  */
+ #if CONFIG_DIAGNOSTICS_TEXT_PARSER
 static void diagnostics_log(enum diagnostics_severity severity, 
 						    char* header, char* msg)
 {
@@ -413,6 +434,7 @@ static void diagnostics_log(enum diagnostics_severity severity,
 
 	k_free(buf);
 }
+#endif
 
 /**
  * @brief Main event handler function. Listens to BLE connection state and 

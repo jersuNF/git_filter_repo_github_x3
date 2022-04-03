@@ -445,6 +445,7 @@ static bool event_handler(const struct event_header *eh)
 				memcpy(&ble_receive_buffer[ble_received_count],
 				       event->buf, 
 				       event->len);
+				ble_received_count += event->len;
 			} else {
 				LOG_ERR("BLE receive data overflow.");
 			}
@@ -453,7 +454,6 @@ static bool event_handler(const struct event_header *eh)
 			
 			k_mutex_unlock(&ble_receive_buffer_mutex);
 		}
-
 
 		return false;
 	}
@@ -491,14 +491,16 @@ static void diagnostics_build_event_string(const struct event_header *eh,
 					   uint8_t* buffer, 
 					   uint32_t size)
 {
-	/* Must have space for event name, 
-	parantheses, space and null-termination. */
-	if (size < (strlen(eh->type_id->name) + 4)) {
-		LOG_ERR("Too small buffer for diagnostics logging of event.");
-	}
+	if (eh->type_id->log_event) {
+		/* Must have space for event name, 
+		parantheses, space and null-termination. */
+		if (size < (strlen(eh->type_id->name) + 4)) {
+			LOG_ERR("Too small buffer for diagnostics logging of event.");
+		}
 
-	uint32_t length = snprintf(buffer, size, "(%s) ", eh->type_id->name);
-	eh->type_id->log_event(eh, &buffer[length], size-length);
+		uint32_t length = snprintf(buffer, size, "(%s) ", eh->type_id->name);
+		eh->type_id->log_event(eh, &buffer[length], size-length);
+	}
 }
 
 /**

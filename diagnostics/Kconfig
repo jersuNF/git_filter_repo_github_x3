@@ -1,7 +1,6 @@
 menuconfig DIAGNOSTICS
 	bool "Diagnostics module"
 	default n
-	depends on DEBUG
 	select USE_SEGGER_RTT
 
 if DIAGNOSTICS
@@ -36,7 +35,7 @@ if DIAGNOSTICS
 	
 	config DIAGNOSTICS_PROFILE_EVENTS
 		bool "Use the diagnostics module to profile event manager event submits and execution start/stop."
-		default y
+		default n
 	
 	config DIAGNOSTICS_RECEIVE_BUFFER_LENGTH
 		int "Maximum number of bytes in receive buffer. This sets a limits to how long each command and accompanying data can be."

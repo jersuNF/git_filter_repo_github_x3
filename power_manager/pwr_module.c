@@ -7,7 +7,6 @@
 #include <device.h>
 #include <devicetree.h>
 #include <drivers/gpio.h>
-#include <power/reboot.h>
 
 #include <math.h>
 #include <stdio.h>
@@ -20,6 +19,9 @@
 #include "ble_ctrl_event.h"
 #include "messaging_module_events.h"
 
+#if CONFIG_ADC_NRFX_SAADC
+#include "charging.h"
+#endif
 #define MODULE pwr_module
 #include <logging/log.h>
 
@@ -48,8 +50,11 @@ static const struct battery_level_point levels[] = {
 
 };
 
+/* Define the workers for battery and charger */
 static struct k_work_delayable battery_poll_work;
-static struct k_work_delayable power_reboot;
+#if CONFIG_ADC_NRFX_SAADC
+static struct k_work_delayable charging_poll_work;
+#endif
 
 /** @brief Periodic battery voltage work function */
 static void battery_poll_work_fn()
@@ -78,6 +83,17 @@ static void battery_poll_work_fn()
 		    CONFIG_BATTERY_LOW - CONFIG_BATTERY_THRESHOLD) {
 			current_state = PWR_LOW;
 		}
+#if CONFIG_ADC_NRFX_SAADC
+		if (batt_voltage > CONFIG_CHARGING_THRESHOLD_STOP) {
+			if (charging_in_progress()) {
+				charging_stop();
+			}
+		} else if (batt_voltage < CONFIG_CHARGING_THRESHOLD_START) {
+			if (!charging_in_progress()) {
+				charging_start();
+			}
+		}
+#endif
 		break;
 
 	case PWR_LOW:
@@ -110,22 +126,58 @@ static void battery_poll_work_fn()
 	k_work_reschedule(&battery_poll_work,
 			  K_SECONDS(CONFIG_BATTERY_POLLER_WORK_SEC));
 }
-
-static void reboot_work_fn()
+#if CONFIG_ADC_NRFX_SAADC
+/** @brief Periodic solar charging work function */
+static void charging_poll_work_fn()
 {
-#ifdef CONFIG_BOARD_NF_X25_NRF52840
-	/* Add a check that we are using NRF board
-	* since they are the ones supported by nordic's <power/reboot.h>
-	*/
-	/* Add logic to shutdown modules if necessary. */
-	sys_reboot(SYS_REBOOT_COLD);
-#endif
+	int charging_current_avg = charging_current_sample_averaged();
+	if (charging_current_avg < 0) {
+		LOG_ERR("Failed to fetch charging data %d",
+			charging_current_avg);
+		char *msg = "Unable fetch charging data";
+		nf_app_error(ERR_PWR_MODULE, charging_current_avg, msg,
+			     strlen(msg));
+		return;
+	}
+	LOG_INF("Solar charging current: %d mA", charging_current_avg);
+	struct pwr_status_event *event = new_pwr_status_event();
+	event->pwr_state = PWR_CHARGING;
+	event->charging_ma = charging_current_avg;
+	EVENT_SUBMIT(event);
+	k_work_reschedule(&charging_poll_work,
+			  K_SECONDS(CONFIG_CHARGING_POLLER_WORK_SEC));
 }
+#endif
 
 int pwr_module_init(void)
 {
-	init_moving_average();
+	int err;
+	/* Configure battery voltage and charging adc */
+	err = battery_setup();
+	if (err) {
+		char *e_msg = "Failed to set up battery";
+		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
+		return err;
+	}
 
+#if CONFIG_ADC_NRFX_SAADC
+	/* Initialize and start charging */
+	err = charging_setup();
+	err = charging_init_module();
+	if (err) {
+		LOG_ERR("Failed to init charging module %d", err);
+		char *e_msg = "Failed to configure or setup charging";
+		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
+		return err;
+	}
+	err = charging_start();
+	if (err) {
+		LOG_ERR("Failed to start charging %d", err);
+		char *e_msg = "Failed to start solar charging";
+		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
+		return err;
+	}
+#endif
 	/* Set PWR state to NORMAL as initial state */
 	struct pwr_status_event *event = new_pwr_status_event();
 	event->pwr_state = PWR_NORMAL;
@@ -133,7 +185,7 @@ int pwr_module_init(void)
 	current_state = PWR_NORMAL;
 
 	/* NB: Battery is already initialized with SYS_INIT in battery.c */
-	int err = log_and_fetch_battery_voltage();
+	err = log_and_fetch_battery_voltage();
 	if (err < 0) {
 		char *e_msg = "Error in fetching battery voltage";
 		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
@@ -145,8 +197,12 @@ int pwr_module_init(void)
 	k_work_reschedule(&battery_poll_work,
 			  K_SECONDS(CONFIG_BATTERY_POLLER_WORK_SEC));
 
-	k_work_init_delayable(&power_reboot, reboot_work_fn);
-
+#if CONFIG_ADC_NRFX_SAADC
+	/* Initialize and start periodic charging poll function */
+	k_work_init_delayable(&charging_poll_work, charging_poll_work_fn);
+	k_work_reschedule(&charging_poll_work,
+			  K_SECONDS(CONFIG_CHARGING_POLLER_WORK_SEC));
+#endif
 	return 0;
 }
 
@@ -170,33 +226,3 @@ int log_and_fetch_battery_voltage(void)
 
 	return batt_mV;
 }
-
-/**
- * @brief Event handler function
- * @param[in] eh Pointer to event handler struct
- * @return true to consume the event (event is not propagated to further
- * listners), false otherwise
- */
-static bool event_handler(const struct event_header *eh)
-{
-	/* Received reboot event */
-	if (is_reboot_scheduled_event(eh)) {
-		LOG_INF("Reboot event received!");
-		const struct reboot_scheduled_event *r_ev =
-			cast_reboot_scheduled_event(eh);
-
-		uint32_t time_to_wait_ms = r_ev->reboots_at - k_uptime_get_32();
-
-		LOG_INF("Will reboot after %u milliseconds", time_to_wait_ms);
-		k_work_reschedule(&power_reboot, K_MSEC(time_to_wait_ms));
-		return false;
-	}
-
-	/* If event is unhandled, unsubscribe. */
-	__ASSERT_NO_MSG(false);
-
-	return false;
-}
-
-EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE_FINAL(MODULE, reboot_scheduled_event);

@@ -1,0 +1,23 @@
+
+menuconfig TIME_USE
+	bool "Messaging module"
+	select COLLAR_PROTOCOL
+	select POLL
+	help
+	  Enable messaging module
+	default y
+
+
+if TIME_USE
+	config TIME_USE_LOG_LEVEL
+		int "Log level for the time_use module"
+		default 4
+
+	config TIME_USE_THREAD_STACK_SIZE
+		int "Size of the time_use processing thread"
+		default 2048
+
+	config TIME_USE_THREAD_PRIORITY
+		int "Priority of the time_use processing thread"
+		default 1
+endif

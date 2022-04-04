@@ -151,6 +151,20 @@ int reset_modem(void)
 	return modem_nf_reset();
 }
 
+/**
+ * Reads a 17 byte string potentially with an ipv4 address "xxx.xxx.xxx.xxx",
+ * representing the ip address given to the sim card. The string will
+ * have garbage bytes if the quoted ip address is shorter than 17 bytes. e.g:
+ * for "10.12.225.223" we would have 2 garbage bytes.
+ * @param collar_ip
+ * @return
+ */
+int get_ip(char** collar_ip)
+{/*TODO: extract the quoted address if needed and return the exact length. */
+	get_pdp_addr(collar_ip);
+	return 0;
+}
+
 void stop_tcp(void)
 {
 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
@@ -187,3 +201,25 @@ const struct device *bind_modem(void)
 {
 	return device_get_binding(GSM_DEVICE);
 }
+
+int check_ip(void){
+	char* collar_ip = NULL;
+	uint8_t timeout_counter = 0;
+	while(timeout_counter++ <= 40){
+		int ret = get_ip(&collar_ip);
+		if (ret != 0){
+			LOG_ERR("Failed to get ip from sara r4 driver!");
+			return -1;
+			/*TODO: reset modem?*/
+		}else {
+			ret = memcmp(collar_ip,"\"0.0.0.0\"",
+				     9);
+			if (ret != 0){
+				return 0;
+			}
+		}
+		k_sleep(K_MSEC(500));
+	}
+	LOG_ERR("Failed to acquire ip!");
+	return -1;
+};

@@ -32,6 +32,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/../../events/cellular_controller/cellular_controller
 ${CMAKE_CURRENT_SOURCE_DIR}/../../events/gnss_controller/gnss_controller_events.c
 ${CMAKE_CURRENT_SOURCE_DIR}/../../events/error_handler/error_event.c
 ${CMAKE_CURRENT_SOURCE_DIR}/../../events/storage/storage_event.c
+
 )
 
 add_dependencies(${ZEPHYR_CURRENT_LIBRARY}

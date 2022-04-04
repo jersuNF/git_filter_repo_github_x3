@@ -22,6 +22,7 @@
 #include "UBX.h"
 #include "unixTime.h"
 #include "error_event.h"
+#include "helpers.h"
 
 #include "nf_crc16.h"
 
@@ -310,10 +311,11 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_connection_state_event(eh)) {
-		struct connection_state_event *ev = cast_connection_state_event(eh);
-		if (ev->state){
+		struct connection_state_event *ev =
+			cast_connection_state_event(eh);
+		if (ev->state) {
 			k_sem_give(&connection_ready);
-		} else{
+		} else {
 			/*TODO: take some action while waiting for cellular
 			 * controller to recover the connection.*/
 		}
@@ -571,6 +573,10 @@ void build_poll_request(NofenceMessage *poll_req)
  * value from battery voltage event.*/
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
+
+	/* Fw info. */
+	poll_req->m.poll_message_req.has_versionInfoHW = true;
+	poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version = 1;
 	/* TODO: get gsm info from modem driver */
 	//	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
 	//	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
@@ -648,11 +654,11 @@ int8_t request_fframe(uint32_t version, uint8_t frame)
 	return 0;
 }
 
-void fence_download( uint8_t new_fframe){
-	if (new_fframe == 0 && first_frame){
+void fence_download(uint8_t new_fframe)
+{
+	if (new_fframe == 0 && first_frame) {
 		first_frame = false;
-	}
-	else if (new_fframe == 0 && !first_frame){ //something went bad
+	} else if (new_fframe == 0 && !first_frame) { //something went bad
 		expected_fframe = 0;
 		new_fence_in_progress = 0;
 		return;
@@ -757,7 +763,7 @@ int send_binary_message(uint8_t *data, size_t len)
 	struct check_connection *ev = new_check_connection();
 	EVENT_SUBMIT(ev);
 	int ret = k_sem_take(&connection_ready, K_MINUTES(2));
-	if (ret != 0){
+	if (ret != 0) {
 		LOG_ERR("Connection not ready, can't send message now!");
 		return -ETIMEDOUT;
 	}
@@ -826,7 +832,10 @@ void process_poll_response(NofenceMessage *proto)
 	}
 	// If we are asked to, reboot
 	if (pResp->has_bReboot && pResp->bReboot) {
-		/* TODO: publish reboot event to power manager */
+		struct reboot_scheduled_event *r_ev =
+			new_reboot_scheduled_event();
+		r_ev->reboots_at = k_uptime_get_32() +
+				   (CONFIG_SHUTDOWN_TIMER_SEC * MSEC_PER_SEC);
 	}
 	/* TODO: set activation mode to (pResp->eActivationMode); */
 
@@ -884,8 +893,8 @@ void process_poll_response(NofenceMessage *proto)
 		 * to AMC */
 		//request frame 0
 		first_frame = true;
-		LOG_WRN("Requesting frame 0 of fence: %d!\n"
-			,pResp->ulFenceDefVersion);
+		LOG_INF("Requesting frame 0 for fence version %i.",
+			pResp->ulFenceDefVersion);
 		int ret = request_fframe(pResp->ulFenceDefVersion, 0);
 		if (ret == 0) {
 			first_frame = true;
@@ -898,10 +907,12 @@ void process_poll_response(NofenceMessage *proto)
 /* @brief: starts a firmware download if a new version exists on the server. */
 void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 {
-	// compare versions and start update when needed.//
-	uint32_t app_ver = fw_ver_from_server->ulNRF52AppVersion;
+	//uint32_t app_ver = fw_ver_from_server->ulNRF52AppVersion;
+	uint32_t app_ver = fw_ver_from_server->ulATmegaVersion;
 
-	if (app_ver > NF_X25_VERSION_NUMBER) {
+	LOG_INF("Received app version from server %i", app_ver);
+
+	if (app_ver != NF_X25_VERSION_NUMBER) {
 		struct start_fota_event *ev = new_start_fota_event();
 		ev->override_default_host = false;
 		ev->version = app_ver;

@@ -24,7 +24,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_GNSS_CONTROLLER_LOG_LEVEL);
 
 #define MIN_GNSS_RATE CONFIG_MINIMUM_ALLOWED_GNSS_RATE
 
-_Noreturn void publish_gnss_data(void);
+_Noreturn void publish_gnss_data(void* ctx);
 void set_gnss_rate(enum gnss_data_rate);
 static int gnss_data_update_cb(const gnss_t*);
 void check_gnss_age(uint32_t);
@@ -39,7 +39,15 @@ gnss_t cached_gnss_data;
 
 const struct device *gnss_dev = NULL;
 uint8_t gnss_reset_count;
+/*
+K_THREAD_DEFINE(pub_gnss, STACK_SIZE,
+		publish_gnss_data, NULL, NULL, NULL,
+		PRIORITY, 0, 0);
+		*/
 
+K_THREAD_STACK_DEFINE(pub_gnss_stack, STACK_SIZE);
+struct k_thread pub_gnss_thread;
+bool pub_gnss_started = false;
 
 int gnss_controller_init(void){
 	gnss_age = 0;
@@ -78,6 +86,14 @@ int gnss_controller_init(void){
 		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
 		return ret;
 	}
+	if (!pub_gnss_started) {
+		k_thread_create(&pub_gnss_thread, pub_gnss_stack,
+				K_KERNEL_STACK_SIZEOF(pub_gnss_stack),
+				(k_thread_entry_t) publish_gnss_data,
+				(void*)NULL, NULL, NULL, 
+				PRIORITY, 0, K_NO_WAIT);
+		pub_gnss_started = true;
+	}
 
 /* power consumption crude test - begin
 	ret = gnss_set_rate(gnss_dev, MIN_GNSS_RATE);
@@ -103,12 +119,8 @@ int gnss_controller_init(void){
 power consumption crude test - end */
 	return 0;
 }
-K_THREAD_DEFINE(pub_gnss, STACK_SIZE,
-		publish_gnss_data, NULL, NULL, NULL,
-		PRIORITY, 0, 0);
 
-
-_Noreturn void publish_gnss_data(){
+_Noreturn void publish_gnss_data(void* ctx){
 	while(true){
 		if(k_sem_take(&new_data_sem, K_SECONDS(25)) == 0) {
 			if (gnss_data_buffer.fix_ok) {

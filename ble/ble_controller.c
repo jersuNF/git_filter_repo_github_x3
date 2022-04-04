@@ -602,7 +602,9 @@ int ble_module_init()
 			strncpy(bt_device_name, "NF??????\0", DEVICE_NAME_LEN+1);
 		} else {
 			char tmp[DEVICE_NAME_LEN + 1];
-			snprintf(tmp, 6, "%d" , serial_id);
+			snprintf(tmp, 7, "%i" , serial_id); //TODO: 7
+			// digit numbers would overflow. Using 7 to overcome
+			// the compiler warning, needs to be fixed.
 			uint32_t len = strlen(tmp);
 			memset(bt_device_name, '0', sizeof(bt_device_name));
 			bt_device_name[0] = 'N';

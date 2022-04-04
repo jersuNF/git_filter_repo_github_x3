@@ -10,6 +10,8 @@
 #include <logging/log.h>
 #include "ble_ctrl_event.h"
 #include "ble_data_event.h"
+#include "ble_cmd_event.h"
+#include "nofence_service.h"
 #include "lte_proto_event.h"
 
 #include "cellular_controller_events.h"
@@ -21,6 +23,7 @@
 #include "unixTime.h"
 #include "error_event.h"
 #include "helpers.h"
+#include <power/reboot.h>
 
 #include "nf_crc16.h"
 
@@ -30,6 +33,7 @@
 
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
+#include "sound_event.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
@@ -45,6 +49,7 @@ uint32_t time_from_server;
 
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
 K_SEM_DEFINE(send_out_ack, 0, 1);
+K_SEM_DEFINE(connection_ready, 0, 1);
 
 collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
@@ -85,16 +90,21 @@ K_MSGQ_DEFINE(ble_ctrl_msgq, sizeof(struct ble_ctrl_event),
 	      CONFIG_MSGQ_BLE_CTRL_SIZE, 4);
 K_MSGQ_DEFINE(ble_data_msgq, sizeof(struct ble_data_event),
 	      CONFIG_MSGQ_BLE_DATA_SIZE, 4);
+K_MSGQ_DEFINE(ble_cmd_msgq, sizeof(struct ble_cmd_event),
+	      CONFIG_MSGQ_BLE_CMD_SIZE, 4);
 K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct lte_proto_event),
 	      CONFIG_MSGQ_LTE_PROTO_SIZE, 4);
 
-#define NUM_MSGQ_EVENTS 3
+#define NUM_MSGQ_EVENTS 4
 struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY, &ble_ctrl_msgq,
 					0),
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY, &ble_data_msgq,
+					0),
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
+					K_POLL_MODE_NOTIFY_ONLY, &ble_cmd_msgq,
 					0),
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY,
@@ -158,6 +168,9 @@ int read_log_data_cb(uint8_t *data, size_t len)
  */
 void log_data_periodic_fn()
 {
+	/* Reschedule. */
+	k_work_reschedule_for_queue(&send_q, &log_work,
+				    K_MINUTES(atomic_get(&log_period_minutes)));
 	/* Construct log data and write to storage controller. */
 	build_log_message();
 
@@ -180,10 +193,6 @@ void log_data_periodic_fn()
 		}
 		LOG_INF("Emptied LOG partition data as we have read everything.");
 	}
-
-	/* Reschedule. */
-	k_work_reschedule_for_queue(&send_q, &log_work,
-				    K_MINUTES(atomic_get(&log_period_minutes)));
 }
 
 /**
@@ -192,6 +201,9 @@ void log_data_periodic_fn()
  */
 void modem_poll_work_fn()
 {
+	k_work_reschedule_for_queue(
+		&send_q, &modem_poll_work,
+		K_MINUTES(atomic_get(&poll_period_minutes)));
 	/* Add logic for the periodic protobuf modem poller. */
 	LOG_INF("Starting periodic poll work and building poll request.");
 	NofenceMessage new_poll_msg;
@@ -206,10 +218,6 @@ void modem_poll_work_fn()
 					    K_SECONDS(1));
 		return;
 	}
-
-	k_work_reschedule_for_queue(
-		&send_q, &modem_poll_work,
-		K_MINUTES(atomic_get(&poll_period_minutes)));
 }
 
 /**
@@ -227,6 +235,13 @@ static bool event_handler(const struct event_header *eh)
 		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
 			/* Message queue is full: purge old data & try again */
 			k_msgq_purge(&ble_ctrl_msgq);
+		}
+		return false;
+	}
+	if (is_ble_cmd_event(eh)) {
+		struct ble_cmd_event *ev = cast_ble_cmd_event(eh);
+		while (k_msgq_put(&ble_cmd_msgq, ev, K_NO_WAIT) != 0) {
+			k_msgq_purge(&ble_cmd_msgq);
 		}
 		return false;
 	}
@@ -295,6 +310,17 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	if (is_connection_state_event(eh)) {
+		struct connection_state_event *ev =
+			cast_connection_state_event(eh);
+		if (ev->state) {
+			k_sem_give(&connection_ready);
+		} else {
+			/*TODO: take some action while waiting for cellular
+			 * controller to recover the connection.*/
+		}
+		return false;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -338,8 +364,12 @@ bool validate_pasture()
 }
 
 EVENT_LISTENER(MODULE, event_handler);
+
+/* Bluetooth events. */
 EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
+EVENT_SUBSCRIBE(MODULE, ble_cmd_event);
 EVENT_SUBSCRIBE(MODULE, ble_data_event);
+
 EVENT_SUBSCRIBE(MODULE, lte_proto_event);
 EVENT_SUBSCRIBE(MODULE, cellular_ack_event);
 EVENT_SUBSCRIBE(MODULE, cellular_proto_in_event);
@@ -351,6 +381,7 @@ EVENT_SUBSCRIBE(MODULE, update_flash_erase);
 EVENT_SUBSCRIBE(MODULE, update_zap_count);
 EVENT_SUBSCRIBE(MODULE, animal_warning_event);
 EVENT_SUBSCRIBE(MODULE, animal_escape_event);
+EVENT_SUBSCRIBE(MODULE, connection_state_event);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -371,6 +402,51 @@ static inline void process_ble_data_event(void)
 	if (err) {
 		LOG_ERR("Error getting ble_data_event: %d", err);
 		return;
+	}
+}
+
+static inline void process_ble_cmd_event(void)
+{
+	struct ble_cmd_event ev;
+
+	int err = k_msgq_get(&ble_cmd_msgq, &ev, K_NO_WAIT);
+	if (err) {
+		LOG_ERR("Error getting ble_cmd_event: %d\n", err);
+		return;
+	}
+
+	enum command_char ble_command = ev.cmd;
+
+	switch (ble_command) {
+	case CMD_TURN_OFF_FENCE: {
+		/* Wait for final AMC integration. Should simply issue an event. */
+		break;
+	}
+	case CMD_REBOOT_AVR_MCU: {
+		struct reboot_scheduled_event *r_ev =
+			new_reboot_scheduled_event();
+		r_ev->reboots_at = k_uptime_get_32() +
+				   (CONFIG_SHUTDOWN_TIMER_SEC * MSEC_PER_SEC);
+		EVENT_SUBMIT(r_ev);
+		break;
+	}
+	case CMD_PLAY_SOUND: {
+		struct sound_event *s_ev = new_sound_event();
+		s_ev->type = SND_FIND_ME;
+		EVENT_SUBMIT(s_ev);
+		break;
+	}
+	case CMD_DOWNLOAD_FENCE: {
+		/* Downloads fence from bluetooth? */
+		break;
+	}
+	case CMD_FW_INSTALL: {
+		/* Deprecated as we have ble_dfu.c instead? */
+		break;
+	}
+	default: {
+		break;
+	}
 	}
 }
 
@@ -429,6 +505,9 @@ void messaging_thread_fn()
 		if (rc == 0) {
 			while (k_msgq_num_used_get(&ble_ctrl_msgq) > 0) {
 				process_ble_ctrl_event();
+			}
+			while (k_msgq_num_used_get(&ble_cmd_msgq) > 0) {
+				process_ble_cmd_event();
 			}
 			while (k_msgq_num_used_get(&ble_data_msgq) > 0) {
 				process_ble_data_event();
@@ -493,6 +572,10 @@ void build_poll_request(NofenceMessage *poll_req)
  * value from battery voltage event.*/
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
+
+	/* Fw info. */
+	poll_req->m.poll_message_req.has_versionInfoHW = true;
+	poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version = 1;
 	/* TODO: get gsm info from modem driver */
 	//	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
 	//	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
@@ -669,6 +752,13 @@ void proto_InitHeader(NofenceMessage *msg)
  */
 int send_binary_message(uint8_t *data, size_t len)
 {
+	struct check_connection *ev = new_check_connection();
+	EVENT_SUBMIT(ev);
+	int ret = k_sem_take(&connection_ready, K_MINUTES(2));
+	if (ret != 0) {
+		LOG_ERR("Connection not ready, can't send message now!");
+		return -ETIMEDOUT;
+	}
 	/* We can only send 1 message at a time, use mutex. */
 	if (k_mutex_lock(&send_binary_mutex,
 			 K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC * 2)) == 0) {
@@ -794,10 +884,12 @@ void process_poll_response(NofenceMessage *proto)
 /* @brief: starts a firmware download if a new version exists on the server. */
 void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 {
-	// compare versions and start update when needed.//
-	uint32_t app_ver = fw_ver_from_server->ulNRF52AppVersion;
+	//uint32_t app_ver = fw_ver_from_server->ulNRF52AppVersion;
+	uint32_t app_ver = fw_ver_from_server->ulATmegaVersion;
 
-	if (app_ver > NF_X25_VERSION_NUMBER) {
+	LOG_INF("Received app version from server %i", app_ver);
+
+	if (app_ver != NF_X25_VERSION_NUMBER) {
 		struct start_fota_event *ev = new_start_fota_event();
 		ev->override_default_host = false;
 		ev->version = app_ver;

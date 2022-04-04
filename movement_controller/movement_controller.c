@@ -11,8 +11,7 @@
 #include "nf_fifo.h"
 #include "trigonometry.h"
 
-#define LOG_MODULE_NAME move_controller
-LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
+LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 
 static const struct device *sensor;
 
@@ -395,5 +394,5 @@ static bool event_handler(const struct event_header *eh)
 	return false;
 }
 
-EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE(MODULE, movement_set_mode_event);
+EVENT_LISTENER(move_controller, event_handler);
+EVENT_SUBSCRIBE(move_controller, movement_set_mode_event);

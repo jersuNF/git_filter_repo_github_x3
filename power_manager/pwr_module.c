@@ -17,6 +17,7 @@
 #include "error_event.h"
 #include "battery.h"
 #include "ble_ctrl_event.h"
+#include "messaging_module_events.h"
 
 #if CONFIG_ADC_NRFX_SAADC
 #include "charging.h"

@@ -97,7 +97,7 @@ enum command_char {
 	CMD_PLAY_SOUND = 0x03,
 	CMD_DOWNLOAD_FENCE = 0x04,
 	CMD_FW_INSTALL = 0x05
-} cmd;
+};
 
 #define PB_RESPONSE_CHAR_LEN 8 /* This length must be checked */
 

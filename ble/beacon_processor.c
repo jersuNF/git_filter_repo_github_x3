@@ -298,7 +298,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 	}
 
 	char mac_current[MAC_CHARBUF_SIZE];
-	LOG_INF("Device=%s  RX_RSSI=%d TX_RSSI=%d  m=%d",
+	LOG_DBG("Device=%s  RX_RSSI=%d TX_RSSI=%d  m=%d",
 		log_strdup(mac2string(mac_current, sizeof(mac_current), addr)),
 		(int)scanner_rssi_measured, (int)beacon_adv_rssi, (int)m);
 
@@ -335,7 +335,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		shortest_dist = UINT8_MAX;
 	} else {
 		char mac_best[MAC_CHARBUF_SIZE];
-		LOG_INF("Calculated new shortest distance %u m from Beacon_%u: %s",
+		LOG_DBG("Calculated new shortest distance %u m from Beacon_%u: %s",
 			shortest_dist, beacon_index,
 			log_strdup(
 				mac2string(mac_best, sizeof(mac_best),

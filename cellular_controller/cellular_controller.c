@@ -1,5 +1,4 @@
 #include "cellular_controller.h"
-#include "cellular_controller_events.h"
 #include "cellular_helpers_header.h"
 #include "messaging_module_events.h"
 #include <zephyr.h>
@@ -15,6 +14,10 @@
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
 K_SEM_DEFINE(messaging_ack, 1, 1);
+
+K_THREAD_DEFINE(send_tcp_from_q, CONFIG_SEND_THREAD_STACK_SIZE,
+		send_tcp_fn, NULL, NULL, NULL,
+		CONFIG_SEND_THREAD_PRIORITY, 0, 0);
 
 char server_address[EEP_HOST_PORT_BUF_SIZE-1];
 char server_address_tmp[EEP_HOST_PORT_BUF_SIZE-1];
@@ -41,14 +44,6 @@ APP_DMEM struct configs conf = {
 		.tcp.sock = INVALID_SOCK,
 	},
 };
-
-void submit_error(int8_t cause, int8_t err_code)
-{
-	struct cellular_error_event *err = new_cellular_error_event();
-	err->cause = cause;
-	err->err_code = err_code;
-	EVENT_SUBMIT(err);
-}
 
 void receive_tcp(struct data *);
 K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK,
@@ -78,7 +73,6 @@ void receive_tcp(struct data *sock_data)
 					/* TODO: notify the error handler */
 					LOG_ERR("New message received while the messaging module "
 						"hasn't consumed the previous one!\n");
-					submit_error(OTHER, -1);
 				} else {
 					if (pMsgIn != NULL) {
 						k_free(pMsgIn);
@@ -98,14 +92,12 @@ void receive_tcp(struct data *sock_data)
 				if (socket_idle_count > SOCK_RECV_TIMEOUT){
 					LOG_ERR("Socket receive timed out!, "
 						"%f\n", socket_idle_count);
-					submit_error(SOCKET_RECV, -ETIMEDOUT);
 					stop_tcp();
 					connected = false;
 					socket_idle_count = 0;
 				}
 			} else {
 				LOG_ERR("Socket receive error!\n");
-				submit_error(SOCKET_RECV, received);
 				stop_tcp();
 				connected = false;
 				socket_idle_count = 0;
@@ -133,7 +125,6 @@ int start_tcp(void)
 		ret = socket_connect(&conf.ipv4, (struct sockaddr *)&addr4,
 				     sizeof(addr4));
 		if (ret < 0) {
-			submit_error(SOCKET_CONNECT, ret);
 			return ret;
 		}
 	}
@@ -189,8 +180,6 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		uint8_t *pCharMsgOut = event->buf;
 		size_t MsgOutLen = event->len;
 		
-		int8_t err;
-		
 		/* make a local copy of the message to send.*/
 		uint8_t *CharMsgOut;
 		CharMsgOut = (char *) k_malloc(MsgOutLen);
@@ -201,8 +190,8 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			EVENT_SUBMIT(ack);
 		}
 
-		err = send_tcp(CharMsgOut, MsgOutLen);
-		if (err != MsgOutLen) { /* TODO: notify error handler! */
+		int err = send_tcp_q(CharMsgOut, MsgOutLen);
+		if (err != 0) { /* TODO: notify error handler! */
 			LOG_DBG("Failed to send tcp message, error: %d!", err);
 			k_free(CharMsgOut);
 			return false;
@@ -211,6 +200,9 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return false;
 	}else if(is_check_connection(eh)){
 		k_sem_give(&connection_state_sem);
+		return false;
+	} else if (is_cellular_error_event(eh)) {
+		modem_is_ready = false;
 		return false;
 	}
 	return false;
@@ -322,6 +314,9 @@ void announce_connection_state(bool state){
 		= new_connection_state_event();
 	ev->state = state;
 	EVENT_SUBMIT(ev);
+	if (state == false){
+		modem_is_ready = false;
+	}
 }
 
 bool cellular_controller_is_ready(void)
@@ -336,7 +331,6 @@ int8_t cellular_controller_init(void)
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {
 		LOG_ERR("GSM driver was not found!\n");
-		submit_error(OTHER, -1);
 		return -1;
 	}
 

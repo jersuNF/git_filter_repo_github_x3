@@ -18,6 +18,18 @@ static struct net_if *iface;
 static struct net_if_config *cfg;
 #define GSM_DEVICE DT_LABEL(DT_INST(0, u_blox_sara_r4))
 
+struct msg2server {
+	char *msg;
+	size_t len;
+};
+K_MSGQ_DEFINE(msgq, sizeof(struct msg2server), 1, 4);
+
+struct k_poll_event events[1] = {
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
+					K_POLL_MODE_NOTIFY_ONLY, &msgq, 0)};
+
+K_TIMER_DEFINE(sendall_timer, NULL, NULL);
+
 int8_t lte_init(void)
 {
 	int rc = 0;
@@ -54,14 +66,17 @@ bool lte_is_ready(void)
 static size_t sendall(int sock, const void *buf, size_t len)
 {
 	size_t to_send = len;
+	k_timer_start(&sendall_timer, K_MSEC(500), K_NO_WAIT);
 	while (len) {
 		size_t out_len = send(sock, buf, len, 0);
-
 		if (out_len < 0) {
 			return out_len;
 		}
 		buf = (const char *)buf + out_len;
 		len -= out_len;
+		if (k_timer_remaining_ticks(&sendall_timer) == 0){
+			return -ETIMEDOUT;
+		}
 	}
 	return to_send;
 }
@@ -182,7 +197,7 @@ void stop_tcp(void)
 	}
 }
 
-int8_t send_tcp(char *msg, size_t len)
+int send_tcp(char *msg, size_t len)
 {
 	size_t ret;
 	ret = sendall(conf.ipv4.tcp.sock, msg, len);
@@ -196,6 +211,49 @@ int8_t send_tcp(char *msg, size_t len)
      * this should be handled here as well.*/
 	return ret;
 }
+
+/** put a message in the send out queue
+ * The queue can hold a single message and it will be discarded on arrival of
+ * a new meassage.
+ * .*/
+int send_tcp_q(char *msg, size_t len)
+{
+	LOG_DBG("send_tcp_q start!");
+	struct msg2server msgout;
+	msgout.msg = msg;
+	msgout.len = len;
+	LOG_DBG("send_tcp_q allocated msgout!");
+	while (k_msgq_put(&msgq, &msgout, K_NO_WAIT) != 0) {
+		/* Message queue is full: purge old data & try again */
+		k_msgq_purge(&msgq);
+	}
+	LOG_DBG("message successfully pushed to queue!");
+	return 0;
+}
+
+void send_tcp_fn(void)
+{
+	while (true) {
+		int rc = k_poll(events, 1, K_FOREVER);
+		if (rc == 0) {
+			while (k_msgq_num_used_get(&msgq) > 0) {
+				struct msg2server msg_in_q;
+				k_msgq_get(&msgq, &msg_in_q, K_FOREVER);
+				int ret = send_tcp(msg_in_q.msg, msg_in_q.len);
+				if (ret != msg_in_q.len){
+					struct cellular_error_event *err = new_cellular_error_event();
+					err->cause = SOCKET_SEND;
+					err->err_code = -ETIMEDOUT;
+					EVENT_SUBMIT(err);
+					LOG_WRN("Failed to send TCP message!");
+				}
+			}
+		}
+		events[0].state = K_POLL_STATE_NOT_READY;
+	}
+}
+
+
 
 const struct device *bind_modem(void)
 {

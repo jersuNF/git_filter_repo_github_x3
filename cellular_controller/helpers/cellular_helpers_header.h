@@ -12,6 +12,7 @@
 #include <net/net_event.h>
 #include <net/socket.h>
 #include "nf_eeprom.h"
+#include "cellular_controller_events.h"
 #define INVALID_SOCK (-1)
 #define PEER_PORT CONFIG_SERVER_PORT
 #define RECV_BUF_SIZE CONFIG_RECV_BUF_MAX
@@ -36,6 +37,8 @@ extern struct k_mem_domain app_domain;
 #else
 #define THREAD_PRIORITY K_PRIO_COOP(CONFIG_NUM_COOP_PRIORITIES - 1)
 #endif
+
+
 
 /**
      * A structure for socket meta data in addition to work delayables for
@@ -74,7 +77,9 @@ extern struct configs conf;
 
 int reset_modem(void);
 int get_ip(char **);
-int8_t send_tcp(char *, size_t);
+int send_tcp(char *, size_t);
+int send_tcp_q(char *, size_t);
 void stop_tcp(void);
 const struct device *bind_modem(void);
 int check_ip(void);
+void send_tcp_fn(void);

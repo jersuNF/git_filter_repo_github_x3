@@ -222,4 +222,4 @@ int check_ip(void){
 	}
 	LOG_ERR("Failed to acquire ip!");
 	return -1;
-};
+}

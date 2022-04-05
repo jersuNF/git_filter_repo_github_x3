@@ -237,9 +237,8 @@ void process_acc_data(raw_acc_data_t *acc)
 		LOG_DBG("Total steps is %i, state is %i, activity is %i, acc_std_final %i",
 			total_steps, m_state, cur_activity, acc_std_final);
 		EVENT_SUBMIT(event);
+		prev_state = m_state;
 	}
-
-	prev_state = m_state;
 }
 
 void movement_thread_fn()

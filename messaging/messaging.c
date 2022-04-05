@@ -60,7 +60,7 @@ gnss_last_fix_struct_t cached_fix;
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
 static bool first_frame, first_ano_frame;
-static bool hasGnssTimestamp = false;
+static atomic_t has_gnss_data = ATOMIC_INIT(false);
 
 void build_poll_request(NofenceMessage *);
 int8_t request_fframe(uint32_t, uint8_t);
@@ -244,7 +244,7 @@ static bool event_handler(const struct event_header *eh)
 		struct tm *tm_time = gmtime(&gm_time);
 		/* Update date_time library which storage uses for ANO data. */
 		if (!date_time_set(tm_time)) {
-			hasGnssTimestamp = true;
+			atomic_set(&has_gnss_data, true);
 		}
 	}
 	if (is_ble_ctrl_event(eh)) {
@@ -853,7 +853,7 @@ void process_poll_response(NofenceMessage *proto)
 		LOG_INF("Server time will be used.");
 		time_from_server = proto->header.ulUnixTimestamp;
 		use_server_time = true;
-		if (!hasGnssTimestamp) {
+		if (atomic_get(&has_gnss_data)) {
 			time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
 			struct tm *tm_time = gmtime(&gm_time);
 			/* Update date_time library which storage uses for ANO data. */

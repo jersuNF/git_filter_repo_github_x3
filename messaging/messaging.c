@@ -780,7 +780,7 @@ int send_binary_message(uint8_t *data, size_t len)
 
 		int err = k_sem_take(&send_out_ack,
 				     K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC));
-		if (err) {
+		if (err != 0) {
 			char *e_msg = "Timed out waiting for cellular ack";
 			nf_app_error(ERR_MESSAGING, -ETIMEDOUT, e_msg,
 				     strlen(e_msg));

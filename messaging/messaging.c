@@ -533,6 +533,7 @@ int messaging_module_init(void)
 		LOG_ERR("Failed to read serial number from eeprom!");
 		return err;
 	}
+	LOG_WRN("Serial id = %d", serial_id);
 
 	k_work_queue_init(&send_q);
 	k_work_queue_start(&send_q, messaging_send_thread,

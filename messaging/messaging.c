@@ -838,14 +838,15 @@ void process_poll_response(NofenceMessage *proto)
 		LOG_INF("Server time will be used.");
 		time_from_server = proto->header.ulUnixTimestamp;
 		use_server_time = true;
-		time_t cur_time = (time_t)proto->header.ulUnixTimestamp;
+		int64_t cur_time = (int64_t)proto->header.ulUnixTimestamp;
 		/* Update date_time library which storage uses for ANO data. */
-		struct tm *tm_time = gmtime(&cur_time);
-		int err = date_time_set(tm_time);
+		int err = date_time_set(cur_time);
 		if (err) {
 			LOG_ERR("Error updating time from server %i", err);
 		} else {
-			/** @note This prints two hours from GMT (GMT-02:00DST). */
+			/** @note This prints UTC. */
+			time_t gm_time = (time_t)cur_time;
+			struct tm *tm_time = gmtime(&gm_time);
 			LOG_INF("Set timestamp to date_time library: %s",
 				asctime(tm_time));
 		}

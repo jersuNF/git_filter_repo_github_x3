@@ -616,17 +616,15 @@ int ble_module_init()
 {
 	uint32_t serial_id = 0;
 	int err = eep_read_serial(&serial_id);
-	if (err != 0){ //TODO: handle in a better way.
+	if (err != 0) { //TODO: handle in a better way.
 		LOG_ERR("Failed to read serial number from eeprom!");
-	}
-	else{
+	} else {
 		if (serial_id > 999999) {
-			strncpy(bt_device_name, "NF??????\0", DEVICE_NAME_LEN+1);
+			strncpy(bt_device_name, "NF??????\0",
+				DEVICE_NAME_LEN + 1);
 		} else {
 			char tmp[DEVICE_NAME_LEN + 1];
-			snprintf(tmp, 7, "%i" , serial_id); //TODO: 7
-			// digit numbers would overflow. Using 7 to overcome
-			// the compiler warning, needs to be fixed.
+			snprintf(tmp, 7, "%i", serial_id);
 			uint32_t len = strlen(tmp);
 			memset(bt_device_name, '0', sizeof(bt_device_name));
 			bt_device_name[0] = 'N';

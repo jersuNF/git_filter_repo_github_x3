@@ -202,8 +202,8 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		}
 
 		err = send_tcp(CharMsgOut, MsgOutLen);
-		if (err < 0) { /* TODO: notify error handler! */
-			submit_error(SOCKET_SEND, err);
+		if (err != 0) { /* TODO: notify error handler! */
+			LOG_DBG("Failed to send tcp message, error: %d!", err);
 			k_free(CharMsgOut);
 			return false;
 		}

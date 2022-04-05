@@ -161,8 +161,8 @@ int reset_modem(void)
  */
 int get_ip(char** collar_ip)
 {/*TODO: extract the quoted address if needed and return the exact length. */
-	get_pdp_addr(collar_ip);
-	return 0;
+	int ret = get_pdp_addr(collar_ip);
+	return ret;
 }
 
 void stop_tcp(void)
@@ -214,7 +214,7 @@ int check_ip(void){
 		}else {
 			ret = memcmp(collar_ip,"\"0.0.0.0\"",
 				     9);
-			if (ret != 0){
+			if (ret > 0){
 				return 0;
 			}
 		}

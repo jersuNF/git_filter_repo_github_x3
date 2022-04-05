@@ -791,7 +791,6 @@ int send_binary_message(uint8_t *data, size_t len)
 	} else {
 		return -ETIMEDOUT;
 	}
-	return 0;
 }
 
 int encode_and_send_message(NofenceMessage *msg_proto)

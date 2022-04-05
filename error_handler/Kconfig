@@ -30,6 +30,6 @@ if ERROR_HANDLER
 
 	config ERROR_THREAD_STACK_SIZE
 		int "Size of the error thread"
-		default 1024
+		default 2048
 	
 endif

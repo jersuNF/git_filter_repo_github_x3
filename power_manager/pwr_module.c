@@ -260,7 +260,7 @@ static bool event_handler(const struct event_header *eh)
 	if (is_pwr_reboot_event(eh)) {
 		LOG_INF("Reboot event received!");
 		k_work_reschedule(&power_reboot,
-				  K_MSEC(CONFIG_SHUTDOWN_TIMER_SEC));
+				  K_SECONDS(CONFIG_SHUTDOWN_TIMER_SEC));
 		return false;
 	}
 

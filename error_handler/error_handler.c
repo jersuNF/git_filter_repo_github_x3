@@ -17,8 +17,7 @@
 
 K_MSGQ_DEFINE(err_container_msgq, sizeof(struct error_container), 4, 4);
 
-#define LOG_MODULE_NAME error_handler
-LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_ERROR_HANDLER_LOG_LEVEL);
+LOG_MODULE_REGISTER(error_handler, CONFIG_ERROR_HANDLER_LOG_LEVEL);
 
 /**
  * @brief Processing function for fatal errors. 
@@ -87,8 +86,8 @@ static bool event_handler(const struct event_header *eh)
 	return false;
 }
 
-EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE(MODULE, error_event);
+EVENT_LISTENER(error_handler, event_handler);
+EVENT_SUBSCRIBE(error_handler, error_event);
 
 void error_handler_thread_fn()
 {

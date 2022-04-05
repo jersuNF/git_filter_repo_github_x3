@@ -29,6 +29,9 @@
 
 #include "storage_event.h"
 
+#include <date_time.h>
+#include <time.h>
+
 #include "storage.h"
 
 #include "pasture_structure.h"
@@ -835,6 +838,17 @@ void process_poll_response(NofenceMessage *proto)
 		LOG_INF("Server time will be used.");
 		time_from_server = proto->header.ulUnixTimestamp;
 		use_server_time = true;
+		time_t cur_time = (time_t)proto->header.ulUnixTimestamp;
+		/* Update date_time library which storage uses for ANO data. */
+		struct tm *tm_time = gmtime(&cur_time);
+		int err = date_time_set(tm_time);
+		if (err) {
+			LOG_ERR("Error updating time from server %i", err);
+		} else {
+			/** @note This prints two hours from GMT (GMT-02:00DST). */
+			LOG_INF("Set timestamp to date_time library: %s",
+				asctime(tm_time));
+		}
 	}
 	if (pResp->has_usPollConnectIntervalSec) {
 		atomic_set(&poll_period_minutes,

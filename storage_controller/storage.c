@@ -27,6 +27,7 @@
 #include "UBX.h"
 
 #include <date_time.h>
+#include <time.h>
 
 /* Get sizes and offset definitions from pm_static.yml. */
 #include <pm_config.h>
@@ -371,6 +372,46 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 	return err;
 }
 
+bool ano_is_same_day_or_greater(UBX_MGA_ANO_RAW_t *ano_date)
+{
+	/* Fetch unix timestamp. */
+	time_t unixtime = 0;
+
+	if (date_time_now(&unixtime) != 0) {
+		/* Time is not yet acquired, keep all ANO entries
+		 * as they still might be valid. 
+		 */
+		return true;
+	}
+
+	struct tm *time = gmtime(&unixtime);
+
+	/* Time since 1900 > Time since 2000 */
+	if (time->tm_year + 1900 > ano_date->mga_ano.year + 2000) {
+		return false;
+	}
+
+	if (time->tm_year + 1900 < ano_date->mga_ano.year + 2000) {
+		return true;
+	}
+
+	/* 0..11 > 1..12 */
+	if (time->tm_mon + 1 > ano_date->mga_ano.month) {
+		return false;
+	}
+
+	if (time->tm_mon + 1 < ano_date->mga_ano.month) {
+		return true;
+	}
+
+	/* 1..31 < 1..31 */
+	if (time->tm_mday < ano_date->mga_ano.day) {
+		return false;
+	}
+
+	return true;
+}
+
 /** @brief When condition is met that we have a valid ANO partition,
  *         return -EINTR.
  * @param[in] data data to check
@@ -383,21 +424,10 @@ int check_if_ano_valid_cb(uint8_t *data, size_t len)
 {
 	UBX_MGA_ANO_RAW_t *ano_frame = (UBX_MGA_ANO_RAW_t *)(data);
 
-	/* Fetch unix timestamp. */
-	int64_t unixtime = 0;
-
-	if (date_time_now(&unixtime) != 0) {
-		/* Time is not yet acquired, keep all ANO entries
-		 * as they still might be valid. 
-		 */
+	if (ano_is_same_day_or_greater(ano_frame)) {
 		return -EINTR;
 	}
 
-	/** @todo If age is valid, update ano sector. Fetch from somewhere! */
-	if (ano_frame->mga_ano.year == 22) {
-		/* Done, we found oldest, valid timestamp, exit loop. */
-		return -EINTR;
-	}
 	return 0;
 }
 

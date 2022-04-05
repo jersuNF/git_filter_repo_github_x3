@@ -5,6 +5,9 @@
 #include <zephyr.h>
 #include "error_event.h"
 #include "pwr_event.h"
+#include "system_diagnostic_structure.h"
+#include "storage.h"
+
 #include <logging/log.h>
 #include <power/reboot.h>
 
@@ -18,24 +21,22 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_ERROR_HANDLER_LOG_LEVEL);
 static inline void process_fatal(enum error_sender_module sender, int code,
 				 char *msg, size_t msg_len)
 {
-	/* Process fatal errors here. */
-	switch (sender) {
-	case ERR_FW_UPGRADE:
-	case ERR_AMC:
-	case ERR_STORAGE_CONTROLLER:
-	case ERR_ENV_SENSOR:
-	case ERR_ELECTRIC_PULSE:
-	case ERR_PWR_MODULE:
-	case ERR_GNSS_CONTROLLER:
-	case ERR_SOUND_CONTROLLER:
-	case ERR_MESSAGING:
-		LOG_INF("Received a fatal event.");
-		/* Log event here */
-		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
-		EVENT_SUBMIT(r_ev);
-		break;
-	default:;
-	}
+	LOG_INF("Received a fatal error (%d) from sender %d ", code, sender);
+
+	/* Log error in external flash */
+	int64_t uptime = k_uptime_get();
+	int64_t unix_time = 0; /* TODO: ADD Eivind's function */
+	system_diagnostic_t sys_diag = { .error_code = code,
+					 .sender = sender,
+					 .uptime = uptime,
+					 .unix_time = unix_time };
+
+	size_t sys_diag_len = sizeof(system_diagnostic_t);
+	stg_write_system_diagnostic_log((uint8_t *)&sys_diag, sys_diag_len);
+
+	/* Reboot on fatal events */
+	struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
+	EVENT_SUBMIT(r_ev);
 }
 
 /**
@@ -45,22 +46,18 @@ static inline void process_fatal(enum error_sender_module sender, int code,
 static inline void process_error(enum error_sender_module sender, int code,
 				 char *msg, size_t msg_len)
 {
-	/* Process normal errors here. */
-	switch (sender) {
-	case ERR_FW_UPGRADE:
-	case ERR_AMC:
-	case ERR_STORAGE_CONTROLLER:
-	case ERR_ENV_SENSOR:
-	case ERR_ELECTRIC_PULSE:
-	case ERR_PWR_MODULE:
-	case ERR_GNSS_CONTROLLER:
-	case ERR_SOUND_CONTROLLER:
-	case ERR_MESSAGING:
-		/* Log event here */
-		LOG_INF("Received an error event.");
-		break;
-	default:;
-	}
+	LOG_INF("Received a normal error (%d) from sender %d ", code, sender);
+
+	/* Log error in external flash */
+	int64_t uptime = k_uptime_get();
+	int64_t unix_time = 0; /* TODO: ADD Eivind's function */
+	system_diagnostic_t sys_diag = { .error_code = code,
+					 .sender = sender,
+					 .uptime = uptime,
+					 .unix_time = unix_time };
+
+	size_t sys_diag_len = sizeof(system_diagnostic_t);
+	stg_write_system_diagnostic_log((uint8_t *)&sys_diag, sys_diag_len);
 }
 
 /**
@@ -69,22 +66,18 @@ static inline void process_error(enum error_sender_module sender, int code,
 static inline void process_warning(enum error_sender_module sender, int code,
 				   char *msg, size_t msg_len)
 {
-	/* Process warnings here. */
-	switch (sender) {
-	case ERR_FW_UPGRADE:
-	case ERR_AMC:
-	case ERR_STORAGE_CONTROLLER:
-	case ERR_ENV_SENSOR:
-	case ERR_ELECTRIC_PULSE:
-	case ERR_PWR_MODULE:
-	case ERR_GNSS_CONTROLLER:
-	case ERR_SOUND_CONTROLLER:
-	case ERR_MESSAGING:
-		/* Log event here */
-		LOG_INF("Received a warning event.");
-		break;
-	default:;
-	}
+	LOG_INF("Received a warning (%d) from sender %d ", code, sender);
+
+	/* Log warning in external flash */
+	int64_t uptime = k_uptime_get();
+	int64_t unix_time = 0; /* TODO: ADD Eivind's function */
+	system_diagnostic_t sys_diag = { .error_code = code,
+					 .sender = sender,
+					 .uptime = uptime,
+					 .unix_time = unix_time };
+
+	size_t sys_diag_len = sizeof(system_diagnostic_t);
+	stg_write_system_diagnostic_log((uint8_t *)&sys_diag, sys_diag_len);
 }
 
 /**

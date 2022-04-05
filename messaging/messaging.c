@@ -853,7 +853,7 @@ void process_poll_response(NofenceMessage *proto)
 		LOG_INF("Server time will be used.");
 		time_from_server = proto->header.ulUnixTimestamp;
 		use_server_time = true;
-		if (atomic_get(&has_gnss_data)) {
+		if (!atomic_get(&has_gnss_data)) {
 			time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
 			struct tm *tm_time = gmtime(&gm_time);
 			/* Update date_time library which storage uses for ANO data. */

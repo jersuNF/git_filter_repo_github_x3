@@ -50,7 +50,7 @@ K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK,
 		receive_tcp, &conf.ipv4, NULL, NULL,
 		MY_PRIORITY, 0, 0);
 
-atomic_t connected = ATOMIC_INIT(0);
+static bool connected = false;
 
 void receive_tcp(struct data *sock_data)
 {
@@ -59,7 +59,7 @@ void receive_tcp(struct data *sock_data)
 	uint8_t *pMsgIn = NULL;
 	static float socket_idle_count;
 	while(1){
-		if(atomic_get(&connected) == 1){
+		if(connected){
 			received = socket_receive(sock_data, &buf);
 			if (received > 0) {
 				socket_idle_count = 0;
@@ -94,7 +94,7 @@ void receive_tcp(struct data *sock_data)
 						     e_msg, strlen
 						(e_msg));
 					stop_tcp();
-					atomic_set(&connected,0);
+					connected = false;
 					socket_idle_count = 0;
 				}
 			} else {
@@ -102,7 +102,7 @@ void receive_tcp(struct data *sock_data)
 				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
 					(e_msg));
 				stop_tcp();
-				atomic_set(&connected,0);
+				connected = false;
 				socket_idle_count = 0;
 			}
 		}
@@ -146,7 +146,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return true;
 	} else if (is_messaging_stop_connection_event(eh)) {
 		stop_tcp();
-		atomic_set(&connected,0);
+		connected = false;
 		return true;
 	}else if (is_messaging_host_address_event(eh)) {
 		int ret = eep_read_host_port(&server_address_tmp[0], EEP_HOST_PORT_BUF_SIZE-1);
@@ -212,7 +212,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return false;
 	} else if (is_cellular_error_event(eh)) {
 		modem_is_ready = false;
-		atomic_set(&connected,0);
+		connected = false;
 		return false;
 	}
 	return false;
@@ -289,12 +289,12 @@ static void cellular_controller_keep_alive(void* dev)
 				}
 			}
 			if (cellular_controller_is_ready()) {
-				if(atomic_get(&connected) == 0){//check_ip
+				if(!connected){//check_ip
 					// takes place in start_tcp() in this
 					// case.
 					int  ret = start_tcp();
 					if (ret == 0){
-						atomic_set(&connected,1);
+						connected = true;
 						announce_connection_state(true);
 					}else {
 						stop_tcp();
@@ -326,7 +326,7 @@ void announce_connection_state(bool state){
 	EVENT_SUBMIT(ev);
 	if (state == false){
 		modem_is_ready = false;
-		atomic_set(&connected,0);
+		connected = false;
 	}
 }
 
@@ -337,7 +337,7 @@ bool cellular_controller_is_ready(void)
 
 int8_t cellular_controller_init(void)
 {
-	atomic_set(&connected,0);
+	connected = false;
 	
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {

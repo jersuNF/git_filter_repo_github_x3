@@ -13,6 +13,7 @@
 #include "ble_cmd_event.h"
 #include "nofence_service.h"
 #include "lte_proto_event.h"
+#include "pwr_event.h"
 
 #include "cellular_controller_events.h"
 #include "gnss_controller_events.h"
@@ -46,6 +47,8 @@ static pasture_t pasture_temp;
 static uint8_t cached_fences_counter = 0;
 
 uint32_t time_from_server;
+uint16_t battery;
+uint16_t charging;
 
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
 K_SEM_DEFINE(send_out_ack, 0, 1);
@@ -127,6 +130,16 @@ K_KERNEL_STACK_DEFINE(messaging_send_thread,
 
 void build_log_message()
 {
+	/* EVENTS we need:
+	   - Battery event (mV)
+	   - Charging current (mAh)
+	   - GNSS event to get date and position
+	   - Modem RSSI (from cellular controller)
+	   - Histogram struct (request/response behavior)
+	   - BME280 enviroment data (temp, humid, pressure)
+	   - Battery performance?
+	*/
+
 	/* Fill in NofenceMessage and encode it, then store on fcb. Do it twice,
 	 * once for seq message 1 and once for seq message 2. As such;
 
@@ -321,6 +334,17 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+
+	if (is_pwr_status_event(eh)) {
+		struct pwr_status_event *ev = cast_pwr_status_event(eh);
+		/* Update shaddow register */
+		if (ev->pwr_state == PWR_BATTERY) {
+			battery = ev->battery_mv;
+		} else if (ev->pwr_state == PWR_CHARGING) {
+			charging = ev->charging_ma;
+		}
+		return false;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -382,6 +406,7 @@ EVENT_SUBSCRIBE(MODULE, update_zap_count);
 EVENT_SUBSCRIBE(MODULE, animal_warning_event);
 EVENT_SUBSCRIBE(MODULE, animal_escape_event);
 EVENT_SUBSCRIBE(MODULE, connection_state_event);
+/** @todo add battery, histogram, gnss and modem event */
 
 static inline void process_ble_ctrl_event(void)
 {

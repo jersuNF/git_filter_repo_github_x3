@@ -9,8 +9,8 @@
 #include <date_time.h>
 #include "error_event.h"
 
-/** @todo Fix this struct to contain what is needed. */
-typedef struct __attribute__((packed)) {
+/** @todo Fix packing. */
+typedef struct /*__attribute__((packed))*/ {
 	int32_t error_code;
 	int64_t uptime;
 	int64_t unix_time;

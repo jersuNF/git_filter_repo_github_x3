@@ -1,16 +1,21 @@
 from .commander import Commander
-from .stream import BLEStream
+from .stream import BLEStream, JLinkStream
+
+import time
 
 class NFDiag:
 	def __init__(self):
-		self.stream = BLEStream("/dev/ttyACM0", serial=674)
+		self.stream = JLinkStream() #BLEStream("/dev/ttyACM0", serial=674)
+		while not self.stream.is_connected():
+			time.sleep(0.1)
+			
 		self.cmndr = Commander(self.stream)
+		for i in range(20):
+			print(i)
+			self.cmndr.send_cmd(0, 0x55) #, data=b"\x00")
+			time.sleep(0.1)
 
-		self.cmndr.send_cmd(1, 0, data=b"\x00")
-
-import time
-if __name__ == "__main__":
-	nfdiag = NFDiag()
-
-	while True:
-		time.sleep(1)
+	def __del__(self):
+		self.cmndr.stop()
+		del self.cmndr
+		del self.stream

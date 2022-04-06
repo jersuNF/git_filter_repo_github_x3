@@ -155,6 +155,8 @@ class BLEStream:
         self.conn = self.nfdiag.connect_and_discover()
         if self.conn is None:
             raise Exception("Failed connecting to device")
+        else:
+            self.connected = True
 
     def __del__(self):
         self.close()
@@ -162,7 +164,10 @@ class BLEStream:
     def close(self):
         self.nfdiag.close()
 
-    def read(self, size):
+    def is_connected(self):
+        return self.connected
+
+    def read(self, size=0):
         data = None
         try:
             data = self.nfdiag.get_data()
@@ -172,3 +177,109 @@ class BLEStream:
 
     def write(self, data):
         self.nfdiag.send_data(self.conn, data)
+
+import subprocess
+
+import socket
+#import fcntl
+import os
+import threading
+import logging
+import time
+
+
+HOST = "127.0.0.1"
+# TODO - Make this smarter with regards to existing jlink instances running
+JLINK_EXE = "JLinkExe"
+JLINK_EXE = "C:\\Program Files\\SEGGER\\JLink\\JLink.exe"
+#JLINK_EXE = "C:\\Program Files (x86)\\SEGGER\\JLink\\JLink.exe"
+
+class JLinkStream(threading.Thread):
+    def __init__(self, serial=None):
+        threading.Thread.__init__(self)
+
+        self.jlink_proc = None
+        if JLINK_EXE:
+            cmd = [JLINK_EXE, '-device', 'nRF52840_xxAA', '-if', 'swd', '-speed', '8000', '-autoconnect', '1']
+            self.jlink_proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+        self.running = True
+        self.daemon = True
+
+        self.received_data = b""
+        self.lock = threading.Lock()
+
+        self.connected = False
+
+        self.start()
+
+    def __del__(self):
+        self.close()
+
+    def close(self):
+        self.running = False
+        self.join()
+        self.s.close()
+        if self.jlink_proc:
+            self.jlink_proc.communicate(input=b'exit\n')
+
+    def is_connected(self):
+        return self.connected
+
+    def write(self, data):
+        try:
+            self.s.send(data)
+        except Exception as e:
+            logging.debug("Exception when writing to RTT: " + str(e))
+    
+    def read(self, size=0):
+        self.lock.acquire()
+        data = self.received_data
+        self.received_data = b""
+        self.lock.release()
+        return data
+
+    def _add_received_data(self, data):
+        self.lock.acquire()
+        self.received_data += data
+        self.lock.release()
+
+    def run(self):
+        print("Connecting to JLink RTT")
+        
+        while not self.connected:
+            try:
+                self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.s.connect((HOST, 19021))
+                self.s.setblocking(False)
+                
+                # Need to send enabling string immediately, and wait for prompt
+                self.write(b"$$SEGGER_TELNET_ConfigStr=RTTCh;2$$")
+                prompt = b""
+                timeout = time.time() + 2
+                while not ((b"Process: " in prompt) and prompt.endswith(b"\r\n")):
+                    try:
+                        data = self.s.recv(1024)
+                        if len(data) > 0:
+                            prompt += data
+                    except:
+                        pass
+                    
+                    if time.time() > timeout:
+                        raise Exception("Timed out..")
+
+                self.connected = True
+            except:
+                time.sleep(0.1)
+
+        print("Connected")
+
+        while self.running:
+            try:
+                data = self.s.recv(1024)
+
+                if len(data) > 0:
+                    self._add_received_data(data)
+                    logging.debug(data.decode("utf-8"))
+            except Exception as e:
+                time.sleep(0.01)

@@ -34,7 +34,7 @@ class Commander(threading.Thread):
 	def send_cmd(self, group, cmd, data=None):
 		struct_format = "<BBH"
 		raw_cmd = struct.pack(struct_format, group, cmd, 0)
-		if not (data == 0 or len(data) == 0):
+		if not (data is None or len(data) == 0):
 			raw_cmd += data
 
 		checksum = self.crc_calc.calculate_checksum(raw_cmd)
@@ -97,6 +97,7 @@ class Commander(threading.Thread):
 						found_zero = (ind >= 0)
 						if found_zero:
 							# Identified a COBS encoded packet, fetch and remove from buffer
+							print("Received: " + str(receive_buffer))
 							enc = data[:ind]
 							receive_buffer = receive_buffer[ind+1:]
 

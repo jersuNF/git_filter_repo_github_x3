@@ -31,6 +31,8 @@ typedef enum {
 	ACK = 0x00,
 	DATA = 0x01,
 
+	PONG = 0xAA,
+
 	CHK_FAILED = 0xC0,
 	NOT_ENOUGH = 0xD0,
 	ERROR = 0xE0,
@@ -50,6 +52,11 @@ typedef enum {
 	SERIAL = 0x00,
 	HOST_PORT = 0x01,
 } settings_id_t;
+
+typedef enum {
+	PING = 0x55,
+	REBOOT = 0xEB,
+} system_cmd_t;
 
 typedef enum {
 	READ = 0x00,

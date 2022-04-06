@@ -5,6 +5,8 @@
 #ifndef _COMMANDER_DEF_H_
 #define _COMMANDER_DEF_H_
 
+#include <stdint.h>
+
 typedef struct __attribute__((packed)) {
 	/* Overall group context of the command */
 	uint8_t group;
@@ -12,7 +14,7 @@ typedef struct __attribute__((packed)) {
 	uint8_t command;
 	/* CRC16 CCITT */
 	uint16_t checksum;
-} commander_header_t;
+} commander_cmd_header_t;
 
 typedef struct __attribute__((packed)) {
 	/* Overall group context of the command */
@@ -23,7 +25,7 @@ typedef struct __attribute__((packed)) {
 	uint8_t response;
 	/* CRC16 CCITT */
 	uint16_t checksum;
-} commander_resp_t;
+} commander_resp_header_t;
 
 typedef enum {
 	ACK = 0x00,
@@ -45,6 +47,11 @@ typedef enum {
 } commander_group_t;
 
 typedef enum {
+	SERIAL = 0x00,
+	HOST_PORT = 0x01,
+} settings_id_t;
+
+typedef enum {
 	READ = 0x00,
 	WRITE = 0x01,
 	ERASE_ALL = 0xEA
@@ -53,7 +60,12 @@ typedef enum {
 typedef enum {
 	GNSS_DATA = 0x10,
 	BUZZER_WARN = 0xB0,
-	EP_RELEASE = 0xE0,
+	ELECTRICAL_PULSE = 0xE0,
 } stimulator_cmd_t;
+
+int commander_send_resp(enum diagnostics_interface interface, 
+			commander_group_t group, uint8_t cmd, 
+			commander_resp_t resp,
+			uint8_t* data, uint8_t data_size);
 
 #endif /* _COMMANDER_DEF_H_ */

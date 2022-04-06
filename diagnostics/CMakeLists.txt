@@ -2,6 +2,7 @@
 if (CONFIG_DIAGNOSTICS)
 zephyr_include_directories(
     .
+    ./commander
     ./../../events/diagnostics/)
 
 target_sources(app PRIVATE 
@@ -14,7 +15,14 @@ passthrough.c
 if (CONFIG_DIAGNOSTICS_TEXT_PARSER)
 target_sources(app PRIVATE parser.c)
 else()
-target_sources(app PRIVATE commander.c cobs.c)
+target_sources(app PRIVATE 
+    ./commander/commander.c
+    ./commander/cobs.c
+    ./commander/cmd_settings.c
+    ./commander/cmd_stimulator.c
+    ./commander/cmd_storage.c
+    ./commander/cmd_system.c
+)
 endif()
 
 endif()

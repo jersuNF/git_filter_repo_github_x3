@@ -50,7 +50,7 @@ K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK,
 		receive_tcp, &conf.ipv4, NULL, NULL,
 		MY_PRIORITY, 0, 0);
 
-static APP_BMEM bool connected;
+atomic_t connected = ATOMIC_INIT(0);
 
 void receive_tcp(struct data *sock_data)
 {
@@ -59,8 +59,7 @@ void receive_tcp(struct data *sock_data)
 	uint8_t *pMsgIn = NULL;
 	static float socket_idle_count;
 	while(1){
-		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
-		if(connected){
+		if(atomic_get(&connected) == 1){
 			received = socket_receive(sock_data, &buf);
 			if (received > 0) {
 				socket_idle_count = 0;
@@ -70,9 +69,9 @@ void receive_tcp(struct data *sock_data)
 				LOG_WRN("will take semaphore!\n");
 				if (k_sem_take(&messaging_ack, K_SECONDS
 					       (MESSAGING_ACK_TIMEOUT)) !=0) {
-					/* TODO: notify the error handler */
-					LOG_ERR("New message received while the messaging module "
-						"hasn't consumed the previous one!\n");
+					char *e_msg = "Missed messaging ack!";
+					nf_app_error(ERR_MESSAGING, -EINPROGRESS, e_msg, strlen
+						(e_msg));
 				} else {
 					if (pMsgIn != NULL) {
 						k_free(pMsgIn);
@@ -90,19 +89,24 @@ void receive_tcp(struct data *sock_data)
 			} else if (received == 0) {
 				socket_idle_count += SOCKET_POLL_INTERVAL;
 				if (socket_idle_count > SOCK_RECV_TIMEOUT){
-					LOG_ERR("Socket receive timed out!, "
-						"%f\n", socket_idle_count);
+					char *e_msg = "Socket receive timed out!";
+					nf_app_error(ERR_MESSAGING, -ETIMEDOUT,
+						     e_msg, strlen
+						(e_msg));
 					stop_tcp();
-					connected = false;
+					atomic_set(&connected,0);
 					socket_idle_count = 0;
 				}
 			} else {
-				LOG_ERR("Socket receive error!\n");
+				char *e_msg = "Socket receive error!";
+				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
+					(e_msg));
 				stop_tcp();
-				connected = false;
+				atomic_set(&connected,0);
 				socket_idle_count = 0;
 			}
 		}
+		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
 	}
 }
 
@@ -110,9 +114,9 @@ int start_tcp(void)
 {
 	int ret = check_ip();
 	if (ret != 0){
-		LOG_ERR("Failed to get ip "
-			"address!");
-		/*TODO: notify error handler*/
+		LOG_ERR("Failed to get ip address!");
+		char *e_msg = "Failed to get ip address!";
+		nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
 		return ret;
 	}
 	struct sockaddr_in addr4;
@@ -125,6 +129,9 @@ int start_tcp(void)
 		ret = socket_connect(&conf.ipv4, (struct sockaddr *)&addr4,
 				     sizeof(addr4));
 		if (ret < 0) {
+			char *e_msg = "Socket connect error!";
+			nf_app_error(ERR_MESSAGING, -ECONNREFUSED, e_msg, strlen
+				(e_msg));
 			return ret;
 		}
 	}
@@ -139,7 +146,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return true;
 	} else if (is_messaging_stop_connection_event(eh)) {
 		stop_tcp();
-		connected = false;
+		atomic_set(&connected,0);
 		return true;
 	}else if (is_messaging_host_address_event(eh)) {
 		int ret = eep_read_host_port(&server_address_tmp[0], EEP_HOST_PORT_BUF_SIZE-1);
@@ -156,7 +163,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		if (server_port <= 0) {
 			char *e_msg = "Failed to parse port number from new "
 				      "host address!";
-			nf_app_error(ERR_MESSAGING, -EILSEQ, e_msg, strlen
+			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
 				     (e_msg));
 			return false;
 		}
@@ -191,8 +198,10 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		}
 
 		int err = send_tcp_q(CharMsgOut, MsgOutLen);
-		if (err != 0) { /* TODO: notify error handler! */
-			LOG_DBG("Failed to send tcp message, error: %d!", err);
+		if (err != 0) {
+			char *e_msg = "Couldn't push message to queue!";
+			nf_app_error(ERR_MESSAGING, -EAGAIN, e_msg, strlen
+				(e_msg));
 			k_free(CharMsgOut);
 			return false;
 		}
@@ -203,6 +212,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return false;
 	} else if (is_cellular_error_event(eh)) {
 		modem_is_ready = false;
+		atomic_set(&connected,0);
 		return false;
 	}
 	return false;
@@ -279,27 +289,27 @@ static void cellular_controller_keep_alive(void* dev)
 				}
 			}
 			if (cellular_controller_is_ready()) {
-				if(!connected){//check_ip takes place in start_tcp()
-					// in this case.
+				if(atomic_get(&connected) == 0){//check_ip
+					// takes place in start_tcp() in this
+					// case.
 					int  ret = start_tcp();
 					if (ret == 0){
-						connected = true;
+						atomic_set(&connected,1);
 						announce_connection_state(true);
 					}else {
-						LOG_WRN("Connection failed!");
 						stop_tcp();
 						announce_connection_state
 							(false);
-						/*TODO: notify error handler*/
 					}
 				} else {
 					int ret = check_ip();
 					if (ret != 0){
-						LOG_ERR("Failed to get ip "
-							"address!");
 						announce_connection_state
 							(false);
-						/*TODO: notify error handler*/
+						char *e_msg = "Failed to get ip address!";
+						nf_app_error(ERR_MESSAGING,
+							     -EIO, e_msg, strlen
+							(e_msg));
 					}else {
 						announce_connection_state(true);
 					}
@@ -316,6 +326,7 @@ void announce_connection_state(bool state){
 	EVENT_SUBMIT(ev);
 	if (state == false){
 		modem_is_ready = false;
+		atomic_set(&connected,0);
 	}
 }
 
@@ -326,11 +337,13 @@ bool cellular_controller_is_ready(void)
 
 int8_t cellular_controller_init(void)
 {
-	connected = false;
+	atomic_set(&connected,0);
 	
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {
-		LOG_ERR("GSM driver was not found!\n");
+		char *e_msg = "GSM driver was not found!";
+		nf_app_error(ERR_MESSAGING, -EBUSY, e_msg, strlen
+			(e_msg));
 		return -1;
 	}
 
@@ -353,3 +366,4 @@ EVENT_SUBSCRIBE(MODULE, messaging_proto_out_event);
 EVENT_SUBSCRIBE(MODULE, messaging_stop_connection_event);
 EVENT_SUBSCRIBE(MODULE, messaging_host_address_event);
 EVENT_SUBSCRIBE(MODULE, check_connection);
+EVENT_SUBSCRIBE(MODULE, cellular_error_event);

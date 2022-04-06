@@ -1,7 +1,7 @@
 from cobs import cobs
 import struct
 from queue import Queue, Empty
-from crc import CrcCalculator, Crc16
+import crc
 import threading
 import time
 
@@ -10,7 +10,15 @@ class Commander(threading.Thread):
 		threading.Thread.__init__(self)
 
 		self.stream = stream
-		self.crc_calc = CrcCalculator(Crc16.CCITT)
+		crc16_conf = crc.Configuration(
+			width=16,
+			polynomial=0x1021,
+			init_value=0x0000,
+			final_xor_value=0x0000,
+			reverse_input=True,
+			reverse_output=True,
+		)
+		self.crc_calc = crc.CrcCalculator(crc16_conf)
 
 		self.running = True
 		self.daemon = True
@@ -24,12 +32,10 @@ class Commander(threading.Thread):
 		self.join()
 
 	def send_cmd(self, group, cmd, data=None):
-		if not data or len(data) == 0:
-			struct_format = "<BBH"
-			raw_cmd = struct.pack(struct_format, group, cmd, 0)
-		else:
-			struct_format = "<BBH" + str(len(data)) + "B"
-			raw_cmd = struct.pack(struct_format, group, cmd, 0, data)
+		struct_format = "<BBH"
+		raw_cmd = struct.pack(struct_format, group, cmd, 0)
+		if not (data == 0 or len(data) == 0):
+			raw_cmd += data
 
 		checksum = self.crc_calc.calculate_checksum(raw_cmd)
 
@@ -52,7 +58,7 @@ class Commander(threading.Thread):
 		
 		data_size = size - struct.Struct(resp_struct_format).size
 		if data_size > 0:
-			resp_struct_format += str(data_size) + "B"
+			resp_struct_format += str(data_size) + "s"
 			group, cmd, code, checksum, data = struct.unpack(resp_struct_format, resp)
 		else:
 			group, cmd, code, checksum = struct.unpack(resp_struct_format, resp)
@@ -101,7 +107,7 @@ class Commander(threading.Thread):
 							self.handle_resp(resp)
 				else:
 					time.sleep(0.01)
-			except:
+			except Exception as e:
 				time.sleep(0.01)
 
 class TestStream:

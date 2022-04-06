@@ -87,7 +87,8 @@ int commander_send_resp(enum diagnostics_interface interface,
 		buffer = (uint8_t*)&resp_ack;
 	}
 
-	resp_ack.checksum = crc16_ccitt(0x0000, buffer, size);
+	commander_resp_header_t* header = (commander_resp_header_t*)buffer;
+	header->checksum = crc16_ccitt(0x0000, buffer, size);
 
 	cobs_encode_result cobs_res;
 	cobs_res = cobs_encode(cobs_buffer, sizeof(cobs_buffer)-1,

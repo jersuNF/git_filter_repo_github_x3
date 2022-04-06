@@ -133,29 +133,33 @@ static inline void update_env_sensor_event_values(void)
 		return;
 	}
 
+	double temp_d, press_d, humidity_d;
+
+	temp_d = sensor_value_to_double(&temp);
+	err = sensor_sanity_check(SENSOR_CHAN_AMBIENT_TEMP, temp_d);
+
+	if (err) {
+		return;
+	}
+
+	press_d = sensor_value_to_double(&press);
+	err = sensor_sanity_check(SENSOR_CHAN_PRESS, press_d);
+
+	if (err) {
+		return;
+	}
+
+	humidity_d = sensor_value_to_double(&humidity);
+	err = sensor_sanity_check(SENSOR_CHAN_HUMIDITY, humidity_d);
+
+	if (err) {
+		return;
+	}
+
 	struct env_sensor_event *ev = new_env_sensor_event();
-
-	ev->temp = sensor_value_to_double(&temp);
-	err = sensor_sanity_check(SENSOR_CHAN_AMBIENT_TEMP, ev->temp);
-
-	if (err) {
-		return;
-	}
-
-	ev->press = sensor_value_to_double(&press);
-	err = sensor_sanity_check(SENSOR_CHAN_PRESS, ev->press);
-
-	if (err) {
-		return;
-	}
-
-	ev->humidity = sensor_value_to_double(&humidity);
-	err = sensor_sanity_check(SENSOR_CHAN_HUMIDITY, ev->humidity);
-
-	if (err) {
-		return;
-	}
-
+	ev->temp = temp_d;
+	ev->press = press_d;
+	ev->humidity = humidity_d;
 	EVENT_SUBMIT(ev);
 }
 

@@ -461,10 +461,11 @@ void play()
 	/* Set to false indicating we're ready to wait for true signal again. */
 	//atomic_set(&stop_sound_signal, false);
 
-	struct sound_status_event *ev_playing = new_sound_status_event();
 	enum sound_event_type type = atomic_get(&current_type_signal);
 
 	if (type != SND_OFF && type != SND_WARN) {
+		struct sound_status_event *ev_playing =
+			new_sound_status_event();
 		ev_playing->status = SND_STATUS_PLAYING;
 		EVENT_SUBMIT(ev_playing);
 	}

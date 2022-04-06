@@ -343,36 +343,48 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 						    .mac_address)));
 	}
 
-	struct ble_beacon_event *event = new_ble_beacon_event();
-
 	if (shortest_dist == UINT8_MAX) {
+		struct ble_beacon_event *event = new_ble_beacon_event();
 		cross_type = CROSS_UNDEFINED;
 		event->status = BEACON_STATUS_NOT_FOUND;
+		EVENT_SUBMIT(event);
 
 	} else if (shortest_dist > CONFIG_BEACON_HIGH_LIMIT) {
+		struct ble_beacon_event *event = new_ble_beacon_event();
 		cross_type = CROSS_UNDEFINED;
 		event->status = BEACON_STATUS_REGION_FAR;
+		EVENT_SUBMIT(event);
 
 	} else if (shortest_dist <= CONFIG_BEACON_LOW_LIMIT) {
+		struct ble_beacon_event *event = new_ble_beacon_event();
 		cross_type = CROSS_UNDEFINED;
 		event->status = BEACON_STATUS_REGION_NEAR;
+		EVENT_SUBMIT(event);
 
 	} else if (last_calculated_distance <= CONFIG_BEACON_LOW_LIMIT &&
 		   shortest_dist > CONFIG_BEACON_LOW_LIMIT) {
+		struct ble_beacon_event *event = new_ble_beacon_event();
 		cross_type = CROSS_LOW_FROM_BELOW;
 		event->status = BEACON_STATUS_REGION_NEAR;
+		EVENT_SUBMIT(event);
 
 	} else if (last_calculated_distance > CONFIG_BEACON_HIGH_LIMIT &&
 		   shortest_dist <= CONFIG_BEACON_HIGH_LIMIT) {
+		struct ble_beacon_event *event = new_ble_beacon_event();
 		cross_type = CROSS_HIGH_FROM_ABOVE;
 		event->status = BEACON_STATUS_REGION_FAR;
+		EVENT_SUBMIT(event);
 
 	} else {
 		if (cross_type == CROSS_LOW_FROM_BELOW) {
+			struct ble_beacon_event *event = new_ble_beacon_event();
 			event->status = BEACON_STATUS_REGION_NEAR;
+			EVENT_SUBMIT(event);
 
 		} else if (cross_type == CROSS_HIGH_FROM_ABOVE) {
+			struct ble_beacon_event *event = new_ble_beacon_event();
 			event->status = BEACON_STATUS_REGION_FAR;
+			EVENT_SUBMIT(event);
 
 		} else {
 			// Cross type undefined
@@ -382,7 +394,6 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 			return -EIO;
 		}
 	}
-	EVENT_SUBMIT(event);
 	last_calculated_distance = shortest_dist;
 	return shortest_dist;
 }

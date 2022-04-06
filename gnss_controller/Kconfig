@@ -10,7 +10,7 @@ menuconfig GNSS_CONTROLLER
 if GNSS_CONTROLLER
 	config GNSS_CONTROLLER_LOG_LEVEL
 		int "Log level for the gnss controller"
-		default 4
+		default 1
     config MINIMUM_ALLOWED_GNSS_RATE
         int "Minimum allowable rate for GNSS receiver (milliseconds)"
         default 250

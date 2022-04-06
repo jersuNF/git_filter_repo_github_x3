@@ -10,6 +10,7 @@ LOG_MODULE_REGISTER(amc_correction, CONFIG_AMC_LIB_LOG_LEVEL);
 #include "amc_states.h"
 #include "amc_gnss.h"
 #include "amc_const.h"
+#include "amc_handler.h"
 
 /* For playing sound and fetching freq limits and zapping. */
 #include "sound_event.h"
@@ -292,7 +293,7 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 				 *  "escaped."
 				 */
 
-				if (try_zap) {
+				if (try_zap && atomic_get(&sound_max_atomic)) {
 					correction_pause(
 						Reason_WARNPAUSEREASON_ZAP,
 						mean_dist);

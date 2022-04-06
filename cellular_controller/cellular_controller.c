@@ -3,7 +3,7 @@
 #include "cellular_helpers_header.h"
 #include "messaging_module_events.h"
 #include <zephyr.h>
-#include "nf_eeprom.h"
+#include "nf_settings.h"
 #include "error_event.h"
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define MY_PRIORITY CONFIG_RECV_THREAD_PRIORITY
@@ -16,14 +16,13 @@ LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
 K_SEM_DEFINE(messaging_ack, 1, 1);
 
-char server_address[EEP_HOST_PORT_BUF_SIZE-1];
-char server_address_tmp[EEP_HOST_PORT_BUF_SIZE-1];
+char server_address[EEP_HOST_PORT_BUF_SIZE - 1];
+char server_address_tmp[EEP_HOST_PORT_BUF_SIZE - 1];
 static int server_port;
 static char server_ip[15];
 
 /* Connection keep-alive thread structures */
-K_KERNEL_STACK_DEFINE(keep_alive_stack,
-		      CONFIG_CELLULAR_KEEP_ALIVE_STACK_SIZE);
+K_KERNEL_STACK_DEFINE(keep_alive_stack, CONFIG_CELLULAR_KEEP_ALIVE_STACK_SIZE);
 struct k_thread keep_alive_thread;
 static struct k_sem connection_state_sem;
 
@@ -51,21 +50,20 @@ void submit_error(int8_t cause, int8_t err_code)
 }
 
 void receive_tcp(struct data *);
-K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK,
-		receive_tcp, &conf.ipv4, NULL, NULL,
+K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK, receive_tcp, &conf.ipv4, NULL, NULL,
 		MY_PRIORITY, 0, 0);
 
 static APP_BMEM bool connected;
 
 void receive_tcp(struct data *sock_data)
 {
-	int  received;
+	int received;
 	char *buf = NULL;
 	uint8_t *pMsgIn = NULL;
 	static float socket_idle_count;
-	while(1){
+	while (1) {
 		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
-		if(connected){
+		if (connected) {
 			received = socket_receive(sock_data, &buf);
 			if (received > 0) {
 				socket_idle_count = 0;
@@ -73,8 +71,10 @@ void receive_tcp(struct data *sock_data)
 				LOG_WRN("received %d bytes!\n", received);
 #endif
 				LOG_WRN("will take semaphore!\n");
-				if (k_sem_take(&messaging_ack, K_SECONDS
-					       (MESSAGING_ACK_TIMEOUT)) !=0) {
+				if (k_sem_take(
+					    &messaging_ack,
+					    K_SECONDS(MESSAGING_ACK_TIMEOUT)) !=
+				    0) {
 					/* TODO: notify the error handler */
 					LOG_ERR("New message received while the messaging module "
 						"hasn't consumed the previous one!\n");
@@ -84,7 +84,7 @@ void receive_tcp(struct data *sock_data)
 						k_free(pMsgIn);
 						pMsgIn = NULL;
 					}
-					pMsgIn = (uint8_t *) k_malloc(received);
+					pMsgIn = (uint8_t *)k_malloc(received);
 					memcpy(pMsgIn, buf, received);
 					struct cellular_proto_in_event *msgIn =
 						new_cellular_proto_in_event();
@@ -95,9 +95,10 @@ void receive_tcp(struct data *sock_data)
 				}
 			} else if (received == 0) {
 				socket_idle_count += SOCKET_POLL_INTERVAL;
-				if (socket_idle_count > SOCK_RECV_TIMEOUT){
+				if (socket_idle_count > SOCK_RECV_TIMEOUT) {
 					LOG_ERR("Socket receive timed out!, "
-						"%f\n", socket_idle_count);
+						"%f\n",
+						socket_idle_count);
 					submit_error(SOCKET_RECV, -ETIMEDOUT);
 					stop_tcp();
 					connected = false;
@@ -117,7 +118,7 @@ void receive_tcp(struct data *sock_data)
 int start_tcp(void)
 {
 	int ret = check_ip();
-	if (ret != 0){
+	if (ret != 0) {
 		LOG_ERR("Failed to get ip "
 			"address!");
 		/*TODO: notify error handler*/
@@ -150,50 +151,52 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		stop_tcp();
 		connected = false;
 		return true;
-	}else if (is_messaging_host_address_event(eh)) {
-		int ret = eep_read_host_port(&server_address_tmp[0], EEP_HOST_PORT_BUF_SIZE-1);
-		if (ret != 0){
+	} else if (is_messaging_host_address_event(eh)) {
+		int ret = eep_read_host_port(&server_address_tmp[0],
+					     EEP_HOST_PORT_BUF_SIZE - 1);
+		if (ret != 0) {
 			LOG_ERR("Failed to read host address from eeprom!\n");
 		}
 		struct messaging_host_address_event *event =
 			cast_messaging_host_address_event(eh);
 		memcpy(&server_address[0], event->address,
-		       sizeof(event->address)-1);
+		       sizeof(event->address) - 1);
 		char *ptr_port;
 		ptr_port = strchr(server_address, ':') + 1;
 		server_port = atoi(ptr_port);
 		if (server_port <= 0) {
 			char *e_msg = "Failed to parse port number from new "
 				      "host address!";
-			nf_app_error(ERR_MESSAGING, -EILSEQ, e_msg, strlen
-				     (e_msg));
+			nf_app_error(ERR_MESSAGING, -EILSEQ, e_msg,
+				     strlen(e_msg));
 			return false;
 		}
 		uint8_t ip_len;
 		ip_len = ptr_port - 1 - &server_address[0];
 		memcpy(&server_ip[0], &server_address[0], ip_len);
-		ret = memcmp(server_address, server_address_tmp, EEP_HOST_PORT_BUF_SIZE-1);
-		if (ret != 0){
+		ret = memcmp(server_address, server_address_tmp,
+			     EEP_HOST_PORT_BUF_SIZE - 1);
+		if (ret != 0) {
 			LOG_INF("New host address received!\n");
 			ret = eep_write_host_port(server_address);
-			if (ret != 0){
+			if (ret != 0) {
 				LOG_ERR("Failed to write new host address to "
 					"eeprom!\n");
 			}
 		}
 		return false;
-	}else if (is_messaging_proto_out_event(eh)) {
+	} else if (is_messaging_proto_out_event(eh)) {
 		/* Accessing event data. */
 		struct messaging_proto_out_event *event =
 			cast_messaging_proto_out_event(eh);
 		uint8_t *pCharMsgOut = event->buf;
 		size_t MsgOutLen = event->len;
-		
+
 		int8_t err;
-		
+
 		/* make a local copy of the message to send.*/
 		uint8_t *CharMsgOut;
-		CharMsgOut = (char *) k_malloc(MsgOutLen);
+		CharMsgOut = (char *)k_malloc(MsgOutLen);
 		if (CharMsgOut == memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
 			LOG_DBG("Publishing ack to messaging!\n");
 			struct cellular_ack_event *ack =
@@ -209,7 +212,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		}
 		k_free(CharMsgOut);
 		return false;
-	}else if(is_check_connection(eh)){
+	} else if (is_check_connection(eh)) {
 		k_sem_give(&connection_state_sem);
 		return false;
 	}
@@ -246,7 +249,7 @@ int8_t cache_server_address(void)
 	}
 }
 
-static int cellular_controller_connect(void* dev)
+static int cellular_controller_connect(void *dev)
 {
 	int ret = lte_init();
 	if (ret != 0) {
@@ -260,7 +263,7 @@ static int cellular_controller_connect(void* dev)
 	ret = cache_server_address();
 	if (ret != 0) { //172.31.36.11:4321
 		//172.31.33.243:9876
-		strcpy(server_ip,"172.31.36.11");
+		strcpy(server_ip, "172.31.36.11");
 		server_port = 4321;
 		LOG_INF("Default server ip address will be "
 			"used.");
@@ -272,7 +275,7 @@ exit:
 	return ret;
 }
 
-static void cellular_controller_keep_alive(void* dev)
+static void cellular_controller_keep_alive(void *dev)
 {
 	while (true) {
 		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
@@ -287,28 +290,28 @@ static void cellular_controller_keep_alive(void* dev)
 				}
 			}
 			if (cellular_controller_is_ready()) {
-				if(!connected){//check_ip takes place in start_tcp()
+				if (!connected) { //check_ip takes place in start_tcp()
 					// in this case.
-					int  ret = start_tcp();
-					if (ret == 0){
+					int ret = start_tcp();
+					if (ret == 0) {
 						connected = true;
 						announce_connection_state(true);
-					}else {
+					} else {
 						LOG_WRN("Connection failed!");
 						stop_tcp();
-						announce_connection_state
-							(false);
+						announce_connection_state(
+							false);
 						/*TODO: notify error handler*/
 					}
 				} else {
 					int ret = check_ip();
-					if (ret != 0){
+					if (ret != 0) {
 						LOG_ERR("Failed to get ip "
 							"address!");
-						announce_connection_state
-							(false);
+						announce_connection_state(
+							false);
 						/*TODO: notify error handler*/
-					}else {
+					} else {
 						announce_connection_state(true);
 					}
 				}
@@ -317,9 +320,9 @@ static void cellular_controller_keep_alive(void* dev)
 	}
 }
 
-void announce_connection_state(bool state){
-	struct connection_state_event *ev
-		= new_connection_state_event();
+void announce_connection_state(bool state)
+{
+	struct connection_state_event *ev = new_connection_state_event();
 	ev->state = state;
 	EVENT_SUBMIT(ev);
 }
@@ -332,7 +335,7 @@ bool cellular_controller_is_ready(void)
 int8_t cellular_controller_init(void)
 {
 	connected = false;
-	
+
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {
 		LOG_ERR("GSM driver was not found!\n");
@@ -345,8 +348,8 @@ int8_t cellular_controller_init(void)
 	k_sem_init(&connection_state_sem, 0, 1);
 	k_thread_create(&keep_alive_thread, keep_alive_stack,
 			K_KERNEL_STACK_SIZEOF(keep_alive_stack),
-			(k_thread_entry_t) cellular_controller_keep_alive,
-			(void*)gsm_dev, NULL, NULL, 
+			(k_thread_entry_t)cellular_controller_keep_alive,
+			(void *)gsm_dev, NULL, NULL,
 			K_PRIO_COOP(CONFIG_CELLULAR_KEEP_ALIVE_THREAD_PRIORITY),
 			0, K_NO_WAIT);
 

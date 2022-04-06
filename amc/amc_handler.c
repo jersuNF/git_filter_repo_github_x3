@@ -44,6 +44,9 @@ static int16_t instant_dist = INT16_MIN;
 static uint8_t fifo_dist_elem_count = 0;
 static uint8_t fifo_avg_dist_elem_count = 0;
 
+/* To make sure we're in the sound max before we submit EP release. */
+atomic_t sound_max_atomic = ATOMIC_INIT(false);
+
 #define MODULE animal_monitor_control
 LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
 
@@ -367,6 +370,15 @@ static bool event_handler(const struct event_header *eh)
 		set_beacon_status(event->status);
 		return false;
 	}
+	if (is_sound_status_event(eh)) {
+		const struct sound_status_event *event =
+			cast_sound_status_event(eh);
+		if (event->status == SND_STATUS_PLAYING_MAX) {
+			atomic_set(&sound_max_atomic, true);
+		} else {
+			atomic_set(&sound_max_atomic, false);
+		}
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -377,3 +389,4 @@ EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, gnss_data);
 EVENT_SUBSCRIBE(MODULE, new_fence_available);
 EVENT_SUBSCRIBE(MODULE, ble_beacon_event);
+EVENT_SUBSCRIBE(MODULE, sound_status_event);

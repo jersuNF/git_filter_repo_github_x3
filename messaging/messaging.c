@@ -58,6 +58,10 @@ K_SEM_DEFINE(cache_lock_sem, 1, 1);
 K_SEM_DEFINE(send_out_ack, 0, 1);
 K_SEM_DEFINE(connection_ready, 0, 1);
 
+K_SEM_DEFINE(env_data_sem, 0, 1);
+K_SEM_DEFINE(battery_data_sem, 0, 1);
+K_SEM_DEFINE(charge_data_sem, 0, 1);
+
 collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
 
@@ -132,53 +136,80 @@ K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE,
 K_KERNEL_STACK_DEFINE(messaging_send_thread,
 		      CONFIG_MESSAGING_SEND_THREAD_STACK_SIZE);
 
+/** @todo 
+ * EVENTS we need:
+	 - Battery event (mV)
+	- Charging current (mAh)
+	- GNSS event to get date and position
+	- Modem RSSI (from cellular controller)
+	- Histogram struct (request/response behavior)
+	- BME280 enviroment data (temp, humid, pressure)
+	- Battery performance?
+*/
 void build_log_message()
 {
-	/* EVENTS we need:
-	   - Battery event (mV)
-	   - Charging current (mAh)
-	   - GNSS event to get date and position
-	   - Modem RSSI (from cellular controller)
-	   - Histogram struct (request/response behavior)
-	   - BME280 enviroment data (temp, humid, pressure)
-	   - Battery performance?
-	*/
+	int ret;
+	
 	struct request_pwr_battery_event *ev_batt =
 		new_request_pwr_battery_event();
 	EVENT_SUBMIT(ev_batt);
+	k_sem_take(&battery_data_sem, K_SECONDS(30));
+
 	struct request_pwr_charging_event *ev_charge =
 		new_request_pwr_charging_event();
 	EVENT_SUBMIT(ev_charge);
+	k_sem_take(&charge_data_sem, K_SECONDS(30));
 
 	struct request_env_sensor_event *ev_env =
 		new_request_env_sensor_event();
 	EVENT_SUBMIT(ev_env);
+	k_sem_take(&env_data_sem, K_SECONDS(30));
 
-	//NofenceMessage seq_1;
-	//NofenceMessage seq_2;
-	//
-	//seq_1.m.seq_msg.
-	//seq_1.which_m
-	/* Fill in NofenceMessage and encode it, then store on fcb. Do it twice,
-	 * once for seq message 1 and once for seq message 2. As such;
+	/* Fill in NofenceMessage struct */
+	NofenceMessage seq_1;
+	NofenceMessage seq_2;
 
-	 * NofenceMessage seq_1;
-	 * NofenceMessage seq_2;
-	 * 
-	 * seq_1.which_m = NofenceMessage_seq_msg_tag;
-	 * seq_2.which_m = NofenceMessage_seq_msg_2_tag;
-	 * ...
-	 * ...
-	 * 
-	 * collar_protocol_encode(seq_1, dst1, dst_max_size1, dst_size1);
-	 * collar_protocol_encode(seq_2, dst2, dst_max_size2, dst_size2);
-	 * 
-	 * stg_write_log_data(dst1, dst_size1);
-	 * stg_write_log_data(dst2, dst_size2);
-	 * 
-	 * DONE.
-	 */
-	return;
+	seq_1.m.seq_msg.usBatteryVoltage = cached_battery;
+	seq_1.m.seq_msg.usChargeMah = cached_charging;
+	//seq_1.m.seq_msg.xGprsRssi = cached_rssi; // not implemented
+
+	seq_2.m.seq_msg_2.bme280.ulHumidity = cached_humidity;
+	seq_2.m.seq_msg_2.bme280.ulPressure = cached_pressure;
+	seq_2.m.seq_msg_2.bme280.ulTemperature = cached_temperature;
+
+	seq_1.which_m = NofenceMessage_seq_msg_tag;
+	seq_2.which_m = NofenceMessage_seq_msg_2_tag;
+
+	uint8_t header_size = 2;
+	uint8_t encoded_msg_seq_1[NofenceMessage_size + header_size];
+	uint8_t encoded_msg_seq_2[NofenceMessage_size + header_size];
+
+	memset(encoded_msg_seq_1, 0, sizeof(encoded_msg_seq_1));
+	memset(encoded_msg_seq_2, 0, sizeof(encoded_msg_seq_1));
+
+	size_t encoded_seq_1_size = 0;
+	size_t encoded_seq_2_size = 0;
+
+	/* Encode the seq_1 struct created. */
+	ret = collar_protocol_encode(&seq_1, &encoded_msg_seq_1[2],
+				     NofenceMessage_size, &encoded_seq_1_size);
+	if (ret) {
+		LOG_ERR("Error encoding nofence message seq 1 (%i)", ret);
+		return;
+	}
+
+	/* Encode the seq_2 struct created. */
+	ret = collar_protocol_encode(&seq_2, &encoded_msg_seq_2[2],
+				     NofenceMessage_size, &encoded_seq_2_size);
+	if (ret) {
+		LOG_ERR("Error encoding nofence message seq 2 (%i)", ret);
+		return;
+	}
+
+	/** @todo Double chech for correct  size */
+	/* Store the encoded message to external flash ring buffer */
+	stg_write_log_data(encoded_msg_seq_1, encoded_seq_1_size);
+	stg_write_log_data(encoded_msg_seq_2, encoded_seq_2_size);
 }
 
 int read_log_data_cb(uint8_t *data, size_t len)

@@ -7,7 +7,7 @@
 LOG_MODULE_REGISTER(amc_correction, CONFIG_AMC_LIB_LOG_LEVEL);
 
 #include "amc_correction.h"
-#include "amc_states.h"
+#include "amc_states_cache.h"
 #include "amc_gnss.h"
 #include "amc_const.h"
 #include "amc_handler.h"

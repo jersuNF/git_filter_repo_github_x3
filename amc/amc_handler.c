@@ -5,7 +5,7 @@
 #include "amc_dist.h"
 #include "amc_zone.h"
 #include "amc_gnss.h"
-#include "amc_states.h"
+#include "amc_states_cache.h"
 #include "amc_correction.h"
 #include "amc_const.h"
 #include "nf_fifo.h"
@@ -22,6 +22,8 @@
 #include "gnss_controller_events.h"
 
 #include "ble_beacon_event.h"
+
+#include "movement_events.h"
 
 #include "storage.h"
 
@@ -330,8 +332,8 @@ int amc_module_init(void)
 	k_work_init(&process_new_gnss_work, process_new_gnss_data_fn);
 	k_work_init(&process_new_fence_work, process_new_fence_fn);
 
-	/* Checks and inits the mode we're in. */
-	init_mode_status();
+	/* Checks and inits the mode we're in as well as caching variables. */
+	init_states_and_variables();
 
 	/* Fetch the fence from external flash and update fence cache. */
 	return update_pasture_from_stg();
@@ -379,6 +381,11 @@ static bool event_handler(const struct event_header *eh)
 			atomic_set(&sound_max_atomic, false);
 		}
 	}
+	if (is_movement_out_event(eh)) {
+		const struct movement_out_event *ev =
+			cast_movement_out_event(eh);
+		update_movement_state(ev->state);
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -390,3 +397,4 @@ EVENT_SUBSCRIBE(MODULE, gnss_data);
 EVENT_SUBSCRIBE(MODULE, new_fence_available);
 EVENT_SUBSCRIBE(MODULE, ble_beacon_event);
 EVENT_SUBSCRIBE(MODULE, sound_status_event);
+EVENT_SUBSCRIBE(MODULE, movement_out_event);

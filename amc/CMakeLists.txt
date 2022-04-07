@@ -12,7 +12,8 @@ zephyr_include_directories(
     ./../../events/buzzer/
     ./../../lib/trigonometry/
     ./../../lib/fifo/
-    ./../../events/error_handler/)
+    ./../../events/error_handler/
+    ./../../events/movement_controller)
 
 target_sources(app PRIVATE 
 ./amc_handler.c

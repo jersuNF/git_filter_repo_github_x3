@@ -2,14 +2,15 @@
  * Copyright (c) 2022 Nofence AS
  */
 
-#ifndef _AMC_STATES_H_
-#define _AMC_STATES_H_
+#ifndef _AMC_STATES_CACHE_H_
+#define _AMC_STATES_CACHE_H_
 
 #include <zephyr.h>
 #include "embedded.pb.h"
 #include "gnss.h"
 
 #include "ble_beacon_event.h"
+#include "movement_events.h"
 
 /** @todo Move these to another place? Should AMC definitions have a common place?
  * There will not be performed more than this number of shocks each day, 
@@ -44,7 +45,7 @@
 /** @brief Checks if we're in teach mode and sets the cache variables
  *         that is necessary.
  */
-void init_mode_status(void);
+void init_states_and_variables(void);
 
 /** @brief Calculates the amc mode based on internal zap/warn count variables.
  * 
@@ -106,4 +107,10 @@ void reset_zap_pain_cnt(void);
  */
 void set_beacon_status(enum beacon_status_type status);
 
-#endif /* _AMC_STATES_H_ */
+/** @brief Sets the movement state from the movement controller event.
+ * 
+ *  @param state to update the cached variable to.
+ */
+void update_movement_state(movement_state_t state);
+
+#endif /* _AMC_STATES_CACHE_H_ */

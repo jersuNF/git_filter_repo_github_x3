@@ -1,10 +1,10 @@
 
 menuconfig TIME_USE
-	bool "Messaging module"
+	bool "time use accumulator"
 	select COLLAR_PROTOCOL
 	select POLL
 	help
-	  Enable messaging module
+	  Enable time use accumulator
 	default y
 
 
@@ -15,9 +15,13 @@ if TIME_USE
 
 	config TIME_USE_THREAD_STACK_SIZE
 		int "Size of the time_use processing thread"
-		default 2048
+		default 1024
 
 	config TIME_USE_THREAD_PRIORITY
 		int "Priority of the time_use processing thread"
 		default 1
+
+    config TIME_USE_RESOLUTION_SEC
+            int "histograms update resolution in seconds"
+            default 4
 endif

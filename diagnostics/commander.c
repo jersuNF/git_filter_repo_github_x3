@@ -181,11 +181,11 @@ static int commander_settings_handler(enum diagnostics_interface interface,
 						  (data[2 + 1] << 8) +
 						  (data[2 + 2] << 16) +
 						  (data[2 + 3] << 24);
-				err = eep_write_serial(serial);
+				err = eep_uint32_write(EEP_UID, serial);
 			}
 		} else {
 			uint32_t serial = 0;
-			err = eep_read_serial(&serial);
+			err = eep_uint32_read(EEP_UID, &serial);
 			if (err == 0) {
 				commander_send_data(interface,
 						    COMMANDER_CMD_SETTINGS,

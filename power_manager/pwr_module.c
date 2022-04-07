@@ -221,8 +221,60 @@ int log_and_fetch_battery_voltage(void)
 	event->param.battery = batt_soc;
 	EVENT_SUBMIT(event);
 
-	LOG_INF("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
+	LOG_DBG("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
 		batt_soc);
 
 	return batt_mV;
 }
+
+/**
+ * @brief Main event handler function. 
+ * 
+ * @param[in] eh Event_header for the if-chain to 
+ *               use to recognize which event triggered.
+ * 
+ * @return True or false based on if we want to consume the event or not.
+ */
+static bool event_handler(const struct event_header *eh)
+{
+	if (is_request_pwr_battery_event(eh)) {
+		int batt_voltage = log_and_fetch_battery_voltage();
+		if (batt_voltage < 0) {
+			char *e_msg = "Error in fetching battery voltage";
+			nf_app_error(ERR_PWR_MODULE, batt_voltage, e_msg,
+				     strlen(e_msg));
+			return false;
+		}
+
+		/* Publish battery event with averaged voltage */
+		struct pwr_status_event *event = new_pwr_status_event();
+		event->pwr_state = PWR_BATTERY;
+		event->battery_mv = batt_voltage;
+		EVENT_SUBMIT(event);
+		return true;
+	}
+#if CONFIG_ADC_NRFX_SAADC
+	if (is_request_pwr_charging_event(eh)) {
+		int charging_current_avg = charging_current_sample_averaged();
+		if (charging_current_avg < 0) {
+			char *msg = "Unable fetch charging data";
+			nf_app_error(ERR_PWR_MODULE, charging_current_avg, msg,
+				     strlen(msg));
+			return false;
+		}
+		struct pwr_status_event *event = new_pwr_status_event();
+		event->pwr_state = PWR_CHARGING;
+		event->charging_ma = charging_current_avg;
+		EVENT_SUBMIT(event);
+		return true;
+	}
+#endif
+	/* If event is unhandled, unsubscribe. */
+	__ASSERT_NO_MSG(false);
+
+	return false;
+}
+
+EVENT_LISTENER(MODULE, event_handler);
+EVENT_SUBSCRIBE(MODULE, request_pwr_battery_event);
+EVENT_SUBSCRIBE(MODULE, request_pwr_charging_event);

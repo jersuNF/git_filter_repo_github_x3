@@ -14,6 +14,7 @@
 #include "nofence_service.h"
 #include "lte_proto_event.h"
 #include "pwr_event.h"
+#include "env_sensor_event.h"
 
 #include "cellular_controller_events.h"
 #include "gnss_controller_events.h"
@@ -47,8 +48,11 @@ static pasture_t pasture_temp;
 static uint8_t cached_fences_counter = 0;
 
 uint32_t time_from_server;
-uint16_t battery;
-uint16_t charging;
+uint16_t cached_battery;
+uint16_t cached_charging;
+double cached_temperature;
+double cached_pressure;
+double cached_humidity;
 
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
 K_SEM_DEFINE(send_out_ack, 0, 1);
@@ -139,7 +143,22 @@ void build_log_message()
 	   - BME280 enviroment data (temp, humid, pressure)
 	   - Battery performance?
 	*/
+	struct request_pwr_battery_event *ev_batt =
+		new_request_pwr_battery_event();
+	EVENT_SUBMIT(ev_batt);
+	struct request_pwr_charging_event *ev_charge =
+		new_request_pwr_charging_event();
+	EVENT_SUBMIT(ev_charge);
 
+	struct request_env_sensor_event *ev_env =
+		new_request_env_sensor_event();
+	EVENT_SUBMIT(ev_env);
+
+	//NofenceMessage seq_1;
+	//NofenceMessage seq_2;
+	//
+	//seq_1.m.seq_msg.
+	//seq_1.which_m
 	/* Fill in NofenceMessage and encode it, then store on fcb. Do it twice,
 	 * once for seq message 1 and once for seq message 2. As such;
 
@@ -339,10 +358,19 @@ static bool event_handler(const struct event_header *eh)
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
 		/* Update shaddow register */
 		if (ev->pwr_state == PWR_BATTERY) {
-			battery = ev->battery_mv;
+			cached_battery = ev->battery_mv;
 		} else if (ev->pwr_state == PWR_CHARGING) {
-			charging = ev->charging_ma;
+			cached_charging = ev->charging_ma;
 		}
+		return false;
+	}
+
+	if (is_env_sensor_event(eh)) {
+		struct env_sensor_event *ev = cast_env_sensor_event(eh);
+		/* Update shaddow register */
+		cached_temperature = ev->temp;
+		cached_pressure = ev->press;
+		cached_humidity = ev->humidity;
 		return false;
 	}
 	/* If event is unhandled, unsubscribe. */

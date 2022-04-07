@@ -10,7 +10,7 @@
 #include <sys/ring_buffer.h>
 #include <zephyr.h>
 #include <zephyr/types.h>
-#include "nf_eeprom.h"
+#include "nf_settings.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -593,16 +593,16 @@ static void scan_stop(void)
 int ble_module_init()
 {
 	uint32_t serial_id = 0;
-	int err = eep_read_serial(&serial_id);
-	if (err != 0){ //TODO: handle in a better way.
+	int err = eep_uint32_read(EEP_UID, &serial_id);
+	if (err != 0) { //TODO: handle in a better way.
 		LOG_ERR("Failed to read serial number from eeprom!");
-	}
-	else{
+	} else {
 		if (serial_id > 999999) {
-			strncpy(bt_device_name, "NF??????\0", DEVICE_NAME_LEN+1);
+			strncpy(bt_device_name, "NF??????\0",
+				DEVICE_NAME_LEN + 1);
 		} else {
 			char tmp[DEVICE_NAME_LEN + 1];
-			snprintf(tmp, 7, "%i" , serial_id); //TODO: 7
+			snprintf(tmp, 7, "%i", serial_id); //TODO: 7
 			// digit numbers would overflow. Using 7 to overcome
 			// the compiler warning, needs to be fixed.
 			uint32_t len = strlen(tmp);

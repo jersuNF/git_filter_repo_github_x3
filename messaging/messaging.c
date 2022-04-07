@@ -34,7 +34,7 @@
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
-#include "nf_eeprom.h"
+#include "nf_settings.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
@@ -528,8 +528,8 @@ void messaging_thread_fn()
 int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module.");
-	int err = eep_read_serial(&serial_id);
-	if (err != 0){ //TODO: handle in a better way.
+	int err = eep_uint32_read(EEP_UID, &serial_id);
+	if (err != 0) { //TODO: handle in a better way.
 		LOG_ERR("Failed to read serial number from eeprom!");
 		return err;
 	}

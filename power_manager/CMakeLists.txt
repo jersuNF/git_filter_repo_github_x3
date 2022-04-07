@@ -8,6 +8,8 @@ target_include_directories(app PRIVATE
 	./include/
 	./../../events/messaging/
 	./battery/
+
+  	./../../modules/nf_settings/include
 	./charging/
 )
 

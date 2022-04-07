@@ -1,0 +1,36 @@
+menuconfig MOVE_CONTROLLER
+	bool "Movement controller"
+	help
+	  Movement controller module
+	select SENSOR
+	select LIS2DW
+	select LIS2DW_TRIGGER
+	default y
+
+if MOVE_CONTROLLER
+	module = MOVE_CONTROLLER
+	module-str = MOVEMENT Controller
+	source "subsys/logging/Kconfig.template.log_config"
+
+	config MOVEMENT_THREAD_STACK_SIZE
+		int "Stack size of the movement processing thread"
+		default 2048
+
+	config MOVEMENT_THREAD_PRIORITY
+		int "Priority of the movement processing thread"
+		default 1
+		help
+		  A cooperative thread has a negative priority value. 
+		  Once it becomes the current thread, a cooperative thread 
+		  remains the current thread until it performs an action 
+		  that makes it unready.
+		  A preemptible thread has a non-negative priority value. 
+		  Once it becomes the current thread, a preemptible thread 
+		  may be supplanted at any time if a cooperative thread, 
+		  or a preemptible thread of higher or equal priority, 
+		  becomes ready.
+
+	config ACC_MSGQ_SIZE
+	int "Size of number of acc data elements"
+	default 5
+endif

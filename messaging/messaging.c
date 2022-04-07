@@ -38,9 +38,12 @@
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
 
+#include "nf_eeprom.h"
+
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
 #define SECONDS_IN_THREE_DAYS 259200
+#define TWO_DAYS_SEC SEC_DAY * 2
 
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
 
@@ -60,7 +63,10 @@ gnss_last_fix_struct_t cached_fix;
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
 static bool first_frame, first_ano_frame;
-static atomic_t has_gnss_data = ATOMIC_INIT(false);
+
+/* Time since the server updated the date time in seconds. */
+static atomic_t server_timestamp_sec = ATOMIC_INIT(0);
+
 uint32_t serial_id = 0;
 
 void build_poll_request(NofenceMessage *);
@@ -225,6 +231,8 @@ void modem_poll_work_fn()
 	}
 }
 
+static int32_t sec_since_gnss_time = 0;
+
 /**
  * @brief Main event handler function. 
  * 
@@ -236,17 +244,46 @@ void modem_poll_work_fn()
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_gnss_data(eh)) {
+		/* Check when we received server time last. */
+		int32_t delta_server_time =
+			(int32_t)(k_uptime_get_32() / 1000) -
+			(int32_t)atomic_get(&server_timestamp_sec);
+
+		/* If we already have server time, just return. */
+		if (delta_server_time <= TWO_DAYS_SEC) {
+			return false;
+		}
+
+		/* Check if we can use GNSS data based on the pvt_valid bits
+		 * and timestamp since correction. Doesn't need to be
+		 * atomic, since event handler thead is the only one
+		 * accessing it.
+		 */
 		struct gnss_data *ev = cast_gnss_data(eh);
 
-		/* Update date time. */
+		if (!(ev->gnss_data.lastfix.pvt_flags & (1 << 0)) ||
+		    !(ev->gnss_data.lastfix.pvt_flags & (1 << 1))) {
+			return false;
+		}
+
+		if ((int32_t)(k_uptime_get_32() / 1000) - sec_since_gnss_time <
+		    SEC_HOUR) {
+			return false;
+		}
 
 		/** @todo Check if uint32_t to time_t typecast works. */
 		time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
 		struct tm *tm_time = gmtime(&gm_time);
 		/* Update date_time library which storage uses for ANO data. */
 		if (!date_time_set(tm_time)) {
-			atomic_set(&has_gnss_data, true);
+			LOG_ERR("Could not set date time from GNSS data");
+			return false;
+		} else {
+			LOG_INF("Now using GNSS unix timestamp instead: %s",
+				asctime(tm_time));
 		}
+
+		sec_since_gnss_time = (int32_t)(k_uptime_get_32() / 1000);
 	}
 	if (is_ble_ctrl_event(eh)) {
 		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
@@ -545,8 +582,8 @@ void messaging_thread_fn()
 int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module.");
-	int err = eep_uint32_read(EEP_UID, &serial_id);
-	if (err != 0){ //TODO: handle in a better way.
+	int err = eep_read_serial(&serial_id);
+	if (err != 0) { //TODO: handle in a better way.
 		LOG_ERR("Failed to read serial number from eeprom!");
 		return err;
 	}
@@ -858,19 +895,19 @@ void process_poll_response(NofenceMessage *proto)
 		LOG_INF("Server time will be used.");
 		time_from_server = proto->header.ulUnixTimestamp;
 		use_server_time = true;
-		if (!atomic_get(&has_gnss_data)) {
-			time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
-			struct tm *tm_time = gmtime(&gm_time);
-			/* Update date_time library which storage uses for ANO data. */
-			int err = date_time_set(tm_time);
-			if (err) {
-				LOG_ERR("Error updating time from server %i",
-					err);
-			} else {
-				/** @note This prints UTC. */
-				LOG_INF("Set timestamp to date_time library: %s",
-					asctime(tm_time));
-			}
+		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
+		struct tm *tm_time = gmtime(&gm_time);
+		/* Update date_time library which storage uses for ANO data. */
+		int err = date_time_set(tm_time);
+		if (err) {
+			LOG_ERR("Error updating time from server %i", err);
+		} else {
+			/** @note This prints UTC. */
+			LOG_INF("Set timestamp to date_time library from modem: %s",
+				asctime(tm_time));
+			atomic_set(&server_timestamp_sec,
+				   (atomic_val_t)(int32_t)(k_uptime_get_32() /
+							   1000));
 		}
 	}
 	if (pResp->has_usPollConnectIntervalSec) {

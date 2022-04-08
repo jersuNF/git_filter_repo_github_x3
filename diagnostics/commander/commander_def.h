@@ -65,10 +65,13 @@ typedef enum {
 } settings_cmd_t;
 
 typedef enum {
-	GNSS_DATA = 0x10,
+	GNSS_HUB = 0x10,
+	GNSS_SEND = 0x11,
+	GNSS_RECEIVE = 0x12,
+
 	BUZZER_WARN = 0xB0,
 	ELECTRICAL_PULSE = 0xE0,
-} stimulator_cmd_t;
+} simulator_cmd_t;
 
 int commander_send_resp(enum diagnostics_interface interface, 
 			commander_group_t group, uint8_t cmd, 

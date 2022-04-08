@@ -5,6 +5,8 @@
 #include "ep_event.h"
 #include "event_manager.h"
 
+#include "gnss_hub.h"
+
 int commander_stimulator_handler(enum diagnostics_interface interface, 
 				 uint8_t cmd, uint8_t* data, uint32_t size)
 {
@@ -13,9 +15,25 @@ int commander_stimulator_handler(enum diagnostics_interface interface,
 	uint8_t resp = ACK;
 
 	switch (cmd) {
-		case GNSS_DATA:
+		case GNSS_HUB:
 		{
-			/** @todo Process and send GNSS data event */
+			if (size != 1) {
+				resp = ERROR;
+				break;
+			}
+
+			uint8_t hub_mode = data[0];
+			if (gnss_hub_configure(hub_mode) != 0) {
+				resp = ERROR;
+			}
+			
+			break;
+		}
+		case GNSS_SEND:
+		{
+			if (gnss_hub_send(GNSS_HUB_ID_DIAGNOSTICS, data, size) != 0) {
+				resp = ERROR;
+			}
 			break;
 		}
 		case BUZZER_WARN:

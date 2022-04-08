@@ -284,6 +284,7 @@ static bool event_handler(const struct event_header *eh)
 		}
 
 		sec_since_gnss_time = (int32_t)(k_uptime_get_32() / 1000);
+		return false;
 	}
 	if (is_ble_ctrl_event(eh)) {
 		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);

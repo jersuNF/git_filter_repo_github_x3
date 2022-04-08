@@ -44,6 +44,8 @@ class Commander(threading.Thread):
 		raw_cmd[2] = checksum&0xFF
 		raw_cmd[3] = (checksum>>8)&0xFF
 
+		print("Sending: " + str(raw_cmd))
+
 		self.stream.write(cobs.encode(raw_cmd) + b"\x00")
 	
 	def handle_resp(self, resp):

@@ -14,6 +14,12 @@ class NFDiag:
 			print(i)
 			self.cmndr.send_cmd(0, 0x55) #, data=b"\x00")
 			time.sleep(0.1)
+		
+		self.cmndr.send_cmd(0x02, 0x10, b"\x01")
+		time.sleep(0.1)
+		while True:
+			self.cmndr.send_cmd(0x02, 0x12)
+			time.sleep(0.1)
 
 	def __del__(self):
 		self.cmndr.stop()

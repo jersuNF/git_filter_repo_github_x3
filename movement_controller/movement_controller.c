@@ -34,12 +34,7 @@ static movement_state_t prev_state = STATE_INACTIVE;
 
 static uint8_t num_acc_fifo_samples = 0;
 
-typedef enum {
-	ACTIVITY_NO = 0,
-	ACTIVITY_LOW = 1,
-	ACTIVITY_MED = 2,
-	ACTIVITY_HIGH = 3
-} acc_activity_t;
+
 static acc_activity_t last_activity = ACTIVITY_NO;
 
 void movement_thread_fn();

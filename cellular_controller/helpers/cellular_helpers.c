@@ -72,9 +72,6 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 	int ret;
 
 	data->tcp.sock = socket(addr->sa_family, SOCK_STREAM, IPPROTO_TCP);
-//	if (data->tcp.sock > 0){ /* socket 0 already created!*/
-//		data->tcp.sock = 0;
-//		}
 
 	if (data->tcp.sock < 0) {
 		LOG_ERR("Failed to create TCP socket (%s): %d", data->proto,
@@ -208,6 +205,10 @@ bool query_listen_sock(void)
 	return poll_listen_socket();
 }
 
+/**
+ * will close the latest TCP socket with id greater than zero, as zero is
+ * reserved for the listening socket. */
+ /* TODO: enhance robustness. */
 void stop_tcp(void)
 {
 	if (IS_ENABLED(CONFIG_NET_IPV6)) {

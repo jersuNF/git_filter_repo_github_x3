@@ -55,7 +55,15 @@ int time_use_module_init(void)
 			0, K_NO_WAIT);
 	return 0;
 }
+typedef enum {
+	RESTING,
+	GRAZING,
+	WALKING,
+	RUNNING,
+	UNKNOWN
+} STATE;
 
+static STATE cur_animal_state = UNKNOWN;
 static amc_zone_t cur_zone;
 static Mode cur_collar_mode;
 static CollarStatus cur_collar_status;
@@ -64,8 +72,7 @@ static bool in_beacon_or_sleep;
 static movement_state_t cur_mv_state;
 static acc_activity_t cur_activity_level = ACTIVITY_NO;
 static uint32_t steps, steps_old;
-static int16_t xloc, yloc;
-int16_t m_i16_way_pnt[2];
+int16_t m_i16_way_pnt[2], fresh_pos[2];
 static gnss_mode_t cur_gnss_pwr_m = GNSSMODE_NOMODE;
 static modem_pwr_mode cur_modem_pwr_m = POWER_ON;
 static uint16_t cur_bat_volt, cur_min_bat_volt, cur_max_bat_volt;
@@ -164,8 +171,8 @@ static bool event_handler(const struct event_header *eh)
 
 	if (is_xy_location(eh)) {
 		struct xy_location *ev = cast_xy_location(eh);
-		xloc = ev->x;
-		yloc = ev->y;
+		fresh_pos[0] = ev->x;
+		fresh_pos[1] = ev->y;
 	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
@@ -193,26 +200,18 @@ EVENT_SUBSCRIBE(MODULE, modem_state);
 
 EVENT_SUBSCRIBE(MODULE, pwr_status_event);
 
-typedef enum {
-	RESTING,
-	GRAZING,
-	WALKING,
-	RUNNING,
-	UNKNOWN
-} STATE;
-
 void collect_stats(void){
 	static int64_t elapsed_time = 0;
 	elapsed_time = k_uptime_delta(&elapsed_time);
 	while (true){
 		elapsed_time = k_uptime_delta(&elapsed_time);
 		if (elapsed_time >= resolution_msec){
-			if(cur_activity_level == ACTIVITY_LOW) { cur_mv_state = RESTING; }		//Grazing
-			else if(cur_activity_level == ACTIVITY_MED) { cur_mv_state = WALKING; }
-			else if(cur_activity_level == ACTIVITY_HIGH) { cur_mv_state = RUNNING; }
+			if(cur_activity_level == ACTIVITY_LOW) { cur_animal_state = RESTING; }		//Grazing
+			else if(cur_activity_level == ACTIVITY_MED) { cur_animal_state = WALKING; }
+			else if(cur_activity_level == ACTIVITY_HIGH) { cur_animal_state = RUNNING; }
 			else cur_mv_state = UNKNOWN;
 
-			switch (cur_mv_state)
+			switch (cur_animal_state)
 			{
 			case RESTING:
 				histogram.animal_behave.has_usRestingTime =
@@ -223,13 +222,15 @@ void collect_stats(void){
 				histogram.animal_behave.has_usWalkingTime = true;
 				histogram.animal_behave.usWalkingTime += elapsed_time;
 				histogram.animal_behave.has_usWalkingDist = true;
-				histogram.animal_behave.usWalkingDist +=  TimeuseDistance(m_i16_way_pnt);
+				histogram.animal_behave.usWalkingDist +=
+					TimeuseDistance(m_i16_way_pnt, fresh_pos);
 				break;
 			case RUNNING:
 				histogram.animal_behave.has_usRunningTime = true;
 				histogram.animal_behave.usRunningTime += elapsed_time;
 				histogram.animal_behave.has_usRunningDist = true;
-				histogram.animal_behave.usRunningDist +=  TimeuseDistance(m_i16_way_pnt);
+				histogram.animal_behave.usRunningDist +=
+					TimeuseDistance(m_i16_way_pnt, fresh_pos);
 				break;
 			case GRAZING:
 				histogram.animal_behave.has_usGrazingTime = true;
@@ -241,8 +242,8 @@ void collect_stats(void){
 				break;
 			}
 
-			m_i16_way_pnt[0] = xloc;
-			m_i16_way_pnt[1] = yloc;
+			m_i16_way_pnt[0] = fresh_pos[0];
+			m_i16_way_pnt[1] = fresh_pos[1];
 
 //******************Add Stepcounter value*************************
 			uint16_t stepdiff = (uint16_t)(steps - steps_old);

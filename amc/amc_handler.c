@@ -13,6 +13,7 @@
 #include <zephyr.h>
 #include "amc_handler.h"
 #include <logging/log.h>
+#include <amc_events.h>
 #include "sound_event.h"
 #include "request_events.h"
 #include "pasture_structure.h"
@@ -160,6 +161,12 @@ void process_new_gnss_data_fn(struct k_work *item)
 	err = gnss_calc_xy(gnss, &pos_x, &pos_y, pasture->m.l_origin_lon,
 			   pasture->m.l_origin_lat, pasture->m.us_k_lon,
 			   pasture->m.us_k_lat);
+
+	struct xy_location *loc = new_xy_location();
+	loc->x = pos_x;
+	loc->y = pos_y;
+	EVENT_SUBMIT(loc);
+
 	bool overflow_xy = err == -EOVERFLOW;
 
 	/* If any fence (pasture?) is valid and we have fix. */

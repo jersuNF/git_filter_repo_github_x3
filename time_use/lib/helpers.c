@@ -1,4 +1,7 @@
+#include <stdlib.h>
+#include <stdio.h>
 #include "helpers.h"
+#include "stdint.h"
 
 
 /** Implemented at v3.21-17

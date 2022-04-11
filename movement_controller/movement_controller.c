@@ -10,6 +10,7 @@
 
 #include "nf_fifo.h"
 #include "trigonometry.h"
+#define STEPS_TRIGGER 50
 
 LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 
@@ -174,6 +175,12 @@ void process_acc_data(raw_acc_data_t *acc)
 
 	/** @todo Use total steps? */
 	total_steps += stepcount;
+	if (stepcount >= STEPS_TRIGGER) {
+		struct step_counter_event *steps = new_step_counter_event();
+		steps->steps = total_steps;
+		EVENT_SUBMIT(steps);
+	}
+
 
 	/* Gradually increase or decrease of activity level. 
          * If activity is greater than the last, increment instantly.

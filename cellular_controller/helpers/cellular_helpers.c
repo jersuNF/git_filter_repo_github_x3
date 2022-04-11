@@ -120,7 +120,6 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 int socket_listen(struct data *data, uint16_t port)
 {
 	int ret;
-	struct sockaddr_in bind_addr;
 
 	data->tcp.sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
@@ -133,14 +132,7 @@ int socket_listen(struct data *data, uint16_t port)
 		LOG_INF("Created TCP listening socket (%s): %d\n", data->proto,
 			data->tcp.sock);
 	}
-//	bind_addr.sin_family = AF_INET;
-//	bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-//	bind_addr.sin_port = htons(port);
-//
-//	if (bind(data->tcp.sock, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0) {
-//		printf("error: bind: %d\n", errno);
-//		exit(1);
-//	}
+
 	k_sleep(K_MSEC(50));
 	ret = listen(data->tcp.sock, 1); //2nd parameter is backlog size, not
 	// important as we are not interested in the incoming data anyways.
@@ -198,11 +190,6 @@ int get_ip(char** collar_ip)
 {/*TODO: extract the quoted address if needed and return the exact length. */
 	get_pdp_addr(collar_ip);
 	return 0;
-}
-
-bool query_listen_sock(void)
-{
-	return poll_listen_socket();
 }
 
 /**

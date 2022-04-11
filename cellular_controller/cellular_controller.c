@@ -57,6 +57,8 @@ K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK,
 		receive_tcp, &conf.ipv4, NULL, NULL,
 		MY_PRIORITY, 0, 0);
 
+extern struct k_sem listen_sem;
+
 void listen_sock_receive_tcp(void);
 K_THREAD_DEFINE(listen_recv_tid, RCV_THREAD_STACK,
 		listen_sock_poll, NULL, NULL, NULL,
@@ -124,8 +126,7 @@ void receive_tcp(struct data *sock_data)
 void listen_sock_poll(void)
 {
 	while(1){
-		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
-		if (query_listen_sock()) {
+		if (k_sem_take(&listen_sem, K_FOREVER)==0) {
 			LOG_WRN("Waking up!");
 			struct send_poll_request_now* wake_up =
 				new_send_poll_request_now();

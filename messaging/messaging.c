@@ -36,6 +36,7 @@
 #include "sound_event.h"
 #include "nf_settings.h"
 #include "histogram_events.h"
+#include "pwr_event.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
@@ -55,6 +56,7 @@ K_SEM_DEFINE(connection_ready, 0, 1);
 
 collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
+int16_t battery_voltage = 0;
 
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
@@ -328,6 +330,11 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	if (is_pwr_status_event(eh)) {
+		struct pwr_status_event *ev = cast_pwr_status_event(eh);
+		battery_voltage = (int16_t) ev->battery_mv/10;
+		return false;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -389,6 +396,7 @@ EVENT_SUBSCRIBE(MODULE, update_zap_count);
 EVENT_SUBSCRIBE(MODULE, animal_warning_event);
 EVENT_SUBSCRIBE(MODULE, animal_escape_event);
 EVENT_SUBSCRIBE(MODULE, connection_state_event);
+EVENT_SUBSCRIBE(MODULE, pwr_status_event);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -580,7 +588,7 @@ void build_poll_request(NofenceMessage *poll_req)
 	poll_req->m.poll_message_req.eFenceStatus = current_state.fence_status;
 	poll_req->m.poll_message_req.ulFenceDefVersion =
 		current_state.fence_version;
-	poll_req->m.poll_message_req.usBatteryVoltage = 378; /* TODO: get
+	poll_req->m.poll_message_req.usBatteryVoltage = battery_voltage; /* TODO: get
  * value from battery voltage event.*/
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;

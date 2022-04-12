@@ -17,6 +17,7 @@ zephyr_include_directories(
 		${CMAKE_CURRENT_SOURCE_DIR}/../../events/storage/
 		${CMAKE_CURRENT_SOURCE_DIR}/../../modules/storage_controller/
 		${CMAKE_CURRENT_SOURCE_DIR}/../../events/collar_stats/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../events/power_manager/
 		${PROJECT_BINARY_DIR}/include/generated/
 		../../../include)
 

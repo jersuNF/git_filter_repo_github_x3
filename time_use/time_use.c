@@ -22,7 +22,7 @@
 #include "amc_gnss.h"
 #include "histogram_events.h"
 #include "time_use.h"
-#include "helpers.h"
+#include "time_use_helpers.h"
 
 #define TIME_USE_THREAD_PRIORITY CONFIG_TIME_USE_THREAD_PRIORITY
 #define resolution_msec CONFIG_TIME_USE_RESOLUTION_SEC*1000

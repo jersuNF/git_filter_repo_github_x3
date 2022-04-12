@@ -1,7 +1,8 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include "helpers.h"
+#include "time_use_helpers.h"
 #include "stdint.h"
+#include "trigonometry.h"
 
 /** TimeuseDistance
  * Description	: Compute the distance from A to B

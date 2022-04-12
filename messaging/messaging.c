@@ -35,6 +35,7 @@
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
 #include "nf_settings.h"
+#include "histogram_events.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
@@ -129,6 +130,10 @@ K_KERNEL_STACK_DEFINE(messaging_send_thread,
 
 void build_log_message()
 {
+	struct save_histogram *histogram_snapshot = new_save_histogram();
+	EVENT_SUBMIT(histogram_snapshot);
+	collar_histogram histogram;
+	k_msgq_get(&histogram_msgq, &histogram, K_FOREVER);
 	/* Fill in NofenceMessage and encode it, then store on fcb. Do it twice,
 	 * once for seq message 1 and once for seq message 2. As such;
 

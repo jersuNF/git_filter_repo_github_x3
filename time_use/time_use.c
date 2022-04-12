@@ -21,6 +21,7 @@
 #include "pwr_event.h"
 #include "helpers.h"
 #include "amc_gnss.h"
+#include "histogram_events.h"
 
 #define TIME_USE_THREAD_PRIORITY CONFIG_TIME_USE_THREAD_PRIORITY
 #define resolution_msec CONFIG_TIME_USE_RESOLUTION_SEC*1000
@@ -35,18 +36,12 @@ void collect_stats(void);
 
 K_MUTEX_DEFINE(update_in_progress);
 
-struct {
-	_HISTOGRAM_ANIMAL_BEHAVE animal_behave;
-	_HISTOGRAM_ZONE in_zone;
-	_POSITION_QC_MAX_MIN_MEAN qc_baro_gps_max_mean_min;
-	_HISTOGRAM_CURRENT_PROFILE current_profile;
-	_BATTERY_QC qc_battery;
-} histogram;
+collar_histogram histogram;
+K_MSGQ_DEFINE(histogram_msgq, sizeof(struct collar_histogram), 1, 4);
 
 int time_use_module_init(void)
 {
 	LOG_INF("Initializing time_use module.");
-
 	k_thread_create(&collect_stats_thread, collect_stats_stack,
 			K_THREAD_STACK_SIZEOF(collect_stats_stack),
 			(k_thread_entry_t) collect_stats,
@@ -68,7 +63,7 @@ static amc_zone_t cur_zone;
 static Mode cur_collar_mode;
 static CollarStatus cur_collar_status;
 static FenceStatus cur_fence_status;
-static bool in_beacon_or_sleep;
+static bool in_beacon_or_sleep, save_and_reset;
 static movement_state_t cur_mv_state;
 static acc_activity_t cur_activity_level = ACTIVITY_NO;
 static uint32_t steps, steps_old;
@@ -174,6 +169,9 @@ static bool event_handler(const struct event_header *eh)
 		fresh_pos[0] = ev->x;
 		fresh_pos[1] = ev->y;
 	}
+	if (is_save_histogram(eh)) {
+		save_and_reset = true;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 	return false;
@@ -200,12 +198,14 @@ EVENT_SUBSCRIBE(MODULE, modem_state);
 
 EVENT_SUBSCRIBE(MODULE, pwr_status_event);
 
+EVENT_SUBSCRIBE(MODULE, save_histogram);
+
 void collect_stats(void){
 	static int64_t elapsed_time = 0;
 	elapsed_time = k_uptime_delta(&elapsed_time);
 	while (true){
 		elapsed_time = k_uptime_delta(&elapsed_time);
-		if (elapsed_time >= resolution_msec){
+		if (elapsed_time >= resolution_msec && !save_and_reset){
 			if(cur_activity_level == ACTIVITY_LOW) { cur_animal_state = RESTING; }		//Grazing
 			else if(cur_activity_level == ACTIVITY_MED) { cur_animal_state = WALKING; }
 			else if(cur_activity_level == ACTIVITY_HIGH) { cur_animal_state = RUNNING; }
@@ -353,6 +353,25 @@ void collect_stats(void){
 					m_u32_speedmean /
 					m_u32_timeuse_sample_gps;
 			}
+		}
+		if (save_and_reset){
+			save_and_reset = false;
+			/*write to queue*/
+			while (k_msgq_put(&histogram_msgq, &histogram,
+					  K_NO_WAIT) != 0) {
+				/* TODO: handle previous histogram not
+				 * consumed! */
+				k_msgq_purge(&histogram_msgq);
+			}
+			memset(&histogram, 0, sizeof(struct collar_histogram));
+			m_u32_timeuse_sample_gps = 0;
+			m_i16_heightmax = INT16_MIN;
+			m_i16_heightmin = INT16_MAX;
+			m_i32_heightmean = 0;
+			m_u16_speedmin = UINT16_MAX;
+			m_u16_speedmax = 0;
+			m_u32_speedmean = 0;
+			m_ui16_hs_samples = 0;
 		}
 	}
 }

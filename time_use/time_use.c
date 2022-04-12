@@ -47,7 +47,7 @@ int time_use_module_init(void)
 			K_THREAD_STACK_SIZEOF(collect_stats_stack),
 			(k_thread_entry_t) collect_stats,
 			NULL, NULL, NULL,
-			K_PRIO_COOP(TIME_USE_THREAD_PRIORITY),
+			TIME_USE_THREAD_PRIORITY,
 			0, K_NO_WAIT);
 	return 0;
 }

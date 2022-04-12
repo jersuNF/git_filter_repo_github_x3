@@ -332,7 +332,9 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_pwr_status_event(eh)) {
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
-		battery_voltage = (int16_t) ev->battery_mv/10;
+		if(ev->battery_mv > 0){
+			battery_voltage = (int16_t)ev->battery_mv/10;
+		}
 		return false;
 	}
 	/* If event is unhandled, unsubscribe. */

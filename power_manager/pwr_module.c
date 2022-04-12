@@ -181,6 +181,10 @@ int pwr_module_init(void)
 	/* Set PWR state to NORMAL as initial state */
 	struct pwr_status_event *event = new_pwr_status_event();
 	event->pwr_state = PWR_NORMAL;
+	int rc = log_and_fetch_battery_voltage();
+	if (rc > 0){
+		event->battery_mv = (int16_t) rc;
+	}
 	EVENT_SUBMIT(event);
 	current_state = PWR_NORMAL;
 

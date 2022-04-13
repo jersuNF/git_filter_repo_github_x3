@@ -19,7 +19,7 @@ if TIME_USE
 
 	config TIME_USE_THREAD_PRIORITY
 		int "Priority of the time_use processing thread"
-		default 1
+		default 10
 
     config TIME_USE_RESOLUTION_SEC
             int "histograms update resolution in seconds"

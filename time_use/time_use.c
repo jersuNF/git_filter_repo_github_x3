@@ -202,10 +202,9 @@ EVENT_SUBSCRIBE(MODULE, pwr_status_event);
 EVENT_SUBSCRIBE(MODULE, save_histogram);
 
 void collect_stats(void){
-	static int64_t elapsed_time = 0;
-	elapsed_time = k_uptime_delta(&elapsed_time);
+	static int64_t elapsed_time, uptime;
 	while (true){
-		elapsed_time = k_uptime_delta(&elapsed_time);
+		elapsed_time += k_uptime_delta(&uptime);
 		if (elapsed_time >= resolution_msec && !save_and_reset){
 			if(cur_activity_level == ACTIVITY_LOW) { cur_animal_state = RESTING; }		//Grazing
 			else if(cur_activity_level == ACTIVITY_MED) { cur_animal_state = WALKING; }
@@ -374,5 +373,6 @@ void collect_stats(void){
 			m_u32_speedmean = 0;
 			m_ui16_hs_samples = 0;
 		}
+		k_sleep(K_MSEC(150));
 	}
 }

@@ -8,6 +8,10 @@ module = BLE_SERVICE
 module-str = BLE Service
 source "subsys/logging/Kconfig.template.log_config"
 
+module = BEACON_PROCESSOR
+module-str = Beacon processor
+source "subsys/logging/Kconfig.template.log_config"
+
 config NOFENCE_SERIAL_NUMBER
 	int "Nofence serial number"
 	default 673

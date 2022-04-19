@@ -7,7 +7,8 @@ zephyr_include_directories(.
 			${CMAKE_CURRENT_SOURCE_DIR}/../../../include
 			${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble
 			${CMAKE_CURRENT_SOURCE_DIR}/../../events/messaging
-			${PROJECT_BINARY_DIR}/include/generated/)
+			${CMAKE_CURRENT_SOURCE_DIR}/../../events/watchdog
+			)
 			
 target_sources(app PRIVATE
 			${CMAKE_CURRENT_SOURCE_DIR}/ble_controller.c
@@ -18,4 +19,5 @@ target_sources(app PRIVATE
 			${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/ble_ctrl_event.c
 			${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/ble_data_event.c
 			${CMAKE_CURRENT_SOURCE_DIR}/../../events/messaging/msg_data_event.c
+			${CMAKE_CURRENT_SOURCE_DIR}/../../events/watchdog/watchdog_event.c
 )

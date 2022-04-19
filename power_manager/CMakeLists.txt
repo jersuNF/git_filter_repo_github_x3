@@ -5,7 +5,7 @@ list(APPEND ZEPHYR_EXTRA_MODULES
 target_include_directories(app PRIVATE 
 	.
 	./../../events/error_handler/
-	./include/
+	./../../events/watchdog/
 	./../../events/messaging/
 	./battery/
 	./charging/
@@ -16,8 +16,12 @@ target_sources(app PRIVATE
 		     ${CMAKE_CURRENT_SOURCE_DIR}/battery/battery.c
 		     ${CMAKE_CURRENT_SOURCE_DIR}/charging/charging.c
 		     ./../../events/error_handler/error_event.c
+		     ./../../events/watchdog/watchdog_event.c
 		     ./../../events/messaging/messaging_module_events.c
 )
+
+
+
 
 
 

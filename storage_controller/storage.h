@@ -8,11 +8,15 @@
 #include <zephyr.h>
 #include "fcb_ext.h"
 
+#include "embedded.pb.h"
+#include "UBX.h"
+
 /** Used to tell storage controller which region to read/write to. */
 typedef enum {
 	STG_PARTITION_LOG = 0,
 	STG_PARTITION_ANO = 1,
-	STG_PARTITION_PASTURE = 2
+	STG_PARTITION_PASTURE = 2,
+	STG_PARTITION_SYSTEM_DIAG = 3
 } flash_partition_t;
 
 /** 
@@ -147,6 +151,37 @@ bool stg_log_pointing_to_last();
  */
 uint32_t get_num_entries(flash_partition_t partition);
 
+/** 
+ * @brief Reads the newest pasture and callbacks the data.
+ * 
+ * @param[in] cb pointer location to the callback function that is 
+ *               called during the data read.
+ * 
+ * @return 0 on success 
+ * @return -ENODATA if no data available, Otherwise negative errno.
+ */
+int stg_read_system_diagnostic_log(fcb_read_cb cb, uint16_t num_entries);
+
+/** 
+ * @brief Writes log data to external flash LOG partition.
+ * 
+ * @param[in] data pointer location to of data to be written
+ * @param[in] len length of data
+ * 
+ * @return 0 on success, otherwise negative errno
+ */
+int stg_write_system_diagnostic_log(uint8_t *data, size_t len);
+
+/** 
+ * @brief Uses time.h library to compare input ano_date with current unix time.
+ *        Returns true if no unix time is available.
+ * 
+ * @param[in] ano_date UBX ano struct containing ano date.
+ * 
+ * @return True is ano date is same day or greater, false otherwise.
+ */
+bool ano_is_same_day_or_greater(UBX_MGA_ANO_RAW_t *ano_date);
+
 #define SECTOR_SIZE                                                            \
 	MAX(CONFIG_NORDIC_QSPI_NOR_FLASH_LAYOUT_PAGE_SIZE,                     \
 	    CONFIG_STORAGE_SECTOR_SIZE)
@@ -156,5 +191,7 @@ uint32_t get_num_entries(flash_partition_t partition);
 #define FLASH_ANO_NUM_SECTORS PM_ANO_PARTITION_SIZE / SECTOR_SIZE
 
 #define FLASH_PASTURE_NUM_SECTORS PM_PASTURE_PARTITION_SIZE / SECTOR_SIZE
+
+#define FLASH_SYSTEM_DIAG_NUM_SECTORS PM_SYSTEM_DIAGNOSTIC_SIZE / SECTOR_SIZE
 
 #endif /* _STORAGE_H_ */

@@ -13,7 +13,7 @@
 #include "ble_cmd_event.h"
 #include "nofence_service.h"
 #include "lte_proto_event.h"
-
+#include "watchdog_event.h"
 #include "cellular_controller_events.h"
 #include "gnss_controller_events.h"
 #include "request_events.h"
@@ -28,11 +28,15 @@
 
 #include "storage_event.h"
 
+#include <date_time.h>
+#include <time.h>
+
 #include "storage.h"
 
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
+#include "pwr_event.h"
 #include "nf_eeprom.h"
 
 #define DOWNLOAD_COMPLETE 255
@@ -57,6 +61,7 @@ gnss_last_fix_struct_t cached_fix;
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
 static bool first_frame, first_ano_frame;
+static atomic_t has_gnss_data = ATOMIC_INIT(false);
 uint32_t serial_id = 0;
 
 void build_poll_request(NofenceMessage *);
@@ -202,6 +207,11 @@ void log_data_periodic_fn()
  */
 void modem_poll_work_fn()
 {
+#if defined(CONFIG_WATCHDOG_ENABLE)
+	/* Report alive */
+	watchdog_report_module_alive(WDG_MESSAGING);
+#endif
+
 	k_work_reschedule_for_queue(
 		&send_q, &modem_poll_work,
 		K_MINUTES(atomic_get(&poll_period_minutes)));
@@ -231,6 +241,19 @@ void modem_poll_work_fn()
  */
 static bool event_handler(const struct event_header *eh)
 {
+	if (is_gnss_data(eh)) {
+		struct gnss_data *ev = cast_gnss_data(eh);
+
+		/* Update date time. */
+
+		/** @todo Check if uint32_t to time_t typecast works. */
+		time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
+		struct tm *tm_time = gmtime(&gm_time);
+		/* Update date_time library which storage uses for ANO data. */
+		if (!date_time_set(tm_time)) {
+			atomic_set(&has_gnss_data, true);
+		}
+	}
 	if (is_ble_ctrl_event(eh)) {
 		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
 		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
@@ -383,6 +406,7 @@ EVENT_SUBSCRIBE(MODULE, update_zap_count);
 EVENT_SUBSCRIBE(MODULE, animal_warning_event);
 EVENT_SUBSCRIBE(MODULE, animal_escape_event);
 EVENT_SUBSCRIBE(MODULE, connection_state_event);
+EVENT_SUBSCRIBE(MODULE, gnss_data);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -424,10 +448,7 @@ static inline void process_ble_cmd_event(void)
 		break;
 	}
 	case CMD_REBOOT_AVR_MCU: {
-		struct reboot_scheduled_event *r_ev =
-			new_reboot_scheduled_event();
-		r_ev->reboots_at = k_uptime_get_32() +
-				   (CONFIG_SHUTDOWN_TIMER_SEC * MSEC_PER_SEC);
+		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
 		EVENT_SUBMIT(r_ev);
 		break;
 	}
@@ -835,10 +856,8 @@ void process_poll_response(NofenceMessage *proto)
 	}
 	// If we are asked to, reboot
 	if (pResp->has_bReboot && pResp->bReboot) {
-		struct reboot_scheduled_event *r_ev =
-			new_reboot_scheduled_event();
-		r_ev->reboots_at = k_uptime_get_32() +
-				   (CONFIG_SHUTDOWN_TIMER_SEC * MSEC_PER_SEC);
+		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
+		EVENT_SUBMIT(r_ev);
 	}
 	/* TODO: set activation mode to (pResp->eActivationMode); */
 
@@ -849,6 +868,20 @@ void process_poll_response(NofenceMessage *proto)
 		LOG_INF("Server time will be used.");
 		time_from_server = proto->header.ulUnixTimestamp;
 		use_server_time = true;
+		if (!atomic_get(&has_gnss_data)) {
+			time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
+			struct tm *tm_time = gmtime(&gm_time);
+			/* Update date_time library which storage uses for ANO data. */
+			int err = date_time_set(tm_time);
+			if (err) {
+				LOG_ERR("Error updating time from server %i",
+					err);
+			} else {
+				/** @note This prints UTC. */
+				LOG_INF("Set timestamp to date_time library: %s",
+					asctime(tm_time));
+			}
+		}
 	}
 	if (pResp->has_usPollConnectIntervalSec) {
 		atomic_set(&poll_period_minutes,

@@ -45,7 +45,7 @@ int init_movement_controller(void);
 /**
  * Default Accelerometer limit for how long it has to be inactive to be off. (30 * 60)
  */
-#define OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT 5
+#define OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT (30 * 60)
 
 /**
  *  Default Accelerometer limit for 2021 No Activity detection algorithm.

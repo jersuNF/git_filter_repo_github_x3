@@ -6,6 +6,17 @@
 #include "nf_settings_private.h"
 #include <drivers/eeprom.h>
 #include <string.h>
+#include "amc_const.h"
+#include "embedded.pb.h"
+#include <logging/log.h>
+#include "nf_settings.h"
+#include "movement_controller.h"
+
+LOG_MODULE_REGISTER(nf_settings, 3);
+
+#define EEPROM_DEFAULT_VALUE_8_T 0xFF
+#define EEPROM_DEFAULT_VALUE_16_T 0xFFFF
+#define EEPROM_DEFAULT_VALUE_32_T 0xFFFFFFFF
 
 /* EEPROM device pointer */
 const struct device *m_p_device;
@@ -42,34 +53,96 @@ int eep_read_host_port(char *host_port, size_t bufsize)
 int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 {
 	off_t offset;
+	int ret = 0;
 
 	switch (field) {
 	case EEP_WARN_MAX_DURATION: {
 		offset = offsetof(struct eemem, eep_warn_max_duration);
+
+		/* Check for default values, i.e value read is 0xFF,
+		 * set to defualt WARN_MAX value. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
+				 WARN_MAX_DURATION :
+				 *value;
+		LOG_INF("Set EEP_WARN_MAX_DURATION to %i", *value);
 		break;
 	}
-	case EEP_OFF_ANIMAL_TIME_LIMIT_SEC: {
+	case EEP_WARN_MIN_DURATION: {
 		offset = offsetof(struct eemem, eep_warn_min_duration);
+
+		/* Check for default values, i.e value read is 0xFF,
+		 * set to defualt WARN_MIN value. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
+				 WARN_MIN_DURATION :
+				 *value;
+		LOG_INF("Set EEP_WARN_MIN_DURATION to %i", *value);
 		break;
 	}
-	case EEP_ACC_SIGMA_SLEEP_LIMIT: {
-		offset = offsetof(struct eemem, eep_pain_cnt_def_escaped);
-		break;
-	}
-	case EEP_ZAP_CNT_TOT: {
-		offset = offsetof(struct eemem, eep_collar_mode);
+	case EEP_PAIN_CNT_DEF_ESCAPED: {
+		offset = offsetof(struct eemem, eep_warn_min_duration);
+
+		/* Check for default values, i.e value read is 0xFF,
+		 * set to default CNT_DEF_ESCAPED value. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
+				 PAIN_CNT_DEF_ESCAPED :
+				 *value;
+		LOG_INF("Set EEP_PAIN_CNT_DEF_ESCAPED to %i", *value);
 		break;
 	}
 	case EEP_FENCE_STATUS: {
 		offset = offsetof(struct eemem, eep_fence_status);
+
+		/* Check for default values, i.e value read is 0xFF,
+		 * set to defualt FenceStatus_FenceStatus_UNKNOWN. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
+				 FenceStatus_FenceStatus_UNKNOWN :
+				 *value;
+		LOG_INF("Set EEP_FENCE_STATUS to %i", *value);
+		break;
+	}
+	case EEP_COLLAR_MODE: {
+		offset = offsetof(struct eemem, eep_collar_mode);
+
+		/* Check for default values, i.e value read is 0xFF,
+		 * set to defualt Mode_Mode_UNKNOWN. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
+				 Mode_Mode_UNKNOWN :
+				 *value;
+		LOG_INF("Set EEP_COLLAR_MODE to %i", *value);
 		break;
 	}
 	case EEP_COLLAR_STATUS: {
 		offset = offsetof(struct eemem, eep_collar_status);
+
+		/* Check for default values, i.e value read is 0xFF,
+		 * set to defualt CollarStatus_CollarStatus_UNKNOWN. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
+				 CollarStatus_CollarStatus_UNKNOWN :
+				 *value;
+		LOG_INF("Set EEP_COLLAR_STATUS to %i", *value);
 		break;
 	}
 	case EEP_TEACH_MODE_FINISHED: {
 		offset = offsetof(struct eemem, eep_teach_mode_finished);
+
+		/* Check for default values, i.e value read is 0xFF,
+		 * set to defualt 0, not finished. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? 0 : *value;
+		LOG_INF("Set teach mode finished to %i", *value);
 		break;
 	}
 	default: {
@@ -77,7 +150,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 	}
 	}
 
-	return eeprom_read(m_p_device, offset, value, sizeof(*value));
+	return ret;
 }
 
 int eep_uint8_write(eep_uint8_enum_t field, uint8_t value)
@@ -124,26 +197,68 @@ int eep_uint8_write(eep_uint8_enum_t field, uint8_t value)
 int eep_uint16_read(eep_uint16_enum_t field, uint16_t *value)
 {
 	off_t offset;
+	int ret = 0;
 
 	switch (field) {
 	case EEP_ACC_SIGMA_NOACTIVITY_LIMIT: {
 		offset = offsetof(struct eemem, eep_acc_sigma_noactivity_limit);
+
+		/* Check for default values, i.e value read is 0xFFFF,
+		 * set to defualt 0 total zaps. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_16_T ?
+				 ACC_SIGMA_NOACTIVITY_LIMIT_DEFAULT :
+				 *value;
+		LOG_INF("Set EEP_ACC_SIGMA_NOACTIVITY_LIMIT to %i", *value);
 		break;
 	}
 	case EEP_OFF_ANIMAL_TIME_LIMIT_SEC: {
 		offset = offsetof(struct eemem, eep_off_animal_time_limit);
+
+		/* Check for default values, i.e value read is 0xFFFF,
+		 * set to defualt 0 total zaps. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_16_T ?
+				 OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT :
+				 *value;
+		LOG_INF("Set EEP_OFF_ANIMAL_TIME_LIMIT_SEC to %i", *value);
 		break;
 	}
 	case EEP_ACC_SIGMA_SLEEP_LIMIT: {
 		offset = offsetof(struct eemem, eep_acc_sigma_sleep_limit);
+
+		/* Check for default values, i.e value read is 0xFFFF,
+		 * set to defualt 0 total zaps. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_16_T ?
+				 ACC_SIGMA_SLEEP_LIMIT_DEFAULT :
+				 *value;
+		LOG_INF("Set EEP_ACC_SIGMA_SLEEP_LIMIT to %i", *value);
 		break;
 	}
 	case EEP_ZAP_CNT_TOT: {
 		offset = offsetof(struct eemem, eep_zap_cnt_tot);
+
+		/* Check for default values, i.e value read is 0xFFFF,
+		 * set to defualt 0 total zaps. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_16_T ? 0 : *value;
+		LOG_INF("Set EEP_ZAP_CNT_TOT to %i", *value);
 		break;
 	}
 	case EEP_ZAP_CNT_DAY: {
 		offset = offsetof(struct eemem, eep_zap_cnt_day);
+
+		/* Check for default values, i.e value read is 0xFFFF,
+		 * set to defualt 0 total zaps. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_16_T ? 0 : *value;
+		LOG_INF("Set EEP_ZAP_CNT_DAY to %i", *value);
 		break;
 	}
 	default: {
@@ -151,7 +266,7 @@ int eep_uint16_read(eep_uint16_enum_t field, uint16_t *value)
 	}
 	}
 
-	return eeprom_read(m_p_device, offset, value, sizeof(*value));
+	return ret;
 }
 
 int eep_uint16_write(eep_uint16_enum_t field, uint16_t value)
@@ -190,14 +305,27 @@ int eep_uint16_write(eep_uint16_enum_t field, uint16_t value)
 int eep_uint32_read(eep_uint32_enum_t field, uint32_t *value)
 {
 	off_t offset;
+	int ret = 0;
 
 	switch (field) {
 	case EEP_UID: {
 		offset = offsetof(struct eemem, eep_uid);
+
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		/** @todo Any default IDs to fetch???? What do to? */
+		//*value = *value == EEPROM_DEFAULT_VALUE_32_T ? 0 : *value;
+		//LOG_INF("Set EEP_UID to %i", *value);
 		break;
 	}
 	case EEP_WARN_CNT_TOT: {
 		offset = offsetof(struct eemem, eep_warn_cnt_tot);
+
+		/* Check for default values, i.e value read is 0xFFFFFFFF,
+		 * set to defualt 0 total warnings. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_32_T ? 0 : *value;
+		LOG_INF("Set EEP_WARN_CNT_TOT to %i", *value);
 		break;
 	}
 	default: {
@@ -205,7 +333,7 @@ int eep_uint32_read(eep_uint32_enum_t field, uint32_t *value)
 	}
 	}
 
-	return eeprom_read(m_p_device, offset, value, sizeof(*value));
+	return ret;
 }
 
 int eep_uint32_write(eep_uint32_enum_t field, uint32_t value)

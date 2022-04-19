@@ -10,6 +10,11 @@
 #include <sys/ring_buffer.h>
 #include <zephyr.h>
 #include <zephyr/types.h>
+#include "nf_eeprom.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
 
 #define MODULE ble_controller
 #include <logging/log.h>
@@ -51,7 +56,7 @@ static char bt_device_name[DEVICE_NAME_LEN + 1] = CONFIG_BT_DEVICE_NAME;
 
 // Shaddow register. Should be initialized with data from EEPROM or FLASH
 static uint16_t current_fw_ver = CONFIG_NOFENCE_FIRMWARE_NUMBER;
-static uint32_t current_serial_numer = CONFIG_NOFENCE_SERIAL_NUMBER;
+static uint32_t current_serial_number = CONFIG_NOFENCE_SERIAL_NUMBER;
 static uint8_t current_battery_level;
 static uint8_t current_error_flags;
 static uint8_t current_collar_mode;
@@ -448,13 +453,13 @@ static void bt_ready(int err)
 		(NOFENCE_BLUETOOTH_SIG_COMPANY_ID & 0xff00) >> 8;
 	mfg_data[BLE_MFG_IDX_NRF_FW_VER] = (current_fw_ver & 0x00ff);
 	mfg_data[BLE_MFG_IDX_NRF_FW_VER + 1] = (current_fw_ver & 0xff00) >> 8;
-	mfg_data[BLE_MFG_IDX_SERIAL_NR] = (current_serial_numer & 0x000000ff);
+	mfg_data[BLE_MFG_IDX_SERIAL_NR] = (current_serial_number & 0x000000ff);
 	mfg_data[BLE_MFG_IDX_SERIAL_NR + 1] =
-		(current_serial_numer & 0x0000ff00) >> 8;
+		(current_serial_number & 0x0000ff00) >> 8;
 	mfg_data[BLE_MFG_IDX_SERIAL_NR + 2] =
-		(current_serial_numer & 0x00ff0000) >> 16;
+		(current_serial_number & 0x00ff0000) >> 16;
 	mfg_data[BLE_MFG_IDX_SERIAL_NR + 3] =
-		(current_serial_numer & 0xff000000) >> 24;
+		(current_serial_number & 0xff000000) >> 24;
 	mfg_data[BLE_MFG_IDX_BATTERY] = current_battery_level;
 	mfg_data[BLE_MFG_IDX_ERROR] = current_error_flags;
 	mfg_data[BLE_MFG_IDX_COLLAR_MODE] = current_collar_mode;
@@ -593,7 +598,26 @@ static void scan_stop(void)
 
 int ble_module_init()
 {
-	int err;
+	uint32_t serial_id = 0;
+	int err = eep_read_serial(&serial_id);
+	if (err != 0){ //TODO: handle in a better way.
+		LOG_ERR("Failed to read serial number from eeprom!");
+	}
+	else{
+		if (serial_id > 999999) {
+			strncpy(bt_device_name, "NF??????\0", DEVICE_NAME_LEN+1);
+		} else {
+			char tmp[DEVICE_NAME_LEN + 1];
+			snprintf(tmp, 7, "%i" , serial_id); //TODO: 7
+			// digit numbers would overflow. Using 7 to overcome
+			// the compiler warning, needs to be fixed.
+			uint32_t len = strlen(tmp);
+			memset(bt_device_name, '0', sizeof(bt_device_name));
+			bt_device_name[0] = 'N';
+			bt_device_name[1] = 'F';
+			strcpy(bt_device_name + DEVICE_NAME_LEN - len, tmp);
+		}
+	}
 
 	atomic_set(&atomic_bt_adv_active, false);
 	atomic_set(&atomic_bt_scan_active, false);

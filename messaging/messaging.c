@@ -49,17 +49,15 @@ static pasture_t pasture_temp;
 static uint8_t cached_fences_counter = 0;
 
 uint32_t time_from_server;
-uint16_t cached_battery;
-uint16_t cached_charging;
-double cached_temperature;
-double cached_pressure;
-double cached_humidity;
+atomic_t cached_batt = ATOMIC_INIT(0);
+atomic_t cached_chrg = ATOMIC_INIT(0);
+atomic_t cached_temp = ATOMIC_INIT(0);
+atomic_t cached_press = ATOMIC_INIT(0);
+atomic_t cached_hum = ATOMIC_INIT(0);
 
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
 K_SEM_DEFINE(send_out_ack, 0, 1);
 K_SEM_DEFINE(connection_ready, 0, 1);
-
-K_SEM_DEFINE(env_data_sem, 0, 1);
 
 collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
@@ -125,6 +123,7 @@ struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
 static struct k_work_q send_q;
 struct k_work_delayable modem_poll_work;
 struct k_work_delayable log_work;
+struct k_work_delayable data_request_work;
 
 atomic_t poll_period_minutes = ATOMIC_INIT(5);
 atomic_t log_period_minutes = ATOMIC_INIT(30);
@@ -154,21 +153,14 @@ void build_log_message()
 	NofenceMessage seq_1;
 	NofenceMessage seq_2;
 
-	seq_1.m.seq_msg.usBatteryVoltage = cached_battery;
-	seq_1.m.seq_msg.usChargeMah = cached_charging;
+	seq_1.m.seq_msg.usBatteryVoltage = atomic_get(&cached_batt);
+	seq_1.m.seq_msg.usChargeMah = atomic_get(&cached_chrg);
 	//seq_1.m.seq_msg.xGprsRssi = cached_rssi; // not implemented
-
-	/* Request env data, since it's not given periodic */
-	struct request_env_sensor_event *ev_env =
-		new_request_env_sensor_event();
-	EVENT_SUBMIT(ev_env);
-	k_sem_take(&env_data_sem, K_SECONDS(5));
-
-	seq_2.m.seq_msg_2.bme280.ulHumidity = cached_humidity;
-	seq_2.m.seq_msg_2.bme280.ulPressure = cached_pressure;
-	seq_2.m.seq_msg_2.bme280.ulTemperature = cached_temperature;
-
 	seq_1.which_m = NofenceMessage_seq_msg_tag;
+
+	seq_2.m.seq_msg_2.bme280.ulPressure = atomic_get(&cached_press);
+	seq_2.m.seq_msg_2.bme280.ulHumidity = atomic_get(&cached_hum);
+	seq_2.m.seq_msg_2.bme280.ulTemperature = atomic_get(&cached_temp);
 	seq_2.which_m = NofenceMessage_seq_msg_2_tag;
 
 	uint8_t header_size = 2;
@@ -275,6 +267,28 @@ void modem_poll_work_fn()
 }
 
 /**
+ * @brief Work function to periodic request sensor data etc.
+ */
+void data_request_work_fn()
+{
+	k_work_reschedule(&data_request_work, K_MINUTES(1));
+
+	/* Request of battery voltage */
+	struct request_pwr_battery_event *ev_batt =
+		new_request_pwr_battery_event();
+	EVENT_SUBMIT(ev_batt);
+
+	/* Request of charging current */
+	struct request_pwr_charging_event *ev_charge =
+		new_request_pwr_charging_event();
+	EVENT_SUBMIT(ev_charge);
+
+	/* Request of temp, press, humidity */
+	struct request_env_sensor_event *ev_env =
+		new_request_env_sensor_event();
+	EVENT_SUBMIT(ev_env);
+}
+/**
  * @brief Main event handler function. 
  * 
  * @param[in] eh Event_header for the if-chain to 
@@ -380,9 +394,9 @@ static bool event_handler(const struct event_header *eh)
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
 		/* Update shaddow register */
 		if (ev->pwr_state == PWR_BATTERY) {
-			cached_battery = ev->battery_mv;
+			atomic_set(&cached_batt, ev->battery_mv);
 		} else if (ev->pwr_state == PWR_CHARGING) {
-			cached_charging = ev->charging_ma;
+			atomic_set(&cached_chrg, ev->charging_ma);
 		}
 		return false;
 	}
@@ -390,10 +404,9 @@ static bool event_handler(const struct event_header *eh)
 	if (is_env_sensor_event(eh)) {
 		struct env_sensor_event *ev = cast_env_sensor_event(eh);
 		/* Update shaddow register */
-		cached_temperature = ev->temp;
-		cached_pressure = ev->press;
-		cached_humidity = ev->humidity;
-		k_sem_give(&env_data_sem);
+		atomic_set(&cached_press, (uint32_t)ev->press);
+		atomic_set(&cached_hum, (uint32_t)ev->humidity);
+		atomic_set(&cached_temp, (uint32_t)ev->temp);
 		return false;
 	}
 	/* If event is unhandled, unsubscribe. */
@@ -615,6 +628,7 @@ int messaging_module_init(void)
 
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
 	k_work_init_delayable(&log_work, log_data_periodic_fn);
+	k_work_init_delayable(&data_request_work, data_request_work_fn);
 
 	memset(&pasture_temp, 0, sizeof(pasture_t));
 	cached_fences_counter = 0;
@@ -631,20 +645,10 @@ int messaging_module_init(void)
 		return err;
 	}
 
-	/* Initial request of battery voltage */
-	struct request_pwr_battery_event *ev_batt =
-		new_request_pwr_battery_event();
-	EVENT_SUBMIT(ev_batt);
-
-	/* Initial request of charging current */
-	struct request_pwr_charging_event *ev_charge =
-		new_request_pwr_charging_event();
-	EVENT_SUBMIT(ev_charge);
-
-	/* Initial request of temp, press, humidity */
-	struct request_env_sensor_event *ev_env =
-		new_request_env_sensor_event();
-	EVENT_SUBMIT(ev_env);
+	err = k_work_schedule(&data_request_work, K_NO_WAIT);
+	if (err < 0) {
+		return err;
+	}
 
 	return 0;
 }

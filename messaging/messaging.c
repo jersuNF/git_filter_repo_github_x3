@@ -36,6 +36,7 @@
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
+#include "nf_eeprom.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
@@ -68,6 +69,7 @@ gnss_last_fix_struct_t cached_fix;
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
 static bool first_frame, first_ano_frame;
+uint32_t serial_id = 0;
 
 void build_poll_request(NofenceMessage *);
 int8_t request_fframe(uint32_t, uint8_t);
@@ -610,6 +612,11 @@ void messaging_thread_fn()
 int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module.");
+	int err = eep_read_serial(&serial_id);
+	if (err != 0){ //TODO: handle in a better way.
+		LOG_ERR("Failed to read serial number from eeprom!");
+		return err;
+	}
 
 	k_work_queue_init(&send_q);
 	k_work_queue_start(&send_q, messaging_send_thread,
@@ -623,7 +630,7 @@ int messaging_module_init(void)
 	cached_fences_counter = 0;
 	pasture_temp.m.us_pasture_crc = EMPTY_FENCE_CRC;
 
-	int err = 0;
+	err = 0;
 
 	err = k_work_schedule_for_queue(&send_q, &modem_poll_work, K_NO_WAIT);
 	if (err < 0) {
@@ -816,8 +823,7 @@ void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
 void proto_InitHeader(NofenceMessage *msg)
 {
 	memset(msg, 0, sizeof(NofenceMessage));
-
-	msg->header.ulId = 11500; //TODO: read from eeprom
+	msg->header.ulId = serial_id;
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
 	if (use_server_time) {

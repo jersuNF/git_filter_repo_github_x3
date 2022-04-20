@@ -60,8 +60,6 @@ K_SEM_DEFINE(send_out_ack, 0, 1);
 K_SEM_DEFINE(connection_ready, 0, 1);
 
 K_SEM_DEFINE(env_data_sem, 0, 1);
-K_SEM_DEFINE(battery_data_sem, 0, 1);
-K_SEM_DEFINE(charge_data_sem, 0, 1);
 
 collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
@@ -151,21 +149,6 @@ K_KERNEL_STACK_DEFINE(messaging_send_thread,
 void build_log_message()
 {
 	int ret;
-	
-	struct request_pwr_battery_event *ev_batt =
-		new_request_pwr_battery_event();
-	EVENT_SUBMIT(ev_batt);
-	k_sem_take(&battery_data_sem, K_SECONDS(30));
-
-	struct request_pwr_charging_event *ev_charge =
-		new_request_pwr_charging_event();
-	EVENT_SUBMIT(ev_charge);
-	k_sem_take(&charge_data_sem, K_SECONDS(30));
-
-	struct request_env_sensor_event *ev_env =
-		new_request_env_sensor_event();
-	EVENT_SUBMIT(ev_env);
-	k_sem_take(&env_data_sem, K_SECONDS(30));
 
 	/* Fill in NofenceMessage struct */
 	NofenceMessage seq_1;
@@ -174,6 +157,12 @@ void build_log_message()
 	seq_1.m.seq_msg.usBatteryVoltage = cached_battery;
 	seq_1.m.seq_msg.usChargeMah = cached_charging;
 	//seq_1.m.seq_msg.xGprsRssi = cached_rssi; // not implemented
+
+	/* Request env data, since it's not given periodic */
+	struct request_env_sensor_event *ev_env =
+		new_request_env_sensor_event();
+	EVENT_SUBMIT(ev_env);
+	k_sem_take(&env_data_sem, K_SECONDS(5));
 
 	seq_2.m.seq_msg_2.bme280.ulHumidity = cached_humidity;
 	seq_2.m.seq_msg_2.bme280.ulPressure = cached_pressure;
@@ -404,6 +393,7 @@ static bool event_handler(const struct event_header *eh)
 		cached_temperature = ev->temp;
 		cached_pressure = ev->press;
 		cached_humidity = ev->humidity;
+		k_sem_give(&env_data_sem);
 		return false;
 	}
 	/* If event is unhandled, unsubscribe. */
@@ -613,7 +603,7 @@ int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module.");
 	int err = eep_read_serial(&serial_id);
-	if (err != 0){ //TODO: handle in a better way.
+	if (err != 0) { //TODO: handle in a better way.
 		LOG_ERR("Failed to read serial number from eeprom!");
 		return err;
 	}
@@ -640,6 +630,21 @@ int messaging_module_init(void)
 	if (err < 0) {
 		return err;
 	}
+
+	/* Initial request of battery voltage */
+	struct request_pwr_battery_event *ev_batt =
+		new_request_pwr_battery_event();
+	EVENT_SUBMIT(ev_batt);
+
+	/* Initial request of charging current */
+	struct request_pwr_charging_event *ev_charge =
+		new_request_pwr_charging_event();
+	EVENT_SUBMIT(ev_charge);
+
+	/* Initial request of temp, press, humidity */
+	struct request_env_sensor_event *ev_env =
+		new_request_env_sensor_event();
+	EVENT_SUBMIT(ev_env);
 
 	return 0;
 }

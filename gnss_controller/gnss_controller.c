@@ -174,6 +174,30 @@ static int gnss_data_update_cb(const gnss_t *data)
 	return 0;
 }
 
+int gnss_set_mode(gnss_mode_t mode)
+{
+	/** @todo Add mode changes here. Should be in the gnss driver???? */
+	switch (mode) {
+	case GNSSMODE_INACTIVE:
+		/*GPS_SetPowerMode_Backup();*/
+		break;
+	case GNSSMODE_PSM:
+		/*GPS_SetPowerMode_PSM(PSM_DEFAULT_PACC_M);*/
+		break;
+	case GNSSMODE_CAUTION:
+		/*GPS_SetPowerMode_CAUTION();*/
+		break;
+	case GNSSMODE_MAX:
+		/*GPS_SetPowerMode_MAX();*/
+		break;
+	default:
+		break;
+	}
+
+	/*GPS_UpdatePowerMode();*/
+	return 0;
+}
+
 static bool gnss_controller_event_handler(const struct event_header *eh)
 {
 	if (is_gnss_rate(eh)) {
@@ -206,10 +230,10 @@ static bool gnss_controller_event_handler(const struct event_header *eh)
 				     sizeof(*msg));
 		}
 		return false;
-	} else if (is_gnss_set_mode(eh)) {
-		struct gnss_set_mode *ev = cast_gnss_set_mode(eh);
+	} else if (is_gnss_set_mode_event(eh)) {
+		struct gnss_set_mode_event *ev = cast_gnss_set_mode_event(eh);
 		if (ev->mode != current_mode) {
-			int ret = 0; //gnss_set_mode(gnss_dev, ev->mode);
+			int ret = gnss_set_mode(ev->mode);
 			if (ret != 0) {
 				char *msg = "Failed to set GNSS receiver mode";
 				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg,
@@ -227,7 +251,7 @@ EVENT_LISTENER(MODULE, gnss_controller_event_handler);
 EVENT_SUBSCRIBE(MODULE, gnss_data_rate);
 EVENT_SUBSCRIBE(MODULE, gnss_switch_off);
 EVENT_SUBSCRIBE(MODULE, gnss_switch_on);
-EVENT_SUBSCRIBE(MODULE, gnss_set_mode);
+EVENT_SUBSCRIBE(MODULE, gnss_set_mode_event);
 
 /**
  * @brief check whether the gnss fix is too old.

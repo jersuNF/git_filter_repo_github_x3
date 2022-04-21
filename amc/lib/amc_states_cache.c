@@ -13,7 +13,11 @@ LOG_MODULE_REGISTER(amc_states, CONFIG_AMC_LIB_LOG_LEVEL);
 #include "amc_zone.h"
 #include "amc_gnss.h"
 #include "amc_const.h"
+#include "amc_correction.h"
 #include "nf_settings.h"
+#include "gnss.h"
+#include "gnss_controller_events.h"
+#include "messaging_module_events.h"
 
 #include "ble_beacon_event.h"
 #include "movement_events.h"
@@ -34,12 +38,17 @@ static uint16_t total_zap_cnt;
 /* Fence status related variables. */
 static uint8_t pain_cnt_def_free = _PAIN_CNT_DEF_ESCAPED;
 
-/** Runtime, cached variables. Some get their values from
+/** Runtime, cached variables. Some get their values come from
  *  eeprom on init.
  */
 static Mode current_mode = Mode_Mode_UNKNOWN;
-static FenceStatus current_fence_status;
-static CollarStatus current_collar_status;
+static FenceStatus current_fence_status = FenceStatus_FenceStatus_UNKNOWN;
+static CollarStatus current_collar_status = CollarStatus_CollarStatus_UNKNOWN;
+static gnss_mode_t current_gnss_mode = GNSSMODE_NOMODE;
+
+/* Variable used to check GNSS mode. */
+static bool first_time_since_start = true;
+static int64_t forcegnsstofix_timestamp = 0;
 
 /* Movement controller variable. */
 static atomic_t movement_state = ATOMIC_INIT(STATE_NORMAL);
@@ -173,10 +182,6 @@ static void enter_teach_mode()
 void init_states_and_variables(void)
 {
 	cache_eeprom_variables();
-
-	/** @todo What happens if it boots the first time? How does
-	 *        it know the modes are not valid?
-	 */
 	uint8_t status_code = 0;
 
 	/* Collar mode. */
@@ -275,6 +280,11 @@ Mode calc_mode(void)
 		if (err) {
 			LOG_ERR("Could not write to collar mode %i ", err);
 		}
+
+		/* Notify server about mode change. */
+		struct update_collar_mode *mode_ev = new_update_collar_mode();
+		mode_ev->collar_mode = current_mode;
+		EVENT_SUBMIT(mode_ev);
 	}
 
 	return new_mode;
@@ -295,7 +305,7 @@ void set_beacon_status(enum beacon_status_type status)
 	LOG_DBG("Updated beacon status to enum ID %i", status);
 }
 
-FenceStatus calc_fence_status()
+FenceStatus calc_fence_status(void)
 {
 	FenceStatus new_fence_status = current_fence_status;
 
@@ -407,6 +417,12 @@ FenceStatus calc_fence_status()
 		if (err) {
 			LOG_ERR("Could not write to fence status %i ", err);
 		}
+
+		/* Notify server about fence status change. */
+		struct update_fence_status *fence_ev =
+			new_update_fence_status();
+		fence_ev->fence_status = current_fence_status;
+		EVENT_SUBMIT(fence_ev);
 	}
 
 	return new_fence_status;
@@ -505,14 +521,112 @@ CollarStatus calc_collar_status(void)
 		if (err) {
 			LOG_ERR("Could not write to collar status %i ", err);
 		}
+
+		/* Notify server about collar status change. */
+		struct update_collar_status *collar_ev =
+			new_update_collar_status();
+		collar_ev->collar_status = current_collar_status;
+		EVENT_SUBMIT(collar_ev);
 	}
 
 	return new_collar_status;
 }
 
-int set_sensor_modes(Mode amc_mode, gnss_mode_t gnss_mode, FenceStatus fs,
-		     CollarStatus cs)
+/* Called everytime we install a new pasture. */
+void restart_force_gnss_to_fix(void)
 {
-	/** @todo Set STUFF!!!! */
-	return 0;
+	/* NOF-618 trigger to restart the "force GPS to fix" 
+	 * also when new pasture is downloaded. 
+	 */
+	forcegnsstofix_timestamp = k_uptime_get();
+
+	/* NOF-618. */
+	first_time_since_start = true;
+}
+
+void set_sensor_modes(Mode mode, FenceStatus fs, CollarStatus cs,
+		      amc_zone_t zone)
+{
+	uint8_t gnss_mode = GNSSMODE_CAUTION;
+
+	if (cs == CollarStatus_Sleep || cs == CollarStatus_OffAnimal ||
+	    fs == FenceStatus_BeaconContact ||
+	    fs == FenceStatus_BeaconContactNormal) {
+		gnss_mode = GNSSMODE_INACTIVE;
+	} else if (mode == Mode_Teach || mode == Mode_Fence) {
+		if (fs == FenceStatus_Escaped) {
+			if (gnss_has_accepted_fix()) {
+				gnss_mode = GNSSMODE_PSM;
+			} else {
+				/* Should struggle to get OKFix to possibly 
+				 * release the BeenInside or Escaped status.
+				 */
+				gnss_mode = GNSSMODE_CAUTION;
+			}
+		} else if (fs == FenceStatus_NotStarted) {
+			gnss_mode = GNSSMODE_CAUTION;
+		} else {
+			if (zone == WARN_ZONE || zone == PREWARN_ZONE) {
+				/* [LEGACY] v3.19-7: Moved this if statement up, 
+				 * to prevent GPSMODE_ONOFF when in warnzone.
+				 */
+				gnss_mode = GNSSMODE_MAX;
+			} else if (zone == CAUTION_ZONE) {
+				gnss_mode = GNSSMODE_CAUTION;
+			} else if (zone == PSM_ZONE) {
+				/* [LEGACY] PSHUSTAD: See  
+				 * http://youtrack.axbit.no/youtrack/issue/NOF-186 
+				 */
+				gnss_mode = GNSSMODE_PSM;
+			}
+			/* Nozone. */
+			else {
+				/* [LEGACY] http://youtrack.axbit.no/youtrack/issue/NOF-156. */
+				gnss_mode = GNSSMODE_CAUTION;
+			}
+		}
+	} else if (mode == Mode_Trace) {
+		gnss_mode = GNSSMODE_PSM;
+	}
+	/* If cold-start or new fence definition downloaded, 
+	 * first_time_since_start is set. In this case,
+	 * try to get a fix for 1 hour unless we are in 
+	 * beacon zone or have a fresh fix.
+	 */
+	if (first_time_since_start) {
+		if (!gnss_has_easy_fix() || fs == FenceStatus_NotStarted) {
+			if (fs != FenceStatus_BeaconContact &&
+			    fs != FenceStatus_BeaconContactNormal) {
+				gnss_mode = GNSSMODE_CAUTION;
+			}
+		} else {
+			/* GPS fix recently, do not check anymore. */
+			first_time_since_start = false;
+		}
+		/* Timeout this function after 1 hour. */
+		uint32_t delta_fix =
+			(uint32_t)((k_uptime_get() - forcegnsstofix_timestamp) /
+				   MSEC_PER_SEC);
+		if (delta_fix >= 3600) {
+			first_time_since_start = false;
+		}
+	}
+
+	if (get_correction_status() > 0) {
+		/* GNSSMODE_MAX is needed whenever the warning tone is playing. */
+		gnss_mode = GNSSMODE_MAX;
+	}
+
+	/** @todo NOF-512 Always set backupmode when in undervoltage state
+	 * if (uvlo_gprs_state() == false) {
+	 * 	gnss_mode = GPSMODE_INACTIVE;
+	 * }
+	 * Do we have uvlo function somewhere?
+	 */
+
+	/* Send GNSS mode change event from amc_gnss.c */
+	if (current_gnss_mode != gnss_mode) {
+		current_gnss_mode = gnss_mode;
+		gnss_update_mode(current_gnss_mode);
+	}
 }

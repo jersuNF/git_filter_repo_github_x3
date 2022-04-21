@@ -11,6 +11,7 @@
 
 #include "ble_beacon_event.h"
 #include "movement_events.h"
+#include "amc_zone.h"
 
 /** @todo Move these to another place? Should AMC definitions have a common place?
  * There will not be performed more than this number of shocks each day, 
@@ -69,25 +70,21 @@ Mode get_mode(void);
  */
 FenceStatus calc_fence_status();
 
-/** @brief Calculates and gives the current collarstatus.
+/** @brief Calculates and gives the new collarstatus.
  * 
- * @param WIP.
- * 
- * @returns Mode that we're currently in.
+ * @returns The new collar status calculated.
  */
 CollarStatus calc_collar_status(void);
 
 /** @brief Sets the sensor mode for those modules required.
  * 
  * @param amc_mode Mode of the amc, i.e teach or not.
- * @param gnss_mode mode of the gnss
  * @param fs status of the fence (i.e animal location relative to pasture)
  * @param cs status of the collar (i.e animal sleeping etc...)
- * 
- * @returns 0 on success, otherwise negative errno.
+ * @param zone that we're currently in
  */
-int set_sensor_modes(Mode amc_mode, gnss_mode_t gnss_mode, FenceStatus fs,
-		     CollarStatus cs);
+void set_sensor_modes(Mode amc_mode, FenceStatus fs, CollarStatus cs,
+		      amc_zone_t zone);
 
 /** @todo Should zap stuff be moved somewhere else? */
 void increment_zap_count(void);
@@ -112,5 +109,10 @@ void set_beacon_status(enum beacon_status_type status);
  *  @param state to update the cached variable to.
  */
 void update_movement_state(movement_state_t state);
+
+/** @brief Function used to reset the gnss mode after we get a new pasture
+ *         installation to force a new fix for that given pasture.
+ */
+void restart_force_gnss_to_fix(void);
 
 #endif /* _AMC_STATES_CACHE_H_ */

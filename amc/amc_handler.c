@@ -103,12 +103,19 @@ void process_new_fence_fn(struct k_work *item)
 		return;
 	}
 
+	/* New pasture installed, force a new gnss fix. */
+	restart_force_gnss_to_fix();
+
 	/* Submit event that we have now began to use the new fence. */
 	struct update_fence_version *ver = new_update_fence_version();
 	ver->fence_version = pasture->m.ul_fence_def_version;
 	EVENT_SUBMIT(ver);
 
 	k_sem_give(&fence_data_sem);
+}
+
+void handle_corrections()
+{
 }
 
 /**
@@ -273,43 +280,24 @@ void process_new_gnss_data_fn(struct k_work *item)
 			m_u16_MaybeOutOfFenceTimestamp = get16secTimer();
 		}*/
 
-		FenceStatus fence_status = calc_fence_status();
+		FenceStatus fence_status =
+			calc_fence_status(/*m_u16_MaybeOutOfFenceTimestamp*/);
+		CollarStatus collar_status = calc_collar_status();
 
-		/** @todo CollarStatus collar_status = get_collar_status();
-		 */
-		CollarStatus collar_status = CollarStatus_CollarStatus_Normal;
-		struct update_collar_status *collar_ev =
-			new_update_collar_status();
-		collar_ev->collar_status = collar_status;
-		EVENT_SUBMIT(collar_ev);
+		set_sensor_modes(amc_mode, fence_status, collar_status,
+				 cur_zone);
 
-		/** @todo 
-		 * 
-		 * Check for gnss->haslastfix?
-		 * gnss_mode_t gnss_mode = gnss->lastfix.mode;
-		 * err = set_sensor_modes(amc_mode, gnss_mode, fence_status,
-		 * 		       collar_status);
-		 * if (err) {
-		 * 	goto cleanup;
-		 * }
-		 */
-
-		/** @todo GNSS set mode HERE! 
-		 *
-		 * err = set_gnss_mode(amc_mode, fence_status, collar_status);
-		 * if (err) {
-		 * 	goto cleanup;
-		 * }
-		 */
-
-		/** @todo Error handle? */
 		process_correction(amc_mode, &gnss->lastfix, fence_status,
 				   cur_zone, mean_dist, dist_change);
 	} else {
 		fifo_dist_elem_count = 0;
 		fifo_avg_dist_elem_count = 0;
 		zone_set(NO_ZONE);
-		/** @todo stop buzzer? */
+
+		/* Turn off sound. */
+		struct sound_event *snd_ev = new_sound_event();
+		snd_ev->type = SND_OFF;
+		EVENT_SUBMIT(snd_ev);
 	}
 
 cleanup:

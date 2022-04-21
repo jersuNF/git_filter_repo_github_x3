@@ -15,7 +15,7 @@ if MESSAGING
 
 	config MESSAGING_THREAD_STACK_SIZE
 		int "Size of the message processing thread"
-		default 2048
+		default 8192
 
 	config MESSAGING_THREAD_PRIORITY
 		int "Priority of the message processing thread"
@@ -33,7 +33,7 @@ if MESSAGING
 
 	config MESSAGING_SEND_THREAD_STACK_SIZE
 		int "Size of the send to server queue thread"
-		default 2048
+		default 8192
 
 	config MESSAGING_SEND_THREAD_PRIORITY
 		int "Priority of the send to server queue thread"

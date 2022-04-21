@@ -152,6 +152,8 @@ void build_log_message()
 	/* Fill in NofenceMessage struct */
 	NofenceMessage seq_1;
 	NofenceMessage seq_2;
+	memset(&seq_1, 0, sizeof(NofenceMessage));
+	memset(&seq_2, 0, sizeof(NofenceMessage));
 
 	seq_1.m.seq_msg.usBatteryVoltage = atomic_get(&cached_batt);
 	seq_1.m.seq_msg.usChargeMah = atomic_get(&cached_chrg);
@@ -168,7 +170,7 @@ void build_log_message()
 	uint8_t encoded_msg_seq_2[NofenceMessage_size + header_size];
 
 	memset(encoded_msg_seq_1, 0, sizeof(encoded_msg_seq_1));
-	memset(encoded_msg_seq_2, 0, sizeof(encoded_msg_seq_1));
+	memset(encoded_msg_seq_2, 0, sizeof(encoded_msg_seq_2));
 
 	size_t encoded_seq_1_size = 0;
 	size_t encoded_seq_2_size = 0;
@@ -271,6 +273,7 @@ void modem_poll_work_fn()
  */
 void data_request_work_fn()
 {
+	LOG_INF("Periodic request data");
 	k_work_reschedule(&data_request_work, K_MINUTES(1));
 
 	/* Request of battery voltage */

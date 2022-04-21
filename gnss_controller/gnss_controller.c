@@ -7,6 +7,9 @@
 #include "error_event.h"
 #include "gnss.h"
 #include "kernel.h"
+#include "nf_eeprom.h"
+#include "UBX.h"
+
 #define STACK_SIZE 1024
 #define PRIORITY 7
 
@@ -27,7 +30,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_GNSS_CONTROLLER_LOG_LEVEL);
 _Noreturn void publish_gnss_data(void* ctx);
 void set_gnss_rate(enum gnss_data_rate);
 static int gnss_data_update_cb(const gnss_t*);
-void check_gnss_age(uint32_t);
+bool check_gnss_age(uint32_t);
 
 static uint16_t current_rate;
 
@@ -132,7 +135,17 @@ _Noreturn void publish_gnss_data(void* ctx){
 				}
 				LOG_DBG("gnss fix age = age:%d, ts:%d", gnss_age,
 					ts);
-				check_gnss_age(gnss_age);
+				if (check_gnss_age(gnss_age)) {
+					int ret = gnss_setup(gnss_dev, false);
+					if (ret != 0) {
+						char *msg = "Failed to set up"
+							    " GNSS receiver "
+							    "after reset!";
+						nf_app_error(
+							ERR_GNSS_CONTROLLER,
+							ret, msg, sizeof(*msg));
+					}
+				}
 				previous_ts = ts;
 			}
 
@@ -224,33 +237,44 @@ EVENT_SUBSCRIBE(MODULE, gnss_set_mode);
  *
  *
  */
-void check_gnss_age(uint32_t gnss_age) {
+bool check_gnss_age(uint32_t gnss_age) {
 	LOG_DBG("resets %d", gnss_reset_count);
-
-	if ((gnss_age > GNSS_5SEC) && (gnss_reset_count < 1)) {
-		gnss_reset_count++;
-		struct gnss_no_zone *noZone = new_gnss_no_zone();
-		EVENT_SUBMIT(noZone);
-		gnss_reset(gnss_dev, GNSS_RESET_MASK_HOT, GNSS_RESET_MODE_HW_IMMEDIATELY);
-		//TODO: check if gnss_setup() is required
-	} else if (gnss_age > GNSS_10SEC && gnss_reset_count < 2) {
-		gnss_reset_count++;
-		struct gnss_no_zone *noZone = new_gnss_no_zone();
-		EVENT_SUBMIT(noZone);
-		gnss_reset(gnss_dev, GNSS_RESET_MASK_WARM, GNSS_RESET_MODE_HW_IMMEDIATELY);
-	} else if (gnss_age > GNSS_20SEC && gnss_reset_count >= 2) {
-		gnss_reset_count++;
-		struct gnss_no_zone *noZone = new_gnss_no_zone();
-		EVENT_SUBMIT(noZone);
-		gnss_reset(gnss_dev, GNSS_RESET_MASK_COLD, GNSS_RESET_MODE_HW_IMMEDIATELY);
-	}
-	else if (gnss_age < GNSS_5SEC){
-		gnss_reset_count = 0;
-	}
 
 	if (gnss_reset_count >= 3){
 		LOG_DBG("OLD FIX ERROR!\n");
 		char* msg = "GNSS fix extremely old!";
 		nf_app_error(ERR_GNSS_CONTROLLER, -ETIMEDOUT, msg, sizeof(*msg));
 	}
+
+	if ((gnss_age > GNSS_5SEC) && (gnss_reset_count < 1)) {
+		gnss_reset_count++;
+		struct gnss_no_zone *noZone = new_gnss_no_zone();
+		EVENT_SUBMIT(noZone);
+		gnss_reset(gnss_dev, GNSS_RESET_MASK_HOT, GNSS_RESET_MODE_HW_IMMEDIATELY);
+		return true;
+		//TODO: check if gnss_setup() is required
+	} else if (gnss_age > GNSS_10SEC && gnss_reset_count < 2) {
+		gnss_reset_count++;
+		struct gnss_no_zone *noZone = new_gnss_no_zone();
+		EVENT_SUBMIT(noZone);
+		gnss_reset(gnss_dev, GNSS_RESET_MASK_WARM, GNSS_RESET_MODE_HW_IMMEDIATELY);
+		return true;
+	} else if (gnss_age > GNSS_20SEC && gnss_reset_count >= 2) {
+		gnss_reset_count++;
+		struct gnss_no_zone *noZone = new_gnss_no_zone();
+		EVENT_SUBMIT(noZone);
+		gnss_reset(gnss_dev, GNSS_RESET_MASK_COLD, GNSS_RESET_MODE_HW_IMMEDIATELY);
+		return true;
+	}
+	else if (gnss_age < GNSS_5SEC){
+		gnss_reset_count = 0;
+		return false;
+	}
+}
+
+int install_new_ano(UBX_MGA_ANO_RAW_t* new_ano_message)
+{
+	gnss_upload_assist_data(gnss_dev, new_ano_message->mga_ano, sizeof(new_ano_message->mga_ano));
+	return 0;
+
 }

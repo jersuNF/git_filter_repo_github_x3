@@ -14,6 +14,9 @@
 #include <date_time.h>
 
 #include "error_handler.h"
+#include "msg_data_event.h"
+
+#include <stdio.h>
 
 K_MSGQ_DEFINE(err_container_msgq, sizeof(struct error_container), 4, 4);
 
@@ -89,6 +92,37 @@ static bool event_handler(const struct event_header *eh)
 EVENT_LISTENER(error_handler, event_handler);
 EVENT_SUBSCRIBE(error_handler, error_event);
 
+static int timestamp_print(char *output, uint32_t timestamp)
+{
+	int length;
+	uint32_t freq = 1000;
+	uint32_t timestamp_div = 1;
+	uint32_t total_seconds;
+	uint32_t remainder;
+	uint32_t seconds;
+	uint32_t hours;
+	uint32_t mins;
+	uint32_t ms;
+	uint32_t us;
+
+	timestamp /= timestamp_div;
+	total_seconds = timestamp / freq;
+	seconds = total_seconds;
+	hours = seconds / 3600U;
+	seconds -= hours * 3600U;
+	mins = seconds / 60U;
+	seconds -= mins * 60U;
+
+	remainder = timestamp % freq;
+	ms = (remainder * 1000U) / freq;
+	us = (1000 * (remainder * 1000U - (ms * freq))) / freq;
+
+	length = sprintf(output, "[%02u:%02u:%02u.%03u,%03u] ", hours, mins,
+			 seconds, ms, us);
+
+	return length;
+}
+
 void error_handler_thread_fn()
 {
 	while (true) {
@@ -120,8 +154,21 @@ void error_handler_thread_fn()
 		 *        the string is null terminated to prevent undefined behaviour?
 		 */
 		LOG_DBG("%s", log_strdup(err_container.msg));
+		int current_uptime = k_uptime_get();
 
-		/** @todo Notify server / bluetooth about error? */
+		char time_buf[20];
+		timestamp_print(time_buf, current_uptime);
+		char buf[250];
+		int len = sprintf(buf, "%s msg: %s, sender %d, err: %d\r\n",
+				  time_buf, err_container.msg,
+				  err_container.sender, err_container.code);
+
+		/* Send data on ble uart */
+		struct msg_data_event *msg_ev = new_msg_data_event(len);
+		memcpy(msg_ev->dyndata.data, buf, len);
+		EVENT_SUBMIT(msg_ev);
+
+		/** @todo Notify server about error? */
 
 		/* Store part of the error to system diagnostic partition. */
 		int64_t unix_time;
@@ -135,7 +182,7 @@ void error_handler_thread_fn()
 		system_diagnostic_t sys_diag = { .error_code =
 							 err_container.code,
 						 .sender = err_container.sender,
-						 .uptime = k_uptime_get(),
+						 .uptime = current_uptime,
 						 .unix_time = unix_time };
 
 		size_t sys_diag_len = sizeof(system_diagnostic_t);

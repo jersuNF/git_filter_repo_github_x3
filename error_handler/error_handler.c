@@ -135,27 +135,30 @@ void error_handler_thread_fn()
 			LOG_ERR("Error: Retrieving err_message queue %i", err);
 			continue;
 		}
-
+		char err_type[6];
 		switch (err_container.severity) {
 		case ERR_SEVERITY_FATAL:
 			process_fatal(err_container.sender, err_container.code);
+			sprintf(err_type, "fatal");
 			break;
 		case ERR_SEVERITY_ERROR:
 			process_error(err_container.sender, err_container.code);
+			sprintf(err_type, "err");
 			break;
 		case ERR_SEVERITY_WARNING:
 			process_warning(err_container.sender,
 					err_container.code);
+			sprintf(err_type, "wrn");
 			break;
 		default:
 			LOG_ERR("Unknown error severity.");
 			continue;
 		}
 
-		/** @todo What should we do about the error message? Also check if
-		 *        the string is null terminated to prevent undefined behaviour?
-		 */
-		LOG_DBG("%s", log_strdup(err_container.msg));
+		if (err_container.msg == NULL) {
+			sprintf(err_container.msg, "N/A");
+		}
+		LOG_DBG("Process error: %s", log_strdup(err_container.msg));
 		int current_uptime = k_uptime_get();
 
 		char time_buf[50];
@@ -163,11 +166,17 @@ void error_handler_thread_fn()
 					  sizeof(time_buf));
 		if (len < 0) {
 			LOG_ERR("Not allocated enought memory for time buffer");
+			continue;
 		}
+
 		char buf[250];
-		len = sprintf(buf, "%s msg: %s, sender %d, err: %d\r\n",
-			      time_buf, err_container.msg, err_container.sender,
-			      err_container.code);
+		len = sprintf(buf, "%s <%s> %s, sender: %d, err: (%d)\r\n",
+			      time_buf, err_type, err_container.msg,
+			      err_container.sender, err_container.code);
+		if (len > sizeof(buf)) {
+			LOG_ERR("Not allocated enought memory for error buffer");
+			continue;
+		}
 		/* Send data on ble uart */
 		struct msg_data_event *msg_ev = new_msg_data_event(len);
 		memcpy(msg_ev->dyndata.data, buf, len);

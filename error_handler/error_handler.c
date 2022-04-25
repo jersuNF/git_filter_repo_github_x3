@@ -92,7 +92,7 @@ static bool event_handler(const struct event_header *eh)
 EVENT_LISTENER(error_handler, event_handler);
 EVENT_SUBSCRIBE(error_handler, error_event);
 
-static int timestamp_print(char *output, uint32_t timestamp)
+static int timestamp_print(char *output, uint32_t timestamp, size_t size)
 {
 	int length;
 	uint32_t freq = 1000;
@@ -117,9 +117,11 @@ static int timestamp_print(char *output, uint32_t timestamp)
 	ms = (remainder * 1000U) / freq;
 	us = (1000 * (remainder * 1000U - (ms * freq))) / freq;
 
-	length = sprintf(output, "[%02u:%02u:%02u.%03u,%03u] ", hours, mins,
+	length = sprintf(output, "[%02u:%02u:%02u.%03u,%03u]", hours, mins,
 			 seconds, ms, us);
-
+	if (length > size) {
+		return -EMSGSIZE;
+	}
 	return length;
 }
 
@@ -156,13 +158,16 @@ void error_handler_thread_fn()
 		LOG_DBG("%s", log_strdup(err_container.msg));
 		int current_uptime = k_uptime_get();
 
-		char time_buf[20];
-		timestamp_print(time_buf, current_uptime);
+		char time_buf[50];
+		int len = timestamp_print(time_buf, current_uptime,
+					  sizeof(time_buf));
+		if (len < 0) {
+			LOG_ERR("Not allocated enought memory for time buffer");
+		}
 		char buf[250];
-		int len = sprintf(buf, "%s msg: %s, sender %d, err: %d\r\n",
-				  time_buf, err_container.msg,
-				  err_container.sender, err_container.code);
-
+		len = sprintf(buf, "%s msg: %s, sender %d, err: %d\r\n",
+			      time_buf, err_container.msg, err_container.sender,
+			      err_container.code);
 		/* Send data on ble uart */
 		struct msg_data_event *msg_ev = new_msg_data_event(len);
 		memcpy(msg_ev->dyndata.data, buf, len);

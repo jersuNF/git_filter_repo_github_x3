@@ -250,7 +250,8 @@ static bool event_handler(const struct event_header *eh)
 			(int32_t)atomic_get(&server_timestamp_sec);
 
 		/* If we already have server time, just return. */
-		if (delta_server_time <= TWO_DAYS_SEC) {
+		if (delta_server_time <= TWO_DAYS_SEC &&
+		    !date_time_is_valid()) {
 			return false;
 		}
 
@@ -261,8 +262,8 @@ static bool event_handler(const struct event_header *eh)
 		 */
 		struct gnss_data *ev = cast_gnss_data(eh);
 
-		if (!(ev->gnss_data.lastfix.pvt_flags & (1 << 0)) ||
-		    !(ev->gnss_data.lastfix.pvt_flags & (1 << 1))) {
+		if (!(ev->gnss_data.lastfix.pvt_valid & (1 << 0)) ||
+		    !(ev->gnss_data.lastfix.pvt_valid & (1 << 1))) {
 			return false;
 		}
 

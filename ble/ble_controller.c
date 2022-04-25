@@ -27,6 +27,7 @@
 #include "beacon_processor.h"
 #include "ble_beacon_event.h"
 #include "watchdog_event.h"
+#include "error_event.h"
 
 #if CONFIG_BOARD_NF_X25_NRF52840
 #include "ble_dfu.h"
@@ -202,7 +203,7 @@ static void bt_send_work_handler(struct k_work *work)
 
 		err = ring_buf_get_finish(&ble_tx_ring_buf, len);
 		if (err) {
-			LOG_ERR("ring_buf_get_finish: %d", err);
+			LOG_ERR("Ring buffer size exceeds valid bytes");
 			break;
 		}
 	} while (len != 0 && !ring_buf_is_empty(&ble_tx_ring_buf));
@@ -281,7 +282,7 @@ static void adv_start(void)
 
 	if (!atomic_get(&atomic_bt_ready)) {
 		/* Advertising will start when ready */
-		LOG_INF("Advertising not ready to start");
+		LOG_WRN("Advertising not ready to start");
 		return;
 	}
 
@@ -290,9 +291,11 @@ static void adv_start(void)
 					      BT_GAP_ADV_SLOW_INT_MAX, NULL),
 			      ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 	if (err) {
-		LOG_ERR("bt_le_adv_start: %d", err);
+		char *e_msg = "Failed to start ble advertisement";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 	} else {
-		LOG_INF("Starting advertising");
+		LOG_INF("Starting BLE advertising");
 	}
 }
 
@@ -305,7 +308,9 @@ static void adv_stop(void)
 
 	err = bt_le_adv_stop();
 	if (err) {
-		LOG_ERR("bt_le_adv_stop: %d", err);
+		char *e_msg = "Failed to stop ble advertisement";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 	}
 }
 
@@ -442,7 +447,9 @@ static void bt_ready(int err)
 
 	err = bt_nus_init(&nus_cb);
 	if (err) {
-		LOG_ERR("bt_nus_init: %d", err);
+		char *e_msg = "Bluetooth Nordic Uart init service failed";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 		return;
 	}
 
@@ -540,6 +547,10 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 		if (err != -EIO) {
 			/* Beacon found. Reset 60 seconds scan_stop countdown */
 			beacon_scanner_timer = k_uptime_get();
+		} else {
+			char *e_msg = "Process of beacon state event error";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_BEACON, err, e_msg, strlen(e_msg));
 		}
 	}
 
@@ -577,9 +588,12 @@ static void scan_start(void)
 	};
 	int err = bt_le_scan_start(&scan_param, scan_cb);
 	if (err) {
-		LOG_ERR("Beacon scanning failed (err %d)", err);
+		char *e_msg = "Start Beacon scanning failed";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_BEACON, err, e_msg, strlen(e_msg));
+
 	} else {
-		LOG_INF("Starting scanning after beacons");
+		LOG_INF("Start scanning for Beacons");
 
 		/* Start beacon scanner countdown */
 		beacon_scanner_timer = k_uptime_get();
@@ -590,9 +604,11 @@ static void scan_stop(void)
 {
 	int err = bt_le_scan_stop();
 	if (err) {
-		LOG_ERR("bt_le_scan_stop error: %d", err);
+		char *e_msg = "Stop Beacon scanning failed";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 	} else {
-		LOG_INF("Beacon scanning stopped");
+		LOG_INF("Stop scanning for Beacons");
 	}
 }
 
@@ -600,15 +616,17 @@ int ble_module_init()
 {
 	uint32_t serial_id = 0;
 	int err = eep_read_serial(&serial_id);
-	if (err != 0){ //TODO: handle in a better way.
-		LOG_ERR("Failed to read serial number from eeprom!");
-	}
-	else{
+	if (err != 0) {
+		char *e_msg = "Failed to read serial number from eeprom!";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+	} else {
 		if (serial_id > 999999) {
-			strncpy(bt_device_name, "NF??????\0", DEVICE_NAME_LEN+1);
+			strncpy(bt_device_name, "NF??????\0",
+				DEVICE_NAME_LEN + 1);
 		} else {
 			char tmp[DEVICE_NAME_LEN + 1];
-			snprintf(tmp, 7, "%i" , serial_id); //TODO: 7
+			snprintf(tmp, 7, "%i", serial_id); //TODO: 7
 			// digit numbers would overflow. Using 7 to overcome
 			// the compiler warning, needs to be fixed.
 			uint32_t len = strlen(tmp);
@@ -627,7 +645,9 @@ int ble_module_init()
 	/* Enable ble subsystem and start advertisement */
 	err = bt_enable(bt_ready);
 	if (err) {
-		LOG_ERR("bt_enable: %d", err);
+		char *e_msg = "Failed to enable Bluetooth";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 		return err;
 	}
 

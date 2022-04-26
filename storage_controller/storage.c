@@ -342,7 +342,8 @@ int stg_clear_partition(flash_partition_t partition)
 	}
 
 	if (k_mutex_lock(mtx, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
-		LOG_ERR("Mutex timeout in storage controller when clearing.");
+		LOG_ERR("Mutex timeout in storage controller when clearing FCB: Partition %i",
+			partition);
 		return -ETIMEDOUT;
 	}
 

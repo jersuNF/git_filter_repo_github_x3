@@ -251,7 +251,7 @@ static bool event_handler(const struct event_header *eh)
 		event->pwr_state = PWR_BATTERY;
 		event->battery_mv = batt_voltage;
 		EVENT_SUBMIT(event);
-		return true;
+		return false;
 	}
 #if CONFIG_ADC_NRFX_SAADC
 	if (is_request_pwr_charging_event(eh)) {
@@ -266,7 +266,7 @@ static bool event_handler(const struct event_header *eh)
 		event->pwr_state = PWR_CHARGING;
 		event->charging_ma = charging_current_avg;
 		EVENT_SUBMIT(event);
-		return true;
+		return false;
 	}
 #endif
 	/* If event is unhandled, unsubscribe. */

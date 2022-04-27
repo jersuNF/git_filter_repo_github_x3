@@ -135,35 +135,31 @@ K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE,
 K_KERNEL_STACK_DEFINE(messaging_send_thread,
 		      CONFIG_MESSAGING_SEND_THREAD_STACK_SIZE);
 
-/** @todo 
- * EVENTS we need:
-	 - Battery event (mV)
-	- Charging current (mAh)
-	- GNSS event to get date and position
-	- Modem RSSI (from cellular controller)
-	- Histogram struct (request/response behavior)
-	- BME280 enviroment data (temp, humid, pressure)
-	- Battery performance?
-*/
+/**
+ * @brief Build the log message with latest data.
+ */
 void build_log_message()
 {
-	int ret;
-
 	/* Fill in NofenceMessage struct */
 	NofenceMessage seq_1;
 	NofenceMessage seq_2;
 	memset(&seq_1, 0, sizeof(NofenceMessage));
 	memset(&seq_2, 0, sizeof(NofenceMessage));
 
-	seq_1.m.seq_msg.usBatteryVoltage = atomic_get(&cached_batt);
-	seq_1.m.seq_msg.usChargeMah = atomic_get(&cached_chrg);
-	//seq_1.m.seq_msg.xGprsRssi = cached_rssi; // not implemented
-	seq_1.which_m = NofenceMessage_seq_msg_tag;
+	seq_1.m.seq_msg.has_usBatteryVoltage = true;
+	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
+	seq_1.m.seq_msg.has_usChargeMah = true;
+	seq_1.m.seq_msg.usChargeMah = (uint16_t)atomic_get(&cached_chrg);
+	// //seq_1.m.seq_msg.xGprsRssi = cached_rssi; // not implemented
+	seq_1.which_m = (uint16_t)NofenceMessage_seq_msg_tag;
 
-	seq_2.m.seq_msg_2.bme280.ulPressure = atomic_get(&cached_press);
-	seq_2.m.seq_msg_2.bme280.ulHumidity = atomic_get(&cached_hum);
-	seq_2.m.seq_msg_2.bme280.ulTemperature = atomic_get(&cached_temp);
-	seq_2.which_m = NofenceMessage_seq_msg_2_tag;
+	seq_2.m.seq_msg_2.has_bme280 = true;
+	seq_2.m.seq_msg_2.bme280.ulPressure =
+		(uint32_t)atomic_get(&cached_press);
+	seq_2.m.seq_msg_2.bme280.ulTemperature =
+		(uint32_t)atomic_get(&cached_temp);
+	seq_2.m.seq_msg_2.bme280.ulHumidity = (uint32_t)atomic_get(&cached_hum);
+	seq_2.which_m = (uint16_t)NofenceMessage_seq_msg_2_tag;
 
 	uint8_t header_size = 2;
 	uint8_t encoded_msg_seq_1[NofenceMessage_size + header_size];
@@ -173,40 +169,45 @@ void build_log_message()
 	memset(encoded_msg_seq_2, 0, sizeof(encoded_msg_seq_2));
 
 	size_t encoded_seq_1_size = 0;
+
 	size_t encoded_seq_2_size = 0;
 
 	/* Encode the seq_1 struct created. */
-	ret = collar_protocol_encode(&seq_1, &encoded_msg_seq_1[2],
-				     NofenceMessage_size, &encoded_seq_1_size);
-	if (ret) {
-		LOG_ERR("Error encoding nofence message seq 1 (%i)", ret);
+	int err = collar_protocol_encode(&seq_1, &encoded_msg_seq_1[2],
+					 NofenceMessage_size,
+					 &encoded_seq_1_size);
+	if (err) {
+		LOG_ERR("Error encoding nofence message seq 1 (%i)", err);
 		return;
 	}
+	encoded_msg_seq_1[0] = (uint8_t)encoded_seq_1_size;
+	encoded_msg_seq_1[1] = (uint8_t)(encoded_seq_1_size << 8);
 
-	/* Encode the seq_2 struct created. */
-	ret = collar_protocol_encode(&seq_2, &encoded_msg_seq_2[2],
+	// /* Encode the seq_2 struct created. */
+	err = collar_protocol_encode(&seq_2, &encoded_msg_seq_2[2],
 				     NofenceMessage_size, &encoded_seq_2_size);
-	if (ret) {
-		LOG_ERR("Error encoding nofence message seq 2 (%i)", ret);
+
+	if (err) {
+		LOG_ERR("Error encoding nofence message seq 2 (%i)", err);
 		return;
 	}
+	encoded_msg_seq_2[0] = (uint8_t)encoded_seq_2_size;
+	encoded_msg_seq_2[1] = (uint8_t)(encoded_seq_2_size << 8);
 
-	/** @todo Double chech for correct  size */
 	/* Store the encoded message to external flash ring buffer */
-	stg_write_log_data(encoded_msg_seq_1, encoded_seq_1_size);
-	stg_write_log_data(encoded_msg_seq_2, encoded_seq_2_size);
+	stg_write_log_data(encoded_msg_seq_1, encoded_seq_1_size + header_size);
+	stg_write_log_data(encoded_msg_seq_2, encoded_seq_2_size + header_size);
 }
 
 int read_log_data_cb(uint8_t *data, size_t len)
 {
-	uint8_t *bytes = k_malloc(len + 2);
-	memcpy(&bytes[2], data, len);
-
-	int err = send_binary_message(bytes, len + 2);
+	uint16_t new_len = (uint16_t)((data[1] << 8) + (data[0] & 0x00ff));
+	uint8_t *new_data = k_malloc(new_len);
+	memcpy(new_data, &data[2], new_len);
+	int err = send_binary_message(new_data, new_len);
 	if (err) {
 		LOG_ERR("Error sending binary message for log data %i", err);
 	}
-	k_free(bytes);
 	return err;
 }
 
@@ -253,7 +254,6 @@ void modem_poll_work_fn()
 		&send_q, &modem_poll_work,
 		K_MINUTES(atomic_get(&poll_period_minutes)));
 	/* Add logic for the periodic protobuf modem poller. */
-	LOG_INF("Starting periodic poll work and building poll request.");
 	NofenceMessage new_poll_msg;
 
 	if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
@@ -274,7 +274,7 @@ void modem_poll_work_fn()
 void data_request_work_fn()
 {
 	LOG_INF("Periodic request data");
-	k_work_reschedule(&data_request_work, K_MINUTES(1));
+	k_work_reschedule_for_queue(&send_q, &data_request_work, K_MINUTES(1));
 
 	/* Request of battery voltage */
 	struct request_pwr_battery_event *ev_batt =
@@ -397,8 +397,10 @@ static bool event_handler(const struct event_header *eh)
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
 		/* Update shaddow register */
 		if (ev->pwr_state == PWR_BATTERY) {
+			LOG_INF("Battery event: %u mV", ev->battery_mv);
 			atomic_set(&cached_batt, ev->battery_mv);
 		} else if (ev->pwr_state == PWR_CHARGING) {
+			LOG_INF("Charge event: %u mV", ev->charging_ma);
 			atomic_set(&cached_chrg, ev->charging_ma);
 		}
 		return false;
@@ -406,6 +408,8 @@ static bool event_handler(const struct event_header *eh)
 
 	if (is_env_sensor_event(eh)) {
 		struct env_sensor_event *ev = cast_env_sensor_event(eh);
+		LOG_INF("Event Temp: %f, humid %f, press %f", ev->temp,
+			ev->humidity, ev->press);
 		/* Update shaddow register */
 		atomic_set(&cached_press, (uint32_t)ev->press);
 		atomic_set(&cached_hum, (uint32_t)ev->humidity);
@@ -473,6 +477,8 @@ EVENT_SUBSCRIBE(MODULE, update_zap_count);
 EVENT_SUBSCRIBE(MODULE, animal_warning_event);
 EVENT_SUBSCRIBE(MODULE, animal_escape_event);
 EVENT_SUBSCRIBE(MODULE, connection_state_event);
+EVENT_SUBSCRIBE(MODULE, pwr_status_event);
+EVENT_SUBSCRIBE(MODULE, env_sensor_event);
 /** @todo add battery, histogram, gnss and modem event */
 
 static inline void process_ble_ctrl_event(void)
@@ -639,16 +645,15 @@ int messaging_module_init(void)
 
 	err = 0;
 
+	err = k_work_schedule_for_queue(&send_q, &data_request_work, K_NO_WAIT);
+	if (err < 0) {
+		return err;
+	}
 	err = k_work_schedule_for_queue(&send_q, &modem_poll_work, K_NO_WAIT);
 	if (err < 0) {
 		return err;
 	}
-	err = k_work_schedule_for_queue(&send_q, &log_work, K_NO_WAIT);
-	if (err < 0) {
-		return err;
-	}
-
-	err = k_work_schedule(&data_request_work, K_NO_WAIT);
+	err = k_work_schedule_for_queue(&send_q, &log_work, K_SECONDS(20));
 	if (err < 0) {
 		return err;
 	}

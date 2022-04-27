@@ -267,33 +267,49 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 	struct fcb *fcb = get_fcb(partition);
 	int err = 0;
 
+	/* Check for multiple of 4 */
+	int padding = 0;
+	int multiple = (len % 4U);
+	if (multiple != 0) {
+		padding = 4 - multiple;
+	}
+	size_t new_len = len + padding;
+	uint8_t *new_data = k_malloc(new_len);
+	memset(new_data, 0xFF, new_len);
+	memcpy(new_data, data, len);
+
 	/* Appending a new entry, rotate(replaces) oldest if no space. */
-	err = fcb_append(fcb, len, &loc);
+	err = fcb_append(fcb, new_len, &loc);
 	if (err == -ENOSPC) {
 		err = fcb_rotate(fcb);
 		if (err) {
 			LOG_ERR("Unable to rotate fcb from -ENOSPC, err %d",
 				err);
+			k_free(new_data);
 			return err;
 		}
 		/* Retry appending. */
-		err = fcb_append(fcb, len, &loc);
+		err = fcb_append(fcb, new_len, &loc);
 		if (err) {
 			LOG_ERR("Unable to recover in appending function, err %d",
 				err);
 			nf_app_error(ERR_STORAGE_CONTROLLER, -ENOTRECOVERABLE,
 				     NULL, 0);
+			k_free(new_data);
 			return err;
 		}
 		LOG_INF("Rotated FCB since it's full.");
 	} else if (err) {
 		LOG_ERR("Error appending new fcb entry, err %d", err);
+		k_free(new_data);
 		return err;
 	}
 
-	err = flash_area_write(fcb->fap, FCB_ENTRY_FA_DATA_OFF(loc), data, len);
+	err = flash_area_write(fcb->fap, FCB_ENTRY_FA_DATA_OFF(loc), new_data,
+			       new_len);
 	if (err) {
 		LOG_ERR("Error writing to flash area. err %d", err);
+		k_free(new_data);
 		return err;
 	}
 
@@ -302,6 +318,7 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 	if (err) {
 		LOG_ERR("Error finishing new entry. err %d", err);
 	}
+	k_free(new_data);
 	return err;
 }
 

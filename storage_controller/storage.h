@@ -15,7 +15,8 @@
 typedef enum {
 	STG_PARTITION_LOG = 0,
 	STG_PARTITION_ANO = 1,
-	STG_PARTITION_PASTURE = 2
+	STG_PARTITION_PASTURE = 2,
+	STG_PARTITION_SYSTEM_DIAG = 3
 } flash_partition_t;
 
 /** 
@@ -149,16 +150,6 @@ bool stg_log_pointing_to_last();
  * @return number of entries on partition.
  */
 uint32_t get_num_entries(flash_partition_t partition);
-
-/** 
- * @brief Uses time.h library to compare input ano_date with current unix time.
- *        Returns true if no unix time is available.
- * 
- * @param[in] ano_date UBX ano struct containing ano date.
- * 
- * @return True is ano date is same day or greater, false otherwise.
- */
-bool ano_is_same_day_or_greater(UBX_MGA_ANO_RAW_t *ano_date);
 
 #define SECTOR_SIZE                                                            \
 	MAX(CONFIG_NORDIC_QSPI_NOR_FLASH_LAYOUT_PAGE_SIZE,                     \

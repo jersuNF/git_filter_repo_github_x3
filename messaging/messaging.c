@@ -36,7 +36,9 @@
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
-#include "nf_eeprom.h"
+#include "nf_settings.h"
+#include "histogram_events.h"
+#include "pwr_event.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
@@ -61,6 +63,7 @@ K_SEM_DEFINE(connection_ready, 0, 1);
 
 collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
+int16_t battery_voltage = 0;
 
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
@@ -145,6 +148,11 @@ void build_log_message()
 	NofenceMessage seq_2;
 	memset(&seq_1, 0, sizeof(NofenceMessage));
 	memset(&seq_2, 0, sizeof(NofenceMessage));
+
+	struct save_histogram *histogram_snapshot = new_save_histogram();
+	EVENT_SUBMIT(histogram_snapshot);
+	collar_histogram histogram;
+	k_msgq_get(&histogram_msgq, &histogram, K_FOREVER);
 
 	seq_1.m.seq_msg.has_usBatteryVoltage = true;
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
@@ -398,7 +406,9 @@ static bool event_handler(const struct event_header *eh)
 		/* Update shaddow register */
 		if (ev->pwr_state == PWR_BATTERY) {
 			LOG_INF("Battery event: %u mV", ev->battery_mv);
-			atomic_set(&cached_batt, ev->battery_mv);
+			/* We want battery voltage in deci volt */
+			atomic_set(&cached_batt,
+				   (uint16_t)(ev->battery_mv / 10));
 		} else if (ev->pwr_state == PWR_CHARGING) {
 			LOG_INF("Charge event: %u mV", ev->charging_ma);
 			atomic_set(&cached_chrg, ev->charging_ma);
@@ -624,8 +634,8 @@ void messaging_thread_fn()
 int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module.");
-	int err = eep_read_serial(&serial_id);
-	if (err != 0) { //TODO: handle in a better way.
+	int err = eep_uint32_read(EEP_UID, &serial_id);
+	if (err != 0) {
 		LOG_ERR("Failed to read serial number from eeprom!");
 		return err;
 	}
@@ -642,8 +652,6 @@ int messaging_module_init(void)
 	memset(&pasture_temp, 0, sizeof(pasture_t));
 	cached_fences_counter = 0;
 	pasture_temp.m.us_pasture_crc = EMPTY_FENCE_CRC;
-
-	err = 0;
 
 	err = k_work_schedule_for_queue(&send_q, &data_request_work, K_NO_WAIT);
 	if (err < 0) {
@@ -676,7 +684,8 @@ void build_poll_request(NofenceMessage *poll_req)
 	poll_req->m.poll_message_req.eFenceStatus = current_state.fence_status;
 	poll_req->m.poll_message_req.ulFenceDefVersion =
 		current_state.fence_version;
-	poll_req->m.poll_message_req.usBatteryVoltage = 378; /* TODO: get
+	poll_req->m.poll_message_req.usBatteryVoltage =
+		battery_voltage; /* TODO: get
  * value from battery voltage event.*/
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
@@ -1174,7 +1183,7 @@ _DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix)
 		.usHeight = gpsLastFix->baro_Height,
 #endif
 		.has_ucGpsMode = true,
-		.ucGpsMode = gpsLastFix->gps_mode
+		.ucGpsMode = gpsLastFix->mode
 	};
 	return a;
 }

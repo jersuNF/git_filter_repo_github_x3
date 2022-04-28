@@ -5,6 +5,7 @@ if(CONFIG_GNSS_CONTROLLER)
                 ./../../events/gnss_controller
                 ./../../../src/events/error_handler
                 ./../../drivers/gnss/zephyr
+                ./../../modules/nf_settings/include
                 )
 
         target_sources(app PRIVATE

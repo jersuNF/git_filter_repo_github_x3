@@ -10,6 +10,7 @@
 
 #include "nf_fifo.h"
 #include "trigonometry.h"
+#define STEPS_TRIGGER 50
 
 LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 
@@ -34,12 +35,7 @@ static movement_state_t prev_state = STATE_INACTIVE;
 
 static uint8_t num_acc_fifo_samples = 0;
 
-typedef enum {
-	ACTIVITY_NO = 0,
-	ACTIVITY_LOW = 1,
-	ACTIVITY_MED = 2,
-	ACTIVITY_HIGH = 3
-} acc_activity_t;
+
 static acc_activity_t last_activity = ACTIVITY_NO;
 
 void movement_thread_fn();
@@ -179,6 +175,12 @@ void process_acc_data(raw_acc_data_t *acc)
 
 	/** @todo Use total steps? */
 	total_steps += stepcount;
+	if (stepcount >= STEPS_TRIGGER) {
+		struct step_counter_event *steps = new_step_counter_event();
+		steps->steps = total_steps;
+		EVENT_SUBMIT(steps);
+	}
+
 
 	/* Gradually increase or decrease of activity level. 
          * If activity is greater than the last, increment instantly.

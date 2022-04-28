@@ -227,7 +227,7 @@ void play_welcome(void)
 		return;
 	}
 
-	int steps = 750;
+	int steps = 750>>2;
 	err = play_sweep(1000, 4000, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
@@ -246,7 +246,7 @@ void play_welcome(void)
 		return;
 	}
 
-	steps = 1650;
+	steps = 1650>>2;
 	err = play_sweep(700, 4000, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
@@ -259,14 +259,14 @@ void play_welcome(void)
 		return;
 	}
 
-	steps = 2500;
+	steps = 2500>>2;
 	err = play_sweep(4000, 1500, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
 		return;
 	}
 
-	steps = 450;
+	steps = 450>>2;
 	err = play_sweep(1500, 600, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
@@ -411,7 +411,7 @@ void warn_zone_timeout_handler(struct k_timer *dummy)
  *            within 1 second occured.
  *        
  * @note The the frequency recevied from AMC must be exactly equal to
- *       WARN_FREQ_MS_PERIOD_MAX in order to publish the
+ *       WARN_FREQ_MAX in order to publish the
  *       SND_STATUS_PLAYING_MAX event for the EP module to subscribe to
  *       for instance.
  * @return 0 if successful and sound finished.
@@ -421,15 +421,14 @@ int play_warn_zone_from_freq(void)
 {
 	uint32_t cur_freq = atomic_get(&current_warn_zone_freq);
 
-	if (cur_freq == WARN_FREQ_MS_PERIOD_MAX) {
+	if (cur_freq == WARN_FREQ_MAX) {
 		/* Submit event to EP that we're now playing
 		 * max freq warn zone.
 		 */
 		struct sound_status_event *ev = new_sound_status_event();
 		ev->status = SND_STATUS_PLAYING_MAX;
 		EVENT_SUBMIT(ev);
-	} else if (cur_freq > WARN_FREQ_MS_PERIOD_MAX ||
-		   cur_freq < WARN_FREQ_MS_PERIOD_INIT) {
+	} else if (cur_freq > WARN_FREQ_MAX || cur_freq < WARN_FREQ_INIT) {
 		/* Not a valid frequency, exit entire SND_WARN event. */
 		return -ERANGE;
 	} else {
@@ -462,10 +461,11 @@ void play()
 	/* Set to false indicating we're ready to wait for true signal again. */
 	//atomic_set(&stop_sound_signal, false);
 
-	struct sound_status_event *ev_playing = new_sound_status_event();
 	enum sound_event_type type = atomic_get(&current_type_signal);
 
 	if (type != SND_OFF && type != SND_WARN) {
+		struct sound_status_event *ev_playing =
+			new_sound_status_event();
 		ev_playing->status = SND_STATUS_PLAYING;
 		EVENT_SUBMIT(ev_playing);
 	}
@@ -592,7 +592,7 @@ static bool event_handler(const struct event_header *eh)
 				 * update it.
 				 */
 				atomic_set(&current_warn_zone_freq,
-					   WARN_FREQ_MS_PERIOD_INIT);
+					   WARN_FREQ_INIT);
 				/* If current type is warn zone, start timeout timer
 			 	 * for getting a new frequency to play. */
 				k_timer_start(

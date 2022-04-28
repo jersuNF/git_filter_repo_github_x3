@@ -3,21 +3,23 @@ list(APPEND ZEPHYR_EXTRA_MODULES
         )
 
 zephyr_include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../fw_upgrade/http_download/
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/crc/
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../modules/ble/services
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../events/lte/
-	${CMAKE_CURRENT_SOURCE_DIR}/../../events/cellular_controller/
-	${CMAKE_CURRENT_SOURCE_DIR}/../../events/gnss_controller/
-	${CMAKE_CURRENT_SOURCE_DIR}/../../events/messaging/
-	${CMAKE_CURRENT_SOURCE_DIR}/../../events/buzzer/
-	${CMAKE_CURRENT_SOURCE_DIR}/../../events/error_handler/
-	${CMAKE_CURRENT_SOURCE_DIR}/../../events/storage/
-	${CMAKE_CURRENT_SOURCE_DIR}/../../modules/storage_controller/
-	${PROJECT_BINARY_DIR}/include/generated/
-	../../../include)
+		${CMAKE_CURRENT_SOURCE_DIR}
+		${CMAKE_CURRENT_SOURCE_DIR}/../fw_upgrade/http_download/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../lib/crc/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../modules/ble/services
+		${CMAKE_CURRENT_SOURCE_DIR}/../../events/lte/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../events/cellular_controller/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../events/gnss_controller/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../events/messaging/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../events/buzzer/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../events/error_handler/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../events/storage/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../modules/storage_controller/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../events/collar_stats/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../events/power_manager/
+		${PROJECT_BINARY_DIR}/include/generated/
+		../../../include)
 
 target_sources(app PRIVATE 
 ${CMAKE_CURRENT_SOURCE_DIR}/messaging.c

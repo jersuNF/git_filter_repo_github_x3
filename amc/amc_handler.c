@@ -1,42 +1,55 @@
 /*
  * Copyright (c) 2021 Nofence AS
  */
+#include "amc_cache.h"
+#include "amc_dist.h"
+#include "amc_zone.h"
+#include "amc_gnss.h"
+#include "amc_states.h"
+#include "amc_correction.h"
+#include "amc_const.h"
+#include "nf_fifo.h"
 
 #include <zephyr.h>
 #include "amc_handler.h"
 #include <logging/log.h>
+#include <amc_events.h>
 #include "sound_event.h"
 #include "request_events.h"
 #include "pasture_structure.h"
 #include "event_manager.h"
 #include "error_event.h"
 #include "messaging_module_events.h"
+#include "gnss_controller_events.h"
+
+#include "ble_beacon_event.h"
 
 #include "storage.h"
 
+/* Distance arrays. */
+static int16_t dist_array[FIFO_ELEMENTS];
+static int16_t dist_avg_array[FIFO_AVG_DISTANCE_ELEMENTS];
+
+/* Array to discover unstable position accuracy. */
+static int16_t acc_array[FIFO_ELEMENTS];
+
+/* Array used to discover abnormal height changes that might happen
+ * if gps signals gets reflected.
+ */
+static int16_t height_avg_array[FIFO_ELEMENTS];
+
+/* Static variables used in AMC logic. */
+static int16_t dist_change;
+static int16_t mean_dist = INT16_MIN;
+static int16_t instant_dist = INT16_MIN;
+static uint8_t fifo_dist_elem_count = 0;
+static uint8_t fifo_avg_dist_elem_count = 0;
+
+/* To make sure we're in the sound max before we submit EP release. */
+atomic_t sound_max_atomic = ATOMIC_INIT(false);
+
 #define MODULE animal_monitor_control
 LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
-
-/* Cached fence data header and a max coordinate region. Links the coordinate
- * region to the header. Important! Is set to NULL everytime it's free'd
- * to ensure that we're calculating with a valid cached fence.
- */
-static pasture_t pasture_cache;
-
-#define REQUEST_DATA_SEM_TIMEOUT_SEC 5
-K_SEM_DEFINE(fence_data_sem, 1, 1);
-static inline int update_pasture_cache(uint8_t *data, size_t len);
-
-/* Use two memory regions so we can swap the pointer between them
- * so that instead of waiting for semaphore to be released, we schedule
- * a pointer swap to the other region once we've read the data. Use an
- * atomic variable if both threads try to access and update that
- * gnss data is available or consumed.
- */
-static gnss_struct_t cached_gnssdata_area_1;
-static gnss_struct_t cached_gnssdata_area_2;
-static gnss_struct_t *current_gnssdata_area = &cached_gnssdata_area_1;
-atomic_t new_gnss_written = ATOMIC_INIT(false);
 
 /* Thread stack area that we use for the calculation process. We add a work
  * item here when we have data available from GNSS.
@@ -45,44 +58,14 @@ atomic_t new_gnss_written = ATOMIC_INIT(false);
  * this calculation function can submit to event handler.
  */
 K_THREAD_STACK_DEFINE(amc_calculation_thread_area, CONFIG_AMC_CALCULATION_SIZE);
+
 static struct k_work_q amc_work_q;
-
-/* Calculation work item, can be changed in future based on the algorithm
- * we use and how many functions we want to create for the distance
- * calculation algorithm.
- */
-static struct k_work calc_work;
-
+static struct k_work process_new_gnss_work;
 static struct k_work process_new_fence_work;
-
-static inline int update_pasture_cache(uint8_t *data, size_t len)
-{
-	int err = k_sem_take(&fence_data_sem,
-			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
-	if (err) {
-		LOG_ERR("Error semaphore, retry request pasture here?");
-		return err;
-	}
-
-	if (len != sizeof(pasture_cache)) {
-		LOG_ERR("Error reading pasture from flash, length not expected.");
-		return -EINVAL;
-	}
-
-	/* Memcpy the flash contents. */
-	memset(&pasture_cache, 0, sizeof(pasture_cache));
-	memcpy(&pasture_cache, data, len);
-
-	LOG_INF("Updated pasture cache to definition version: %d",
-		pasture_cache.m.ul_fence_def_version);
-
-	k_sem_give(&fence_data_sem);
-	return 0;
-}
 
 static inline int update_pasture_from_stg(void)
 {
-	int err = stg_read_pasture_data(update_pasture_cache);
+	int err = stg_read_pasture_data(set_pasture_cache);
 	if (err == -ENODATA) {
 		char *err_msg = "No pasture found on external flash.";
 		nf_app_warning(ERR_AMC, err, err_msg, strlen(err_msg));
@@ -98,69 +81,243 @@ static inline int update_pasture_from_stg(void)
 void process_new_fence_fn(struct k_work *item)
 {
 	/* Update AMC cache. */
-	int err = update_pasture_from_stg();
+	int cache_ret = update_pasture_from_stg();
 
 	/* Take pasture sem, since we need to access the version to send
 	 * to messaging module.
 	 */
-	err = k_sem_take(&fence_data_sem,
-			 K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
+	int err = k_sem_take(&fence_data_sem,
+			     K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
 		LOG_ERR("Error taking pasture semaphore for version check.");
 		return;
 	}
 
-	if (err) {
-		pasture_cache.m.ul_fence_def_version = 0;
+	pasture_t *pasture = NULL;
+	get_pasture_cache(&pasture);
+
+	if (cache_ret) {
+		pasture->m.ul_fence_def_version = 0;
 		LOG_ERR("Error caching new pasture from storage controller.");
 		return;
 	}
 
 	/* Submit event that we have now began to use the new fence. */
 	struct update_fence_version *ver = new_update_fence_version();
-	ver->fence_version = pasture_cache.m.ul_fence_def_version;
+	ver->fence_version = pasture->m.ul_fence_def_version;
 	EVENT_SUBMIT(ver);
 
 	k_sem_give(&fence_data_sem);
 }
 
 /**
- * @brief Work function for calculating the distance etc using fence and gnss
- *        data.
+ * @brief Work function for processing new gnss data that have just been stored.
  */
-void calculate_work_fn(struct k_work *item)
+void process_new_gnss_data_fn(struct k_work *item)
 {
-	/* Check if cached fence is valid. */
-	if (pasture_cache.m.ul_total_fences == 0) {
-		char *err_msg = "No fence data available during calculation.";
-		nf_app_fatal(ERR_AMC, -ENODATA, err_msg, strlen(err_msg));
-		return;
-	}
-
+	/* Take fence semaphore since we're going to use the cached area. */
 	int err = k_sem_take(&fence_data_sem,
-			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
+			     K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
 		LOG_ERR("Error waiting for fence data semaphore to release.");
-		return;
+		goto cleanup;
 	}
 
-	/* Check if we received new data, swap the pointer to point
-	 * at the newly written GNSS data area if we have.
-	 */
-	if (atomic_get(&new_gnss_written)) {
-		if (current_gnssdata_area == &cached_gnssdata_area_1) {
-			current_gnssdata_area = &cached_gnssdata_area_2;
+	/* Fetch cached fence and size. */
+	pasture_t *pasture = NULL;
+
+	err = get_pasture_cache(&pasture);
+	if (err || pasture == NULL) {
+		/* Error handle. */
+		goto cleanup;
+	}
+
+	/* Fetch new, cached gnss data. */
+	gnss_t *gnss = NULL;
+	err = get_gnss_cache(&gnss);
+	if (err || gnss == NULL) {
+		/* Error handle. */
+		goto cleanup;
+	}
+
+	/* Set local variables used in AMC logic. */
+	int16_t height_delta = INT16_MAX;
+	int16_t acc_delta = INT16_MAX;
+	int16_t dist_avg_change = 0;
+	uint8_t dist_inc_count = 0;
+
+	/* Update static variables pre-fix check. */
+	amc_zone_t cur_zone = zone_get();
+
+	/* Validate position */
+	err = gnss_update(gnss);
+	if (err) {
+		/* Error handle. */
+		goto cleanup;
+	}
+
+	/* Fetch x and y position based on gnss data */
+	int16_t pos_x = 0, pos_y = 0;
+	err = gnss_calc_xy(gnss, &pos_x, &pos_y, pasture->m.l_origin_lon,
+			   pasture->m.l_origin_lat, pasture->m.us_k_lon,
+			   pasture->m.us_k_lat);
+
+	struct xy_location *loc = new_xy_location();
+	loc->x = pos_x;
+	loc->y = pos_y;
+	EVENT_SUBMIT(loc);
+
+	bool overflow_xy = err == -EOVERFLOW;
+
+	/* If any fence (pasture?) is valid and we have fix. */
+	if (gnss_has_fix() && fnc_valid_fence() && !overflow_xy) {
+		/* Calculate distance to closest polygon. */
+		uint8_t fence_index = 0;
+		uint8_t vertex_index = 0;
+		instant_dist = fnc_calc_dist(pos_x, pos_y, &fence_index,
+					     &vertex_index);
+
+		/* Reset dist_change since we acquired a new distance. */
+		dist_change = 0;
+
+		/* if ((GPS_GetMode() == GPSMODE_MAX) 
+		*  && TestBits(m_u16_PosAccuracy, GPSFIXOK_MASK)) { ??????
+	 	*/
+		/** @todo We should do something about that GPS_GetMode thing 
+		  * here. Either add check to has_accepted_fix, or explicit 
+		  * call to gnss_get_mode */
+		if (gnss_has_accepted_fix()) {
+			/* Accepted position. Fill FIFOs. */
+			fifo_put(gnss->lastfix.h_acc_dm, acc_array,
+				 FIFO_ELEMENTS);
+			fifo_put(gnss->lastfix.height, height_avg_array,
+				 FIFO_ELEMENTS);
+			fifo_put(instant_dist, dist_array, FIFO_ELEMENTS);
+
+			/* If we have filled the distance FIFO, calculate
+			 * the average and store that value into
+			 * another avg_dist FIFO.
+			 */
+			if (++fifo_dist_elem_count >= FIFO_ELEMENTS) {
+				fifo_dist_elem_count = 0;
+				fifo_put(fifo_avg(dist_array, FIFO_ELEMENTS),
+					 dist_avg_array,
+					 FIFO_AVG_DISTANCE_ELEMENTS);
+
+				if (++fifo_avg_dist_elem_count >=
+				    FIFO_AVG_DISTANCE_ELEMENTS) {
+					fifo_avg_dist_elem_count =
+						FIFO_AVG_DISTANCE_ELEMENTS;
+				}
+			}
 		} else {
-			current_gnssdata_area = &cached_gnssdata_area_1;
+			fifo_dist_elem_count = 0;
+			fifo_avg_dist_elem_count = 0;
 		}
-		atomic_set(&new_gnss_written, false);
+
+		if (fifo_avg_dist_elem_count > 0) {
+			/* Fill avg/mean/delta fifos as we have collected
+			 * valid data over a short period.
+			 */
+			mean_dist = fifo_avg(dist_array, FIFO_ELEMENTS);
+			dist_change = fifo_slope(dist_array, FIFO_ELEMENTS);
+			dist_inc_count =
+				fifo_inc_cnt(dist_array, FIFO_ELEMENTS);
+
+			acc_delta = fifo_delta(acc_array, FIFO_ELEMENTS);
+			height_delta =
+				fifo_delta(height_avg_array, FIFO_ELEMENTS);
+
+			if (fifo_avg_dist_elem_count >=
+			    FIFO_AVG_DISTANCE_ELEMENTS) {
+				dist_avg_change =
+					fifo_slope(dist_avg_array,
+						   FIFO_AVG_DISTANCE_ELEMENTS);
+			}
+		}
+
+		int16_t dist_incr_slope_lim = 0;
+		uint8_t dist_incr_count = 0;
+
+		/* Set slopes and count based on mode. */
+		if (get_mode() == Mode_Teach) {
+			dist_incr_slope_lim = TEACHMODE_DIST_INCR_SLOPE_LIM;
+			dist_incr_count = TEACHMODE_DIST_INCR_COUNT;
+		} else {
+			dist_incr_slope_lim = DIST_INCR_SLOPE_LIM;
+			dist_incr_count = DIST_INCR_COUNT;
+		}
+
+		/* Set final accuracy flags based on previous calculations. */
+		err = gnss_update_dist_flags(dist_avg_change, dist_change,
+					     dist_incr_slope_lim,
+					     dist_inc_count, dist_incr_count,
+					     height_delta, acc_delta, mean_dist,
+					     gnss->lastfix.h_acc_dm);
+		if (err) {
+			/* Error handle. */
+			goto cleanup;
+		}
+
+		/* Update zone. */
+		err = zone_update(instant_dist, gnss, &cur_zone);
+		if (err != 0) {
+			fifo_dist_elem_count = 0;
+			fifo_avg_dist_elem_count = 0;
+		}
+
+		/* Start correction and set states based on fence status.
+		 * Should we have this is another loop, or just perform
+		 * whenever we get new postion data?
+		 */
+		Mode amc_mode = calc_mode();
+
+		/** @todo if (cur_zone != WARN_ZONE || SndState() == 2 ||
+		    fenceStatus == FenceStatus_NotStarted ||
+		    fenceStatus == FenceStatus_Escaped) {
+			m_u16_MaybeOutOfFenceTimestamp = get16secTimer();
+		}*/
+
+		FenceStatus fence_status = calc_fence_status();
+
+		/** @todo CollarStatus collar_status = get_collar_status();
+		 */
+		CollarStatus collar_status = CollarStatus_CollarStatus_Normal;
+		struct update_collar_status *collar_ev =
+			new_update_collar_status();
+		collar_ev->collar_status = collar_status;
+		EVENT_SUBMIT(collar_ev);
+
+		/** @todo 
+		 * 
+		 * Check for gnss->haslastfix?
+		 * gnss_mode_t gnss_mode = gnss->lastfix.mode;
+		 * err = set_sensor_modes(amc_mode, gnss_mode, fence_status,
+		 * 		       collar_status);
+		 * if (err) {
+		 * 	goto cleanup;
+		 * }
+		 */
+
+		/** @todo GNSS set mode HERE! 
+		 *
+		 * err = set_gnss_mode(amc_mode, fence_status, collar_status);
+		 * if (err) {
+		 * 	goto cleanup;
+		 * }
+		 */
+
+		/** @todo Error handle? */
+		process_correction(amc_mode, &gnss->lastfix, fence_status,
+				   cur_zone, mean_dist, dist_change);
+	} else {
+		fifo_dist_elem_count = 0;
+		fifo_avg_dist_elem_count = 0;
+		zone_set(NO_ZONE);
+		/** @todo stop buzzer? */
 	}
 
-	/* Play sound event. */
-	struct sound_event *ev = new_sound_event();
-	ev->type = SND_WELCOME;
-	EVENT_SUBMIT(ev);
-
+cleanup:
 	/* Calculation finished, give semaphore so we can swap memory region
 	 * on next GNSS request. 
 	 * As well as notifying we're not using fence data area. 
@@ -177,10 +334,13 @@ int amc_module_init(void)
 	k_work_queue_start(&amc_work_q, amc_calculation_thread_area,
 			   K_THREAD_STACK_SIZEOF(amc_calculation_thread_area),
 			   CONFIG_AMC_CALCULATION_PRIORITY, NULL);
-	k_work_init(&calc_work, calculate_work_fn);
+	k_work_init(&process_new_gnss_work, process_new_gnss_data_fn);
 	k_work_init(&process_new_fence_work, process_new_fence_fn);
 
-	/* Fetch the fence from external flash. */
+	/* Checks and inits the mode we're in. */
+	init_mode_status();
+
+	/* Fetch the fence from external flash and update fence cache. */
 	return update_pasture_from_stg();
 }
 
@@ -198,26 +358,33 @@ static bool event_handler(const struct event_header *eh)
 		k_work_submit_to_queue(&amc_work_q, &process_new_fence_work);
 		return false;
 	}
-	if (is_gnssdata_event(eh)) {
-		struct gnssdata_event *event = cast_gnssdata_event(eh);
+	if (is_gnss_data(eh)) {
+		struct gnss_data *event = cast_gnss_data(eh);
 
-		/* Copy GNSS data struct to area not being read from
-		 * and indicate that we have new data available. So the
-		 * calculation thread can swap pointers.
-		 */
-		if (current_gnssdata_area == &cached_gnssdata_area_1) {
-			memcpy(&cached_gnssdata_area_2, &event->gnss,
-			       sizeof(gnss_struct_t));
-		} else {
-			memcpy(&cached_gnssdata_area_1, &event->gnss,
-			       sizeof(gnss_struct_t));
+		int err = set_gnss_cache(&event->gnss_data);
+		if (err) {
+			char *msg = "Could not set gnss cahce.";
+			nf_app_error(ERR_AMC, err, msg, strlen(msg));
+			return false;
 		}
 
-		atomic_set(&new_gnss_written, true);
-
-		/* Call the calculation thread. */
-		k_work_submit_to_queue(&amc_work_q, &calc_work);
+		k_work_submit_to_queue(&amc_work_q, &process_new_gnss_work);
 		return false;
+	}
+	if (is_ble_beacon_event(eh)) {
+		struct ble_beacon_event *event = cast_ble_beacon_event(eh);
+
+		set_beacon_status(event->status);
+		return false;
+	}
+	if (is_sound_status_event(eh)) {
+		const struct sound_status_event *event =
+			cast_sound_status_event(eh);
+		if (event->status == SND_STATUS_PLAYING_MAX) {
+			atomic_set(&sound_max_atomic, true);
+		} else {
+			atomic_set(&sound_max_atomic, false);
+		}
 	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
@@ -226,5 +393,7 @@ static bool event_handler(const struct event_header *eh)
 }
 
 EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE(MODULE, gnssdata_event);
+EVENT_SUBSCRIBE(MODULE, gnss_data);
 EVENT_SUBSCRIBE(MODULE, new_fence_available);
+EVENT_SUBSCRIBE(MODULE, ble_beacon_event);
+EVENT_SUBSCRIBE(MODULE, sound_status_event);

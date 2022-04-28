@@ -107,6 +107,18 @@ void increment_zap_count(void)
 	}
 }
 
+void reset_zap_count_day()
+{
+	/** @todo Should it be 0xFF or 0? */
+	zap_count_day = 0;
+	int err = eep_uint16_write(EEP_ZAP_CNT_DAY, zap_count_day);
+
+	if (err) {
+		LOG_ERR("Could not reset zap count day %i", err);
+		return;
+	}
+}
+
 void cache_eeprom_variables(void)
 {
 	int err = eep_uint16_read(EEP_ZAP_CNT_TOT, &total_zap_cnt);
@@ -305,17 +317,24 @@ void set_beacon_status(enum beacon_status_type status)
 	LOG_DBG("Updated beacon status to enum ID %i", status);
 }
 
-FenceStatus calc_fence_status(void)
+FenceStatus get_fence_status(void)
+{
+	return current_fence_status;
+}
+
+CollarStatus get_collar_status(void)
+{
+	return current_collar_status;
+}
+
+FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
+			      enum beacon_status_type beacon_status)
 {
 	FenceStatus new_fence_status = current_fence_status;
 
-	enum beacon_status_type beacon_status =
-		atomic_get(&current_beacon_status);
-
-	/** @todo uint32_t maybe_out_of_fence_delta = (k_uptime_get_32() / MSEC_PER_SEC) -
-					    maybe_out_of_fence_timestamp;*/
-
-	uint32_t maybe_out_of_fence_delta = 0;
+	uint32_t maybe_out_of_fence_delta =
+		((uint32_t)(k_uptime_get_32() / MSEC_PER_SEC)) -
+		maybe_out_of_fence;
 
 	switch (current_fence_status) {
 	case FenceStatus_FenceStatus_UNKNOWN:

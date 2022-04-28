@@ -66,15 +66,38 @@ Mode get_mode(void);
 
 /** @brief Calculates and gives the current fencestatus.
  * 
- * @returns Mode that we're currently in.
+ * @param maybe_out_of_fence_timestamp timestamp to check, used for 
+ *                                     maybe_out_of_fence fence status.
+ * 
+ * @param beacon_status status of the beacon.
+ * 
+ * @returns the new fence status we calculated.
  */
-FenceStatus calc_fence_status();
+FenceStatus calc_fence_status(uint32_t maybe_out_of_fence_timestamp,
+			      enum beacon_status_type beacon_status);
 
 /** @brief Calculates and gives the new collarstatus.
  * 
  * @returns The new collar status calculated.
  */
 CollarStatus calc_collar_status(void);
+
+/** @brief Get function for fence status.
+ * 
+ * @returns The fence status state that we're currently in.
+ */
+FenceStatus get_fence_status(void);
+
+/** @brief Get function for collar status.
+ * 
+ * @returns The collar status state that we're currently in.
+ */
+CollarStatus get_collar_status(void);
+
+/** @brief Resets the daily zap counter to 0. No timing logic is performed here,
+ *         this must be done outside the function.
+ */
+void reset_zap_count_day();
 
 /** @brief Sets the sensor mode for those modules required.
  * 

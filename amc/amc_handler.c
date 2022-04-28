@@ -46,8 +46,17 @@ static int16_t instant_dist = INT16_MIN;
 static uint8_t fifo_dist_elem_count = 0;
 static uint8_t fifo_avg_dist_elem_count = 0;
 
+/* Cached variable to check which state the buzzer is in. 
+ * false = SND_OFF
+ * true  = SND_WARN or SND_MAX
+ */
+atomic_t buzzer_state = ATOMIC_INIT(false);
+
 /* To make sure we're in the sound max before we submit EP release. */
 atomic_t sound_max_atomic = ATOMIC_INIT(false);
+
+/* Beacon status used in calculating the fence status. */
+atomic_t current_beacon_status = ATOMIC_INIT(BEACON_STATUS_OUT_OF_RANGE);
 
 #define MODULE animal_monitor_control
 LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
@@ -61,8 +70,12 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
 K_THREAD_STACK_DEFINE(amc_calculation_thread_area, CONFIG_AMC_CALCULATION_SIZE);
 
 static struct k_work_q amc_work_q;
-static struct k_work process_new_gnss_work;
-static struct k_work process_new_fence_work;
+
+/* Work items used to call AMC's main functionalities. */
+static struct k_work handle_new_gnss_work;
+static struct k_work handle_states_work;
+static struct k_work handle_corrections_work;
+static struct k_work handle_new_fence_work;
 
 static inline int update_pasture_from_stg(void)
 {
@@ -79,7 +92,7 @@ static inline int update_pasture_from_stg(void)
 	return 0;
 }
 
-void process_new_fence_fn(struct k_work *item)
+void handle_new_fence_fn(struct k_work *item)
 {
 	/* Update AMC cache. */
 	int cache_ret = update_pasture_from_stg();
@@ -114,14 +127,83 @@ void process_new_fence_fn(struct k_work *item)
 	k_sem_give(&fence_data_sem);
 }
 
-void handle_corrections()
+/**
+ * @brief Function that re-calculates the fence status, collar status and 
+ *        collar mode.
+ */
+void handle_states_fn()
 {
+	/* Fetch cached gnss data. */
+	gnss_t *gnss = NULL;
+	int err = get_gnss_cache(&gnss);
+	if (err || gnss == NULL) {
+		LOG_ERR("Could not fetch GNSS cache %i", err);
+		return;
+	}
+
+	/* Update zone. */
+	amc_zone_t cur_zone = zone_get();
+	err = zone_update(instant_dist, gnss, &cur_zone);
+	if (err != 0) {
+		fifo_dist_elem_count = 0;
+		fifo_avg_dist_elem_count = 0;
+	}
+
+	/* Get states, and recalculate if we have new state changes. */
+	Mode amc_mode = calc_mode();
+	FenceStatus fence_status = get_fence_status();
+	uint32_t maybe_out_of_fence_timestamp = 0;
+
+	if (cur_zone != WARN_ZONE || buzzer_state ||
+	    fence_status == FenceStatus_NotStarted ||
+	    fence_status == FenceStatus_Escaped) {
+		/** @todo Based on uint32, we can only stay uptime for
+		 *        1.6 months, (1193) hours before it wraps around. Issue?
+		 *        We have k_uptime_get_32 other places as well.
+		 */
+		maybe_out_of_fence_timestamp =
+			(uint32_t)(k_uptime_get_32() / MSEC_PER_SEC);
+	}
+
+	FenceStatus new_fence_status =
+		calc_fence_status(maybe_out_of_fence_timestamp,
+				  atomic_get(&current_beacon_status));
+	CollarStatus new_collar_status = calc_collar_status();
+
+	set_sensor_modes(amc_mode, new_fence_status, new_collar_status,
+			 cur_zone);
+}
+
+/**
+ * @brief Function that perform corrections based on the mode during
+ *        the function call instance due to get-modes within the function.
+ *        Does not perform distance calculations nor re-calculate the modes.
+ *        Gets cached distances and FIFO's and then
+ *        fetches the fence status and collar status, and ultimately
+ *        performs the corrections.
+ */
+void handle_corrections_fn()
+{
+	/* Fetch cached gnss data. */
+	gnss_t *gnss = NULL;
+	int err = get_gnss_cache(&gnss);
+	if (err || gnss == NULL) {
+		LOG_ERR("Could not fetch GNSS cache %i", err);
+		return;
+	}
+
+	Mode collar_mode = get_mode();
+	FenceStatus fence_status = get_fence_status();
+	amc_zone_t current_zone = zone_get();
+
+	process_correction(collar_mode, &gnss->lastfix, fence_status,
+			   current_zone, mean_dist, dist_change);
 }
 
 /**
  * @brief Work function for processing new gnss data that have just been stored.
  */
-void process_new_gnss_data_fn(struct k_work *item)
+void handle_gnss_data_fn(struct k_work *item)
 {
 	/* Take fence semaphore since we're going to use the cached area. */
 	int err = k_sem_take(&fence_data_sem,
@@ -153,9 +235,6 @@ void process_new_gnss_data_fn(struct k_work *item)
 	int16_t acc_delta = INT16_MAX;
 	int16_t dist_avg_change = 0;
 	uint8_t dist_inc_count = 0;
-
-	/* Update static variables pre-fix check. */
-	amc_zone_t cur_zone = zone_get();
 
 	/* Validate position */
 	err = gnss_update(gnss);
@@ -261,34 +340,11 @@ void process_new_gnss_data_fn(struct k_work *item)
 			goto cleanup;
 		}
 
-		/* Update zone. */
-		err = zone_update(instant_dist, gnss, &cur_zone);
-		if (err != 0) {
-			fifo_dist_elem_count = 0;
-			fifo_avg_dist_elem_count = 0;
-		}
+		/* Process the states. */
+		k_work_submit_to_queue(&amc_work_q, &handle_states_work);
 
-		/* Start correction and set states based on fence status.
-		 * Should we have this is another loop, or just perform
-		 * whenever we get new postion data?
-		 */
-		Mode amc_mode = calc_mode();
-
-		/** @todo if (cur_zone != WARN_ZONE || SndState() == 2 ||
-		    fenceStatus == FenceStatus_NotStarted ||
-		    fenceStatus == FenceStatus_Escaped) {
-			m_u16_MaybeOutOfFenceTimestamp = get16secTimer();
-		}*/
-
-		FenceStatus fence_status =
-			calc_fence_status(/*m_u16_MaybeOutOfFenceTimestamp*/);
-		CollarStatus collar_status = calc_collar_status();
-
-		set_sensor_modes(amc_mode, fence_status, collar_status,
-				 cur_zone);
-
-		process_correction(amc_mode, &gnss->lastfix, fence_status,
-				   cur_zone, mean_dist, dist_change);
+		/* Process corrections. */
+		k_work_submit_to_queue(&amc_work_q, &handle_corrections_work);
 	} else {
 		fifo_dist_elem_count = 0;
 		fifo_avg_dist_elem_count = 0;
@@ -317,8 +373,10 @@ int amc_module_init(void)
 	k_work_queue_start(&amc_work_q, amc_calculation_thread_area,
 			   K_THREAD_STACK_SIZEOF(amc_calculation_thread_area),
 			   CONFIG_AMC_CALCULATION_PRIORITY, NULL);
-	k_work_init(&process_new_gnss_work, process_new_gnss_data_fn);
-	k_work_init(&process_new_fence_work, process_new_fence_fn);
+	k_work_init(&handle_new_gnss_work, handle_gnss_data_fn);
+	k_work_init(&handle_new_fence_work, handle_new_fence_fn);
+	k_work_init(&handle_corrections_work, handle_corrections_fn);
+	k_work_init(&handle_states_work, handle_states_fn);
 
 	/* Checks and inits the mode we're in as well as caching variables. */
 	init_states_and_variables();
@@ -338,7 +396,7 @@ int amc_module_init(void)
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_new_fence_available(eh)) {
-		k_work_submit_to_queue(&amc_work_q, &process_new_fence_work);
+		k_work_submit_to_queue(&amc_work_q, &handle_new_fence_work);
 		return false;
 	}
 	if (is_gnss_data(eh)) {
@@ -351,28 +409,37 @@ static bool event_handler(const struct event_header *eh)
 			return false;
 		}
 
-		k_work_submit_to_queue(&amc_work_q, &process_new_gnss_work);
+		k_work_submit_to_queue(&amc_work_q, &handle_new_gnss_work);
 		return false;
 	}
 	if (is_ble_beacon_event(eh)) {
 		struct ble_beacon_event *event = cast_ble_beacon_event(eh);
+		atomic_set(&current_beacon_status, event->status);
 
-		set_beacon_status(event->status);
+		/** Process the states, recalculate. @todo Other places we should call this?*/
+		k_work_submit_to_queue(&amc_work_q, &handle_states_work);
 		return false;
 	}
 	if (is_sound_status_event(eh)) {
 		const struct sound_status_event *event =
 			cast_sound_status_event(eh);
 		if (event->status == SND_STATUS_PLAYING_MAX) {
+			atomic_set(&buzzer_state, true);
 			atomic_set(&sound_max_atomic, true);
+		} else if (event->status == SND_STATUS_PLAYING_WARN) {
+			atomic_set(&buzzer_state, true);
+			atomic_set(&sound_max_atomic, false);
 		} else {
+			atomic_set(&buzzer_state, false);
 			atomic_set(&sound_max_atomic, false);
 		}
+		return false;
 	}
 	if (is_movement_out_event(eh)) {
 		const struct movement_out_event *ev =
 			cast_movement_out_event(eh);
 		update_movement_state(ev->state);
+		return false;
 	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);

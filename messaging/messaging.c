@@ -63,7 +63,6 @@ K_SEM_DEFINE(connection_ready, 0, 1);
 
 collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
-int16_t battery_voltage = 0;
 
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
@@ -685,8 +684,7 @@ void build_poll_request(NofenceMessage *poll_req)
 	poll_req->m.poll_message_req.ulFenceDefVersion =
 		current_state.fence_version;
 	poll_req->m.poll_message_req.usBatteryVoltage =
-		battery_voltage; /* TODO: get
- * value from battery voltage event.*/
+		(uint16_t)atomic_get(&cached_batt);
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
 

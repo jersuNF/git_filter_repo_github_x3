@@ -50,6 +50,7 @@ uint32_t time_from_server;
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
 K_SEM_DEFINE(send_out_ack, 0, 1);
 K_SEM_DEFINE(connection_ready, 0, 1);
+K_SEM_DEFINE(ano_download_start, 0, 1);
 
 collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
@@ -322,6 +323,11 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	if (is_start_ano_download(eh)) {
+		LOG_WRN("Received ano request!");
+		k_sem_give(&ano_download_start);
+		return false;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -383,6 +389,8 @@ EVENT_SUBSCRIBE(MODULE, update_zap_count);
 EVENT_SUBSCRIBE(MODULE, animal_warning_event);
 EVENT_SUBSCRIBE(MODULE, animal_escape_event);
 EVENT_SUBSCRIBE(MODULE, connection_state_event);
+
+EVENT_SUBSCRIBE(MODULE, start_ano_download);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -484,6 +492,7 @@ static void process_lte_proto_event(void)
 	/* process poll response */
 	if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
 		process_poll_response(&proto);
+//		request_ano_frame(0,0);
 		return;
 	} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
 		uint8_t new_fframe =
@@ -520,6 +529,21 @@ void messaging_thread_fn()
 		/* Set all the events to not ready again. */
 		for (int i = 0; i < NUM_MSGQ_EVENTS; i++) {
 			msgq_events[i].state = K_POLL_STATE_NOT_READY;
+		}
+		if (k_sem_take(&ano_download_start, K_MSEC(10)) == 0){
+			uint16_t ano_id;
+			int ret = eep_read_ano_id(&ano_id);
+			LOG_WRN("ano id = %i", ano_id);
+			if (ret != 0){
+				LOG_ERR("Failed to read ano_id from eeprom!");
+			}
+			if (ano_id > 366){
+				ano_id = 0;
+			}
+			int err = request_ano_frame(ano_id, 0);
+			if (err != 0){
+				LOG_ERR("Couldn't send kick-off ano request!");
+			}
 		}
 	}
 }
@@ -688,6 +712,7 @@ void fence_download(uint8_t new_fframe)
 
 int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 {
+	LOG_WRN("Start ANO request message!");
 	NofenceMessage ano_req;
 	proto_InitHeader(&ano_req); /* fill up message header. */
 	ano_req.which_m = NofenceMessage_ubx_ano_req_tag;
@@ -716,6 +741,12 @@ void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
 		if (new_ano_frame == DOWNLOAD_COMPLETE) {
 			LOG_INF("ANO %d download complete.",
 				new_ano_in_progress);
+			struct ano_ready *ev = new_ano_ready();
+			EVENT_SUBMIT(ev);
+			int err = eep_write_ano_id(ano_id);
+			if (err != 0) {
+				LOG_ERR("Failed to write ano_id!");
+			}
 			return;
 		}
 
@@ -758,6 +789,7 @@ void proto_InitHeader(NofenceMessage *msg)
 int send_binary_message(uint8_t *data, size_t len)
 {
 	struct check_connection *ev = new_check_connection();
+	LOG_WRN("Send connection check!");
 	EVENT_SUBMIT(ev);
 	int ret = k_sem_take(&connection_ready, K_MINUTES(2));
 	if (ret != 0) {
@@ -788,6 +820,7 @@ int send_binary_message(uint8_t *data, size_t len)
 		k_mutex_unlock(&send_binary_mutex);
 		return 0;
 	} else {
+		LOG_ERR("Send out mutex can not be unlocked!");
 		return -ETIMEDOUT;
 	}
 	return 0;
@@ -1023,28 +1056,44 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 {
 	uint8_t rec_ano_frames =
 		anoResp->rgucBuf.size / sizeof(UBX_MGA_ANO_RAW_t);
-	UBX_MGA_ANO_RAW_t *temp = NULL;
-	temp = (UBX_MGA_ANO_RAW_t *)(anoResp->rgucBuf.bytes +
-				     sizeof(UBX_MGA_ANO_RAW_t));
 
-	uint32_t age = ano_date_to_unixtime_midday(
-		temp->mga_ano.year, temp->mga_ano.month, temp->mga_ano.day);
-
-	LOG_INF("Relative age of received ANO frame = %d, %d", age,
-		time_from_server);
-
+	uint32_t age = 0;
+	uint8_t packed_ano = anoResp->rgucBuf.size/sizeof(UBX_MGA_ANO_RAW_t);
+	LOG_INF("Number of packed ano messages = %d", packed_ano);
 	/* Write to storage controller's ANO WRITE partition. */
-	int err = stg_write_ano_data((uint8_t *)&anoResp->rgucBuf,
-				     anoResp->rgucBuf.size);
+	UBX_MGA_ANO_RAW_t tmp_ano;
+	GPS_UBX_MGA_ANO_t tmp_ano_raw;
+	for (int i = 0; i<packed_ano; i++) {
+		if (sizeof(UBX_MGA_ANO_RAW_t) * packed_ano !=
+		    anoResp->rgucBuf.size) {
+			LOG_ERR("ANO MSG size mismatch, %d, %d",
+				sizeof(UBX_MGA_ANO_RAW_t),
+				anoResp->rgucBuf.size);
+		}
+		memcpy(&tmp_ano, anoResp->rgucBuf.bytes + sizeof(UBX_MGA_ANO_RAW_t) * i,
+		       sizeof(UBX_MGA_ANO_RAW_t));
 
-	if (err) {
-		LOG_ERR("Error writing ano frame to storage controller %i",
-			err);
+		LOG_INF("ano msg age = %d, my_time = %d", age,
+			time_from_server);
+		tmp_ano_raw = tmp_ano.mga_ano;
+		age = ano_date_to_unixtime_midday(
+			tmp_ano_raw.year, tmp_ano_raw.month,
+			tmp_ano_raw.day);
+
+		if (age > time_from_server + SECONDS_IN_THREE_DAYS) {
+			return DOWNLOAD_COMPLETE;
+		}
+
+		int err = stg_write_ano_data((uint8_t *)&tmp_ano_raw,
+					     sizeof(GPS_UBX_MGA_ANO_t));
+
+		LOG_WRN("ano age = %d", age);
+		if (err) {
+			LOG_ERR("Error writing ano frame to storage controller %i",
+				err);
+		}
 	}
 
-	if (age > time_from_server + SECONDS_IN_THREE_DAYS) {
-		return DOWNLOAD_COMPLETE;
-	}
 	return rec_ano_frames;
 }
 

@@ -255,7 +255,7 @@ int stg_init_storage_controller(void)
 	/* Check which ANO partition is active. We just booted, so
 	 * we have to go through every entry.
 	 */
-	update_ano_active_entry(NULL);
+//	update_ano_active_entry(NULL);
 
 	return 0;
 }
@@ -379,18 +379,18 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
  */
 int check_if_ano_valid_cb(uint8_t *data, size_t len)
 {
-	UBX_MGA_ANO_RAW_t *ano_frame = (UBX_MGA_ANO_RAW_t *)(data);
+	GPS_UBX_MGA_ANO_t *ano_frame = (GPS_UBX_MGA_ANO_t *)(data);
 
 	/* Age logic here. */
-	LOG_INF("Year %i, month %i, day %i", ano_frame->mga_ano.year,
-		ano_frame->mga_ano.month, ano_frame->mga_ano.day);
+	LOG_INF("Year %i, month %i, day %i", ano_frame->year,
+		ano_frame->month, ano_frame->day);
 
 	/** @todo If age is valid, update ano sector. Fetch from somewhere! */
-	if (ano_frame->mga_ano.year == 22) {
+	if (ano_frame->year == 22) {
 		/* Done, we found oldest, valid timestamp, exit loop. */
 		return -EINTR;
 	}
-	return 0;
+	return -EINTR;
 }
 
 /** @brief Goes through ANO partition data and stops whenever

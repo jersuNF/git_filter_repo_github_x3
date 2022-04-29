@@ -438,5 +438,7 @@ _Noreturn void install_fresh_ano(void)
 				 * timeout expires. */
 			}
 		}
+//		k_yield();
+		k_sleep(K_SECONDS(1));
 	}
 }

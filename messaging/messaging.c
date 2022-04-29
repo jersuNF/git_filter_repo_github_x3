@@ -142,22 +142,33 @@ K_KERNEL_STACK_DEFINE(messaging_send_thread,
  */
 void build_log_message()
 {
+	/* Fetch histogram data */
+	struct save_histogram *histogram_snapshot = new_save_histogram();
+	EVENT_SUBMIT(histogram_snapshot);
+	collar_histogram histogram;
+	k_msgq_get(&histogram_msgq, &histogram, K_SECONDS(10));
+
 	/* Fill in NofenceMessage struct */
 	NofenceMessage seq_1;
 	NofenceMessage seq_2;
 	memset(&seq_1, 0, sizeof(NofenceMessage));
 	memset(&seq_2, 0, sizeof(NofenceMessage));
 
-	struct save_histogram *histogram_snapshot = new_save_histogram();
-	EVENT_SUBMIT(histogram_snapshot);
-	collar_histogram histogram;
-	k_msgq_get(&histogram_msgq, &histogram, K_FOREVER);
-
 	seq_1.m.seq_msg.has_usBatteryVoltage = true;
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	seq_1.m.seq_msg.has_usChargeMah = true;
 	seq_1.m.seq_msg.usChargeMah = (uint16_t)atomic_get(&cached_chrg);
 	// //seq_1.m.seq_msg.xGprsRssi = cached_rssi; // not implemented
+	seq_1.m.seq_msg.has_xHistogramCurrentProfile = true;
+	seq_1.m.seq_msg.has_xHistogramZone = true;
+	seq_1.m.seq_msg.has_xHistogramAnimalBehave = true;
+	memcpy(&seq_1.m.seq_msg.xHistogramAnimalBehave,
+	       &histogram.animal_behave, sizeof(histogram.animal_behave));
+	memcpy(&seq_1.m.seq_msg.xHistogramCurrentProfile,
+	       &histogram.current_profile, sizeof(histogram.current_profile));
+	memcpy(&seq_1.m.seq_msg.xHistogramZone, &histogram.in_zone,
+	       sizeof(histogram.in_zone));
+
 	seq_1.which_m = (uint16_t)NofenceMessage_seq_msg_tag;
 
 	seq_2.m.seq_msg_2.has_bme280 = true;

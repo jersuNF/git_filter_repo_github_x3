@@ -17,7 +17,7 @@
 #define NEW_GNSS_DATA_PRIORITY 7
 
 #define UPDATE_ANO_STACK_SIZE 1024
-#define UPDATE_ANO_PRIORITY 7
+#define UPDATE_ANO_PRIORITY 12
 
 #define GNSS_1SEC			1000
 #define GNSS_5SEC			(GNSS_1SEC * 5)
@@ -172,7 +172,7 @@ _Noreturn void publish_gnss_data(void* ctx){
 							ERR_GNSS_CONTROLLER,
 							ret, msg, sizeof(*msg));
 					}
-					k_sem_give(&ano_update);
+//					k_sem_give(&ano_update);
 				}
 				previous_ts = ts;
 			}
@@ -180,8 +180,8 @@ _Noreturn void publish_gnss_data(void* ctx){
 			struct gnss_data* new_data = new_gnss_data();
 			new_data->gnss_data = gnss_data_buffer;
 //			LOG_INF("New GNSS data received!\n");
-			LOG_INF("ttff = %d", gnss_data_buffer.latest.ttff);
-			LOG_INF("GNSS data: %d, %d, %d, %d, %d", gnss_data_buffer.latest.lon, gnss_data_buffer.latest.lat, gnss_data_buffer.latest.pvt_flags, gnss_data_buffer.latest.h_acc_dm, gnss_data_buffer.latest.num_sv);
+//			LOG_INF("ttff = %d", gnss_data_buffer.latest.ttff);
+//			LOG_INF("GNSS data: %d, %d, %d, %d, %d", gnss_data_buffer.latest.lon, gnss_data_buffer.latest.lat, gnss_data_buffer.latest.pvt_flags, gnss_data_buffer.latest.h_acc_dm, gnss_data_buffer.latest.num_sv);
 			EVENT_SUBMIT(new_data);
 			if(k_sem_take(&cached_fix_sem, K_MSEC(100)) == 0){
 				cached_gnss_data = gnss_data_buffer;

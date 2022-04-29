@@ -159,8 +159,6 @@ _Noreturn void publish_gnss_data(void* ctx){
 				} else{ //handle overflow
 					gnss_age = UINT32_MAX + ts - previous_ts;
 				}
-				LOG_DBG("gnss fix age = age:%d, ts:%d", gnss_age,
-					ts);
 				if (check_gnss_age(gnss_age)) {
 					k_sem_take(&ano_update, K_SECONDS(1));
 					int ret = gnss_setup(gnss_dev, false);
@@ -276,8 +274,6 @@ EVENT_SUBSCRIBE(MODULE,ano_ready);
  *
  */
 bool check_gnss_age(uint32_t gnss_age) {
-	LOG_DBG("resets %d", gnss_reset_count);
-
 	if (gnss_reset_count >= 3){
 		LOG_DBG("OLD FIX ERROR!\n");
 		char* msg = "GNSS fix extremely old!";
@@ -362,7 +358,7 @@ static inline int read_ano_callback(uint8_t *data, size_t len)
 _Noreturn void install_fresh_ano(void)
 {
 	static uint32_t last_installed_ano_time, serial_id;
-	static bool all_ano_installed = false;
+	static bool all_ano_installed = false, ano_downloaded = false;
 	uint32_t ano_msg_age = 0;
 	int ret;
 	while (true) {
@@ -379,6 +375,8 @@ _Noreturn void install_fresh_ano(void)
 							ano_msg.year,
 							ano_msg.month,
 							ano_msg.day);
+					LOG_WRN("time: %d, ano_msg_time: %d",
+						current_time,  ano_msg_age);
 					if (ano_msg_age > current_time
 					    && ano_msg_age >=
 						       last_installed_ano_time) {
@@ -395,11 +393,12 @@ _Noreturn void install_fresh_ano(void)
 								ret);
 						}
 						//TODO: handle failure to install ano_msg
-					} else {
-						LOG_INF("Finished installing "
-							" all ano from flash!");
-						all_ano_installed = true;
 					}
+//					else {
+//						LOG_INF("Finished installing "
+//							" all ano from flash!");
+//						all_ano_installed = true;
+//					}
 				} else if (err == -ENODATA) {
 					LOG_INF("Reached end of ano "
 						"partition!");
@@ -420,8 +419,8 @@ _Noreturn void install_fresh_ano(void)
 			server with update ano requests from all collars
 			at the same time. */
 			uint16_t offset = (serial_id & 0x0FF) * 56;
-			if (last_installed_ano_time + offset < current_time) {
-				all_ano_installed = true;
+			if ( (last_installed_ano_time + offset < current_time)
+			    && all_ano_installed && !ano_downloaded) {
 				/* Time to download new ano data from the server*/
 				struct start_ano_download *ev =
 					new_start_ano_download();
@@ -433,12 +432,15 @@ _Noreturn void install_fresh_ano(void)
 					LOG_ERR("Failed to clear ano "
 						"partition!");
 				}
-				k_sem_take(&ano_update, K_MINUTES(5));
+				if (k_sem_take(&ano_update, K_MINUTES(5)) == 0){
+					all_ano_installed = false;
+					ano_downloaded = true;
+				}
 				/* wait until ano download is complete or
 				 * timeout expires. */
 			}
 		}
 //		k_yield();
-		k_sleep(K_SECONDS(1));
+		k_sleep(K_MSEC(200));
 	}
 }

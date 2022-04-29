@@ -116,7 +116,7 @@ struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
 static struct k_work_q send_q;
 struct k_work_delayable modem_poll_work;
 struct k_work_delayable log_work;
-
+bool start_ano = false;
 atomic_t poll_period_minutes = ATOMIC_INIT(5);
 atomic_t log_period_minutes = ATOMIC_INIT(30);
 
@@ -325,7 +325,7 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_start_ano_download(eh)) {
 		LOG_WRN("Received ano request!");
-		k_sem_give(&ano_download_start);
+		start_ano = true;
 		return false;
 	}
 	/* If event is unhandled, unsubscribe. */
@@ -391,6 +391,7 @@ EVENT_SUBSCRIBE(MODULE, animal_escape_event);
 EVENT_SUBSCRIBE(MODULE, connection_state_event);
 
 EVENT_SUBSCRIBE(MODULE, start_ano_download);
+EVENT_SUBSCRIBE(MODULE, gnss_data);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -530,7 +531,8 @@ void messaging_thread_fn()
 		for (int i = 0; i < NUM_MSGQ_EVENTS; i++) {
 			msgq_events[i].state = K_POLL_STATE_NOT_READY;
 		}
-		if (k_sem_take(&ano_download_start, K_MSEC(10)) == 0){
+		if (start_ano){
+			start_ano = false;
 			uint16_t ano_id;
 			int ret = eep_read_ano_id(&ano_id);
 			LOG_WRN("ano id = %i", ano_id);
@@ -741,6 +743,7 @@ void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
 		if (new_ano_frame == DOWNLOAD_COMPLETE) {
 			LOG_INF("ANO %d download complete.",
 				new_ano_in_progress);
+			expected_ano_frame = 0;
 			struct ano_ready *ev = new_ano_ready();
 			EVENT_SUBMIT(ev);
 			int err = eep_write_ano_id(ano_id);

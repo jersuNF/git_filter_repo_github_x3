@@ -54,6 +54,8 @@ K_SEM_DEFINE(ano_download_start, 0, 1);
 
 collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
+uint32_t cached_msss;
+uint32_t cached_ttff;
 
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
@@ -77,7 +79,7 @@ int send_binary_message(uint8_t *, size_t);
 void messaging_thread_fn(void);
 
 _DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *);
-bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *);
+
 static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
 bool m_confirm_acc_limits, m_confirm_ble_key, m_transfer_boot_params;
 bool use_server_time;
@@ -307,6 +309,8 @@ static bool event_handler(const struct event_header *eh)
 		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
 			if (k_sem_take(&cache_lock_sem, K_MSEC(500)) == 0) {
 				cached_fix = ev->gnss_data.lastfix;
+				cached_ttff = ev->gnss_data.latest.ttff;
+				cached_msss = ev->gnss_data.latest.msss;
 				k_sem_give(&cache_lock_sem);
 			}
 		}
@@ -592,7 +596,7 @@ void build_poll_request(NofenceMessage *poll_req)
 	poll_req->m.poll_message_req.datePos =
 		proto_get_last_known_date_pos(&cached_fix);
 	poll_req->m.poll_message_req.has_datePos =
-		proto_has_last_known_date_pos(&cached_fix);
+		cached_fix.unix_timestamp != 0;
 	poll_req->m.poll_message_req.eMode = current_state.collar_mode;
 	poll_req->m.poll_message_req.usZapCount = current_state.zap_count;
 	poll_req->m.poll_message_req.eCollarStatus =
@@ -636,8 +640,9 @@ void build_poll_request(NofenceMessage *poll_req)
 		//		EEPROM_ReadBleSecKey(poll_req.m.poll_message_req.rgubcBleKey.bytes,
 		//				     EEP_BLE_SEC_KEY_LEN);
 	}
-	poll_req->m.poll_message_req.usGnssOnFixAgeSec = 123;
-	poll_req->m.poll_message_req.usGnssTTFFSec = 12;
+	poll_req->m.poll_message_req.usGnssOnFixAgeSec =
+		MAX(cached_msss -cached_fix.msss, UINT16_MAX);
+	poll_req->m.poll_message_req.usGnssTTFFSec = cached_ttff;
 
 	if (m_transfer_boot_params) {
 		//		poll_req.m.poll_message_req.has_versionInfo = true;
@@ -1127,11 +1132,6 @@ _DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix)
 		.ucGpsMode = gpsLastFix->gps_mode
 	};
 	return a;
-}
-
-bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *gps)
-{
-	return gps->unix_timestamp != 0;
 }
 
 static uint32_t ano_date_to_unixtime_midday(uint8_t year, uint8_t month,

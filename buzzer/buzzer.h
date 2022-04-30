@@ -19,7 +19,7 @@
 #define WARN_MIN_DURATION_MS 5000
 
 /** Default loudness for the buzzer in percent. */
-#define BUZZER_SOUND_VOLUME_PERCENT 100
+#define BUZZER_SOUND_VOLUME_PERCENT 5
 
 typedef enum { d_16 = 250, d_8 = 500 } duration_t;
 

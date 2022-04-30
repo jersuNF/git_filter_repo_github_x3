@@ -159,7 +159,7 @@ int play_sweep(uint32_t start_freq, uint32_t end_freq, uint32_t duration,
 	}
 
 	uint32_t sustain = duration / step_count;
-
+	step_count >>= 1;
 	for (uint16_t i = 0; i < step_count; i++) {
 		uint32_t freq = (uint32_t)(
 			start_freq + (int32_t)(i * (((int32_t)end_freq -

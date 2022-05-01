@@ -195,6 +195,11 @@ void stop_tcp(void)
 			memset(&conf, 0, sizeof(conf));
 		}
 	}
+	int ret = modem_nf_sleep();
+	if (ret != 0){
+		LOG_ERR("Failed to switch modem to power saving!");
+		/*TODO: notify error handler and take action.*/
+	}
 }
 
 int send_tcp(char *msg, size_t len)

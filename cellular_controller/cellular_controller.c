@@ -309,7 +309,12 @@ static void cellular_controller_keep_alive(void* dev)
 							(false);
 					}
 				} else {
-					int ret = check_ip();
+					int ret = modem_nf_wakeup();
+					if (ret != 0) {
+						LOG_ERR("Failed to wake up the modem!");
+						modem_nf_reset();
+					}
+					ret = check_ip();
 					if (ret != 0){
 						announce_connection_state
 							(false);

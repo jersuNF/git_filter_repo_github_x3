@@ -10,6 +10,7 @@
 #define SOCK_RECV_TIMEOUT 15
 #define MODULE cellular_controller
 #define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_SEC
+#include <modem_nf.h>
 
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
@@ -112,7 +113,13 @@ void receive_tcp(struct data *sock_data)
 
 int start_tcp(void)
 {
-	int ret = check_ip();
+	int ret = modem_nf_wakeup();
+	if (ret != 0) {
+		LOG_ERR("Failed to wake up the modem!");
+		modem_nf_reset();
+		return ret;
+	}
+	ret = check_ip();
 	if (ret != 0){
 		LOG_ERR("Failed to get ip address!");
 		char *e_msg = "Failed to get ip address!";

@@ -180,7 +180,7 @@ int get_ip(char** collar_ip)
 	return ret;
 }
 
-void stop_tcp(void)
+void stop_tcp(bool initializing)
 {
 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
 		if (conf.ipv6.tcp.sock >= 0) {
@@ -195,10 +195,15 @@ void stop_tcp(void)
 			memset(&conf, 0, sizeof(conf));
 		}
 	}
-	int ret = modem_nf_sleep();
-	if (ret != 0){
-		LOG_ERR("Failed to switch modem to power saving!");
-		/*TODO: notify error handler and take action.*/
+	k_sleep(K_SECONDS(3)); /*wait until socket is closed (USOSO delay is
+ * 3 seconds)
+ * TODO: set change delay to a configuration symbol*/
+	if (!initializing){
+		int ret = modem_nf_sleep();
+		if (ret != 0){
+			LOG_ERR("Failed to switch modem to power saving!");
+			/*TODO: notify error handler and take action.*/
+		}
 	}
 }
 

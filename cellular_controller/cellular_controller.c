@@ -94,7 +94,7 @@ void receive_tcp(struct data *sock_data)
 					nf_app_error(ERR_MESSAGING, -ETIMEDOUT,
 						     e_msg, strlen
 						(e_msg));
-					stop_tcp();
+					stop_tcp(false);
 					connected = false;
 					socket_idle_count = 0;
 				}
@@ -102,7 +102,7 @@ void receive_tcp(struct data *sock_data)
 				char *e_msg = "Socket receive error!";
 				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
 					(e_msg));
-				stop_tcp();
+				stop_tcp(false);
 				connected = false;
 				socket_idle_count = 0;
 			}
@@ -152,7 +152,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		LOG_WRN("ACK received!\n");
 		return true;
 	} else if (is_messaging_stop_connection_event(eh)) {
-		stop_tcp();
+		stop_tcp(false);
 		connected = false;
 		return true;
 	}else if (is_messaging_host_address_event(eh)) {
@@ -286,7 +286,7 @@ static void cellular_controller_keep_alive(void* dev)
 	while (true) {
 		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
 			if (!cellular_controller_is_ready()) {
-				stop_tcp();
+				stop_tcp(true);
 				int ret = reset_modem();
 				if (ret == 0) {
 					ret = cellular_controller_connect(dev);
@@ -304,7 +304,7 @@ static void cellular_controller_keep_alive(void* dev)
 						connected = true;
 						announce_connection_state(true);
 					}else {
-						stop_tcp();
+						stop_tcp(false);
 						announce_connection_state
 							(false);
 					}

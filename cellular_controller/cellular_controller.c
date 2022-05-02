@@ -283,10 +283,11 @@ exit:
 
 static void cellular_controller_keep_alive(void* dev)
 {
+	int ret;
 	while (true) {
 		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
 			if (!cellular_controller_is_ready()) {
-				int ret = reset_modem();
+				ret = reset_modem();
 				if (ret == 0) {
 					ret = cellular_controller_connect(dev);
 					if (ret == 0) {
@@ -298,21 +299,16 @@ static void cellular_controller_keep_alive(void* dev)
 				if(!connected){//check_ip
 					// takes place in start_tcp() in this
 					// case.
-					int  ret = start_tcp();
+					ret = start_tcp();
 					if (ret == 0){
 						connected = true;
 						announce_connection_state(true);
 					}else {
-//						stop_tcp();
+						stop_tcp();
 						announce_connection_state
 							(false);
 					}
 				} else {
-					int ret = modem_nf_wakeup();
-					if (ret != 0) {
-						LOG_ERR("Failed to wake up the modem!");
-						modem_nf_reset();
-					}
 					ret = check_ip();
 					if (ret != 0){
 						announce_connection_state
@@ -321,7 +317,7 @@ static void cellular_controller_keep_alive(void* dev)
 						nf_app_error(ERR_MESSAGING,
 							     -EIO, e_msg, strlen
 							(e_msg));
-					}else {
+					} else {
 						announce_connection_state(true);
 					}
 				}

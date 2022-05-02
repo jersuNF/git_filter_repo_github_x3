@@ -19,6 +19,8 @@ LOG_MODULE_REGISTER(amc_states, CONFIG_AMC_LIB_LOG_LEVEL);
 #include "gnss_controller_events.h"
 #include "messaging_module_events.h"
 
+#include "error_event.h"
+
 #include "ble_beacon_event.h"
 #include "movement_events.h"
 
@@ -29,8 +31,8 @@ static uint16_t zap_count_day = 0;
 static uint8_t teach_mode_finished = 0;
 
 /* Updated once we enter teach mode. */
-static uint16_t teach_mode_saved_warn_cnt = 0;
-static uint16_t teach_mode_saved_zap_cnt = 0;
+static uint32_t teach_mode_saved_warn_cnt = 0;
+static uint32_t teach_mode_saved_zap_cnt = 0;
 
 static uint32_t total_warn_cnt;
 static uint16_t total_zap_cnt;
@@ -54,8 +56,8 @@ static int64_t forcegnsstofix_timestamp = 0;
 static atomic_t movement_state = ATOMIC_INIT(STATE_NORMAL);
 
 /* warncount - teachwarncount_saved */
-static uint16_t teach_zap_cnt = 0;
-static uint16_t teach_warn_cnt = 0;
+static uint32_t teach_zap_cnt = 0;
+static uint32_t teach_warn_cnt = 0;
 
 static uint16_t zap_pain_cnt = 0;
 
@@ -239,8 +241,8 @@ Mode get_mode(void)
 
 Mode calc_mode(void)
 {
-	uint16_t teach_zap_cnt = total_zap_cnt - teach_mode_saved_zap_cnt;
-	uint16_t teach_warn_cnt = total_warn_cnt - teach_mode_saved_warn_cnt;
+	uint32_t teach_zap_cnt = total_zap_cnt - teach_mode_saved_zap_cnt;
+	uint32_t teach_warn_cnt = total_warn_cnt - teach_mode_saved_warn_cnt;
 
 	Mode new_mode = current_mode;
 	switch (current_mode) {
@@ -271,7 +273,6 @@ Mode calc_mode(void)
 		break;
 	case Mode_Trace:
 		if (!trace_mode_conditions()) {
-			/** @todo Fetch from eeprom. */
 			if (teach_mode_finished) {
 				new_mode = Mode_Fence;
 			} else {
@@ -412,16 +413,13 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 		break;
 	case FenceStatus_FenceStatus_Invalid:
 		LOG_INF("Invalid fence status.");
-		/** @todo Fence is invalid, nothing much to do at this point, 
-		 * wait for fenceDef to be downloaded again.
-		 */
 		break;
 	case FenceStatus_TurnedOffByBLE:
 		LOG_INF("Fence turned of by BLE.");
 		/** @todo Fence must be downloaded again. */
 		break;
 	default:
-		/** Internal error. @todo Error handle? */
+		/** Internal error. @todo Error handle? nf_app_error */
 		new_fence_status = FenceStatus_FenceStatus_UNKNOWN;
 		LOG_INF("?->Unknown");
 		break;
@@ -464,23 +462,13 @@ CollarStatus calc_collar_status(void)
 		}
 		break;
 	case CollarStatus_CollarStatus_Normal:
-		/** @todo add nomov !!!! if (nomov_GetStatus()) {
-		  *	new_collar_status = CollarStatus_Stuck;
-		  *	LOG_INF("Normal->Stuck");
-		  * } else 
-		  */
 		if (mov_state == STATE_SLEEP) {
 			new_collar_status = CollarStatus_Sleep;
 			LOG_INF("Normal->Sleep");
-		} /** else? @todo Should we go directly from normal to inactive? */
-		break;
-	case CollarStatus_Stuck:
-		/** @todo add nomov !!!!
-		 * 	if (!nomov_GetStatus()) {
-		 *	new_collar_status = CollarStatus_CollarStatus_Normal;
-		 *	LOG_INF("Stuck->Normal");
-		 * }
-		 */
+		} else if (mov_state == STATE_INACTIVE) {
+			char *msg = "Went directly to inactive in normal";
+			nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
+		}
 		break;
 	case CollarStatus_Sleep:
 		if (mov_state == STATE_NORMAL) {
@@ -508,11 +496,10 @@ CollarStatus calc_collar_status(void)
 		} else if (mov_state == STATE_SLEEP) {
 			new_collar_status = CollarStatus_Sleep;
 			LOG_INF("PowerOff->Sleep");
-		} /** @todo Add this ?? else if (mov_state == STATE_INACTIVE) {
-				new_collar_status = CollarStatus_OffAnimal;
-				LOG_INF("PowerOff->OffAnimal");
-			} */
-		else {
+		} else if (mov_state == STATE_INACTIVE) {
+			char *msg = "Went directly to inactive in powerOff";
+			nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
+		} else {
 			new_collar_status = CollarStatus_CollarStatus_UNKNOWN;
 			LOG_INF("PowerOff->UNKNOWN");
 		}
@@ -520,7 +507,8 @@ CollarStatus calc_collar_status(void)
 		break;
 	default:
 		new_collar_status = CollarStatus_CollarStatus_UNKNOWN;
-		LOG_INF("?->UNKNOWN");
+		char *msg = "Unknown collar status";
+		nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
 		break;
 	}
 
@@ -637,7 +625,9 @@ void set_sensor_modes(Mode mode, FenceStatus fs, CollarStatus cs,
 	}
 
 	/** @todo NOF-512 Always set backupmode when in undervoltage state
+	 * 
 	 * if (uvlo_gprs_state() == false) {
+	 * PWR_CRITICAL = pwr_status_event
 	 * 	gnss_mode = GPSMODE_INACTIVE;
 	 * }
 	 * Do we have uvlo function somewhere?

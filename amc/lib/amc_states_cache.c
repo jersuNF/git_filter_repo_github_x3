@@ -635,6 +635,7 @@ void set_sensor_modes(Mode mode, FenceStatus fs, CollarStatus cs,
 
 	/* Send GNSS mode change event from amc_gnss.c */
 	if (current_gnss_mode != gnss_mode) {
+		LOG_INF("%i is", current_gnss_mode);
 		current_gnss_mode = gnss_mode;
 		gnss_update_mode(current_gnss_mode);
 	}

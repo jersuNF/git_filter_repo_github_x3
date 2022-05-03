@@ -143,18 +143,22 @@ static bool event_handler(const struct event_header *eh)
 	int ret;
 	if (is_watchdog_alive_event(eh)) {
 		struct watchdog_alive_event *ev = cast_watchdog_alive_event(eh);
-		module_alive_array[ev->module] = 1;
-		ret = memcmp(module_alive_array, expected_array,
-			     WDG_END_OF_LIST);
-		if (ret == 0) {
-			if (init_and_start) {
-				LOG_INF("Array is equal");
-				k_work_reschedule(
-					&wdt_data.system_workqueue_work,
-					K_NO_WAIT);
-				/* Clear alive array */
-				memset(module_alive_array, 0,
-				       sizeof(module_alive_array));
+		if (ev->magic == WATCHDOG_ALIVE_MAGIC) {
+			if (ev->module < WDG_END_OF_LIST) {
+				module_alive_array[ev->module] = 1;
+				ret = memcmp(module_alive_array, expected_array,
+					     WDG_END_OF_LIST);
+				if (ret == 0) {
+					if (init_and_start) {
+						LOG_DBG("Array is equal");
+						k_work_reschedule(
+							&wdt_data.system_workqueue_work,
+							K_NO_WAIT);
+						/* Clear alive array */
+						memset(module_alive_array, 0,
+						       sizeof(module_alive_array));
+					}
+				}
 			}
 		}
 		/* Consume event */

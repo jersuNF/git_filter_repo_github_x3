@@ -630,13 +630,13 @@ void set_sensor_modes(Mode mode, FenceStatus fs, CollarStatus cs,
 	 * PWR_CRITICAL = pwr_status_event
 	 * 	gnss_mode = GPSMODE_INACTIVE;
 	 * }
-	 * Do we have uvlo function somewhere?
+	 * Do we have uvlo function somehwere?
 	 */
 
 	/* Send GNSS mode change event from amc_gnss.c */
 	if (current_gnss_mode != gnss_mode) {
-		LOG_INF("%i is", current_gnss_mode);
 		current_gnss_mode = gnss_mode;
 		gnss_update_mode(current_gnss_mode);
 	}
+	LOG_INF("Is %i", current_gnss_mode);
 }

@@ -69,7 +69,7 @@ static bool event_handler(const struct event_header *eh)
 						 .code = ev->code,
 						 .severity = ev->severity };
 
-		if (ev->dyndata.size <= CONFIG_ERROR_USER_MESSAGE_SIZE) {
+		if (ev->dyndata.size <= CONFIG_ERROR_MAX_USER_MESSAGE_SIZE) {
 			memcpy(&err_c.msg, &ev->dyndata.data, ev->dyndata.size);
 		} else {
 			char *no_err_msg = "No error msg or corrupt msg.";

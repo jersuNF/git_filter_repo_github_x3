@@ -9,7 +9,7 @@ if ERROR_HANDLER
 		default 3
 		depends on LOG
 
-	config ERROR_USER_MESSAGE_SIZE
+	config ERROR_MAX_USER_MESSAGE_SIZE
 		int "How large can the user message string be."
 		default 64
 

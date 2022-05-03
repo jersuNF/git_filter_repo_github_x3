@@ -12,6 +12,7 @@
 #include "ble_beacon_event.h"
 #include "movement_events.h"
 #include "amc_zone.h"
+#include "pwr_event.h"
 
 /** @todo Move these to another place? Should AMC definitions have a common place?
  * There will not be performed more than this number of shocks each day, 
@@ -126,6 +127,12 @@ void reset_zap_pain_cnt(void);
  * @param status beacon status to update to.
  */
 void set_beacon_status(enum beacon_status_type status);
+
+/** @brief Sets the power state from the power manager event.
+ * 
+ *  @param state to update the cached variable to.
+ */
+void update_power_state(enum pwr_state_flag state);
 
 /** @brief Sets the movement state from the movement controller event.
  * 

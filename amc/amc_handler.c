@@ -416,7 +416,15 @@ static bool event_handler(const struct event_header *eh)
 		struct ble_beacon_event *event = cast_ble_beacon_event(eh);
 		atomic_set(&current_beacon_status, event->status);
 
-		/** Process the states, recalculate. @todo Other places we should call this?*/
+		/** Process the states, recalculate. */
+		k_work_submit_to_queue(&amc_work_q, &handle_states_work);
+		return false;
+	}
+	if (is_pwr_status_event(eh)) {
+		struct pwr_status_event *event = cast_pwr_status_event(eh);
+		update_power_state(event->pwr_state);
+
+		/** Process the states, recalculate. */
 		k_work_submit_to_queue(&amc_work_q, &handle_states_work);
 		return false;
 	}

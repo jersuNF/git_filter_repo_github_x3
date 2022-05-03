@@ -13,6 +13,7 @@ zephyr_include_directories(
     ./../../lib/trigonometry/
     ./../../lib/fifo/
     ./../../events/error_handler/
+    ./../../events/power_manager/
     ./../../events/movement_controller)
 
 target_sources(app PRIVATE 
@@ -25,6 +26,7 @@ target_sources(app PRIVATE
 ./../../events/messaging/messaging_module_events.c
 ./../../events/gnss_controller/gnss_controller_events.c
 ./../../events/error_handler/error_event.c
+./../../events/power_manager/pwr_event.c
 )
 
 

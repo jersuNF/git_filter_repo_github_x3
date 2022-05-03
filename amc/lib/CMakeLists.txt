@@ -8,6 +8,7 @@ zephyr_include_directories(
     ./../../../events/buzzer
     ./../../../events/ble/
     ./../../../events/electric_pulse
+    ./../../../events/power_manager
     ./../../../events/movement_controller)
 
 target_sources(app PRIVATE 

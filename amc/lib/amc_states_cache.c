@@ -25,6 +25,7 @@ LOG_MODULE_REGISTER(amc_states, CONFIG_AMC_LIB_LOG_LEVEL);
 #include "movement_events.h"
 
 #include "movement_controller.h"
+#include "pwr_event.h"
 
 /* Mode related variables. */
 static uint16_t zap_count_day = 0;
@@ -55,6 +56,9 @@ static int64_t forcegnsstofix_timestamp = 0;
 /* Movement controller variable. */
 static atomic_t movement_state = ATOMIC_INIT(STATE_NORMAL);
 
+/* Power manager variable. */
+static atomic_t power_state = ATOMIC_INIT(PWR_NORMAL);
+
 /* warncount - teachwarncount_saved */
 static uint32_t teach_zap_cnt = 0;
 static uint32_t teach_warn_cnt = 0;
@@ -64,6 +68,11 @@ static uint16_t zap_pain_cnt = 0;
 void update_movement_state(movement_state_t state)
 {
 	atomic_set(&movement_state, state);
+}
+
+void update_power_state(enum pwr_state_flag state)
+{
+	atomic_set(&power_state, state);
 }
 
 static bool trace_mode_conditions()
@@ -417,12 +426,12 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 		break;
 	case FenceStatus_TurnedOffByBLE:
 		LOG_INF("Fence turned of by BLE.");
-		/** @todo Fence must be downloaded again. */
 		break;
 	default:
-		/** Internal error. @todo Error handle? nf_app_error */
 		new_fence_status = FenceStatus_FenceStatus_UNKNOWN;
 		LOG_INF("?->Unknown");
+		char *msg = "Unknown fence status received.";
+		nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
 		break;
 	}
 
@@ -490,21 +499,25 @@ CollarStatus calc_collar_status(void)
 		}
 		break;
 	case CollarStatus_PowerOff:
-		/** @todo? if (uvlo_gprs_state() == true) { */
-		if (mov_state == STATE_NORMAL) {
-			new_collar_status = CollarStatus_CollarStatus_Normal;
-			LOG_INF("PowerOff->Normal");
-		} else if (mov_state == STATE_SLEEP) {
-			new_collar_status = CollarStatus_Sleep;
-			LOG_INF("PowerOff->Sleep");
-		} else if (mov_state == STATE_INACTIVE) {
-			char *msg = "Went directly to inactive in powerOff";
-			nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
-		} else {
-			new_collar_status = CollarStatus_CollarStatus_UNKNOWN;
-			LOG_INF("PowerOff->UNKNOWN");
+		if (atomic_get(&power_state) != PWR_CRITICAL) {
+			if (mov_state == STATE_NORMAL) {
+				new_collar_status =
+					CollarStatus_CollarStatus_Normal;
+				LOG_INF("PowerOff->Normal");
+			} else if (mov_state == STATE_SLEEP) {
+				new_collar_status = CollarStatus_Sleep;
+				LOG_INF("PowerOff->Sleep");
+			} else if (mov_state == STATE_INACTIVE) {
+				char *msg =
+					"Went directly to inactive in powerOff";
+				nf_app_error(ERR_AMC, -EINVAL, msg,
+					     strlen(msg));
+			} else {
+				new_collar_status =
+					CollarStatus_CollarStatus_UNKNOWN;
+				LOG_INF("PowerOff->UNKNOWN");
+			}
 		}
-		/*}*/
 		break;
 	default:
 		new_collar_status = CollarStatus_CollarStatus_UNKNOWN;
@@ -513,12 +526,13 @@ CollarStatus calc_collar_status(void)
 		break;
 	}
 
-	/** @todo do we use this? if (uvlo_gprs_state() ==
-	    false) { //Added to enable power off mode without power switch. Trigged by low battery voltage
+	/* Added to enable power off mode without power switch. 
+	 * Trigged by low battery voltage.
+	 */
+	if (atomic_get(&power_state) == PWR_CRITICAL) {
 		new_collar_status = CollarStatus_PowerOff;
 		LOG_INF("...->PowerOff");
 	}
-	*/
 
 	/* If new status, write to EEPROM. */
 	if (current_collar_status != new_collar_status) {
@@ -625,14 +639,12 @@ void set_sensor_modes(Mode mode, FenceStatus fs, CollarStatus cs,
 		gnss_mode = GNSSMODE_MAX;
 	}
 
-	/** @todo NOF-512 Always set backupmode when in undervoltage state
-	 * 
-	 * if (uvlo_gprs_state() == false) {
-	 * PWR_CRITICAL = pwr_status_event
-	 * 	gnss_mode = GPSMODE_INACTIVE;
-	 * }
-	 * Do we have uvlo function somehwere?
-	 */
+	/** @todo [LEGACY] NOF-512 Always set backupmode 
+	  * when in undervoltage state. 
+	  */
+	if (atomic_get(&power_state) == PWR_CRITICAL) {
+		gnss_mode = GNSSMODE_INACTIVE;
+	}
 
 	/* Send GNSS mode change event from amc_gnss.c */
 	if (current_gnss_mode != gnss_mode) {

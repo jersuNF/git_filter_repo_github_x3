@@ -638,5 +638,4 @@ void set_sensor_modes(Mode mode, FenceStatus fs, CollarStatus cs,
 		current_gnss_mode = gnss_mode;
 		gnss_update_mode(current_gnss_mode);
 	}
-	LOG_INF("Is %i", current_gnss_mode);
 }

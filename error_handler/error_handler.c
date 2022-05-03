@@ -92,6 +92,7 @@ static bool event_handler(const struct event_header *eh)
 EVENT_LISTENER(error_handler, event_handler);
 EVENT_SUBSCRIBE(error_handler, error_event);
 
+#ifdef CONFIG_ERROR_BLE_UART_OUTPUT_ENABLE
 static int timestamp_print(char *output, uint32_t timestamp, size_t size)
 {
 	int length;
@@ -124,6 +125,7 @@ static int timestamp_print(char *output, uint32_t timestamp, size_t size)
 	}
 	return length;
 }
+#endif
 
 void error_handler_thread_fn()
 {
@@ -135,20 +137,16 @@ void error_handler_thread_fn()
 			LOG_ERR("Error: Retrieving err_message queue %i", err);
 			continue;
 		}
-		char err_type[6];
 		switch (err_container.severity) {
 		case ERR_SEVERITY_FATAL:
 			process_fatal(err_container.sender, err_container.code);
-			sprintf(err_type, "fatal");
 			break;
 		case ERR_SEVERITY_ERROR:
 			process_error(err_container.sender, err_container.code);
-			sprintf(err_type, "err");
 			break;
 		case ERR_SEVERITY_WARNING:
 			process_warning(err_container.sender,
 					err_container.code);
-			sprintf(err_type, "wrn");
 			break;
 		default:
 			LOG_ERR("Unknown error severity.");
@@ -161,6 +159,8 @@ void error_handler_thread_fn()
 		LOG_DBG("Process error: %s", log_strdup(err_container.msg));
 		int current_uptime = k_uptime_get();
 
+#ifdef CONFIG_ERROR_BLE_UART_OUTPUT_ENABLE
+
 		char time_buf[50];
 		int len = timestamp_print(time_buf, current_uptime,
 					  sizeof(time_buf));
@@ -170,9 +170,9 @@ void error_handler_thread_fn()
 		}
 
 		char buf[250];
-		len = sprintf(buf, "%s <%s> %s, sender: %d, err: (%d)\r\n",
-			      time_buf, err_type, err_container.msg,
-			      err_container.sender, err_container.code);
+		len = sprintf(buf, "%s %s, sender: %d, err: (%d)\r\n", time_buf,
+			      err_container.msg, err_container.sender,
+			      err_container.code);
 		if (len > sizeof(buf)) {
 			LOG_ERR("Not allocated enough memory for error buffer");
 			continue;
@@ -181,6 +181,7 @@ void error_handler_thread_fn()
 		struct msg_data_event *msg_ev = new_msg_data_event(len);
 		memcpy(msg_ev->dyndata.data, buf, len);
 		EVENT_SUBMIT(msg_ev);
+#endif
 
 		/** @todo Notify server about error? */
 

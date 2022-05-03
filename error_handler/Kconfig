@@ -32,4 +32,8 @@ if ERROR_HANDLER
 		int "Size of the error thread"
 		default 2048
 	
+	config ERROR_BLE_UART_OUTPUT_ENABLE
+		bool "Enable external logging via BLE UART"
+		default n
+	
 endif

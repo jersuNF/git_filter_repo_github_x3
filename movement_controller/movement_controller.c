@@ -42,12 +42,26 @@ typedef enum {
 } acc_activity_t;
 static acc_activity_t last_activity = ACTIVITY_NO;
 
+/* Variable used to check if we time out regarding new accelerometer data. */
+
+void movement_timeout_fn(struct k_timer *dummy);
+K_TIMER_DEFINE(movement_timeout_timer, movement_timeout_fn, NULL);
+
 void movement_thread_fn();
 K_THREAD_DEFINE(movement_thread, CONFIG_MOVEMENT_THREAD_STACK_SIZE,
 		movement_thread_fn, NULL, NULL, NULL,
 		CONFIG_MOVEMENT_THREAD_PRIORITY, 0, 0);
 
 K_MSGQ_DEFINE(acc_data_msgq, sizeof(raw_acc_data_t), CONFIG_ACC_MSGQ_SIZE, 4);
+
+/** @brief Times out after n seconds of not receiving new data. */
+void movement_timeout_fn(struct k_timer *dummy)
+{
+	ARG_UNUSED(dummy);
+
+	struct movement_timeout_event *ev = new_movement_timeout_event();
+	EVENT_SUBMIT(ev);
+}
 
 /** @brief Counts the number of steps in the FIFO-queue. Works only with 10Hz.
  * 
@@ -239,6 +253,10 @@ void process_acc_data(raw_acc_data_t *acc)
 		EVENT_SUBMIT(event);
 		prev_state = m_state;
 	}
+
+	/* Reset the timer since we just consumed the data successfully. */
+	k_timer_start(&movement_timeout_timer,
+		      K_SECONDS(CONFIG_MOVEMENT_TIMEOUT_SEC), K_NO_WAIT);
 }
 
 void movement_thread_fn()
@@ -364,6 +382,13 @@ int init_movement_controller(void)
 	if (err) {
 		return err;
 	}
+
+	/* Start the timeout timer. This is reset everytime we have calculated
+	 * the activity successfully.
+	 */
+	k_timer_start(&movement_timeout_timer,
+		      K_SECONDS(CONFIG_MOVEMENT_TIMEOUT_SEC), K_NO_WAIT);
+
 	return 0;
 }
 

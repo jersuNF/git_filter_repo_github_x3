@@ -246,19 +246,24 @@ Mode calc_mode(void)
 	switch (current_mode) {
 	case Mode_Mode_UNKNOWN:
 		if (fnc_valid_fence()) {
+			LOG_INF("Unknown->Teach");
 			new_mode = Mode_Teach;
 		} else if (fnc_valid_def()) {
+			LOG_INF("Unknown->Trace");
 			new_mode = Mode_Trace;
 		}
 		break;
 	case Mode_Teach:
 		if (trace_mode_conditions()) {
+			LOG_INF("Teach->Trace");
 			new_mode = Mode_Trace;
 		} else if (teach_zap_cnt >= _TEACHMODE_ZAP_CNT_HIGHLIM) {
+			LOG_INF("Teach->Trace");
 			new_mode = Mode_Trace;
 		} else if ((teach_zap_cnt >= TEACHMODE_ZAP_CNT_LOWLIM) &&
 			   ((teach_warn_cnt - teach_zap_cnt) >=
 			    _TEACHMODE_WARN_CNT_LOWLIM)) {
+			LOG_INF("Teach->Fence");
 			/* See https://youtrack.axbit.com/youtrack/issue/NOF-310. */
 			new_mode = Mode_Fence;
 			teach_mode_finished = 1;
@@ -266,20 +271,24 @@ Mode calc_mode(void)
 		break;
 	case Mode_Fence:
 		if (trace_mode_conditions()) {
+			LOG_INF("Fence->Trace");
 			new_mode = Mode_Trace;
 		}
 		break;
 	case Mode_Trace:
 		if (!trace_mode_conditions()) {
 			if (teach_mode_finished) {
+				LOG_INF("Trace->Fence");
 				new_mode = Mode_Fence;
 			} else {
+				LOG_INF("Trace->Teach");
 				new_mode = Mode_Teach;
 			}
 		}
 		break;
 	default:
 		new_mode = Mode_Mode_UNKNOWN;
+		LOG_INF("Unknown");
 		break;
 	}
 

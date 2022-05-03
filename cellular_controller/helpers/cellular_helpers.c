@@ -208,6 +208,13 @@ void stop_tcp(void)
 
 int send_tcp(char *msg, size_t len)
 {
+#if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
+	LOG_DBG("Socket sending %d bytes!\n", len);
+		for (int i = 0; i<len; i++){
+			printk("\\x%02x",*(msg+i));
+		}
+		printk("\n");
+#endif
 	size_t ret;
 	ret = sendall(conf.ipv4.tcp.sock, msg, len);
 	if (ret < 0) {

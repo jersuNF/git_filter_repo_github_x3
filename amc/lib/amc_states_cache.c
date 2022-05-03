@@ -61,8 +61,6 @@ static uint32_t teach_warn_cnt = 0;
 
 static uint16_t zap_pain_cnt = 0;
 
-static atomic_t current_beacon_status = ATOMIC_INIT(BEACON_STATUS_NOT_FOUND);
-
 void update_movement_state(movement_state_t state)
 {
 	atomic_set(&movement_state, state);
@@ -310,12 +308,6 @@ static inline bool is_inside_fence_relaxed()
 	return fnc_valid_fence() /*&& gpsp_isGpsFresh()*/ &&
 	       gnss_has_accepted_fix() &&
 	       !(cur_zone == WARN_ZONE || cur_zone == NO_ZONE);
-}
-
-void set_beacon_status(enum beacon_status_type status)
-{
-	atomic_set(&current_beacon_status, status);
-	LOG_DBG("Updated beacon status to enum ID %i", status);
 }
 
 FenceStatus get_fence_status(void)

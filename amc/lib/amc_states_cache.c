@@ -114,6 +114,11 @@ void increment_zap_count(void)
 		LOG_ERR("Could not write zap count day %i", err);
 		return;
 	}
+
+	/* Notify server about our recent zap. */
+	struct update_zap_count *ev = new_update_zap_count();
+	ev->count = total_zap_cnt;
+	EVENT_SUBMIT(ev);
 }
 
 void reset_zap_count_day()
@@ -450,6 +455,13 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 			new_update_fence_status();
 		fence_ev->fence_status = current_fence_status;
 		EVENT_SUBMIT(fence_ev);
+
+		/* Notify server if animal escaped. */
+		if (current_fence_status == FenceStatus_Escaped) {
+			struct animal_escape_event *ev =
+				new_animal_escape_event();
+			EVENT_SUBMIT(ev);
+		}
 	}
 
 	return new_fence_status;

@@ -397,6 +397,7 @@ static bool event_handler(const struct event_header *eh)
 {
 	if (is_new_fence_available(eh)) {
 		k_work_submit_to_queue(&amc_work_q, &handle_new_fence_work);
+		k_work_submit_to_queue(&amc_work_q, &handle_states_work);
 		return false;
 	}
 	if (is_gnss_data(eh)) {
@@ -409,6 +410,9 @@ static bool event_handler(const struct event_header *eh)
 			return false;
 		}
 
+		/* No need to handle states/correction here, this is done
+		 * within handle_new_gnss_work.
+		 */
 		k_work_submit_to_queue(&amc_work_q, &handle_new_gnss_work);
 		return false;
 	}

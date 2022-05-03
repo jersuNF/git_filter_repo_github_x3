@@ -165,7 +165,7 @@ void error_handler_thread_fn()
 		int len = timestamp_print(time_buf, current_uptime,
 					  sizeof(time_buf));
 		if (len < 0) {
-			LOG_ERR("Not allocated enought memory for time buffer");
+			LOG_ERR("Not allocated enough memory for time buffer");
 			continue;
 		}
 
@@ -174,7 +174,7 @@ void error_handler_thread_fn()
 			      time_buf, err_type, err_container.msg,
 			      err_container.sender, err_container.code);
 		if (len > sizeof(buf)) {
-			LOG_ERR("Not allocated enought memory for error buffer");
+			LOG_ERR("Not allocated enough memory for error buffer");
 			continue;
 		}
 		/* Send data on ble uart */

@@ -43,10 +43,11 @@ static void fota_dl_handler(const struct fota_download_evt *evt)
 	switch (evt->id) {
 	case FOTA_DOWNLOAD_EVT_ERROR:
 		LOG_ERR("Received error from fota_download %d", evt->cause);
+		char *e_msg = "Fota download error";
+		nf_app_error(ERR_FW_UPGRADE, -evt->cause, e_msg, strlen(e_msg));
 
 		event->dfu_status = DFU_STATUS_IDLE;
 		event->dfu_error = evt->cause;
-
 		/* Submit event. */
 		EVENT_SUBMIT(event);
 

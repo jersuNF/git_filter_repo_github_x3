@@ -4,10 +4,11 @@
 
 zephyr_include_directories(.
 			./services
+			${CMAKE_CURRENT_SOURCE_DIR}/../../../include
 			${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble
 			${CMAKE_CURRENT_SOURCE_DIR}/../../events/messaging
 			${CMAKE_CURRENT_SOURCE_DIR}/../../events/watchdog
-			../../../include)
+			)
 			
 target_sources(app PRIVATE
 			${CMAKE_CURRENT_SOURCE_DIR}/ble_controller.c

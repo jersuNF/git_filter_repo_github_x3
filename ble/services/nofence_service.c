@@ -20,7 +20,9 @@
 #include <zephyr.h>
 #include <zephyr/types.h>
 
+#include "nf_eeprom_private.h"
 #include "ble_cmd_event.h"
+#include "ble_ctrl_event.h"
 
 #define MODULE nofence_ble_service
 #include <logging/log.h>
@@ -28,17 +30,20 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_SERVICE_LOG_LEVEL);
 
 // Filled with dummy data for test
 struct nofence_service_data nofence_data = {
-	.cmd = { 1 },
-	.frame_char = { 1 },
-	.pb_response_char = { 1, 2, 3, 4, 5, 6, 7, 8 },
-	.pwd_char = { 1, 2, 3, 4, 5, 6, 7, 8 },
-	.version_char = { 1 }
+	.cmd = { 0 },
+	.frame_char = { 0 },
+	.pb_response_char = { 0, 0, 0, 0, 0, 0, 0, 0 },
+	.pwd_char = { 0, 0, 0, 0, 0, 0, 0, 0 },
+	.version_char = { 0 }
 };
 
 static struct bt_uuid_128 bt_uuid_nofence_service =
 	BT_UUID_INIT_128(0xe1, 0x2c, 0xf3, 0xe9, 0xa7, 0xfd, 0x36, 0xb7, 0xe8,
 			 0x45, 0x92, 0x98, 0xcd, 0xab, 0x85, 0x8c);
 
+static struct bt_uuid_128 bt_uuid_find_me_char =
+	BT_UUID_INIT_128(0xe1, 0x2c, 0xf3, 0xe9, 0xa7, 0xfd, 0x36, 0xb7, 0xe8,
+			 0x45, 0x92, 0x98, 0xef, 0xbe, 0x85, 0x8c);
 static struct bt_uuid_128 bt_uuid_pwd_char =
 	BT_UUID_INIT_128(0xe1, 0x2c, 0xf3, 0xe9, 0xa7, 0xfd, 0x36, 0xb7, 0xe8,
 			 0x45, 0x92, 0x98, 0x5e, 0xba, 0x85, 0x8c);
@@ -89,22 +94,58 @@ ssize_t write_pb_response_char(struct bt_conn *conn,
 	return len;
 }
 
+/* NB: This is deprecated, but kept here for testing with the current nofence app */
+ssize_t write_find_me_char(struct bt_conn *conn,
+			   const struct bt_gatt_attr *attr, const void *buf,
+			   uint16_t len, uint16_t offset, uint8_t flags)
+{
+	LOG_INF("Received find me char of len %d", len);
+	struct ble_cmd_event *ev = new_ble_cmd_event();
+	ev->cmd = CMD_PLAY_SOUND;
+	EVENT_SUBMIT(ev);
+	return len;
+}
+
 ssize_t write_command_char(struct bt_conn *conn,
 			   const struct bt_gatt_attr *attr, const void *buf,
 			   uint16_t len, uint16_t offset, uint8_t flags)
 {
 	if (len == sizeof(nofence_data.cmd)) {
-		uint8_t *cmd_char = (uint8_t *)buf;
-		memcpy(nofence_data.cmd, cmd_char, len);
-		LOG_INF("Received write request of command char %d",
-			nofence_data.cmd[0]);
+		uint8_t ble_key_ret[8];
+		memset(ble_key_ret, 0, sizeof(ble_key_ret));
+		int ret =
+			eep_read_ble_sec_key(ble_key_ret, sizeof(ble_key_ret));
+		if (ret < 0) {
+			LOG_ERR("Failed to read ble_sec_key, err %d", ret);
+			return len;
+		}
 
-		/* Submit event to messaging module. */
-		struct ble_cmd_event *ev = new_ble_cmd_event();
-		ev->cmd = *cmd_char;
-		EVENT_SUBMIT(ev);
+		LOG_HEXDUMP_INF(ble_key_ret, 8, "BLE sec key");
+		ret = memcmp(nofence_data.pwd_char, ble_key_ret, 8);
+		if (ret == 0) {
+			/* BLE sec key match. Set nofence_data.cmd shaddow register*/
+			uint8_t *cmd_char = (uint8_t *)buf;
+			memcpy(nofence_data.cmd, cmd_char, len);
+			LOG_INF("Received write request of command char 0x%x",
+				nofence_data.cmd[0]);
+
+			/* Submit event to messaging module. */
+			struct ble_cmd_event *ev = new_ble_cmd_event();
+			ev->cmd = nofence_data.cmd[0];
+			EVENT_SUBMIT(ev);
+		} else {
+			LOG_ERR("BLE sec key mismatch. Remember to write correct key to PWD char first");
+			/* TODO: Disconnect peer here */
+
+			struct ble_ctrl_event *ctrl_event =
+				new_ble_ctrl_event();
+			ctrl_event->cmd = BLE_CTRL_DISCONNECT_PEER;
+			EVENT_SUBMIT(ctrl_event);
+			return len;
+		}
 	} else {
-		LOG_ERR("Size %d of written command char is too long", len);
+		LOG_ERR("Size %d of written command char is wrong. Expect %d bytes",
+			len, sizeof(nofence_data.cmd));
 	}
 	return len;
 }
@@ -119,7 +160,7 @@ ssize_t write_pwd_char(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 		memcpy(nofence_data.pwd_char, pwd_char,
 		       sizeof(nofence_data.pwd_char));
 
-		LOG_INF("Write pwd char request with data: %d.%d.%d.%d.%d.%d.%d.%d",
+		LOG_INF("Write pwd char request with data: 0x%x-%x-%x-%x-%x-%x-%x-%x",
 			nofence_data.pwd_char[0], nofence_data.pwd_char[1],
 			nofence_data.pwd_char[2], nofence_data.pwd_char[3],
 			nofence_data.pwd_char[4], nofence_data.pwd_char[5],
@@ -154,6 +195,10 @@ static void frame_char_ccc_cfg_changed(const struct bt_gatt_attr *attr,
 
 BT_GATT_SERVICE_DEFINE(
 	nofence_service, BT_GATT_PRIMARY_SERVICE(&bt_uuid_nofence_service),
+	/* FIND ME CHAR */
+	BT_GATT_CHARACTERISTIC(&bt_uuid_find_me_char.uuid, BT_GATT_CHRC_WRITE,
+			       BT_GATT_PERM_WRITE, NULL, write_find_me_char,
+			       NULL),
 
 	/* PWD CHAR */
 	BT_GATT_CHARACTERISTIC(&bt_uuid_pwd_char.uuid, BT_GATT_CHRC_WRITE,

@@ -249,6 +249,7 @@ int stg_init_storage_controller(void)
 	k_mutex_unlock(&log_mutex);
 	k_mutex_unlock(&ano_mutex);
 	k_mutex_unlock(&pasture_mutex);
+	k_mutex_unlock(&system_diag_mutex);
 
 	/* Initialize FCB on LOG and ANO partitions
 	 * based on pm_static.yml/.dts flash setup.

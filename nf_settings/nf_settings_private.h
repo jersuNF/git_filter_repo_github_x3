@@ -68,6 +68,9 @@ __packed struct eemem {
 	  * test within the current fence definition.
 	  */
 	uint8_t eep_teach_mode_finished;
+
+	/** Security key for bluetooth connections. */
+	uint8_t ble_sec_key[EEP_BLE_SEC_KEY_LEN];
 };
 
 #endif /* X3_FW_NF_EEPROM_PRIVATE_H */

@@ -13,7 +13,7 @@
 #include "ble_cmd_event.h"
 #include "nofence_service.h"
 #include "lte_proto_event.h"
-
+#include "watchdog_event.h"
 #include "cellular_controller_events.h"
 #include "gnss_controller_events.h"
 #include "request_events.h"
@@ -37,6 +37,7 @@
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
+#include "pwr_event.h"
 #include "nf_settings.h"
 
 #define DOWNLOAD_COMPLETE 255
@@ -480,10 +481,7 @@ static inline void process_ble_cmd_event(void)
 		break;
 	}
 	case CMD_REBOOT_AVR_MCU: {
-		struct reboot_scheduled_event *r_ev =
-			new_reboot_scheduled_event();
-		r_ev->reboots_at = k_uptime_get_32() +
-				   (CONFIG_SHUTDOWN_TIMER_SEC * MSEC_PER_SEC);
+		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
 		EVENT_SUBMIT(r_ev);
 		break;
 	}
@@ -539,6 +537,7 @@ static void process_lte_proto_event(void)
 	EVENT_SUBMIT(ack);
 	/* process poll response */
 	if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
+		LOG_INF("Process poll reponse");
 		process_poll_response(&proto);
 		return;
 	} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
@@ -661,10 +660,15 @@ void build_poll_request(NofenceMessage *poll_req)
 		//			EEPROM_GetOffAnimalTimeLimitSec();
 	}
 	if (m_confirm_ble_key) {
-		//		poll_req.m.poll_message_req.has_rgubcBleKey = true;
-		//		poll_req.m.poll_message_req.rgubcBleKey.size = EEP_BLE_SEC_KEY_LEN;
-		//		EEPROM_ReadBleSecKey(poll_req.m.poll_message_req.rgubcBleKey.bytes,
-		//				     EEP_BLE_SEC_KEY_LEN);
+		poll_req->m.poll_message_req.has_rgubcBleKey = true;
+		poll_req->m.poll_message_req.rgubcBleKey.size =
+			EEP_BLE_SEC_KEY_LEN;
+		int err = eep_read_ble_sec_key(
+			poll_req->m.poll_message_req.rgubcBleKey.bytes,
+			EEP_BLE_SEC_KEY_LEN);
+		if (err) {
+			LOG_ERR("Failed to read ble_sec_key, error: %d", err);
+		}
 	}
 	poll_req->m.poll_message_req.usGnssOnFixAgeSec = 123;
 	poll_req->m.poll_message_req.usGnssTTFFSec = 12;
@@ -885,7 +889,8 @@ void process_poll_response(NofenceMessage *proto)
 	}
 	// If we are asked to, reboot
 	if (pResp->has_bReboot && pResp->bReboot) {
-		/* TODO: publish reboot event to power manager */
+		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
+		EVENT_SUBMIT(r_ev);
 	}
 	/* TODO: set activation mode to (pResp->eActivationMode); */
 
@@ -933,8 +938,20 @@ void process_poll_response(NofenceMessage *proto)
 		/* TODO: submit pResp->usOffAnimalTimeLimitSec to AMC. */
 	}
 	if (pResp->has_rgubcBleKey) {
-		/* TODO: submit pResp->rgubcBleKey.bytes,pResp->rgubcBleKey
-		 * .size to BLE controller. */
+		LOG_INF("Received a ble_sec_key of size %d",
+			pResp->rgubcBleKey.size);
+		uint8_t current_ble_sec_key[EEP_BLE_SEC_KEY_LEN];
+		eep_read_ble_sec_key(current_ble_sec_key, EEP_BLE_SEC_KEY_LEN);
+		int ret = memcmp(pResp->rgubcBleKey.bytes, current_ble_sec_key,
+				 pResp->rgubcBleKey.size);
+		if (ret != 0) {
+			LOG_INF("New ble sec key is different. Will update eeprom");
+			ret = eep_write_ble_sec_key(pResp->rgubcBleKey.bytes,
+						    pResp->rgubcBleKey.size);
+			if (ret < 0) {
+				LOG_ERR("Failed to write ble sec key to EEPROM");
+			}
+		}
 	}
 	if (pResp->has_versionInfo) {
 		process_upgrade_request(&pResp->versionInfo);

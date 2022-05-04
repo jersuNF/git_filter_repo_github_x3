@@ -142,12 +142,15 @@ static bool event_handler(const struct event_header *eh)
 				err = ep_module_release();
 				if (err < 0) {
 					char *e_msg = "Error in ep release";
-					nf_app_error(ERR_EP_MODULE, err,
-						     e_msg, strlen(e_msg));
+					LOG_ERR("%s (%d)", log_strdup(e_msg),
+						err);
+					nf_app_error(ERR_EP_MODULE, err, e_msg,
+						     strlen(e_msg));
 				}
 			} else {
 				char *e_msg =
 					"Tried to give EP outside sound max event";
+				LOG_ERR("%s (%d)", log_strdup(e_msg), -EACCES);
 				nf_app_error(ERR_EP_MODULE, -EACCES, e_msg,
 					     strlen(e_msg));
 			}

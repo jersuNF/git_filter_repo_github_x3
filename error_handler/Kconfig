@@ -9,7 +9,7 @@ if ERROR_HANDLER
 		default 3
 		depends on LOG
 
-	config ERROR_USER_MESSAGE_SIZE
+	config ERROR_MAX_USER_MESSAGE_SIZE
 		int "How large can the user message string be."
 		default 64
 
@@ -31,5 +31,9 @@ if ERROR_HANDLER
 	config ERROR_THREAD_STACK_SIZE
 		int "Size of the error thread"
 		default 2048
+	
+	config ERROR_BLE_UART_OUTPUT_ENABLE
+		bool "Enable external logging via BLE UART"
+		default n
 	
 endif

@@ -267,7 +267,7 @@ static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist,
 static double calculate_accuracy(int8_t tx_power, int8_t rssi)
 {
 	if (rssi == 0) {
-		LOG_ERR("Cannot detirmine rssi value");
+		LOG_WRN("Cannot detirmine RSSI value");
 		return DBL_MAX;
 	}
 	double ratio = rssi / (double)tx_power;

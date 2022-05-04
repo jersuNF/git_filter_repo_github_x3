@@ -37,7 +37,6 @@
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
 #include "pwr_event.h"
-
 #include "nf_eeprom.h"
 
 #define DOWNLOAD_COMPLETE 255
@@ -212,11 +211,6 @@ void log_data_periodic_fn()
  */
 void modem_poll_work_fn()
 {
-#if defined(CONFIG_WATCHDOG_ENABLE)
-	/* Report alive */
-	watchdog_report_module_alive(WDG_MESSAGING);
-#endif
-
 	k_work_reschedule_for_queue(
 		&send_q, &modem_poll_work,
 		K_MINUTES(atomic_get(&poll_period_minutes)));

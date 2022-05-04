@@ -22,8 +22,7 @@ static int server_port;
 static char server_ip[15];
 
 /* Connection keep-alive thread structures */
-K_KERNEL_STACK_DEFINE(keep_alive_stack,
-		      CONFIG_CELLULAR_KEEP_ALIVE_STACK_SIZE);
+K_KERNEL_STACK_DEFINE(keep_alive_stack, CONFIG_CELLULAR_KEEP_ALIVE_STACK_SIZE);
 struct k_thread keep_alive_thread;
 static struct k_sem connection_state_sem;
 
@@ -188,7 +187,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			cast_messaging_proto_out_event(eh);
 		uint8_t *pCharMsgOut = event->buf;
 		size_t MsgOutLen = event->len;
-		
+
 		int8_t err;
 		
 		/* make a local copy of the message to send.*/
@@ -246,7 +245,7 @@ int8_t cache_server_address(void)
 	}
 }
 
-static int cellular_controller_connect(void* dev)
+static int cellular_controller_connect(void *dev)
 {
 	int ret = lte_init();
 	if (ret != 0) {
@@ -260,7 +259,7 @@ static int cellular_controller_connect(void* dev)
 	ret = cache_server_address();
 	if (ret != 0) { //172.31.36.11:4321
 		//172.31.33.243:9876
-		strcpy(server_ip,"172.31.36.11");
+		strcpy(server_ip, "172.31.36.11");
 		server_port = 4321;
 		LOG_INF("Default server ip address will be "
 			"used.");
@@ -272,7 +271,7 @@ exit:
 	return ret;
 }
 
-static void cellular_controller_keep_alive(void* dev)
+static void cellular_controller_keep_alive(void *dev)
 {
 	while (true) {
 		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
@@ -345,8 +344,8 @@ int8_t cellular_controller_init(void)
 	k_sem_init(&connection_state_sem, 0, 1);
 	k_thread_create(&keep_alive_thread, keep_alive_stack,
 			K_KERNEL_STACK_SIZEOF(keep_alive_stack),
-			(k_thread_entry_t) cellular_controller_keep_alive,
-			(void*)gsm_dev, NULL, NULL, 
+			(k_thread_entry_t)cellular_controller_keep_alive,
+			(void *)gsm_dev, NULL, NULL,
 			K_PRIO_COOP(CONFIG_CELLULAR_KEEP_ALIVE_THREAD_PRIORITY),
 			0, K_NO_WAIT);
 

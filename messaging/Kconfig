@@ -43,10 +43,6 @@ if MESSAGING
 	    int "Timeout when waiting for ack from cellular controller"
 	    default 1
 
-	config SHUTDOWN_TIMER_SEC
-		int "Seconds to wait before reboot"
-		default 5
-
 	menu "Message Queues"
 		config MSGQ_BLE_CTRL_SIZE
 		int "Size of the bluetooth control command data received"

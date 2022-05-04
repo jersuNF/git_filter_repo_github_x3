@@ -228,3 +228,23 @@ int eep_uint32_write(eep_uint32_enum_t field, uint32_t value)
 
 	return eeprom_write(m_p_device, offset, &value, sizeof(value));
 }
+
+int eep_write_ble_sec_key(uint8_t *ble_sec_key, size_t bufsize)
+{
+	if (sizeof(bufsize) > EEP_BLE_SEC_KEY_LEN) {
+		return -EOVERFLOW;
+	}
+	/* Note, write the string including null-terminator */
+	return eeprom_write(m_p_device, offsetof(struct eemem, ble_sec_key),
+			    ble_sec_key, bufsize);
+}
+
+int eep_read_ble_sec_key(uint8_t *ble_sec_key, size_t bufsize)
+{
+	if (bufsize < EEP_BLE_SEC_KEY_LEN) {
+		return -EOVERFLOW;
+	}
+	int ret = eeprom_read(m_p_device, offsetof(struct eemem, ble_sec_key),
+			      ble_sec_key, EEP_BLE_SEC_KEY_LEN);
+	return ret;
+}

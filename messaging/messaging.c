@@ -16,6 +16,7 @@
 #include "pwr_event.h"
 #include "env_sensor_event.h"
 
+#include "watchdog_event.h"
 #include "cellular_controller_events.h"
 #include "gnss_controller_events.h"
 #include "request_events.h"
@@ -25,11 +26,13 @@
 #include "unixTime.h"
 #include "error_event.h"
 #include "helpers.h"
-#include <power/reboot.h>
 
 #include "nf_crc16.h"
 
 #include "storage_event.h"
+
+#include <date_time.h>
+#include <time.h>
 
 #include "storage.h"
 
@@ -43,6 +46,7 @@
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
 #define SECONDS_IN_THREE_DAYS 259200
+#define TWO_DAYS_SEC SEC_DAY * 2
 
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
 
@@ -67,6 +71,10 @@ gnss_last_fix_struct_t cached_fix;
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
 static bool first_frame, first_ano_frame;
+
+/* Time since the server updated the date time in seconds. */
+static atomic_t server_timestamp_sec = ATOMIC_INIT(0);
+
 uint32_t serial_id = 0;
 
 void build_poll_request(NofenceMessage *);
@@ -286,6 +294,8 @@ void modem_poll_work_fn()
 	}
 }
 
+static int32_t sec_since_gnss_time = 0;
+
 /**
  * @brief Work function to periodic request sensor data etc.
  */
@@ -319,6 +329,50 @@ void data_request_work_fn()
  */
 static bool event_handler(const struct event_header *eh)
 {
+	if (is_gnss_data(eh)) {
+		/* Check when we received server time last. */
+		int32_t server_time =
+			(int32_t)atomic_get(&server_timestamp_sec);
+		int32_t delta_server_time =
+			(int32_t)(k_uptime_get_32() / 1000) - server_time;
+
+		/* If we already have server time, just return. */
+		if (delta_server_time <= TWO_DAYS_SEC && server_time != 0) {
+			return false;
+		}
+
+		/* Check if we can use GNSS data based on the pvt_valid bits
+		 * and timestamp since correction. Doesn't need to be
+		 * atomic, since event handler thead is the only one
+		 * accessing it.
+		 */
+		struct gnss_data *ev = cast_gnss_data(eh);
+
+		if (!(ev->gnss_data.latest.pvt_valid & (1 << 0)) ||
+		    !(ev->gnss_data.latest.pvt_valid & (1 << 1))) {
+			return false;
+		}
+
+		if ((int32_t)(k_uptime_get_32() / 1000) - sec_since_gnss_time <
+		    SEC_HOUR) {
+			return false;
+		}
+
+		/** @todo Check if uint32_t to time_t typecast works. */
+		time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
+		struct tm *tm_time = gmtime(&gm_time);
+		/* Update date_time library which storage uses for ANO data. */
+		if (!date_time_set(tm_time)) {
+			LOG_ERR("Could not set date time from GNSS data");
+			return false;
+		} else {
+			LOG_INF("Now using GNSS unix timestamp instead: %s",
+				asctime(tm_time));
+		}
+
+		sec_since_gnss_time = (int32_t)(k_uptime_get_32() / 1000);
+		return false;
+	}
 	if (is_ble_ctrl_event(eh)) {
 		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
 		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
@@ -500,6 +554,7 @@ EVENT_SUBSCRIBE(MODULE, connection_state_event);
 EVENT_SUBSCRIBE(MODULE, pwr_status_event);
 EVENT_SUBSCRIBE(MODULE, env_sensor_event);
 /** @todo add battery, histogram, gnss and modem event */
+EVENT_SUBSCRIBE(MODULE, gnss_data);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -541,10 +596,7 @@ static inline void process_ble_cmd_event(void)
 		break;
 	}
 	case CMD_REBOOT_AVR_MCU: {
-		struct reboot_scheduled_event *r_ev =
-			new_reboot_scheduled_event();
-		r_ev->reboots_at = k_uptime_get_32() +
-				   (CONFIG_SHUTDOWN_TIMER_SEC * MSEC_PER_SEC);
+		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
 		EVENT_SUBMIT(r_ev);
 		break;
 	}
@@ -600,6 +652,7 @@ static void process_lte_proto_event(void)
 	EVENT_SUBMIT(ack);
 	/* process poll response */
 	if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
+		LOG_INF("Process poll reponse");
 		process_poll_response(&proto);
 		return;
 	} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
@@ -725,10 +778,15 @@ void build_poll_request(NofenceMessage *poll_req)
 		//			EEPROM_GetOffAnimalTimeLimitSec();
 	}
 	if (m_confirm_ble_key) {
-		//		poll_req.m.poll_message_req.has_rgubcBleKey = true;
-		//		poll_req.m.poll_message_req.rgubcBleKey.size = EEP_BLE_SEC_KEY_LEN;
-		//		EEPROM_ReadBleSecKey(poll_req.m.poll_message_req.rgubcBleKey.bytes,
-		//				     EEP_BLE_SEC_KEY_LEN);
+		poll_req->m.poll_message_req.has_rgubcBleKey = true;
+		poll_req->m.poll_message_req.rgubcBleKey.size =
+			EEP_BLE_SEC_KEY_LEN;
+		int err = eep_read_ble_sec_key(
+			poll_req->m.poll_message_req.rgubcBleKey.bytes,
+			EEP_BLE_SEC_KEY_LEN);
+		if (err) {
+			LOG_ERR("Failed to read ble_sec_key, error: %d", err);
+		}
 	}
 	poll_req->m.poll_message_req.usGnssOnFixAgeSec = 123;
 	poll_req->m.poll_message_req.usGnssTTFFSec = 12;
@@ -949,7 +1007,8 @@ void process_poll_response(NofenceMessage *proto)
 	}
 	// If we are asked to, reboot
 	if (pResp->has_bReboot && pResp->bReboot) {
-		/* TODO: publish reboot event to power manager */
+		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
+		EVENT_SUBMIT(r_ev);
 	}
 	/* TODO: set activation mode to (pResp->eActivationMode); */
 
@@ -960,6 +1019,20 @@ void process_poll_response(NofenceMessage *proto)
 		LOG_INF("Server time will be used.");
 		time_from_server = proto->header.ulUnixTimestamp;
 		use_server_time = true;
+		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
+		struct tm *tm_time = gmtime(&gm_time);
+		/* Update date_time library which storage uses for ANO data. */
+		int err = date_time_set(tm_time);
+		if (err) {
+			LOG_ERR("Error updating time from server %i", err);
+		} else {
+			/** @note This prints UTC. */
+			LOG_INF("Set timestamp to date_time library from modem: %s",
+				asctime(tm_time));
+			atomic_set(&server_timestamp_sec,
+				   (atomic_val_t)(int32_t)(k_uptime_get_32() /
+							   1000));
+		}
 	}
 	if (pResp->has_usPollConnectIntervalSec) {
 		atomic_set(&poll_period_minutes,
@@ -983,8 +1056,20 @@ void process_poll_response(NofenceMessage *proto)
 		/* TODO: submit pResp->usOffAnimalTimeLimitSec to AMC. */
 	}
 	if (pResp->has_rgubcBleKey) {
-		/* TODO: submit pResp->rgubcBleKey.bytes,pResp->rgubcBleKey
-		 * .size to BLE controller. */
+		LOG_INF("Received a ble_sec_key of size %d",
+			pResp->rgubcBleKey.size);
+		uint8_t current_ble_sec_key[EEP_BLE_SEC_KEY_LEN];
+		eep_read_ble_sec_key(current_ble_sec_key, EEP_BLE_SEC_KEY_LEN);
+		int ret = memcmp(pResp->rgubcBleKey.bytes, current_ble_sec_key,
+				 pResp->rgubcBleKey.size);
+		if (ret != 0) {
+			LOG_INF("New ble sec key is different. Will update eeprom");
+			ret = eep_write_ble_sec_key(pResp->rgubcBleKey.bytes,
+						    pResp->rgubcBleKey.size);
+			if (ret < 0) {
+				LOG_ERR("Failed to write ble sec key to EEPROM");
+			}
+		}
 	}
 	if (pResp->has_versionInfo) {
 		process_upgrade_request(&pResp->versionInfo);

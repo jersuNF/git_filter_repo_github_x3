@@ -307,13 +307,11 @@ int battery_sample_averaged(void)
 uint16_t battery_get_max(void)
 {
 	uint16_t curr_batt_max = (uint16_t)atomic_get(&battery_max_mv);
-	LOG_INF("Battery max: %d", curr_batt_max);
 	return curr_batt_max;
 }
 
 uint16_t battery_get_min(void)
 {
 	uint16_t curr_batt_min = (uint16_t)atomic_get(&battery_min_mv);
-	LOG_INF("Battery min: %d", curr_batt_min);
 	return curr_batt_min;
 }

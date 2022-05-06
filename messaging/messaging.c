@@ -148,7 +148,7 @@ K_KERNEL_STACK_DEFINE(messaging_send_thread,
 /**
  * @brief Build the log message with latest data.
  */
-void build_log_message()
+static void build_log_message()
 {
 	/* Fetch histogram data */
 	struct save_histogram *histogram_snapshot = new_save_histogram();
@@ -166,7 +166,7 @@ void build_log_message()
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	seq_1.m.seq_msg.has_usChargeMah = true;
 	seq_1.m.seq_msg.usChargeMah = (uint16_t)atomic_get(&cached_chrg);
-	// //seq_1.m.seq_msg.xGprsRssi = cached_rssi; // not implemented
+	//seq_1.m.seq_msg.xGprsRssi = cached_rssi; // not implemented
 	seq_1.m.seq_msg.has_xHistogramCurrentProfile = true;
 	seq_1.m.seq_msg.has_xHistogramZone = true;
 	seq_1.m.seq_msg.has_xHistogramAnimalBehave = true;
@@ -176,7 +176,6 @@ void build_log_message()
 	       &histogram.current_profile, sizeof(histogram.current_profile));
 	memcpy(&seq_1.m.seq_msg.xHistogramZone, &histogram.in_zone,
 	       sizeof(histogram.in_zone));
-
 	seq_1.which_m = (uint16_t)NofenceMessage_seq_msg_tag;
 
 	seq_2.m.seq_msg_2.has_bme280 = true;
@@ -186,6 +185,18 @@ void build_log_message()
 		(uint32_t)atomic_get(&cached_temp);
 	seq_2.m.seq_msg_2.bme280.ulHumidity = (uint32_t)atomic_get(&cached_hum);
 	seq_2.which_m = (uint16_t)NofenceMessage_seq_msg_2_tag;
+	seq_2.m.seq_msg_2.has_xBatteryQc = true;
+	seq_2.m.seq_msg_2.xBatteryQc.usVbattMax =
+		histogram.qc_battery.usVbattMax;
+	seq_2.m.seq_msg_2.xBatteryQc.usVbattMin =
+		histogram.qc_battery.usVbattMin;
+	seq_2.m.seq_msg_2.xBatteryQc.usTemperature =
+		(uint16_t)atomic_get(&cached_temp);
+
+	LOG_INF("Max_voltage: %u, min voltage: %u, temp: %u",
+		seq_2.m.seq_msg_2.xBatteryQc.usVbattMax,
+		seq_2.m.seq_msg_2.xBatteryQc.usVbattMin,
+		seq_2.m.seq_msg_2.xBatteryQc.usTemperature);
 
 	uint8_t header_size = 2;
 	uint8_t encoded_msg_seq_1[NofenceMessage_size + header_size];
@@ -206,17 +217,20 @@ void build_log_message()
 		LOG_ERR("Error encoding nofence message seq 1 (%i)", err);
 		return;
 	}
+
+	/* Store the length of the message in the two first bytes */
 	encoded_msg_seq_1[0] = (uint8_t)encoded_seq_1_size;
 	encoded_msg_seq_1[1] = (uint8_t)(encoded_seq_1_size << 8);
 
-	// /* Encode the seq_2 struct created. */
+	/* Encode the seq_2 struct created. */
 	err = collar_protocol_encode(&seq_2, &encoded_msg_seq_2[2],
 				     NofenceMessage_size, &encoded_seq_2_size);
-
 	if (err) {
 		LOG_ERR("Error encoding nofence message seq 2 (%i)", err);
 		return;
 	}
+
+	/* Store the length of the message in the two first bytes */
 	encoded_msg_seq_2[0] = (uint8_t)encoded_seq_2_size;
 	encoded_msg_seq_2[1] = (uint8_t)(encoded_seq_2_size << 8);
 
@@ -227,6 +241,7 @@ void build_log_message()
 
 int read_log_data_cb(uint8_t *data, size_t len)
 {
+	/* Fetch the lenght from the two first bytes */
 	uint16_t new_len = (uint16_t)((data[1] << 8) + (data[0] & 0x00ff));
 	uint8_t *new_data = k_malloc(new_len);
 	memcpy(new_data, &data[2], new_len);
@@ -469,12 +484,12 @@ static bool event_handler(const struct event_header *eh)
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
 		/* Update shaddow register */
 		if (ev->pwr_state == PWR_BATTERY) {
-			LOG_INF("Battery event: %u mV", ev->battery_mv);
+			LOG_DBG("Battery event: %u mV", ev->battery_mv);
 			/* We want battery voltage in deci volt */
 			atomic_set(&cached_batt,
 				   (uint16_t)(ev->battery_mv / 10));
 		} else if (ev->pwr_state == PWR_CHARGING) {
-			LOG_INF("Charge event: %u mV", ev->charging_ma);
+			LOG_DBG("Charge event: %u mA", ev->charging_ma);
 			atomic_set(&cached_chrg, ev->charging_ma);
 		}
 		return false;
@@ -482,7 +497,7 @@ static bool event_handler(const struct event_header *eh)
 
 	if (is_env_sensor_event(eh)) {
 		struct env_sensor_event *ev = cast_env_sensor_event(eh);
-		LOG_INF("Event Temp: %f, humid %f, press %f", ev->temp,
+		LOG_DBG("Event Temp: %.2f, humid %.2f, press %.2f", ev->temp,
 			ev->humidity, ev->press);
 		/* Update shaddow register */
 		atomic_set(&cached_press, (uint32_t)ev->press);

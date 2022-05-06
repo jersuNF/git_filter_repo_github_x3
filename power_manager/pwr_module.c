@@ -78,6 +78,8 @@ static void battery_poll_work_fn()
 	struct pwr_status_event *event = new_pwr_status_event();
 	event->pwr_state = PWR_BATTERY;
 	event->battery_mv = batt_voltage;
+	event->battery_mv_min = battery_get_min();
+	event->battery_mv_max = battery_get_max();
 	EVENT_SUBMIT(event);
 
 	/* Keep old state as reference for later */
@@ -271,6 +273,8 @@ static bool event_handler(const struct event_header *eh)
 		struct pwr_status_event *event = new_pwr_status_event();
 		event->pwr_state = PWR_BATTERY;
 		event->battery_mv = batt_voltage;
+		event->battery_mv_min = battery_get_min();
+		event->battery_mv_max = battery_get_max();
 		EVENT_SUBMIT(event);
 		return false;
 	}

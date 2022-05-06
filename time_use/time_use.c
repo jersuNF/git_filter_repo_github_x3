@@ -25,12 +25,11 @@
 #include "time_use_helpers.h"
 
 #define TIME_USE_THREAD_PRIORITY CONFIG_TIME_USE_THREAD_PRIORITY
-#define resolution_msec CONFIG_TIME_USE_RESOLUTION_SEC*1000
+#define resolution_msec CONFIG_TIME_USE_RESOLUTION_SEC * 1000
 #define MODULE time_use
 LOG_MODULE_REGISTER(MODULE, CONFIG_TIME_USE_LOG_LEVEL);
 
-K_THREAD_STACK_DEFINE(collect_stats_stack,
-		      CONFIG_TIME_USE_THREAD_STACK_SIZE);
+K_THREAD_STACK_DEFINE(collect_stats_stack, CONFIG_TIME_USE_THREAD_STACK_SIZE);
 struct k_thread collect_stats_thread;
 
 void collect_stats(void);
@@ -45,19 +44,11 @@ int time_use_module_init(void)
 	LOG_INF("Initializing time_use module.");
 	k_thread_create(&collect_stats_thread, collect_stats_stack,
 			K_THREAD_STACK_SIZEOF(collect_stats_stack),
-			(k_thread_entry_t) collect_stats,
-			NULL, NULL, NULL,
-			TIME_USE_THREAD_PRIORITY,
-			0, K_NO_WAIT);
+			(k_thread_entry_t)collect_stats, NULL, NULL, NULL,
+			TIME_USE_THREAD_PRIORITY, 0, K_NO_WAIT);
 	return 0;
 }
-typedef enum {
-	RESTING,
-	GRAZING,
-	WALKING,
-	RUNNING,
-	UNKNOWN
-} STATE;
+typedef enum { RESTING, GRAZING, WALKING, RUNNING, UNKNOWN } STATE;
 
 static STATE cur_animal_state = UNKNOWN;
 static amc_zone_t cur_zone;
@@ -134,11 +125,12 @@ static bool event_handler(const struct event_header *eh)
 		if (ev->gnss_data.fix_ok) {
 			if (ev->gnss_data.latest.height > m_i16_heightmax) {
 				m_i16_heightmax = ev->gnss_data.latest.height;
-			}        //Find min max value of height and speed. reset upon each request of this parameters
+			} //Find min max value of height and speed. reset upon each request of this parameters
 			if (ev->gnss_data.latest.height < m_i16_heightmin) {
 				m_i16_heightmin = ev->gnss_data.latest.height;
 			}
-			m_i32_heightmean += (int32_t) ev->gnss_data.latest.height;
+			m_i32_heightmean +=
+				(int32_t)ev->gnss_data.latest.height;
 
 			if (ev->gnss_data.latest.speed > m_u16_speedmax) {
 				m_u16_speedmax = ev->gnss_data.latest.speed;
@@ -146,7 +138,7 @@ static bool event_handler(const struct event_header *eh)
 			if (ev->gnss_data.latest.speed < m_u16_speedmin) {
 				m_u16_speedmin = ev->gnss_data.latest.speed;
 			}
-			m_u32_speedmean += (uint32_t) ev->gnss_data.latest.speed;
+			m_u32_speedmean += (uint32_t)ev->gnss_data.latest.speed;
 
 			m_ui16_hs_samples++;
 		}
@@ -159,9 +151,11 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_pwr_status_event(eh)) {
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
-		cur_bat_volt = ev->battery_mv;
-		cur_min_bat_volt = ev->battery_mv;
-		cur_max_bat_volt = ev->battery_mv;
+		if (ev->pwr_state == PWR_BATTERY) {
+			cur_bat_volt = ev->battery_mv;
+			cur_min_bat_volt = ev->battery_mv_min;
+			cur_max_bat_volt = ev->battery_mv_max;
+		}
 		return false;
 	}
 
@@ -170,6 +164,7 @@ static bool event_handler(const struct event_header *eh)
 		fresh_pos[0] = ev->x;
 		fresh_pos[1] = ev->y;
 	}
+
 	if (is_save_histogram(eh)) {
 		save_and_reset = true;
 	}
@@ -201,78 +196,102 @@ EVENT_SUBSCRIBE(MODULE, pwr_status_event);
 
 EVENT_SUBSCRIBE(MODULE, save_histogram);
 
-void collect_stats(void){
+void collect_stats(void)
+{
 	static int64_t elapsed_time, uptime;
-	while (true){
+	while (true) {
 		elapsed_time += k_uptime_delta(&uptime);
-		if (elapsed_time >= resolution_msec && !save_and_reset){
-			if(cur_activity_level == ACTIVITY_LOW) { cur_animal_state = RESTING; }		//Grazing
-			else if(cur_activity_level == ACTIVITY_MED) { cur_animal_state = WALKING; }
-			else if(cur_activity_level == ACTIVITY_HIGH) { cur_animal_state = RUNNING; }
-			else cur_mv_state = UNKNOWN;
+		if (elapsed_time >= resolution_msec && !save_and_reset) {
+			if (cur_activity_level == ACTIVITY_LOW) {
+				cur_animal_state = RESTING;
+			} //Grazing
+			else if (cur_activity_level == ACTIVITY_MED) {
+				cur_animal_state = WALKING;
+			} else if (cur_activity_level == ACTIVITY_HIGH) {
+				cur_animal_state = RUNNING;
+			} else
+				cur_mv_state = UNKNOWN;
 
-			switch (cur_animal_state)
-			{
+			switch (cur_animal_state) {
 			case RESTING:
 				histogram.animal_behave.has_usRestingTime =
 					true;
-				histogram.animal_behave.usRestingTime += elapsed_time;
+				histogram.animal_behave.usRestingTime +=
+					elapsed_time;
 				break;
 			case WALKING:
-				histogram.animal_behave.has_usWalkingTime = true;
-				histogram.animal_behave.usWalkingTime += elapsed_time;
-				histogram.animal_behave.has_usWalkingDist = true;
+				histogram.animal_behave.has_usWalkingTime =
+					true;
+				histogram.animal_behave.usWalkingTime +=
+					elapsed_time;
+				histogram.animal_behave.has_usWalkingDist =
+					true;
 				histogram.animal_behave.usWalkingDist +=
-					TimeuseDistance(m_i16_way_pnt, fresh_pos);
+					TimeuseDistance(m_i16_way_pnt,
+							fresh_pos);
 				break;
 			case RUNNING:
-				histogram.animal_behave.has_usRunningTime = true;
-				histogram.animal_behave.usRunningTime += elapsed_time;
-				histogram.animal_behave.has_usRunningDist = true;
+				histogram.animal_behave.has_usRunningTime =
+					true;
+				histogram.animal_behave.usRunningTime +=
+					elapsed_time;
+				histogram.animal_behave.has_usRunningDist =
+					true;
 				histogram.animal_behave.usRunningDist +=
-					TimeuseDistance(m_i16_way_pnt, fresh_pos);
+					TimeuseDistance(m_i16_way_pnt,
+							fresh_pos);
 				break;
 			case GRAZING:
-				histogram.animal_behave.has_usGrazingTime = true;
-				histogram.animal_behave.usGrazingTime += elapsed_time;
+				histogram.animal_behave.has_usGrazingTime =
+					true;
+				histogram.animal_behave.usGrazingTime +=
+					elapsed_time;
 				break;
 			case UNKNOWN:
-				histogram.animal_behave.has_usUnknownTime = true;
-				histogram.animal_behave.usUnknownTime += elapsed_time;
+				histogram.animal_behave.has_usUnknownTime =
+					true;
+				histogram.animal_behave.usUnknownTime +=
+					elapsed_time;
 				break;
 			}
 
 			m_i16_way_pnt[0] = fresh_pos[0];
 			m_i16_way_pnt[1] = fresh_pos[1];
 
-//******************Add Stepcounter value*************************
+			//******************Add Stepcounter value*************************
 			uint16_t stepdiff = (uint16_t)(steps - steps_old);
 			histogram.animal_behave.has_usStepCounter = true;
 			histogram.animal_behave.usStepCounter += stepdiff;
 			steps_old = steps;
 
-//*****************Histogram to predict Current profile of the collar********************
+			//*****************Histogram to predict Current profile of the collar********************
 
 			if (cur_collar_status == CollarStatus_Sleep ||
-				cur_collar_status == CollarStatus_OffAnimal)
-			{ histogram.current_profile.usCC_Sleep += elapsed_time;}							//"Ultra" Low power
-			else if(cur_fence_status == FenceStatus_BeaconContact ||
-				cur_fence_status ==
-					 FenceStatus_BeaconContactNormal) { histogram.current_profile.usCC_BeaconZone += elapsed_time; }	//"Ultra" Low power
+			    cur_collar_status == CollarStatus_OffAnimal) {
+				histogram.current_profile.usCC_Sleep +=
+					elapsed_time;
+			} //"Ultra" Low power
+			else if (cur_fence_status ==
+					 FenceStatus_BeaconContact ||
+				 cur_fence_status ==
+					 FenceStatus_BeaconContactNormal) {
+				histogram.current_profile.usCC_BeaconZone +=
+					elapsed_time;
+			} //"Ultra" Low power
 			/*TODO: fix when GNSS modes are available. */
-//			else if(cur_gnss_pwr_m == POWER_OPTIMIZED_TRACKING){
-//				histogram.current_profile
-//					.usCC_GNSS_SuperE_POT += elapsed_time; }					//Low power
-//			else if(cur_gnss_pwr_m == TRACKING){ histogram_current_profile.usCC_GNSS_SuperE_Tracking += elapsed_time; }				//Med power
-//			else if((cur_gnss_pwr_m == ACQUSITION) ||
-//				 (gpsp_getPSMState() == ENABLED))	{ histogram.current_profile.usCC_GNSS_SuperE_Acquition += elapsed_time; }			//High power
-//			else if((cur_gnss_pwr_m == DISABLED) && (GPS_GetMode
-//								  () != GPSMODE_INACTIVE)){ histogram.current_profile.usCC_GNSS_MAX += elapsed_time; }							//High power
-//			else if(GPS_GetMode() == GPSMODE_INACTIVE)
-//			{
-//				histogram.current_profile.usCC_Sleep +=
-//					elapsed_time;
-//			} //"Ultra" Low power
+			//			else if(cur_gnss_pwr_m == POWER_OPTIMIZED_TRACKING){
+			//				histogram.current_profile
+			//					.usCC_GNSS_SuperE_POT += elapsed_time; }					//Low power
+			//			else if(cur_gnss_pwr_m == TRACKING){ histogram_current_profile.usCC_GNSS_SuperE_Tracking += elapsed_time; }				//Med power
+			//			else if((cur_gnss_pwr_m == ACQUSITION) ||
+			//				 (gpsp_getPSMState() == ENABLED))	{ histogram.current_profile.usCC_GNSS_SuperE_Acquition += elapsed_time; }			//High power
+			//			else if((cur_gnss_pwr_m == DISABLED) && (GPS_GetMode
+			//								  () != GPSMODE_INACTIVE)){ histogram.current_profile.usCC_GNSS_MAX += elapsed_time; }							//High power
+			//			else if(GPS_GetMode() == GPSMODE_INACTIVE)
+			//			{
+			//				histogram.current_profile.usCC_Sleep +=
+			//					elapsed_time;
+			//			} //"Ultra" Low power
 
 			if (cur_modem_pwr_m == POWER_ON) {
 				histogram.current_profile.usCC_Modem_Active +=
@@ -293,8 +312,7 @@ void collect_stats(void){
 				in_beacon_or_sleep = true;
 			}
 
-			if(in_beacon_or_sleep == false)
-			{
+			if (in_beacon_or_sleep == false) {
 				//Time use in the different zones
 				if (cur_zone == WARN_ZONE ||
 				    cur_zone == PREWARN_ZONE) {
@@ -312,9 +330,8 @@ void collect_stats(void){
 				}
 			}
 
-//*****************GPS AND BARO deviation values********************
-			if(gnss_has_easy_fix())
-			{
+			//*****************GPS AND BARO deviation values********************
+			if (gnss_has_easy_fix()) {
 				m_u32_timeuse_sample_gps++;
 				if (m_i16_heightmax >
 				    histogram.qc_baro_gps_max_mean_min
@@ -353,8 +370,13 @@ void collect_stats(void){
 					m_u32_speedmean /
 					m_u32_timeuse_sample_gps;
 			}
+			/* Add battery max/min voltage [centi-voltage] */
+			histogram.qc_battery.usVbattMax =
+				(uint16_t)cur_max_bat_volt / 10;
+			histogram.qc_battery.usVbattMin =
+				(uint16_t)cur_min_bat_volt / 10;
 		}
-		if (save_and_reset){
+		if (save_and_reset) {
 			save_and_reset = false;
 			/*write to queue*/
 			while (k_msgq_put(&histogram_msgq, &histogram,

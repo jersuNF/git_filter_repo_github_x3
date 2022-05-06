@@ -63,7 +63,7 @@ config GNSS_NUMSV_LIMIT
 	default 6
 
 config GNSS_HDOP_LIMIT
-	int "Maximum horizontal dilution of precision in dm"
+	int "Maximum horizontal dilution of precision"
 	default 200
 
 config GNSS_HACC_LIMIT

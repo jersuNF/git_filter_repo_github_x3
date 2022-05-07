@@ -8,13 +8,14 @@
 #include <float.h>
 #include <math.h>
 #include <sys/ring_buffer.h>
+
+#define MODULE beacon_processor
 #include <logging/log.h>
 
 #include "beacon_processor.h"
 #include "ble_beacon_event.h"
 
-LOG_MODULE_REGISTER(beacon_processor);
-
+LOG_MODULE_REGISTER(MODULE, CONFIG_BEACON_PROCESSOR_LOG_LEVEL);
 /** @brief : Contains the whole structure for the tracked beacons **/
 static struct beacon_list beacons;
 
@@ -266,7 +267,7 @@ static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist,
 static double calculate_accuracy(int8_t tx_power, int8_t rssi)
 {
 	if (rssi == 0) {
-		LOG_ERR("Cannot detirmine rssi value");
+		LOG_WRN("Cannot detirmine RSSI value");
 		return DBL_MAX;
 	}
 	double ratio = rssi / (double)tx_power;
@@ -298,7 +299,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 	}
 
 	char mac_current[MAC_CHARBUF_SIZE];
-	LOG_INF("Device=%s  RX_RSSI=%d TX_RSSI=%d  m=%d",
+	LOG_DBG("Device=%s  RX_RSSI=%d TX_RSSI=%d  m=%d",
 		log_strdup(mac2string(mac_current, sizeof(mac_current), addr)),
 		(int)scanner_rssi_measured, (int)beacon_adv_rssi, (int)m);
 
@@ -335,7 +336,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		shortest_dist = UINT8_MAX;
 	} else {
 		char mac_best[MAC_CHARBUF_SIZE];
-		LOG_INF("Calculated new shortest distance %u m from Beacon_%u: %s",
+		LOG_DBG("Calculated new shortest distance %u m from Beacon_%u: %s",
 			shortest_dist, beacon_index,
 			log_strdup(
 				mac2string(mac_best, sizeof(mac_best),

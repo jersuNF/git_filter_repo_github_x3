@@ -10,8 +10,10 @@
 #include <logging/log.h>
 #include "ble_ctrl_event.h"
 #include "ble_data_event.h"
+#include "ble_cmd_event.h"
+#include "nofence_service.h"
 #include "lte_proto_event.h"
-
+#include "watchdog_event.h"
 #include "cellular_controller_events.h"
 #include "gnss_controller_events.h"
 #include "request_events.h"
@@ -20,19 +22,27 @@
 #include "UBX.h"
 #include "unixTime.h"
 #include "error_event.h"
+#include "helpers.h"
 
 #include "nf_crc16.h"
 
 #include "storage_event.h"
 
+#include <date_time.h>
+#include <time.h>
+
 #include "storage.h"
 
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
+#include "sound_event.h"
+#include "pwr_event.h"
+#include "nf_eeprom.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
 #define SECONDS_IN_THREE_DAYS 259200
+#define TWO_DAYS_SEC SEC_DAY * 2
 
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
 
@@ -52,6 +62,11 @@ gnss_last_fix_struct_t cached_fix;
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
 static bool first_frame, first_ano_frame;
+
+/* Time since the server updated the date time in seconds. */
+static atomic_t server_timestamp_sec = ATOMIC_INIT(0);
+
+uint32_t serial_id = 0;
 
 void build_poll_request(NofenceMessage *);
 int8_t request_fframe(uint32_t, uint8_t);
@@ -85,16 +100,21 @@ K_MSGQ_DEFINE(ble_ctrl_msgq, sizeof(struct ble_ctrl_event),
 	      CONFIG_MSGQ_BLE_CTRL_SIZE, 4);
 K_MSGQ_DEFINE(ble_data_msgq, sizeof(struct ble_data_event),
 	      CONFIG_MSGQ_BLE_DATA_SIZE, 4);
+K_MSGQ_DEFINE(ble_cmd_msgq, sizeof(struct ble_cmd_event),
+	      CONFIG_MSGQ_BLE_CMD_SIZE, 4);
 K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct lte_proto_event),
 	      CONFIG_MSGQ_LTE_PROTO_SIZE, 4);
 
-#define NUM_MSGQ_EVENTS 3
+#define NUM_MSGQ_EVENTS 4
 struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY, &ble_ctrl_msgq,
 					0),
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY, &ble_data_msgq,
+					0),
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
+					K_POLL_MODE_NOTIFY_ONLY, &ble_cmd_msgq,
 					0),
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY,
@@ -210,6 +230,8 @@ void modem_poll_work_fn()
 	}
 }
 
+static int32_t sec_since_gnss_time = 0;
+
 /**
  * @brief Main event handler function. 
  * 
@@ -220,11 +242,62 @@ void modem_poll_work_fn()
  */
 static bool event_handler(const struct event_header *eh)
 {
+	if (is_gnss_data(eh)) {
+		/* Check when we received server time last. */
+		int32_t server_time =
+			(int32_t)atomic_get(&server_timestamp_sec);
+		int32_t delta_server_time =
+			(int32_t)(k_uptime_get_32() / 1000) - server_time;
+
+		/* If we already have server time, just return. */
+		if (delta_server_time <= TWO_DAYS_SEC && server_time != 0) {
+			return false;
+		}
+
+		/* Check if we can use GNSS data based on the pvt_valid bits
+		 * and timestamp since correction. Doesn't need to be
+		 * atomic, since event handler thead is the only one
+		 * accessing it.
+		 */
+		struct gnss_data *ev = cast_gnss_data(eh);
+
+		if (!(ev->gnss_data.latest.pvt_valid & (1 << 0)) ||
+		    !(ev->gnss_data.latest.pvt_valid & (1 << 1))) {
+			return false;
+		}
+
+		if ((int32_t)(k_uptime_get_32() / 1000) - sec_since_gnss_time <
+		    SEC_HOUR) {
+			return false;
+		}
+
+		/** @todo Check if uint32_t to time_t typecast works. */
+		time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
+		struct tm *tm_time = gmtime(&gm_time);
+		/* Update date_time library which storage uses for ANO data. */
+		if (!date_time_set(tm_time)) {
+			LOG_ERR("Could not set date time from GNSS data");
+			return false;
+		} else {
+			LOG_INF("Now using GNSS unix timestamp instead: %s",
+				asctime(tm_time));
+		}
+
+		sec_since_gnss_time = (int32_t)(k_uptime_get_32() / 1000);
+		return false;
+	}
 	if (is_ble_ctrl_event(eh)) {
 		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
 		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
 			/* Message queue is full: purge old data & try again */
 			k_msgq_purge(&ble_ctrl_msgq);
+		}
+		return false;
+	}
+	if (is_ble_cmd_event(eh)) {
+		struct ble_cmd_event *ev = cast_ble_cmd_event(eh);
+		while (k_msgq_put(&ble_cmd_msgq, ev, K_NO_WAIT) != 0) {
+			k_msgq_purge(&ble_cmd_msgq);
 		}
 		return false;
 	}
@@ -294,10 +367,11 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_connection_state_event(eh)) {
-		struct connection_state_event *ev = cast_connection_state_event(eh);
-		if (ev->state){
+		struct connection_state_event *ev =
+			cast_connection_state_event(eh);
+		if (ev->state) {
 			k_sem_give(&connection_ready);
-		} else{
+		} else {
 			/*TODO: take some action while waiting for cellular
 			 * controller to recover the connection.*/
 		}
@@ -357,8 +431,12 @@ bool validate_pasture()
 }
 
 EVENT_LISTENER(MODULE, event_handler);
+
+/* Bluetooth events. */
 EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
+EVENT_SUBSCRIBE(MODULE, ble_cmd_event);
 EVENT_SUBSCRIBE(MODULE, ble_data_event);
+
 EVENT_SUBSCRIBE(MODULE, lte_proto_event);
 EVENT_SUBSCRIBE(MODULE, cellular_ack_event);
 EVENT_SUBSCRIBE(MODULE, cellular_proto_in_event);
@@ -371,6 +449,7 @@ EVENT_SUBSCRIBE(MODULE, update_zap_count);
 EVENT_SUBSCRIBE(MODULE, animal_warning_event);
 EVENT_SUBSCRIBE(MODULE, animal_escape_event);
 EVENT_SUBSCRIBE(MODULE, connection_state_event);
+EVENT_SUBSCRIBE(MODULE, gnss_data);
 EVENT_SUBSCRIBE(MODULE, send_poll_request_now);
 
 static inline void process_ble_ctrl_event(void)
@@ -392,6 +471,48 @@ static inline void process_ble_data_event(void)
 	if (err) {
 		LOG_ERR("Error getting ble_data_event: %d", err);
 		return;
+	}
+}
+
+static inline void process_ble_cmd_event(void)
+{
+	struct ble_cmd_event ev;
+
+	int err = k_msgq_get(&ble_cmd_msgq, &ev, K_NO_WAIT);
+	if (err) {
+		LOG_ERR("Error getting ble_cmd_event: %d\n", err);
+		return;
+	}
+
+	enum command_char ble_command = ev.cmd;
+
+	switch (ble_command) {
+	case CMD_TURN_OFF_FENCE: {
+		/* Wait for final AMC integration. Should simply issue an event. */
+		break;
+	}
+	case CMD_REBOOT_AVR_MCU: {
+		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
+		EVENT_SUBMIT(r_ev);
+		break;
+	}
+	case CMD_PLAY_SOUND: {
+		struct sound_event *s_ev = new_sound_event();
+		s_ev->type = SND_FIND_ME;
+		EVENT_SUBMIT(s_ev);
+		break;
+	}
+	case CMD_DOWNLOAD_FENCE: {
+		/* Downloads fence from bluetooth? */
+		break;
+	}
+	case CMD_FW_INSTALL: {
+		/* Deprecated as we have ble_dfu.c instead? */
+		break;
+	}
+	default: {
+		break;
+	}
 	}
 }
 
@@ -427,6 +548,7 @@ static void process_lte_proto_event(void)
 	EVENT_SUBMIT(ack);
 	/* process poll response */
 	if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
+		LOG_INF("Process poll reponse");
 		process_poll_response(&proto);
 		return;
 	} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
@@ -451,6 +573,9 @@ void messaging_thread_fn()
 			while (k_msgq_num_used_get(&ble_ctrl_msgq) > 0) {
 				process_ble_ctrl_event();
 			}
+			while (k_msgq_num_used_get(&ble_cmd_msgq) > 0) {
+				process_ble_cmd_event();
+			}
 			while (k_msgq_num_used_get(&ble_data_msgq) > 0) {
 				process_ble_data_event();
 			}
@@ -468,6 +593,11 @@ void messaging_thread_fn()
 int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module.");
+	int err = eep_read_serial(&serial_id);
+	if (err != 0) { //TODO: handle in a better way.
+		LOG_ERR("Failed to read serial number from eeprom!");
+		return err;
+	}
 
 	k_work_queue_init(&send_q);
 	k_work_queue_start(&send_q, messaging_send_thread,
@@ -481,7 +611,7 @@ int messaging_module_init(void)
 	cached_fences_counter = 0;
 	pasture_temp.m.us_pasture_crc = EMPTY_FENCE_CRC;
 
-	int err = 0;
+	err = 0;
 
 	err = k_work_schedule_for_queue(&send_q, &modem_poll_work, K_NO_WAIT);
 	if (err < 0) {
@@ -514,6 +644,10 @@ void build_poll_request(NofenceMessage *poll_req)
  * value from battery voltage event.*/
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
+
+	/* Fw info. */
+	poll_req->m.poll_message_req.has_versionInfoHW = true;
+	poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version = 1;
 	/* TODO: get gsm info from modem driver */
 	//	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
 	//	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
@@ -537,10 +671,15 @@ void build_poll_request(NofenceMessage *poll_req)
 		//			EEPROM_GetOffAnimalTimeLimitSec();
 	}
 	if (m_confirm_ble_key) {
-		//		poll_req.m.poll_message_req.has_rgubcBleKey = true;
-		//		poll_req.m.poll_message_req.rgubcBleKey.size = EEP_BLE_SEC_KEY_LEN;
-		//		EEPROM_ReadBleSecKey(poll_req.m.poll_message_req.rgubcBleKey.bytes,
-		//				     EEP_BLE_SEC_KEY_LEN);
+		poll_req->m.poll_message_req.has_rgubcBleKey = true;
+		poll_req->m.poll_message_req.rgubcBleKey.size =
+			EEP_BLE_SEC_KEY_LEN;
+		int err = eep_read_ble_sec_key(
+			poll_req->m.poll_message_req.rgubcBleKey.bytes,
+			EEP_BLE_SEC_KEY_LEN);
+		if (err) {
+			LOG_ERR("Failed to read ble_sec_key, error: %d", err);
+		}
 	}
 	poll_req->m.poll_message_req.usGnssOnFixAgeSec = 123;
 	poll_req->m.poll_message_req.usGnssTTFFSec = 12;
@@ -586,11 +725,11 @@ int8_t request_fframe(uint32_t version, uint8_t frame)
 	return 0;
 }
 
-void fence_download( uint8_t new_fframe){
-	if (new_fframe == 0 && first_frame){
+void fence_download(uint8_t new_fframe)
+{
+	if (new_fframe == 0 && first_frame) {
 		first_frame = false;
-	}
-	else if (new_fframe == 0 && !first_frame){ //something went bad
+	} else if (new_fframe == 0 && !first_frame) { //something went bad
 		expected_fframe = 0;
 		new_fence_in_progress = 0;
 		return;
@@ -670,8 +809,7 @@ void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
 void proto_InitHeader(NofenceMessage *msg)
 {
 	memset(msg, 0, sizeof(NofenceMessage));
-
-	msg->header.ulId = 11501; //TODO: read from eeprom
+	msg->header.ulId = serial_id;
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
 	if (use_server_time) {
@@ -693,7 +831,7 @@ int send_binary_message(uint8_t *data, size_t len)
 	struct check_connection *ev = new_check_connection();
 	EVENT_SUBMIT(ev);
 	int ret = k_sem_take(&connection_ready, K_MINUTES(2));
-	if (ret != 0){
+	if (ret != 0) {
 		LOG_ERR("Connection not ready, can't send message now!");
 		return -ETIMEDOUT;
 	}
@@ -762,7 +900,8 @@ void process_poll_response(NofenceMessage *proto)
 	}
 	// If we are asked to, reboot
 	if (pResp->has_bReboot && pResp->bReboot) {
-		/* TODO: publish reboot event to power manager */
+		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
+		EVENT_SUBMIT(r_ev);
 	}
 	/* TODO: set activation mode to (pResp->eActivationMode); */
 
@@ -773,6 +912,20 @@ void process_poll_response(NofenceMessage *proto)
 		LOG_INF("Server time will be used.");
 		time_from_server = proto->header.ulUnixTimestamp;
 		use_server_time = true;
+		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
+		struct tm *tm_time = gmtime(&gm_time);
+		/* Update date_time library which storage uses for ANO data. */
+		int err = date_time_set(tm_time);
+		if (err) {
+			LOG_ERR("Error updating time from server %i", err);
+		} else {
+			/** @note This prints UTC. */
+			LOG_INF("Set timestamp to date_time library from modem: %s",
+				asctime(tm_time));
+			atomic_set(&server_timestamp_sec,
+				   (atomic_val_t)(int32_t)(k_uptime_get_32() /
+							   1000));
+		}
 	}
 	if (pResp->has_usPollConnectIntervalSec) {
 		atomic_set(&poll_period_minutes,
@@ -796,8 +949,20 @@ void process_poll_response(NofenceMessage *proto)
 		/* TODO: submit pResp->usOffAnimalTimeLimitSec to AMC. */
 	}
 	if (pResp->has_rgubcBleKey) {
-		/* TODO: submit pResp->rgubcBleKey.bytes,pResp->rgubcBleKey
-		 * .size to BLE controller. */
+		LOG_INF("Received a ble_sec_key of size %d",
+			pResp->rgubcBleKey.size);
+		uint8_t current_ble_sec_key[EEP_BLE_SEC_KEY_LEN];
+		eep_read_ble_sec_key(current_ble_sec_key, EEP_BLE_SEC_KEY_LEN);
+		int ret = memcmp(pResp->rgubcBleKey.bytes, current_ble_sec_key,
+				 pResp->rgubcBleKey.size);
+		if (ret != 0) {
+			LOG_INF("New ble sec key is different. Will update eeprom");
+			ret = eep_write_ble_sec_key(pResp->rgubcBleKey.bytes,
+						    pResp->rgubcBleKey.size);
+			if (ret < 0) {
+				LOG_ERR("Failed to write ble sec key to EEPROM");
+			}
+		}
 	}
 	if (pResp->has_versionInfo) {
 		process_upgrade_request(&pResp->versionInfo);
@@ -808,8 +973,8 @@ void process_poll_response(NofenceMessage *proto)
 		 * to AMC */
 		//request frame 0
 		first_frame = true;
-		LOG_WRN("Requesting frame 0 of fence: %d!\n"
-			,pResp->ulFenceDefVersion);
+		LOG_INF("Requesting frame 0 for fence version %i.",
+			pResp->ulFenceDefVersion);
 		int ret = request_fframe(pResp->ulFenceDefVersion, 0);
 		if (ret == 0) {
 			first_frame = true;
@@ -822,10 +987,12 @@ void process_poll_response(NofenceMessage *proto)
 /* @brief: starts a firmware download if a new version exists on the server. */
 void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 {
-	// compare versions and start update when needed.//
-	uint32_t app_ver = fw_ver_from_server->ulNRF52AppVersion;
+	//uint32_t app_ver = fw_ver_from_server->ulNRF52AppVersion;
+	uint32_t app_ver = fw_ver_from_server->ulATmegaVersion;
 
-	if (app_ver > NF_X25_VERSION_NUMBER) {
+	LOG_INF("Received app version from server %i", app_ver);
+
+	if (app_ver != NF_X25_VERSION_NUMBER) {
 		struct start_fota_event *ev = new_start_fota_event();
 		ev->override_default_host = false;
 		ev->version = app_ver;

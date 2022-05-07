@@ -43,10 +43,11 @@ static void fota_dl_handler(const struct fota_download_evt *evt)
 	switch (evt->id) {
 	case FOTA_DOWNLOAD_EVT_ERROR:
 		LOG_ERR("Received error from fota_download %d", evt->cause);
+		char *e_msg = "Fota download error";
+		nf_app_error(ERR_FW_UPGRADE, -evt->cause, e_msg, strlen(e_msg));
 
 		event->dfu_status = DFU_STATUS_IDLE;
 		event->dfu_error = evt->cause;
-
 		/* Submit event. */
 		EVENT_SUBMIT(event);
 
@@ -106,7 +107,6 @@ void mark_new_application_as_valid(void)
  */
 static bool event_handler(const struct event_header *eh)
 {
-	int err;
 	if (is_start_fota_event(eh)) {
 		struct start_fota_event *ev = cast_start_fota_event(eh);
 
@@ -123,20 +123,16 @@ static bool event_handler(const struct event_header *eh)
 				 CACHE_PATH_NAME, ev->version);
 		}
 
-		err = fota_download_start(host_tmp, path_tmp, -1, 0, 0);
-		if (err) {
-			LOG_ERR("fota_download_start() failed, err %d", err);
-			char *msg = "Unable to start FOTA DL";
-			nf_app_error(ERR_FW_UPGRADE, err, msg, strlen(msg));
-			return false;
+		/* If no error, submit in progress event. */
+		if (!fota_download_start(host_tmp, path_tmp, -1, 0, 0)) {
+			struct dfu_status_event *status =
+				new_dfu_status_event();
+
+			status->dfu_status = DFU_STATUS_IN_PROGRESS;
+			status->dfu_error = 0;
+
+			EVENT_SUBMIT(status);
 		}
-
-		struct dfu_status_event *status = new_dfu_status_event();
-
-		status->dfu_status = DFU_STATUS_IN_PROGRESS;
-		status->dfu_error = 0;
-
-		EVENT_SUBMIT(status);
 
 		return false;
 	}

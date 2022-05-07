@@ -15,9 +15,13 @@ if POWER_MANAGER
         module-str = Battery logging
         source "subsys/logging/Kconfig.template.log_config"
 
+        module = CHARGING
+        module-str = Charging logging
+        source "subsys/logging/Kconfig.template.log_config"
+
         config BATTERY_POLLER_WORK_SEC
         int "Seconds between modem poll"
-        default 300
+        default 60
 
         config BATTERY_THRESHOLD
         int "Battery hysteresis in mV"
@@ -34,5 +38,26 @@ if POWER_MANAGER
         config BATTERY_MOVING_AVERAGE_SAMPLES
         int "Number of moving average samples to be considered. Higher number gives smoother voltage change"
         default 300
+
+        config SHUTDOWN_TIMER_SEC
+        int "Seconds to wait before reboot"
+        default 5
+        
+        config CURRENT_MOVING_AVERAGE_SAMPLES
+        int "Number of moving average samples to be considered for current measurement. Higher number gives smoother voltage change"
+        default 32
+
+        config CHARGING_POLLER_WORK_SEC
+        int "Seconds between modem poll"
+        default 60
+
+        config CHARGING_THRESHOLD_START
+        int "Threshold to start charging, defined in mV"
+        default 4000
+
+        config CHARGING_THRESHOLD_STOP
+        int "Threshold to stop charging, defined in mV"
+        default 4200
+
         
 endif

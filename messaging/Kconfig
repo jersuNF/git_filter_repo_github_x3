@@ -47,6 +47,9 @@ if MESSAGING
 		config MSGQ_BLE_CTRL_SIZE
 		int "Size of the bluetooth control command data received"
 		default 4
+		config MSGQ_BLE_CMD_SIZE
+		int "Size of the bluetooth commands data received"
+		default 4
 		config MSGQ_BLE_DATA_SIZE
 		int "Size of the bluetooth connection data received"
 		default 4

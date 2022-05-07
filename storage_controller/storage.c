@@ -284,11 +284,6 @@ int stg_init_storage_controller(void)
 		queue_inited = true;
 	}
 
-	/* Check which ANO partition is active. We just booted, so
-	 * we have to go through every entry.
-	 */
-	update_ano_active_entry(NULL);
-
 	return 0;
 }
 

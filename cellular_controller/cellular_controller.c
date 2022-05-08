@@ -27,12 +27,15 @@ struct k_thread keep_alive_thread;
 static struct k_sem connection_state_sem;
 
 int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
-int socket_listen(struct data *, uint16_t);
+int socket_listen(struct data *);
 int socket_receive(struct data *, char **);
 void listen_sock_poll(void);
 int8_t lte_init(void);
 bool lte_is_ready(void);
-
+K_SEM_DEFINE(listen_sem, 0, 1); /* this semaphore will be given by the modem
+ * driver when receiving the UUSOLI urc code. Socket 0 is the listening
+ * socket by design, however the 'socket' number returned in the UUSOLI =
+ * number of currently opened sockets + 1 */
 static bool modem_is_ready = false;
 
 APP_DMEM struct configs conf = {
@@ -170,8 +173,7 @@ int listen_tcp(void)
 		return ret;
 	}
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
-		uint16_t listen_port = 0U;
-		ret = socket_listen(&conf.ipv4, listen_port);
+		ret = socket_listen(&conf.ipv4);
 		if (ret < 0) {
 			/*TODO: notify error handler*/
 			LOG_DBG("Failed to start listening socket!");

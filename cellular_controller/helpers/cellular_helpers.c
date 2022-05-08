@@ -117,7 +117,7 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 	return ret;
 }
 
-int socket_listen(struct data *data, uint16_t port)
+int socket_listen(struct data *data)
 {
 	int ret;
 

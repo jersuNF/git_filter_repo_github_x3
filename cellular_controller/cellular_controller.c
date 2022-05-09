@@ -205,6 +205,13 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		}
 
 		err = send_tcp(CharMsgOut, MsgOutLen);
+#if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
+		LOG_INF("Sending tcp message with len: %d", MsgOutLen);
+		for (int i = 0; i < MsgOutLen; i++) {
+			printk("\\x%02x", CharMsgOut[i]);
+		}
+		printk("\n");
+#endif
 		if (err < 0) { /* TODO: notify error handler! */
 			submit_error(SOCKET_SEND, err);
 			k_free(CharMsgOut);

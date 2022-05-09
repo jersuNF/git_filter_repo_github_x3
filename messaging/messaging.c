@@ -93,7 +93,8 @@ int send_binary_message(uint8_t *, size_t);
 
 void messaging_thread_fn(void);
 
-_DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *);
+static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix,
+					  _DatePos *pos);
 bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *);
 static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
 bool m_confirm_acc_limits, m_confirm_ble_key, m_transfer_boot_params;
@@ -161,6 +162,14 @@ static void build_log_message()
 	NofenceMessage seq_2;
 	memset(&seq_1, 0, sizeof(NofenceMessage));
 	memset(&seq_2, 0, sizeof(NofenceMessage));
+	seq_1.header.ulId = serial_id;
+	seq_1.header.ulVersion = NF_X25_VERSION_NUMBER;
+	seq_1.header.has_ulVersion = true;
+	seq_2.header.ulId = serial_id;
+	seq_2.header.ulVersion = NF_X25_VERSION_NUMBER;
+	seq_2.header.has_ulVersion = true;
+	//proto_InitHeader(&seq_1); /* fill up message header. */
+	//proto_InitHeader(&seq_2); /* fill up message header. */
 
 	seq_1.m.seq_msg.has_usBatteryVoltage = true;
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
@@ -241,6 +250,7 @@ static void build_log_message()
 
 int read_log_data_cb(uint8_t *data, size_t len)
 {
+	LOG_INF("Send log message fetched from flash");
 	/* Fetch the lenght from the two first bytes */
 	uint16_t new_len = (uint16_t)((data[1] << 8) + (data[0] & 0x00ff));
 	uint8_t *new_data = k_malloc(new_len);
@@ -310,6 +320,13 @@ void modem_poll_work_fn()
 }
 
 static int32_t sec_since_gnss_time = 0;
+
+static void build_zap_message(ClientZapMessage *msg)
+{
+	memset(msg, 0, sizeof(ClientZapMessage));
+	proto_get_last_known_date_pos(&cached_fix, &msg->xDatePos);
+	msg->has_sFenceDist = false;
+}
 
 /**
  * @brief Work function to periodic request sensor data etc.
@@ -751,8 +768,8 @@ void build_poll_request(NofenceMessage *poll_req)
 {
 	proto_InitHeader(poll_req); /* fill up message header. */
 	poll_req->which_m = NofenceMessage_poll_message_req_tag;
-	poll_req->m.poll_message_req.datePos =
-		proto_get_last_known_date_pos(&cached_fix);
+	proto_get_last_known_date_pos(&cached_fix,
+				      &poll_req->m.poll_message_req.datePos);
 	poll_req->m.poll_message_req.has_datePos =
 		proto_has_last_known_date_pos(&cached_fix);
 	poll_req->m.poll_message_req.eMode = current_state.collar_mode;
@@ -1268,7 +1285,8 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 	return rec_ano_frames;
 }
 
-_DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix)
+static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix,
+					  _DatePos *pos)
 {
 	bool valid_headVeh = (bool)(gpsLastFix->pvt_flags &
 				    GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK);
@@ -1294,7 +1312,7 @@ _DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix)
 		.has_ucGpsMode = true,
 		.ucGpsMode = gpsLastFix->mode
 	};
-	return a;
+	memcpy(pos, &a, sizeof(_DatePos));
 }
 
 bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *gps)

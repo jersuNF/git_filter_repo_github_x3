@@ -72,9 +72,6 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 	int ret;
 
 	data->tcp.sock = socket(addr->sa_family, SOCK_STREAM, IPPROTO_TCP);
-	if (data->tcp.sock > 0){ /* socket 0 already created!*/
-		data->tcp.sock = 0;
-		}
 
 	if (data->tcp.sock < 0) {
 		LOG_ERR("Failed to create TCP socket (%s): %d", data->proto,
@@ -112,6 +109,36 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 	ret = connect(data->tcp.sock, addr, addrlen);
 	if (ret < 0) {
 		LOG_ERR("Cannot connect to TCP remote (%s): %d", data->proto,
+			errno);
+		ret = -errno;
+	}else{
+		ret = data->tcp.sock;
+	}
+	return ret;
+}
+
+int socket_listen(struct data *data)
+{
+	int ret;
+
+	data->tcp.sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+	if (data->tcp.sock < 0) {
+		LOG_ERR("Failed to create TCP listening socket (%s): %d",
+			data->proto,
+			errno);
+		return -errno;
+	} else {
+		LOG_INF("Created TCP listening socket (%s): %d\n", data->proto,
+			data->tcp.sock);
+	}
+
+	k_sleep(K_MSEC(50));
+	ret = listen(data->tcp.sock, 1); //2nd parameter is backlog size, not
+	// important as we are not interested in the incoming data anyways.
+	if (ret < 0) {
+		LOG_ERR("Cannot start TCP listening socket (%s): %d",
+			data->proto,
 			errno);
 		ret = -errno;
 	}else{
@@ -165,17 +192,21 @@ int get_ip(char** collar_ip)
 	return 0;
 }
 
+/**
+ * will close the latest TCP socket with id greater than zero, as zero is
+ * reserved for the listening socket. */
+ /* TODO: enhance robustness. */
 void stop_tcp(void)
 {
 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
-		if (conf.ipv6.tcp.sock >= 0) {
+		if (conf.ipv6.tcp.sock > 0) {
 			(void)close(conf.ipv6.tcp.sock);
 			memset(&conf, 0, sizeof(conf));
 		}
 	}
 
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
-		if (conf.ipv4.tcp.sock >= 0) {
+		if (conf.ipv4.tcp.sock > 0) {
 			(void)close(conf.ipv4.tcp.sock);
 			memset(&conf, 0, sizeof(conf));
 		}
@@ -203,6 +234,7 @@ const struct device *bind_modem(void)
 }
 
 int check_ip(void){
+	k_sleep(K_MSEC(500));
 	char* collar_ip = NULL;
 	uint8_t timeout_counter = 0;
 	while(timeout_counter++ <= 40){

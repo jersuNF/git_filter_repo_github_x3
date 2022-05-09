@@ -138,7 +138,6 @@ _Noreturn void publish_gnss_data(void* ctx){
 
 			struct gnss_data* new_data = new_gnss_data();
 			new_data->gnss_data = gnss_data_buffer;
-			LOG_INF("New GNSS data received!\n");
 			EVENT_SUBMIT(new_data);
 			if(k_sem_take(&cached_fix_sem, K_MSEC(100)) == 0){
 				cached_gnss_data = gnss_data_buffer;

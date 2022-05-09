@@ -377,6 +377,17 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	if (is_send_poll_request_now(eh)) {
+		LOG_DBG("Received a nudge on listening socket!");
+		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
+						      K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Error starting modem poll worker in response"
+				" to nudge on listening socket. Error: %d!",
+				err);
+		}
+		return false;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -439,6 +450,7 @@ EVENT_SUBSCRIBE(MODULE, animal_warning_event);
 EVENT_SUBSCRIBE(MODULE, animal_escape_event);
 EVENT_SUBSCRIBE(MODULE, connection_state_event);
 EVENT_SUBSCRIBE(MODULE, gnss_data);
+EVENT_SUBSCRIBE(MODULE, send_poll_request_now);
 
 static inline void process_ble_ctrl_event(void)
 {

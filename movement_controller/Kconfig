@@ -30,6 +30,10 @@ if MOVE_CONTROLLER
 		  or a preemptible thread of higher or equal priority, 
 		  becomes ready.
 
+	config MOVEMENT_TIMEOUT_SEC
+		int "Timeout of the movement controller which fires an event if timeout"
+		default 120
+
 	config ACC_MSGQ_SIZE
 	int "Size of number of acc data elements"
 	default 5

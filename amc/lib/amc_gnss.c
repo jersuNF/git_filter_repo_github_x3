@@ -1,6 +1,7 @@
 #include "amc_gnss.h"
 #include "amc_zone.h"
 #include "amc_const.h"
+#include "gnss_controller_events.h"
 
 gnss_mode_t gnss_mode = GNSSMODE_NOMODE;
 
@@ -173,37 +174,43 @@ int gnss_update(gnss_t *gnss_data)
 	return 0;
 }
 
-int gnss_calc_xy(gnss_t *gnss_data, int16_t* x_dm, int16_t* y_dm,
-		  int32_t origin_lon, int32_t origin_lat, 
-		  uint16_t k_lon, uint16_t k_lat) {
+int gnss_calc_xy(gnss_t *gnss_data, int16_t *x_dm, int16_t *y_dm,
+		 int32_t origin_lon, int32_t origin_lat, uint16_t k_lon,
+		 uint16_t k_lat)
+{
 	int ret = 0;
-	
+
 	int32_t x_dm_32, y_dm_32;
 
-	x_dm_32 = (int32_t) ((k_lon * (int64_t) (gnss_data->latest.lon - origin_lon)) / 100000);
-	y_dm_32 = (int32_t) ((k_lat * (int64_t) (gnss_data->latest.lat - origin_lat)) / 100000);
+	x_dm_32 = (int32_t)(
+		(k_lon * (int64_t)(gnss_data->latest.lon - origin_lon)) /
+		100000);
+	y_dm_32 = (int32_t)(
+		(k_lat * (int64_t)(gnss_data->latest.lat - origin_lat)) /
+		100000);
 
-	if ((x_dm_32 > (int32_t) INT16_MAX) || (y_dm_32 > (int32_t) INT16_MAX) ||
-	    (x_dm_32 < (int32_t) INT16_MIN) || (y_dm_32 < (int32_t) INT16_MIN)) {
+	if ((x_dm_32 > (int32_t)INT16_MAX) || (y_dm_32 > (int32_t)INT16_MAX) ||
+	    (x_dm_32 < (int32_t)INT16_MIN) || (y_dm_32 < (int32_t)INT16_MIN)) {
 		/* Position is not updated if overflow */
 		ret = -EOVERFLOW;
 	} else {
-		*x_dm = (int16_t) x_dm_32;
-		*y_dm = (int16_t) y_dm_32;
+		*x_dm = (int16_t)x_dm_32;
+		*y_dm = (int16_t)y_dm_32;
 	}
 
 	return ret;
 }
 
-int gnss_set_mode(gnss_mode_t mode)
+int gnss_update_mode(gnss_mode_t mode)
 {
 	if (mode >= GNSSMODE_SIZE) {
 		return -EINVAL;
 	}
 
 	gnss_mode = mode;
-
-	/** @todo Send gnss mode through controller when implemented */
+	struct gnss_set_mode_event *ev = new_gnss_set_mode_event();
+	ev->mode = gnss_mode;
+	EVENT_SUBMIT(ev);
 
 	return 0;
 }

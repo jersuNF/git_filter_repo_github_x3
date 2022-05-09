@@ -24,13 +24,13 @@ typedef int (*gnss_timeout_cb)(void);
  */
 int gnss_init(gnss_timeout_cb timeout_cb);
 
-/** @brief Set GNSS power mode. 
+/** @brief Set GNSS power mode by submitting an event to GNSS controller.
  * 
  * @param[in] mode Power mode value to set. 
  * 
  * @returns 0 on success, error code otherwise. 
  */
-int gnss_set_mode(gnss_mode_t mode);
+int gnss_update_mode(gnss_mode_t mode);
 
 /** @brief Get GNSS power mode. 
  * 

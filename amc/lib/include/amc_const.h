@@ -11,6 +11,19 @@
 #define FIFO_ELEMENTS 8
 #define FIFO_AVG_DISTANCE_ELEMENTS 15
 
+/* How many zaps during a breakout before animal is considered 'escaped'. */
+#define PAIN_CNT_DEF_ESCAPED 3
+
+/* Warning duration before pain (sec) if the distance increase is very slow. 
+ * 0 turns off function. 
+ */
+#define WARN_MAX_DURATION 20
+
+/* Warning duration before pain (sec) if the distance increase is very fast. 
+ * 0 turns off function. 
+ */
+#define WARN_MIN_DURATION 5
+
 /* Time in sec every activity level has to be active 
  * before activity level is updated to a lower value. 
  */

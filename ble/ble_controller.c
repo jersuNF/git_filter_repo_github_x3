@@ -654,6 +654,8 @@ int ble_module_init()
 			bt_device_name[0] = 'N';
 			bt_device_name[1] = 'F';
 			strcpy(bt_device_name + DEVICE_NAME_LEN - len, tmp);
+
+			current_serial_number = serial_id;
 		}
 	}
 

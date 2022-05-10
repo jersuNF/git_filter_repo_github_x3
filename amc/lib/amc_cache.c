@@ -130,7 +130,7 @@ bool fnc_valid(fence_t *fence)
 			 FenceDefinitionMessage_FenceType_Normal ||
 		 fence->m.e_fence_type ==
 			 FenceDefinitionMessage_FenceType_Inverted));
-	/** @todo: Also test timespan from eeprom fence definition here. */
+	/** @todo: [LEGACY CODE] Also test timespan from eeprom fence definition here. */
 }
 
 bool fnc_valid_fence(void)

@@ -254,6 +254,7 @@ int read_log_data_cb(uint8_t *data, size_t len)
 	if (err) {
 		LOG_ERR("Error sending binary message for log data %i", err);
 	}
+	k_free(new_data);
 	return err;
 }
 
@@ -400,6 +401,7 @@ static bool event_handler(const struct event_header *eh)
 		sec_since_gnss_time = (int32_t)(k_uptime_get_32() / 1000);
 		return false;
 	}
+
 	if (is_ble_ctrl_event(eh)) {
 		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
 		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
@@ -511,7 +513,17 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-
+	if (is_send_poll_request_now(eh)) {
+		LOG_DBG("Received a nudge on listening socket!");
+		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
+						      K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Error starting modem poll worker in response"
+				" to nudge on listening socket. Error: %d!",
+				err);
+		}
+		return false;
+	}
 	if (is_env_sensor_event(eh)) {
 		struct env_sensor_event *ev = cast_env_sensor_event(eh);
 		LOG_DBG("Event Temp: %.2f, humid %.2f, press %.2f", ev->temp,
@@ -587,6 +599,7 @@ EVENT_SUBSCRIBE(MODULE, pwr_status_event);
 EVENT_SUBSCRIBE(MODULE, env_sensor_event);
 /** @todo add battery, histogram, gnss and modem event */
 EVENT_SUBSCRIBE(MODULE, gnss_data);
+EVENT_SUBSCRIBE(MODULE, send_poll_request_now);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -747,7 +760,10 @@ int messaging_module_init(void)
 	memset(&pasture_temp, 0, sizeof(pasture_t));
 	cached_fences_counter = 0;
 	pasture_temp.m.us_pasture_crc = EMPTY_FENCE_CRC;
-
+	
+	/** @todo Should add semaphore and only start these queues when
+	 *  we get connection to network with modem.
+	 */
 	err = k_work_schedule_for_queue(&send_q, &data_request_work, K_NO_WAIT);
 	if (err < 0) {
 		return err;
@@ -756,7 +772,7 @@ int messaging_module_init(void)
 	if (err < 0) {
 		return err;
 	}
-	err = k_work_schedule_for_queue(&send_q, &log_work, K_SECONDS(20));
+	err = k_work_schedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 	if (err < 0) {
 		return err;
 	}

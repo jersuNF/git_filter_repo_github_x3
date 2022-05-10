@@ -249,7 +249,7 @@ void process_acc_data(raw_acc_data_t *acc)
 	if (prev_state != m_state) {
 		struct movement_out_event *event = new_movement_out_event();
 		event->state = m_state;
-		/** @todo Add total_steps as well? */
+
 		LOG_DBG("Total steps is %i, state is %i, activity is %i, acc_std_final %i",
 			total_steps, m_state, cur_activity, acc_std_final);
 		EVENT_SUBMIT(event);

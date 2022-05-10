@@ -10,7 +10,6 @@
 #include <sys/ring_buffer.h>
 #include <zephyr.h>
 #include <zephyr/types.h>
-#include "nf_settings.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>

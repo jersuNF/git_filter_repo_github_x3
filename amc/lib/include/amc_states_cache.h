@@ -2,14 +2,17 @@
  * Copyright (c) 2022 Nofence AS
  */
 
-#ifndef _AMC_STATES_H_
-#define _AMC_STATES_H_
+#ifndef _AMC_STATES_CACHE_H_
+#define _AMC_STATES_CACHE_H_
 
 #include <zephyr.h>
 #include "embedded.pb.h"
 #include "gnss.h"
 
 #include "ble_beacon_event.h"
+#include "movement_events.h"
+#include "amc_zone.h"
+#include "pwr_event.h"
 
 /** @todo Move these to another place? Should AMC definitions have a common place?
  * There will not be performed more than this number of shocks each day, 
@@ -44,7 +47,7 @@
 /** @brief Checks if we're in teach mode and sets the cache variables
  *         that is necessary.
  */
-void init_mode_status(void);
+void init_states_and_variables(void);
 
 /** @brief Calculates the amc mode based on internal zap/warn count variables.
  * 
@@ -64,29 +67,48 @@ Mode get_mode(void);
 
 /** @brief Calculates and gives the current fencestatus.
  * 
- * @returns Mode that we're currently in.
+ * @param maybe_out_of_fence_timestamp timestamp to check, used for 
+ *                                     maybe_out_of_fence fence status.
+ * 
+ * @param beacon_status status of the beacon.
+ * 
+ * @returns the new fence status we calculated.
  */
-FenceStatus calc_fence_status();
+FenceStatus calc_fence_status(uint32_t maybe_out_of_fence_timestamp,
+			      enum beacon_status_type beacon_status);
 
-/** @brief Calculates and gives the current collarstatus.
+/** @brief Calculates and gives the new collarstatus.
  * 
- * @param WIP.
- * 
- * @returns Mode that we're currently in.
+ * @returns The new collar status calculated.
  */
 CollarStatus calc_collar_status(void);
+
+/** @brief Get function for fence status.
+ * 
+ * @returns The fence status state that we're currently in.
+ */
+FenceStatus get_fence_status(void);
+
+/** @brief Get function for collar status.
+ * 
+ * @returns The collar status state that we're currently in.
+ */
+CollarStatus get_collar_status(void);
+
+/** @brief Resets the daily zap counter to 0. No timing logic is performed here,
+ *         this must be done outside the function.
+ */
+void reset_zap_count_day();
 
 /** @brief Sets the sensor mode for those modules required.
  * 
  * @param amc_mode Mode of the amc, i.e teach or not.
- * @param gnss_mode mode of the gnss
  * @param fs status of the fence (i.e animal location relative to pasture)
  * @param cs status of the collar (i.e animal sleeping etc...)
- * 
- * @returns 0 on success, otherwise negative errno.
+ * @param zone that we're currently in
  */
-int set_sensor_modes(Mode amc_mode, gnss_mode_t gnss_mode, FenceStatus fs,
-		     CollarStatus cs);
+void set_sensor_modes(Mode amc_mode, FenceStatus fs, CollarStatus cs,
+		      amc_zone_t zone);
 
 /** @todo Should zap stuff be moved somewhere else? */
 void increment_zap_count(void);
@@ -106,4 +128,21 @@ void reset_zap_pain_cnt(void);
  */
 void set_beacon_status(enum beacon_status_type status);
 
-#endif /* _AMC_STATES_H_ */
+/** @brief Sets the power state from the power manager event.
+ * 
+ *  @param state to update the cached variable to.
+ */
+void update_power_state(enum pwr_state_flag state);
+
+/** @brief Sets the movement state from the movement controller event.
+ * 
+ *  @param state to update the cached variable to.
+ */
+void update_movement_state(movement_state_t state);
+
+/** @brief Function used to reset the gnss mode after we get a new pasture
+ *         installation to force a new fix for that given pasture.
+ */
+void restart_force_gnss_to_fix(void);
+
+#endif /* _AMC_STATES_CACHE_H_ */

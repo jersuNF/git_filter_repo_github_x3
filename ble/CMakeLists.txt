@@ -7,9 +7,9 @@ zephyr_include_directories(.
 			${CMAKE_CURRENT_SOURCE_DIR}/../../../include
 			${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble
 			${CMAKE_CURRENT_SOURCE_DIR}/../../events/messaging
-  			${CMAKE_CURRENT_SOURCE_DIR}/../../modules/nf_settings/include
 			${CMAKE_CURRENT_SOURCE_DIR}/../../events/watchdog
-			)
+  			${CMAKE_CURRENT_SOURCE_DIR}/../../modules/nf_settings/include
+			../../../include)
 			
 target_sources(app PRIVATE
 			${CMAKE_CURRENT_SOURCE_DIR}/ble_controller.c

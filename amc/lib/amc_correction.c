@@ -7,7 +7,7 @@
 LOG_MODULE_REGISTER(amc_correction, CONFIG_AMC_LIB_LOG_LEVEL);
 
 #include "amc_correction.h"
-#include "amc_states.h"
+#include "amc_states_cache.h"
 #include "amc_gnss.h"
 #include "amc_const.h"
 #include "amc_handler.h"
@@ -325,10 +325,10 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 	if (amc_mode == Mode_Teach || amc_mode == Mode_Fence) {
 		if (zone == WARN_ZONE) {
 			if (gnss->mode == GNSSMODE_MAX) {
-				if (fs == FenceStatus_FenceStatus_Normal
-				    /** || @todo fs == FenceStatus_MaybeOutOfFence*/) {
+				if (fs == FenceStatus_FenceStatus_Normal ||
+				    fs == FenceStatus_MaybeOutOfFence) {
 					/** @todo Fetch getActiveTime() from
-					 *  movement controller.
+					 *  movement controller. What to check for?
 					 *
 					|| get_correction_status() > 0) { */
 					if (gnss_has_warn_fix()) {

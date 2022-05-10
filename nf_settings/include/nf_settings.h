@@ -41,6 +41,7 @@ typedef enum {
 #define EEP_HOST_PORT_BUF_SIZE 24
 
 #define EEP_BLE_SEC_KEY_LEN 8
+
 /**
  * @brief initialises the eeprom API
  * @param[in] device pointer to the EEPROM device to use for subsequent read/writes

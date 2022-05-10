@@ -155,21 +155,17 @@ static void build_log_message()
 	struct save_histogram *histogram_snapshot = new_save_histogram();
 	EVENT_SUBMIT(histogram_snapshot);
 	collar_histogram histogram;
-	k_msgq_get(&histogram_msgq, &histogram, K_SECONDS(10));
+	int err = k_msgq_get(&histogram_msgq, &histogram, K_SECONDS(10));
+	if (err) {
+		LOG_ERR("Timeout on waiting for histogram %i", err);
+		return;
+	}
 
 	/* Fill in NofenceMessage struct */
 	NofenceMessage seq_1;
 	NofenceMessage seq_2;
-	memset(&seq_1, 0, sizeof(NofenceMessage));
-	memset(&seq_2, 0, sizeof(NofenceMessage));
-	seq_1.header.ulId = serial_id;
-	seq_1.header.ulVersion = NF_X25_VERSION_NUMBER;
-	seq_1.header.has_ulVersion = true;
-	seq_2.header.ulId = serial_id;
-	seq_2.header.ulVersion = NF_X25_VERSION_NUMBER;
-	seq_2.header.has_ulVersion = true;
-	//proto_InitHeader(&seq_1); /* fill up message header. */
-	//proto_InitHeader(&seq_2); /* fill up message header. */
+	proto_InitHeader(&seq_1); /* fill up message header. */
+	proto_InitHeader(&seq_2); /* fill up message header. */
 
 	seq_1.m.seq_msg.has_usBatteryVoltage = true;
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
@@ -219,9 +215,8 @@ static void build_log_message()
 	size_t encoded_seq_2_size = 0;
 
 	/* Encode the seq_1 struct created. */
-	int err = collar_protocol_encode(&seq_1, &encoded_msg_seq_1[2],
-					 NofenceMessage_size,
-					 &encoded_seq_1_size);
+	err = collar_protocol_encode(&seq_1, &encoded_msg_seq_1[2],
+				     NofenceMessage_size, &encoded_seq_1_size);
 	if (err) {
 		LOG_ERR("Error encoding nofence message seq 1 (%i)", err);
 		return;
@@ -229,7 +224,7 @@ static void build_log_message()
 
 	/* Store the length of the message in the two first bytes */
 	encoded_msg_seq_1[0] = (uint8_t)encoded_seq_1_size;
-	encoded_msg_seq_1[1] = (uint8_t)(encoded_seq_1_size << 8);
+	encoded_msg_seq_1[1] = (uint8_t)(encoded_seq_1_size >> 8);
 
 	/* Encode the seq_2 struct created. */
 	err = collar_protocol_encode(&seq_2, &encoded_msg_seq_2[2],
@@ -241,7 +236,7 @@ static void build_log_message()
 
 	/* Store the length of the message in the two first bytes */
 	encoded_msg_seq_2[0] = (uint8_t)encoded_seq_2_size;
-	encoded_msg_seq_2[1] = (uint8_t)(encoded_seq_2_size << 8);
+	encoded_msg_seq_2[1] = (uint8_t)(encoded_seq_2_size >> 8);
 
 	/* Store the encoded message to external flash ring buffer */
 	stg_write_log_data(encoded_msg_seq_1, encoded_seq_1_size + header_size);
@@ -469,6 +464,7 @@ static bool event_handler(const struct event_header *eh)
 	if (is_update_zap_count(eh)) {
 		struct update_zap_count *ev = cast_update_zap_count(eh);
 		current_state.zap_count = ev->count;
+		/* Need more info from AMC here???? */
 		return false;
 	}
 	if (is_cellular_ack_event(eh)) {
@@ -485,6 +481,10 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	/*if (is_animal_escaped(eh)) {
+		k_work_submit(&send_q, );
+		return false;
+	}*/
 	if (is_connection_state_event(eh)) {
 		struct connection_state_event *ev =
 			cast_connection_state_event(eh);

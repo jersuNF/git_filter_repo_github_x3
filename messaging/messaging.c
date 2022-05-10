@@ -317,12 +317,13 @@ void modem_poll_work_fn()
 
 static int32_t sec_since_gnss_time = 0;
 
+/** @todo add this
 static void build_zap_message(ClientZapMessage *msg)
 {
 	memset(msg, 0, sizeof(ClientZapMessage));
 	proto_get_last_known_date_pos(&cached_fix, &msg->xDatePos);
 	msg->has_sFenceDist = false;
-}
+}*/
 
 /**
  * @brief Work function to periodic request sensor data etc.
@@ -760,7 +761,7 @@ int messaging_module_init(void)
 	memset(&pasture_temp, 0, sizeof(pasture_t));
 	cached_fences_counter = 0;
 	pasture_temp.m.us_pasture_crc = EMPTY_FENCE_CRC;
-	
+
 	/** @todo Should add semaphore and only start these queues when
 	 *  we get connection to network with modem.
 	 */

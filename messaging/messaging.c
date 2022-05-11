@@ -135,6 +135,8 @@ static struct k_work_q send_q;
 struct k_work_delayable modem_poll_work;
 struct k_work_delayable log_work;
 struct k_work_delayable data_request_work;
+struct k_work_delayable process_escape_work;
+struct k_work_delayable process_zap_work;
 
 atomic_t poll_period_minutes = ATOMIC_INIT(5);
 atomic_t log_period_minutes = ATOMIC_INIT(30);
@@ -317,14 +319,35 @@ void modem_poll_work_fn()
 
 static int32_t sec_since_gnss_time = 0;
 
-/** @todo add this
-static void build_zap_message(ClientZapMessage *msg)
+static void zap_message_work_fn()
 {
-	memset(msg, 0, sizeof(ClientZapMessage));
-	proto_get_last_known_date_pos(&cached_fix, &msg->xDatePos);
-	msg->has_sFenceDist = false;
-}*/
+	NofenceMessage msg;
+	proto_InitHeader(&msg); /* fill up message header. */
+	msg.which_m = (uint16_t)NofenceMessage_client_zap_message_tag;
+	msg.m.client_zap_message.has_sFenceDist = false;
+	proto_get_last_known_date_pos(&cached_fix,
+				      &msg.m.client_zap_message.xDatePos);
 
+	int ret = encode_and_send_message(&msg);
+	if (ret) {
+		LOG_ERR("Failed to encode zap status msg: %d", ret);
+	}
+}
+
+static void animal_escaped_work_fn()
+{
+	NofenceMessage msg;
+	proto_InitHeader(&msg); /* fill up message header. */
+	msg.which_m = (uint16_t)NofenceMessage_status_msg_tag;
+	msg.m.status_msg.has_datePos = true;
+	proto_get_last_known_date_pos(&cached_fix, &msg.m.status_msg.datePos);
+	msg.m.status_msg.eReason = Reason_WARNSTOPREASON_ESCAPED;
+
+	int ret = encode_and_send_message(&msg);
+	if (ret) {
+		LOG_ERR("Failed to encode escaped status msg: %d", ret);
+	}
+}
 /**
  * @brief Work function to periodic request sensor data etc.
  */
@@ -468,6 +491,11 @@ static bool event_handler(const struct event_header *eh)
 		struct update_zap_count *ev = cast_update_zap_count(eh);
 		current_state.zap_count = ev->count;
 		/* Need more info from AMC here???? */
+		int err = k_work_reschedule_for_queue(
+			&send_q, &process_zap_work, K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Error reschedule zap work: %d", err);
+		}
 		return false;
 	}
 	if (is_cellular_ack_event(eh)) {
@@ -484,10 +512,15 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-	/*if (is_animal_escaped(eh)) {
-		k_work_submit(&send_q, );
+
+	if (is_animal_escape_event(eh)) {
+		int err = k_work_reschedule_for_queue(
+			&send_q, &process_escape_work, K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Error reschedule escape work %d", err);
+		}
 		return false;
-	}*/
+	}
 	if (is_connection_state_event(eh)) {
 		struct connection_state_event *ev =
 			cast_connection_state_event(eh);
@@ -757,6 +790,8 @@ int messaging_module_init(void)
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
 	k_work_init_delayable(&log_work, log_data_periodic_fn);
 	k_work_init_delayable(&data_request_work, data_request_work_fn);
+	k_work_init_delayable(&process_escape_work, animal_escaped_work_fn);
+	k_work_init_delayable(&process_zap_work, zap_message_work_fn);
 
 	memset(&pasture_temp, 0, sizeof(pasture_t));
 	cached_fences_counter = 0;

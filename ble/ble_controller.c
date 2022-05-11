@@ -678,7 +678,7 @@ int ble_module_init()
 #if CONFIG_BOARD_NF_X25_NRF52840
 	err = bt_dfu_init();
 #endif
-
+#if CONFIG_BEACON_SCAN_ENABLE
 	/* Start scanning after beacons. Set flag to true */
 	if (!atomic_set(&atomic_bt_scan_active, true)) {
 		scan_start();
@@ -689,7 +689,7 @@ int ble_module_init()
 			      periodic_beacon_scanner_work_fn);
 	k_work_reschedule(&periodic_beacon_scanner_work,
 			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
-
+#endif
 	k_work_init_delayable(&disconnect_peer_work, disconnect_peer_work_fn);
 	return 0;
 }

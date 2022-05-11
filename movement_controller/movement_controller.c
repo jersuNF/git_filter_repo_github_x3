@@ -332,7 +332,11 @@ int update_acc_odr_and_trigger(acc_mode_t mode_hz)
 		break;
 	}
 	case MODE_12_5_HZ: {
+#if CONFIG_LIS2DH
+		hz = 10;
+#else
 		hz = 12;
+#endif
 		break;
 	}
 	default: {

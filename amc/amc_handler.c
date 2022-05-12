@@ -77,6 +77,8 @@ static struct k_work handle_states_work;
 static struct k_work handle_corrections_work;
 static struct k_work handle_new_fence_work;
 
+static uint32_t maybe_out_of_fence_timestamp = 0;
+
 static inline int update_pasture_from_stg(void)
 {
 	int err = stg_read_pasture_data(set_pasture_cache);
@@ -152,7 +154,6 @@ void handle_states_fn()
 	/* Get states, and recalculate if we have new state changes. */
 	Mode amc_mode = calc_mode();
 	FenceStatus fence_status = get_fence_status();
-	uint32_t maybe_out_of_fence_timestamp = 0;
 
 	if (cur_zone != WARN_ZONE || buzzer_state ||
 	    fence_status == FenceStatus_NotStarted ||
@@ -349,11 +350,6 @@ void handle_gnss_data_fn(struct k_work *item)
 		fifo_dist_elem_count = 0;
 		fifo_avg_dist_elem_count = 0;
 		zone_set(NO_ZONE);
-
-		/* Turn off sound. */
-		struct sound_event *snd_ev = new_sound_event();
-		snd_ev->type = SND_OFF;
-		EVENT_SUBMIT(snd_ev);
 	}
 
 cleanup:

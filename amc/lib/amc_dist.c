@@ -181,20 +181,20 @@ int16_t fnc_calc_dist(int16_t pos_x, int16_t pos_y, uint8_t *p_fence_index,
 				}
 			}
 
-			/* Further testing only if no overflow in earlier computing. */
+			/* Further testing only if sufficiently small distance 
+			 * to a fence vertex was found. 
+			 */
 			if (my_dist[fence_index] < INT16_MAX) {
 				bool is_in_closed_polyline =
 					fnc_pt_in_closed_polyline(cur_fence,
 								  pos_x, pos_y);
 
-				if (cur_fence->m.e_fence_type ==
-					    FenceDefinitionMessage_FenceType_Normal &&
-				    is_in_closed_polyline) {
-					my_dist[fence_index] =
-						-my_dist[fence_index];
-				} else if (cur_fence->m.e_fence_type ==
-						   FenceDefinitionMessage_FenceType_Inverted &&
-					   !is_in_closed_polyline) {
+				if ((cur_fence->m.e_fence_type ==
+					     FenceDefinitionMessage_FenceType_Normal &&
+				     is_in_closed_polyline) ||
+				    (cur_fence->m.e_fence_type ==
+					     FenceDefinitionMessage_FenceType_Inverted &&
+				     !is_in_closed_polyline)) {
 					my_dist[fence_index] =
 						-my_dist[fence_index];
 				}

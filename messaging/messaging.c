@@ -139,7 +139,7 @@ struct k_work_delayable process_escape_work;
 struct k_work_delayable process_zap_work;
 
 atomic_t poll_period_minutes = ATOMIC_INIT(5);
-atomic_t log_period_minutes = ATOMIC_INIT(30);
+atomic_t log_period_minutes = ATOMIC_INIT(5);
 
 K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE,
 		messaging_thread_fn, NULL, NULL, NULL,
@@ -166,6 +166,12 @@ static void build_log_message()
 	/* Fill in NofenceMessage struct */
 	NofenceMessage seq_1;
 	NofenceMessage seq_2;
+	/** @todo also include gprs_stat msg
+	NofenceMessage grps;
+	proto_InitHeader(&grps);
+	gprs.m.gprs_stat_msg.has_xGprsErrorDetails = true;
+	gprs.m.gprs_stat_msg.xGprsErrorDetails = ...
+	*/
 	proto_InitHeader(&seq_1); /* fill up message header. */
 	proto_InitHeader(&seq_2); /* fill up message header. */
 
@@ -200,7 +206,7 @@ static void build_log_message()
 	seq_2.m.seq_msg_2.xBatteryQc.usTemperature =
 		(uint16_t)atomic_get(&cached_temp);
 
-	LOG_INF("Max_voltage: %u, min voltage: %u, temp: %u",
+	LOG_DBG("Max_voltage: %u, min voltage: %u, temp: %u",
 		seq_2.m.seq_msg_2.xBatteryQc.usVbattMax,
 		seq_2.m.seq_msg_2.xBatteryQc.usVbattMin,
 		seq_2.m.seq_msg_2.xBatteryQc.usTemperature);
@@ -247,11 +253,11 @@ static void build_log_message()
 
 int read_log_data_cb(uint8_t *data, size_t len)
 {
-	LOG_INF("Send log message fetched from flash");
+	LOG_DBG("Send log message fetched from flash");
 	/* Fetch the lenght from the two first bytes */
-	uint16_t new_len = (uint16_t)((data[1] << 8) + (data[0] & 0x00ff));
+	uint16_t new_len = (uint16_t)((data[1] << 8) + (data[0] & 0x00ff) + 2);
 	uint8_t *new_data = k_malloc(new_len);
-	memcpy(new_data, &data[2], new_len);
+	memcpy(new_data, &data[0], new_len);
 	int err = send_binary_message(new_data, new_len);
 	if (err) {
 		LOG_ERR("Error sending binary message for log data %i", err);
@@ -537,10 +543,10 @@ static bool event_handler(const struct event_header *eh)
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
 		/* Update shaddow register */
 		if (ev->pwr_state == PWR_BATTERY) {
-			LOG_DBG("Battery event: %u mV", ev->battery_mv);
 			/* We want battery voltage in deci volt */
 			atomic_set(&cached_batt,
 				   (uint16_t)(ev->battery_mv / 10));
+			LOG_DBG("Battery event: %u mV", ev->battery_mv);
 		} else if (ev->pwr_state == PWR_CHARGING) {
 			LOG_DBG("Charge event: %u mA", ev->charging_ma);
 			atomic_set(&cached_chrg, ev->charging_ma);
@@ -839,6 +845,8 @@ void build_poll_request(NofenceMessage *poll_req)
 	/* Fw info. */
 	poll_req->m.poll_message_req.has_versionInfoHW = true;
 	poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version = 1;
+	poll_req->m.poll_message_req.versionInfoHW.ucPCB_HV_Version = 1;
+	poll_req->m.poll_message_req.versionInfoHW.usPCB_Product_Type = 1;
 	/* TODO: get gsm info from modem driver */
 	//	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
 	//	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;

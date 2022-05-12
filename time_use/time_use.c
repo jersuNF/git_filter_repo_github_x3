@@ -76,17 +76,20 @@ static bool event_handler(const struct event_header *eh)
 {
 	if (is_zone_change(eh)) {
 		struct zone_change *ev = cast_zone_change(eh);
+		LOG_INF("Current zone %i", ev->zone);
 		cur_zone = ev->zone;
 		return false;
 	}
 	if (is_update_collar_mode(eh)) {
 		struct update_collar_mode *ev = cast_update_collar_mode(eh);
 		cur_collar_mode = ev->collar_mode;
+		LOG_INF("Current mode %i", cur_collar_mode);
 		return false;
 	}
 	if (is_update_collar_status(eh)) {
 		struct update_collar_status *ev = cast_update_collar_status(eh);
 		cur_collar_status = ev->collar_status;
+		LOG_INF("Collar status update %i", cur_collar_status);
 		return false;
 	}
 	if (is_update_fence_status(eh)) {
@@ -262,6 +265,8 @@ void collect_stats(void)
 			uint16_t stepdiff = (uint16_t)(steps - steps_old);
 			histogram.animal_behave.has_usStepCounter = true;
 			histogram.animal_behave.usStepCounter += stepdiff;
+			LOG_INF("Step counter: %d",
+				histogram.animal_behave.usStepCounter);
 			steps_old = steps;
 
 			//*****************Histogram to predict Current profile of the collar********************

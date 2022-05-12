@@ -25,7 +25,6 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change);
 static bool zap_eval_doing;
 static uint32_t zap_timestamp;
 static uint32_t correction_pause_timestamp;
-static uint16_t last_warn_freq;
 
 /* Distance from fence where the last warning was started. */
 static int16_t last_warn_dist;
@@ -38,6 +37,57 @@ static uint8_t correction_started = 0;
 /* True from function correction start to correction_pause. (Sound is ON). */
 static uint8_t correction_warn_on = 0;
 
+/* Semaphore used to make correction wait for new freq calculation. */
+K_SEM_DEFINE(correction_freq_updated_sem, 0, 1);
+K_SEM_DEFINE(correction_warn_sem, 0, 1);
+void correction_freq_thread_fn(void);
+
+K_THREAD_DEFINE(correction_freq_thread, CONFIG_CORRECTION_THREAD_STACK_SIZE,
+		correction_freq_thread_fn, NULL, NULL, NULL,
+		CONFIG_CORRECTION_THREAD_PRIORITY, 0, 0);
+
+/* Atomic variables used by freq calculator thread
+ * and corrcetion consumer.
+ */
+
+static atomic_t last_warn_freq = ATOMIC_INIT(0);
+static atomic_t dist_change_atomic = ATOMIC_INIT(0);
+
+void correction_freq_thread_fn()
+{
+	while (true) {
+		/* Take sem forever, we only want to do this if correction
+		 * has started. 
+		 */
+		k_sem_take(&correction_warn_sem, K_FOREVER);
+
+		Mode mode = get_mode();
+		int16_t dist_change = atomic_get(&dist_change_atomic);
+		uint16_t freq = atomic_get(&last_warn_freq);
+		int16_t inc_tone_slope = 0, dec_tone_slope = 0;
+
+		if (mode == Mode_Teach) {
+			inc_tone_slope = TEACHMODE_DIST_INCR_SLOPE_LIM;
+			dec_tone_slope = TEACHMODE_DIST_DECR_SLOPE_LIM;
+		} else {
+			inc_tone_slope = DIST_INCR_SLOPE_LIM;
+			dec_tone_slope = DIST_DECR_SLOPE_LIM;
+		}
+
+		if (dist_change > inc_tone_slope) {
+			freq += WARN_TONE_SPEED_HZ;
+		}
+		if (dist_change < dec_tone_slope) {
+			freq -= WARN_TONE_SPEED_HZ;
+		}
+
+		atomic_set(&last_warn_freq, freq);
+		k_sem_give(&correction_warn_sem);
+		k_sem_give(&correction_freq_updated_sem);
+		k_sleep(K_MSEC(WARN_TONE_SPEED_MS));
+	}
+}
+
 static void correction_start(int16_t mean_dist)
 {
 	uint32_t delta_correction_pause =
@@ -45,7 +95,7 @@ static void correction_start(int16_t mean_dist)
 
 	if (delta_correction_pause > CORRECTION_PAUSE_MIN_TIME) {
 		if (!correction_started) {
-			last_warn_freq = WARN_FREQ_INIT;
+			atomic_set(&last_warn_freq, WARN_FREQ_INIT);
 			last_warn_dist = mean_dist;
 			/** @todo log_WriteCorrectionMessage(true); */
 
@@ -89,6 +139,7 @@ static void correction_start(int16_t mean_dist)
 		}
 		correction_started = 1;
 		correction_warn_on = 1;
+		k_sem_give(&correction_warn_sem);
 	}
 }
 
@@ -114,6 +165,7 @@ static void correction_end(void)
 		 * #endif
 		 */
 		correction_started = 0;
+		k_sem_take(&correction_warn_sem, K_SECONDS(1));
 
 		LOG_INF("Ended correction.");
 	}
@@ -190,7 +242,7 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 
 	if (dist_add > 0) {
 		/* Makes sure that sound starts over. */
-		last_warn_freq = WARN_FREQ_INIT;
+		atomic_set(&last_warn_freq, WARN_FREQ_INIT);
 
 		/* If Distance is set, then restart further warning 
 		 * mentioned distance from this distance.
@@ -202,6 +254,7 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 	}
 	correction_pause_timestamp = k_uptime_get_32();
 	correction_warn_on = 0;
+	k_sem_take(&correction_warn_sem, K_SECONDS(1));
 
 	if (reason > Reason_WARNSTOPREASON) {
 		correction_end();
@@ -211,12 +264,13 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 {
 	/* Variables used in the correction setup, calculation and end. */
-	int16_t inc_tone_slope = 0, dec_tone_slope = 0;
-	static uint32_t timestamp;
-
 	if (zap_eval_doing) {
 		uint32_t delta_zap_eval = k_uptime_get_32() - zap_timestamp;
 
+		/** @note the zap eval time is set to 200ms, but this function
+		 *  is only called 1000ms/4hz = 250ms due to every GNSS
+		 *  measurement.
+		 */
 		if (delta_zap_eval >= ZAP_EVALUATION_TIME) {
 			/** @todo Notify server and log, i.e submit event to 
 			 *  the messaging module. Old code ref:
@@ -240,50 +294,34 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 		return;
 	} else if (correction_started) {
 		if (correction_warn_on) {
-			if (last_warn_freq < WARN_FREQ_INIT) {
-				last_warn_freq = WARN_FREQ_INIT;
+			uint16_t freq = atomic_get(&last_warn_freq);
+			if (freq == 0) {
+				/** @todo last_warn_freq not yet set from
+				 * correction_freq_thread??? Do something??
+				 */
 			}
 
-			uint32_t delta_timestamp =
-				k_uptime_get_32() - timestamp;
-			if (delta_timestamp > WARN_TONE_SPEED_MS) {
-				timestamp = k_uptime_get_32();
-
-				if (amc_mode == Mode_Teach) {
-					inc_tone_slope =
-						TEACHMODE_DIST_INCR_SLOPE_LIM;
-					dec_tone_slope =
-						TEACHMODE_DIST_DECR_SLOPE_LIM;
-				} else {
-					inc_tone_slope = DIST_INCR_SLOPE_LIM;
-					dec_tone_slope = DIST_DECR_SLOPE_LIM;
-				}
-
-				if (dist_change > inc_tone_slope) {
-					last_warn_freq += WARN_TONE_SPEED_HZ;
-				}
-				if (dist_change < dec_tone_slope) {
-					last_warn_freq -= WARN_TONE_SPEED_HZ;
-				}
+			if (freq < WARN_FREQ_INIT) {
+				freq = WARN_FREQ_INIT;
 			}
 
 			bool try_zap = false;
+
 			/* Clamp max frequency so we know sound controller
 			 * plays the exact MAX frequency in order to
 			 * also publish an event of MAX.
 			 */
-			if (last_warn_freq >= WARN_FREQ_MAX) {
-				last_warn_freq = WARN_FREQ_MAX;
+			if (freq >= WARN_FREQ_MAX) {
+				freq = WARN_FREQ_MAX;
 				try_zap = true;
 			}
 
 			/* We check if we're within valid frequency ranges. */
-			if (last_warn_freq >= WARN_FREQ_INIT &&
-			    last_warn_freq <= WARN_FREQ_MAX) {
+			if (freq >= WARN_FREQ_INIT && freq <= WARN_FREQ_MAX) {
 				/** Update buzzer frequency event. */
 				struct sound_set_warn_freq_event *freq_ev =
 					new_sound_set_warn_freq_event();
-				freq_ev->freq = last_warn_freq;
+				freq_ev->freq = freq;
 				EVENT_SUBMIT(freq_ev);
 
 				/** @note It will zap immediately once we 
@@ -338,6 +376,15 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 				}
 			}
 		}
+	}
+	/* Update distance atomics. Take this semaphore twice to ensure that
+	 * we have calculated the correction_freq once
+	 * before we process the new distances. (Only if correction started)
+	 */
+	atomic_set(&dist_change_atomic, dist_change);
+	if (get_correction_status() > 0) {
+		k_sem_take(&correction_freq_updated_sem, K_SECONDS(1));
+		k_sem_take(&correction_freq_updated_sem, K_SECONDS(1));
 	}
 
 	/* Start main correction procedure. */

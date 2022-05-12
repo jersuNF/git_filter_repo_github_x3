@@ -280,6 +280,7 @@ int check_ip(void){
 	char* collar_ip = NULL;
 	uint8_t timeout_counter = 0;
 	while(timeout_counter++ <= 40){
+		k_sleep(K_MSEC(50));
 		int ret = get_ip(&collar_ip);
 		if (ret != 0){
 			LOG_ERR("Failed to get ip from sara r4 driver!");
@@ -292,7 +293,7 @@ int check_ip(void){
 				return 0;
 			}
 		}
-		k_sleep(K_MSEC(500));
+
 	}
 	LOG_ERR("Failed to acquire ip!");
 	return -1;

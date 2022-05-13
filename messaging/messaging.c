@@ -382,9 +382,10 @@ static bool event_handler(const struct event_header *eh)
 		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
 						      K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Error starting modem poll worker in response"
-				" to nudge on listening socket. Error: %d!",
-				err);
+			char *e_msg =
+				"Error starting modem poll worker in response to nudge on listening socket.";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 		return false;
 	}
@@ -458,7 +459,9 @@ static inline void process_ble_ctrl_event(void)
 
 	int err = k_msgq_get(&ble_ctrl_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting ble_ctrl_event: %d", err);
+		char *e_msg = "Error getting ble_ctrl_event";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
 }
@@ -469,7 +472,9 @@ static inline void process_ble_data_event(void)
 
 	int err = k_msgq_get(&ble_data_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting ble_data_event: %d", err);
+		char *e_msg = "Error getting ble_data_event";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
 }
@@ -480,7 +485,9 @@ static inline void process_ble_cmd_event(void)
 
 	int err = k_msgq_get(&ble_cmd_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting ble_cmd_event: %d\n", err);
+		char *e_msg = "Error getting ble_cmd_event";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
 
@@ -522,7 +529,9 @@ static void process_lte_proto_event(void)
 
 	int err = k_msgq_get(&lte_proto_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting lte_proto_event: %d", err);
+		char *e_msg = "Error getting lte_proto_event";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
 
@@ -541,7 +550,9 @@ static void process_lte_proto_event(void)
 	 */
 
 	if (err) {
-		LOG_ERR("Error decoding protobuf message. %i", err);
+		char *e_msg = "Error decoding protobuf message";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
 	struct messaging_ack_event *ack = new_messaging_ack_event();
@@ -594,8 +605,10 @@ int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module.");
 	int err = eep_read_serial(&serial_id);
-	if (err != 0) { //TODO: handle in a better way.
-		LOG_ERR("Failed to read serial number from eeprom!");
+	if (err != 0) {
+		char *e_msg = "Failed to read serial number from eeprom!";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return err;
 	}
 
@@ -678,7 +691,9 @@ void build_poll_request(NofenceMessage *poll_req)
 			poll_req->m.poll_message_req.rgubcBleKey.bytes,
 			EEP_BLE_SEC_KEY_LEN);
 		if (err) {
-			LOG_ERR("Failed to read ble_sec_key, error: %d", err);
+			char *e_msg = "Failed to read ble_sec_key";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 	}
 	poll_req->m.poll_message_req.usGnssOnFixAgeSec = 123;
@@ -718,8 +733,9 @@ int8_t request_fframe(uint32_t version, uint8_t frame)
 	fence_req.m.fence_definition_req.ucFrameNumber = frame;
 	int ret = encode_and_send_message(&fence_req);
 	if (ret) {
-		LOG_ERR("Failed to send request for fence frame %d, %d", frame,
-			ret);
+		char *e_msg = "Failed to send request for fence frame";
+		LOG_ERR("%s %d (%d)", log_strdup(e_msg), frame, ret);
+		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return -1;
 	}
 	return 0;
@@ -766,7 +782,9 @@ int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 	ano_req.m.ubx_ano_req.usStartAno = ano_start;
 	int ret = encode_and_send_message(&ano_req);
 	if (ret) {
-		LOG_ERR("Failed to send request for ano %d", ano_start);
+		char *e_msg = "Failed to send request for ano";
+		LOG_ERR("%s %d (%d)", log_strdup(e_msg), ano_start, ret);
+		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return -1;
 	}
 	return 0;
@@ -832,7 +850,9 @@ int send_binary_message(uint8_t *data, size_t len)
 	EVENT_SUBMIT(ev);
 	int ret = k_sem_take(&connection_ready, K_MINUTES(2));
 	if (ret != 0) {
-		LOG_ERR("Connection not ready, can't send message now!");
+		char *e_msg = "Connection not ready, can't send message now!";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
+		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return -ETIMEDOUT;
 	}
 	/* We can only send 1 message at a time, use mutex. */
@@ -875,7 +895,9 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 	int ret = collar_protocol_encode(msg_proto, &encoded_msg[2],
 					 NofenceMessage_size, &encoded_size);
 	if (ret) {
-		LOG_ERR("Error encoding nofence message. %i", ret);
+		char *e_msg = "Error encoding nofence message";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
+		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return ret;
 	}
 	return send_binary_message(encoded_msg, encoded_size + 2);
@@ -917,7 +939,9 @@ void process_poll_response(NofenceMessage *proto)
 		/* Update date_time library which storage uses for ANO data. */
 		int err = date_time_set(tm_time);
 		if (err) {
-			LOG_ERR("Error updating time from server %i", err);
+			char *e_msg = "Error updating time from server";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		} else {
 			/** @note This prints UTC. */
 			LOG_INF("Set timestamp to date_time library from modem: %s",
@@ -960,7 +984,11 @@ void process_poll_response(NofenceMessage *proto)
 			ret = eep_write_ble_sec_key(pResp->rgubcBleKey.bytes,
 						    pResp->rgubcBleKey.size);
 			if (ret < 0) {
-				LOG_ERR("Failed to write ble sec key to EEPROM");
+				char *e_msg =
+					"Failed to write ble sec key to EEPROM";
+				LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
+				nf_app_error(ERR_MESSAGING, ret, e_msg,
+					     strlen(e_msg));
 			}
 		}
 	}
@@ -1042,7 +1070,11 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	if (fenceResp->which_m == FenceDefinitionResponse_xHeader_tag) {
 		if (frame != 0) {
 			/* We always expect the header to be the first frame. */
-			LOG_ERR("Unexpected frame count for pasture header.");
+			char *e_msg =
+				"Unexpected frame count for pasture header.";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), -EIO);
+			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
+
 			return 0;
 		}
 
@@ -1092,16 +1124,23 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 			LOG_ERR("Cached %i frames, but expected %i.",
 				cached_fences_counter,
 				pasture_temp.m.ul_total_fences);
+			char *e_msg = "Fence frames out of sync";
+			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
+
 			return 0;
 		}
 
 		if (pasture_temp.m.ul_total_fences == 0) {
-			LOG_ERR("Error, pasture cached is empty.");
+			char *e_msg = "Error, pasture cached is empty.";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), -EIO);
+			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
 			return 0;
 		}
 
 		if (!validate_pasture()) {
-			LOG_ERR("CRC was not correct for new pasture.");
+			char *e_msg = "CRC was not correct for new pasture.";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), -EIO);
+			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
 			return 0;
 		}
 
@@ -1136,8 +1175,9 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 				     anoResp->rgucBuf.size);
 
 	if (err) {
-		LOG_ERR("Error writing ano frame to storage controller %i",
-			err);
+		char *e_msg = "Error writing ano frame to storage controller";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	}
 
 	if (age > time_from_server + SECONDS_IN_THREE_DAYS) {

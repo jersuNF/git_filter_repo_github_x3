@@ -60,12 +60,17 @@ static inline int update_pasture_cache(uint8_t *data, size_t len)
 	int err = k_sem_take(&fence_data_sem,
 			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
 	if (err) {
-		LOG_ERR("Error semaphore, retry request pasture here?");
+		char *e_msg = "Error semaphore, retry request pasture here?";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
 		return err;
 	}
 
 	if (len != sizeof(pasture_cache)) {
-		LOG_ERR("Error reading pasture from flash, length not expected.");
+		char *e_msg =
+			"Error reading pasture from flash, length not expected.";
+		LOG_ERR("%s", log_strdup(e_msg));
+		nf_app_error(ERR_AMC, -EINVAL, e_msg, strlen(e_msg));
 		return -EINVAL;
 	}
 
@@ -106,13 +111,19 @@ void process_new_fence_fn(struct k_work *item)
 	err = k_sem_take(&fence_data_sem,
 			 K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
 	if (err) {
-		LOG_ERR("Error taking pasture semaphore for version check.");
+		char *e_msg =
+			"Error taking pasture semaphore for version check.";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
 		return;
 	}
 
 	if (err) {
 		pasture_cache.m.ul_fence_def_version = 0;
-		LOG_ERR("Error caching new pasture from storage controller.");
+		char *e_msg =
+			"Error caching new pasture from storage controller.";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
 		return;
 	}
 
@@ -140,7 +151,10 @@ void calculate_work_fn(struct k_work *item)
 	int err = k_sem_take(&fence_data_sem,
 			     K_SECONDS(REQUEST_DATA_SEM_TIMEOUT_SEC));
 	if (err) {
-		LOG_ERR("Error waiting for fence data semaphore to release.");
+		char *e_msg =
+			"Error waiting for fence data semaphore to release.";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
 		return;
 	}
 

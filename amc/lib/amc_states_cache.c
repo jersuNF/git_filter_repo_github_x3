@@ -349,8 +349,7 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 	FenceStatus new_fence_status = current_fence_status;
 
 	uint32_t maybe_out_of_fence_delta =
-		((uint32_t)(k_uptime_get_32() / MSEC_PER_SEC)) -
-		maybe_out_of_fence;
+		((k_uptime_get_32() - maybe_out_of_fence) / MSEC_PER_SEC);
 
 	switch (current_fence_status) {
 	case FenceStatus_FenceStatus_UNKNOWN:

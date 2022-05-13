@@ -54,6 +54,9 @@
 static pasture_t pasture_temp;
 static uint8_t cached_fences_counter = 0;
 
+/** @todo This should be fetched from EEPROM */
+static gnss_mode_t cached_gnss_mode = GNSSMODE_NOMODE;
+
 uint32_t time_from_server;
 atomic_t cached_batt = ATOMIC_INIT(0);
 atomic_t cached_chrg = ATOMIC_INIT(0);
@@ -347,8 +350,13 @@ static void animal_escaped_work_fn()
 	msg.which_m = (uint16_t)NofenceMessage_status_msg_tag;
 	msg.m.status_msg.has_datePos = true;
 	proto_get_last_known_date_pos(&cached_fix, &msg.m.status_msg.datePos);
+	msg.m.status_msg.eMode = current_state.collar_mode;
 	msg.m.status_msg.eReason = Reason_WARNSTOPREASON_ESCAPED;
-
+	msg.m.status_msg.eCollarStatus = current_state.collar_status;
+	msg.m.status_msg.eFenceStatus = current_state.fence_status;
+	msg.m.status_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
+	msg.m.status_msg.has_ucGpsMode = true;
+	msg.m.status_msg.ucGpsMode = (uint8_t)cached_gnss_mode;
 	int ret = encode_and_send_message(&msg);
 	if (ret) {
 		LOG_ERR("Failed to encode escaped status msg: %d", ret);
@@ -429,6 +437,8 @@ static bool event_handler(const struct event_header *eh)
 		}
 
 		sec_since_gnss_time = (int32_t)(k_uptime_get_32() / 1000);
+
+		cached_gnss_mode = (gnss_mode_t)ev->gnss_data.lastfix.mode;
 		return false;
 	}
 

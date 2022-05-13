@@ -363,6 +363,7 @@ int gnss_timeout_reset_fifo()
 {
 	fifo_dist_elem_count = 0;
 	fifo_avg_dist_elem_count = 0;
+	return 0;
 }
 
 int amc_module_init(void)

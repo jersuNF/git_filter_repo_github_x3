@@ -140,6 +140,7 @@ struct k_work_delayable log_work;
 struct k_work_delayable data_request_work;
 struct k_work_delayable process_escape_work;
 struct k_work_delayable process_zap_work;
+struct k_work_delayable process_warning_work;
 
 atomic_t poll_period_minutes = ATOMIC_INIT(5);
 atomic_t log_period_minutes = ATOMIC_INIT(30);
@@ -362,6 +363,21 @@ static void animal_escaped_work_fn()
 		LOG_ERR("Failed to encode escaped status msg: %d", ret);
 	}
 }
+
+static void warning_work_fn()
+{
+	NofenceMessage msg;
+	proto_InitHeader(&msg); /* fill up message header. */
+	msg.which_m = (uint16_t)NofenceMessage_client_warning_message_tag;
+	msg.m.client_warning_message.has_sFenceDist = false;
+	proto_get_last_known_date_pos(&cached_fix,
+				      &msg.m.client_zap_message.xDatePos);
+
+	int ret = encode_and_send_message(&msg);
+	if (ret) {
+		LOG_ERR("Failed to encode warning msg: %d", ret);
+	}
+}
 /**
  * @brief Work function to periodic request sensor data etc.
  */
@@ -537,6 +553,7 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+
 	if (is_connection_state_event(eh)) {
 		struct connection_state_event *ev =
 			cast_connection_state_event(eh);
@@ -549,6 +566,15 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 
+	if (is_animal_warning_event(eh)) {
+		int err = k_work_reschedule_for_queue(
+			&send_q, &process_warning_work, K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Error reschedule warning work: %d", err);
+		}
+
+		return false;
+	}
 	if (is_pwr_status_event(eh)) {
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
 		/* Update shaddow register */
@@ -808,6 +834,7 @@ int messaging_module_init(void)
 	k_work_init_delayable(&data_request_work, data_request_work_fn);
 	k_work_init_delayable(&process_escape_work, animal_escaped_work_fn);
 	k_work_init_delayable(&process_zap_work, zap_message_work_fn);
+	k_work_init_delayable(&process_warning_work, warning_work_fn);
 
 	memset(&pasture_temp, 0, sizeof(pasture_t));
 	cached_fences_counter = 0;

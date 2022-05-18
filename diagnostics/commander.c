@@ -12,6 +12,8 @@
 #include "ep_event.h"
 #include "event_manager.h"
 
+#include "log_backend_diag.h"
+
 #include <stdbool.h>
 
 static struct commander_action commander_actions;
@@ -80,6 +82,7 @@ static int commander_send_data(enum diagnostics_interface interface,
 #define COMMANDER_CMD_WARN_MAX		0x20
 #define COMMANDER_CMD_RELEASE_EP	0x50
 #define COMMANDER_CMD_SETTINGS		0x70
+#define COMMANDER_CMD_LOGGING		0x99
 
 uint32_t commander_handle(enum diagnostics_interface interface, 
 			  uint8_t* data, uint32_t size)
@@ -109,7 +112,16 @@ uint32_t commander_handle(enum diagnostics_interface interface,
 		bool ack = false;
 		uint8_t cmd = 0;
 		if (cobs_buffer[0] == 'N') {
-			if (cobs_buffer[1] == COMMANDER_CMD_WARN_MAX) {
+			if (cobs_buffer[1] == COMMANDER_CMD_LOGGING) {
+				if (cobs_buffer[2] == 1) {
+					log_backend_diag_enable(interface);
+				} else {
+					log_backend_diag_disable();
+				}
+
+				cmd = COMMANDER_CMD_LOGGING;
+				ack = true;
+			} else if (cobs_buffer[1] == COMMANDER_CMD_WARN_MAX) {
 				/* Simulate the highest tone event */
 				struct sound_event *sound_event_warn = new_sound_event();
 				sound_event_warn->type = SND_WARN;

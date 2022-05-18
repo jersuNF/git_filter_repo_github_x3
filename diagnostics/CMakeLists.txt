@@ -5,10 +5,11 @@ zephyr_include_directories(
     ./../../events/diagnostics/)
 
 target_sources(app PRIVATE 
-diagnostics.c
-parser.c
-passthrough.c
-./../../events/diagnostics/diagnostics_events.c
+    diagnostics.c
+    parser.c
+    passthrough.c
+    ./../../events/diagnostics/diagnostics_events.c
+    log_backend_diag.c
 )
 
 if (CONFIG_DIAGNOSTICS_TEXT_PARSER)

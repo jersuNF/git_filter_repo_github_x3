@@ -93,14 +93,12 @@ static int watchdog_feed_enable(void)
 static int watchdog_enable(void)
 {
 	int err = -ENXIO;
-#if DT_NODE_HAS_STATUS(DT_LABEL(DT_NODELABEL(wdt)), okay)
 	wdt_data.wdt_drv = device_get_binding(DT_LABEL(DT_NODELABEL(wdt)));
 
 	if (wdt_data.wdt_drv == NULL) {
 		LOG_ERR("Cannot bind watchdog driver, %d", err);
 		return err;
 	}
-#endif
 
 	err = watchdog_timeout_install();
 	if (err) {

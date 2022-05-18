@@ -90,10 +90,11 @@ void receive_tcp(struct data *sock_data)
 			} else if (received == 0) {
 				socket_idle_count += SOCKET_POLL_INTERVAL;
 				if (socket_idle_count > SOCK_RECV_TIMEOUT){
-					char *e_msg = "Socket receive timed out!";
-					nf_app_error(ERR_MESSAGING, -ETIMEDOUT,
-						     e_msg, strlen
-						(e_msg));
+					LOG_WRN("Socket receive timed out!");
+//					char *e_msg = "Socket receive timed out!";
+//					nf_app_error(ERR_MESSAGING, -ETIMEDOUT,
+//						     e_msg, strlen
+//						(e_msg));
 					stop_tcp();
 					connected = false;
 					socket_idle_count = 0;

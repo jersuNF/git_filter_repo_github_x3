@@ -237,6 +237,7 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 	int16_t dist_add = 0;
 
 	atomic_set(&can_update_buzzer, false);
+	k_work_schedule(&update_buzzer_work, K_NO_WAIT);
 
 	/* Everytime we pause, we set the previous slopes to 0. */
 	prev_inc_tone_slope = 0;

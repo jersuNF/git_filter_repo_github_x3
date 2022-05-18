@@ -16,6 +16,5 @@ int amc_module_init(void);
 
 /* extern to make available for correction since event handler is in amc_handler */
 extern atomic_t sound_max_atomic;
-extern atomic_t buzzer_state;
 
 #endif /* _AMC_HANDLER_H_ */

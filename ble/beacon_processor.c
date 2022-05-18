@@ -8,13 +8,14 @@
 #include <float.h>
 #include <math.h>
 #include <sys/ring_buffer.h>
+
+#define MODULE beacon_processor
 #include <logging/log.h>
 
 #include "beacon_processor.h"
 #include "ble_beacon_event.h"
 
-LOG_MODULE_REGISTER(beacon_processor);
-
+LOG_MODULE_REGISTER(MODULE, CONFIG_BEACON_PROCESSOR_LOG_LEVEL);
 /** @brief : Contains the whole structure for the tracked beacons **/
 static struct beacon_list beacons;
 
@@ -266,7 +267,7 @@ static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist,
 static double calculate_accuracy(int8_t tx_power, int8_t rssi)
 {
 	if (rssi == 0) {
-		LOG_ERR("Cannot detirmine rssi value");
+		LOG_WRN("Cannot detirmine RSSI value");
 		return DBL_MAX;
 	}
 	double ratio = rssi / (double)tx_power;

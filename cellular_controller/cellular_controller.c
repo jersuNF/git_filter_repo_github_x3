@@ -8,7 +8,7 @@
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define MY_PRIORITY CONFIG_RECV_THREAD_PRIORITY
 #define SOCKET_POLL_INTERVAL 0.25
-#define SOCK_RECV_TIMEOUT 15
+#define SOCK_RECV_TIMEOUT 45
 #define MODULE cellular_controller
 #define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_SEC
 
@@ -22,16 +22,20 @@ static int server_port;
 static char server_ip[15];
 
 /* Connection keep-alive thread structures */
-K_KERNEL_STACK_DEFINE(keep_alive_stack,
-		      CONFIG_CELLULAR_KEEP_ALIVE_STACK_SIZE);
+K_KERNEL_STACK_DEFINE(keep_alive_stack, CONFIG_CELLULAR_KEEP_ALIVE_STACK_SIZE);
 struct k_thread keep_alive_thread;
 static struct k_sem connection_state_sem;
 
 int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
+int socket_listen(struct data *);
 int socket_receive(struct data *, char **);
+void listen_sock_poll(void);
 int8_t lte_init(void);
 bool lte_is_ready(void);
-
+K_SEM_DEFINE(listen_sem, 0, 1); /* this semaphore will be given by the modem
+ * driver when receiving the UUSOLI urc code. Socket 0 is the listening
+ * socket by design, however the 'socket' number returned in the UUSOLI =
+ * number of currently opened sockets + 1 */
 static bool modem_is_ready = false;
 
 APP_DMEM struct configs conf = {
@@ -53,6 +57,13 @@ void submit_error(int8_t cause, int8_t err_code)
 void receive_tcp(struct data *);
 K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK,
 		receive_tcp, &conf.ipv4, NULL, NULL,
+		MY_PRIORITY, 0, 0);
+
+extern struct k_sem listen_sem;
+
+void listen_sock_receive_tcp(void);
+K_THREAD_DEFINE(listen_recv_tid, RCV_THREAD_STACK,
+		listen_sock_poll, NULL, NULL, NULL,
 		MY_PRIORITY, 0, 0);
 
 static APP_BMEM bool connected;
@@ -114,6 +125,18 @@ void receive_tcp(struct data *sock_data)
 	}
 }
 
+void listen_sock_poll(void)
+{
+	while(1){
+		if (k_sem_take(&listen_sem, K_FOREVER)==0) {
+			LOG_WRN("Waking up!");
+			struct send_poll_request_now* wake_up =
+				new_send_poll_request_now();
+			EVENT_SUBMIT(wake_up);
+		}
+	}
+}
+
 int start_tcp(void)
 {
 	int ret = check_ip();
@@ -134,6 +157,26 @@ int start_tcp(void)
 				     sizeof(addr4));
 		if (ret < 0) {
 			submit_error(SOCKET_CONNECT, ret);
+			return ret;
+		}
+	}
+	return ret;
+}
+
+int listen_tcp(void)
+{
+	int ret = check_ip();
+	if (ret != 0){
+		LOG_ERR("Failed to get ip "
+			"address!");
+		/*TODO: notify error handler*/
+		return ret;
+	}
+	if (IS_ENABLED(CONFIG_NET_IPV4)) {
+		ret = socket_listen(&conf.ipv4);
+		if (ret < 0) {
+			/*TODO: notify error handler*/
+			LOG_DBG("Failed to start listening socket!");
 			return ret;
 		}
 	}
@@ -188,7 +231,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			cast_messaging_proto_out_event(eh);
 		uint8_t *pCharMsgOut = event->buf;
 		size_t MsgOutLen = event->len;
-		
+
 		int8_t err;
 		
 		/* make a local copy of the message to send.*/
@@ -246,7 +289,7 @@ int8_t cache_server_address(void)
 	}
 }
 
-static int cellular_controller_connect(void* dev)
+static int cellular_controller_connect(void *dev)
 {
 	int ret = lte_init();
 	if (ret != 0) {
@@ -260,19 +303,18 @@ static int cellular_controller_connect(void* dev)
 	ret = cache_server_address();
 	if (ret != 0) { //172.31.36.11:4321
 		//172.31.33.243:9876
-		strcpy(server_ip,"172.31.36.11");
+		strcpy(server_ip, "172.31.36.11");
 		server_port = 4321;
 		LOG_INF("Default server ip address will be "
 			"used.");
 	}
-
 	ret = 0;
 
 exit:
 	return ret;
 }
 
-static void cellular_controller_keep_alive(void* dev)
+static void cellular_controller_keep_alive(void *dev)
 {
 	while (true) {
 		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
@@ -282,15 +324,18 @@ static void cellular_controller_keep_alive(void* dev)
 				if (ret == 0) {
 					ret = cellular_controller_connect(dev);
 					if (ret == 0) {
+						listen_tcp();
 						modem_is_ready = true;
 					}
 				}
 			}
 			if (cellular_controller_is_ready()) {
+				/*TODO: check actual socket connection
+				 * statusto determine the value of connected.*/
 				if(!connected){//check_ip takes place in start_tcp()
 					// in this case.
 					int  ret = start_tcp();
-					if (ret == 0){
+					if (ret >= 0){
 						connected = true;
 						announce_connection_state(true);
 					}else {
@@ -345,8 +390,8 @@ int8_t cellular_controller_init(void)
 	k_sem_init(&connection_state_sem, 0, 1);
 	k_thread_create(&keep_alive_thread, keep_alive_stack,
 			K_KERNEL_STACK_SIZEOF(keep_alive_stack),
-			(k_thread_entry_t) cellular_controller_keep_alive,
-			(void*)gsm_dev, NULL, NULL, 
+			(k_thread_entry_t)cellular_controller_keep_alive,
+			(void *)gsm_dev, NULL, NULL,
 			K_PRIO_COOP(CONFIG_CELLULAR_KEEP_ALIVE_THREAD_PRIORITY),
 			0, K_NO_WAIT);
 

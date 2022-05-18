@@ -17,6 +17,7 @@
 #include "error_event.h"
 #include "battery.h"
 #include "ble_ctrl_event.h"
+#include "watchdog_event.h"
 #include "messaging_module_events.h"
 
 #if CONFIG_ADC_NRFX_SAADC
@@ -52,6 +53,7 @@ static const struct battery_level_point levels[] = {
 
 /* Define the workers for battery and charger */
 static struct k_work_delayable battery_poll_work;
+static struct k_work_delayable power_reboot;
 #if CONFIG_ADC_NRFX_SAADC
 static struct k_work_delayable charging_poll_work;
 #endif
@@ -59,6 +61,10 @@ static struct k_work_delayable charging_poll_work;
 /** @brief Periodic battery voltage work function */
 static void battery_poll_work_fn()
 {
+#if defined(CONFIG_WATCHDOG_ENABLE)
+	/* Report alive */
+	watchdog_report_module_alive(WDG_PWR_MODULE);
+#endif
 	/* Periodic log and update ble adv array */
 	int batt_voltage = log_and_fetch_battery_voltage();
 	if (batt_voltage < 0) {
@@ -149,6 +155,17 @@ static void charging_poll_work_fn()
 }
 #endif
 
+static void reboot_work_fn()
+{
+#ifdef CONFIG_BOARD_NF_X25_NRF52840
+	/* Add a check that we are using NRF board
+	* since they are the ones supported by nordic's <power/reboot.h>
+	*/
+	/* Add logic to shutdown modules if necessary. */
+	sys_reboot(SYS_REBOOT_COLD);
+#endif
+}
+
 int pwr_module_init(void)
 {
 	int err;
@@ -203,6 +220,10 @@ int pwr_module_init(void)
 	k_work_reschedule(&charging_poll_work,
 			  K_SECONDS(CONFIG_CHARGING_POLLER_WORK_SEC));
 #endif
+
+	/* Initialize the reboot function */
+	k_work_init_delayable(&power_reboot, reboot_work_fn);
+
 	return 0;
 }
 
@@ -226,3 +247,28 @@ int log_and_fetch_battery_voltage(void)
 
 	return batt_mV;
 }
+
+/**
+ * @brief Event handler function
+ * @param[in] eh Pointer to event handler struct
+ * @return true to consume the event (event is not propagated to further
+ * listners), false otherwise
+ */
+static bool event_handler(const struct event_header *eh)
+{
+	/* Received reboot event */
+	if (is_pwr_reboot_event(eh)) {
+		LOG_INF("Reboot event received!");
+		k_work_reschedule(&power_reboot,
+				  K_SECONDS(CONFIG_SHUTDOWN_TIMER_SEC));
+		return false;
+	}
+
+	/* If event is unhandled, unsubscribe. */
+	__ASSERT_NO_MSG(false);
+
+	return false;
+}
+
+EVENT_LISTENER(MODULE, event_handler);
+EVENT_SUBSCRIBE_FINAL(MODULE, pwr_reboot_event);

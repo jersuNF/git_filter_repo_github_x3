@@ -162,8 +162,7 @@ void handle_states_fn()
 		 *        1.6 months, (1193) hours before it wraps around. Issue?
 		 *        We have k_uptime_get_32 other places as well.
 		 */
-		maybe_out_of_fence_timestamp =
-			(uint32_t)(k_uptime_get_32() / MSEC_PER_SEC);
+		maybe_out_of_fence_timestamp = k_uptime_get_32();
 	}
 
 	FenceStatus new_fence_status =
@@ -360,6 +359,13 @@ cleanup:
 	k_sem_give(&fence_data_sem);
 }
 
+int gnss_timeout_reset_fifo()
+{
+	fifo_dist_elem_count = 0;
+	fifo_avg_dist_elem_count = 0;
+	return 0;
+}
+
 int amc_module_init(void)
 {
 	/* Init work item and start and init calculation 
@@ -373,6 +379,11 @@ int amc_module_init(void)
 	k_work_init(&handle_new_fence_work, handle_new_fence_fn);
 	k_work_init(&handle_corrections_work, handle_corrections_fn);
 	k_work_init(&handle_states_work, handle_states_fn);
+
+	int err = gnss_init(gnss_timeout_reset_fifo);
+	if (err) {
+		return err;
+	}
 
 	/* Checks and inits the mode we're in as well as caching variables. */
 	init_states_and_variables();

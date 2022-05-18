@@ -55,7 +55,9 @@ static atomic_t atomic_bt_ready;
 static atomic_t atomic_bt_adv_active;
 static atomic_t atomic_bt_scan_active;
 static int64_t beacon_scanner_timer;
+#if CONFIG_BEACON_SCAN_ENABLE
 static struct k_work_delayable periodic_beacon_scanner_work;
+#endif
 static struct k_work_delayable disconnect_peer_work;
 
 static char bt_device_name[DEVICE_NAME_LEN + 1] = CONFIG_BT_DEVICE_NAME;
@@ -162,6 +164,7 @@ static struct bt_conn_cb conn_callbacks = {
 	.disconnected = disconnected,
 };
 
+#if CONFIG_BEACON_SCAN_ENABLE
 /**
  * @brief Periodic beacon scanner work function
  */
@@ -181,7 +184,7 @@ static void periodic_beacon_scanner_work_fn()
 	k_work_reschedule(&periodic_beacon_scanner_work,
 			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
 }
-
+#endif
 /**
  * @brief Work function to send data from rx ring buffer with bt nus
  * @param[in] work work item
@@ -678,7 +681,7 @@ int ble_module_init()
 #if CONFIG_BOARD_NF_X25_NRF52840
 	err = bt_dfu_init();
 #endif
-
+#if CONFIG_BEACON_SCAN_ENABLE
 	/* Start scanning after beacons. Set flag to true */
 	if (!atomic_set(&atomic_bt_scan_active, true)) {
 		scan_start();
@@ -689,7 +692,7 @@ int ble_module_init()
 			      periodic_beacon_scanner_work_fn);
 	k_work_reschedule(&periodic_beacon_scanner_work,
 			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
-
+#endif
 	k_work_init_delayable(&disconnect_peer_work, disconnect_peer_work_fn);
 	return 0;
 }

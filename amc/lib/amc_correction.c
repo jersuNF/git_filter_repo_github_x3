@@ -191,6 +191,12 @@ static void correction_start(int16_t mean_dist)
 		if (!correction_warn_on) {
 			start_buzzer_updates();
 
+			/* Set the timesince, because otherwise 
+			 * the freq update is waaay to big since it is
+			 * default to 0.
+			 */
+			time_since_gnss_correction = k_uptime_get();
+
 			/** @todo log_WriteCorrectionMessage(true); */
 			increment_warn_count();
 			LOG_INF("Warn zone counter++ and told buzzer to enter WARN");

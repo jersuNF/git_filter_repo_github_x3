@@ -50,17 +50,9 @@ K_WORK_DELAYABLE_DEFINE(update_buzzer_work, buzzer_update_fn);
 
 static int64_t time_since_gnss_correction = 0;
 
-/* The previous slopes, the very first correction call, will be
- * set to 0, so that we do not increase/decrease the HZ first iteration.
- * However, the next correction call will have the updated slopes and 
- * adjust the HZ accordingly.
- */
-static uint16_t prev_inc_tone_slope = 0;
-static uint16_t prev_dec_tone_slope = 0;
+static int16_t prev_dist_change = 0;
 
 K_SEM_DEFINE(freq_update_sem, 0, 1);
-
-static uint16_t prev_warn_freq = 0;
 
 static void buzzer_update_fn()
 {
@@ -72,70 +64,60 @@ static void buzzer_update_fn()
 			uint32_t delta_zap_eval =
 				k_uptime_get_32() - zap_timestamp;
 
-			/** @note the zap eval time is set to 200ms, but this function
-		 *  is only called 1000ms/4hz = 250ms due to every GNSS
-		 *  measurement.
-		 */
 			if (delta_zap_eval >= ZAP_EVALUATION_TIME) {
-				/** @todo Notify server and log, i.e submit event to 
-			 *  the messaging module. Old code ref:
-			 * 
-			 * NofenceMessage msg = {
-			 * 	.which_m = NofenceMessage_client_zap_message_tag,
-			 * 	.m.client_zap_message = {
-			 * 		.xDatePos = proto_getLastKnownDatePos(gpsLastFix),
-			 * 		.has_sFenceDist = true,
-			 * 		.sFenceDist = gpsp_get_inst_dist_to_border()
-			 * 	}
-			 * };
-            		 * log_WriteNofenceMessage(&msg);
-			 * \* Makes sure the updated data is 
-			 *  * transferred immediately after every zap.
-			 *  *\
-			 * gsm_SetStatusToConnectAndTransfer(GSM_CALL_CORRECTIONZAP, false);
-			 */
 				zap_eval_doing = false;
 			}
-			return;
+		}
 
+		if (!zap_eval_doing) {
 			/* Only submit events etc, if we have freq change and no zap eval. */
-		} else if (k_sem_take(&freq_update_sem, K_NO_WAIT) == 0) {
-			/** Update buzzer frequency event. */
-			struct sound_set_warn_freq_event *freq_ev =
-				new_sound_set_warn_freq_event();
-			freq_ev->freq = freq;
-			EVENT_SUBMIT(freq_ev);
+			if (k_sem_take(&freq_update_sem, K_NO_WAIT) == 0) {
+				/** Update buzzer frequency event. */
+				struct sound_set_warn_freq_event *freq_ev =
+					new_sound_set_warn_freq_event();
+				freq_ev->freq = freq;
+				EVENT_SUBMIT(freq_ev);
 
-			/** @note It will zap immediately once we 
-			 *  reach WARN_FREQ_MAX, and wait 200ms 
-			 *  (ZAP_EVALUATION_TIME) until next zap
-			 *  up to 3 times untill it is considered
-			 *  "escaped."
-			 */
-			if (freq >= WARN_FREQ_MAX &&
-			    atomic_get(&sound_max_atomic)) {
-				correction_pause(Reason_WARNPAUSEREASON_ZAP,
-						 atomic_get(&last_mean_dist));
-				struct ep_status_event *ep_ev =
-					new_ep_status_event();
-				ep_ev->ep_status = EP_RELEASE;
-				EVENT_SUBMIT(ep_ev);
-				zap_eval_doing = true;
-				zap_timestamp = k_uptime_get_32();
-				increment_zap_count();
-				LOG_INF("AMC notified EP to zap!");
+				/** @note It will zap immediately once we 
+			 	 *  reach WARN_FREQ_MAX, and wait 200ms 
+			 	 *  (ZAP_EVALUATION_TIME) until next zap
+			 	 *  up to 3 times untill it is considered
+			 	 *  "escaped."
+			 	 */
+				if (freq >= WARN_FREQ_MAX &&
+				    atomic_get(&sound_max_atomic)) {
+					correction_pause(
+						Reason_WARNPAUSEREASON_ZAP,
+						atomic_get(&last_mean_dist));
+					struct ep_status_event *ep_ev =
+						new_ep_status_event();
+					ep_ev->ep_status = EP_RELEASE;
+					EVENT_SUBMIT(ep_ev);
+					zap_eval_doing = true;
+					zap_timestamp = k_uptime_get_32();
+					increment_zap_count();
+					LOG_INF("AMC notified EP to zap!");
 
-				struct amc_zapped_now_event *ev =
+					struct amc_zapped_now_event *ev =
 						new_amc_zapped_now_event();
 
-				ev->has_fence_dist = true;
-				ev->fence_dist =
+					ev->has_fence_dist = true;
+					ev->fence_dist =
 						atomic_get(&last_mean_dist);
 
-				EVENT_SUBMIT(ev);
+					EVENT_SUBMIT(ev);
+
+					/* We need to reschedule this function
+				 * after ZAP_EVALUATION_TIME, to be able to zap
+				 * again based on this variable, not buzzer
+				 * update rate.
+				 */
+					k_work_reschedule(
+						&update_buzzer_work,
+						K_MSEC(ZAP_EVALUATION_TIME));
+				}
 			}
 		}
-		prev_warn_freq = freq;
 		k_work_schedule(&update_buzzer_work,
 				K_MSEC(WARN_BUZZER_UPDATE_RATE));
 	} else {
@@ -207,6 +189,7 @@ static void correction_start(int16_t mean_dist)
 		}
 		if (!correction_warn_on) {
 			start_buzzer_updates();
+			prev_dist_change = 0;
 
 			/* Set the timesince, because otherwise 
 			 * the freq update is waaay to big since it is
@@ -265,9 +248,8 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 	atomic_set(&can_update_buzzer, false);
 	k_work_schedule(&update_buzzer_work, K_NO_WAIT);
 
-	/* Everytime we pause, we set the previous slopes to 0. */
-	prev_inc_tone_slope = 0;
-	prev_dec_tone_slope = 0;
+	/* Everytime we pause, we set the previous distace to 0. */
+	prev_dist_change = 0;
 
 	LOG_INF("Paused correction warning due to reason %i.", reason);
 
@@ -352,26 +334,44 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 			int64_t current_uptime = k_uptime_get();
 
 			/* Calculates the time since last GNSS update, and
-			 * updates the frequency based on the previous slopes.
+			 * updates the frequency based on the previous distance.
 			 * The new incomming data is also taken into
-			 * consideration.
+			 * consideration, hence -1 in the num_increments.
+			 * Example:
+			 * Let's say there's 250ms since last gnss data,
+			 * and we want to play each hz increase for 25ms
+			 * (NEW_WARN_TONE_SPEED_MS) based on how long it
+			 * takes to reach 5 seconds. This means we have
+			 * 250ms / 25ms = 10 increments, however, we already
+			 * have the current, which means we can subtract
+			 * one increment. Which means the buzzer increases
+			 * by 9 increments using old dist_change, while
+			 * the last 1 uses new dist_change.
 			 */
-			freq_gnss_multiple = (uint16_t)(
+			uint16_t num_increments =
 				((current_uptime - time_since_gnss_correction) /
-				 WARN_TONE_SPEED_MS) *
-				(WARN_TONE_SPEED_HZ));
+				 NEW_WARN_TONE_SPEED_MS) -
+				1;
+			freq_gnss_multiple =
+				num_increments * WARN_TONE_SPEED_HZ;
 
 			time_since_gnss_correction = current_uptime;
 
-			if (dist_change > prev_inc_tone_slope) {
+			if (prev_dist_change > inc_tone_slope) {
 				freq += freq_gnss_multiple;
 			}
-			if (dist_change < prev_dec_tone_slope) {
+			if (prev_dist_change < dec_tone_slope) {
 				freq -= freq_gnss_multiple;
 			}
 
-			prev_inc_tone_slope = inc_tone_slope;
-			prev_dec_tone_slope = dec_tone_slope;
+			if (dist_change > inc_tone_slope) {
+				freq += WARN_TONE_SPEED_HZ;
+			}
+			if (dist_change < dec_tone_slope) {
+				freq -= WARN_TONE_SPEED_HZ;
+			}
+
+			prev_dist_change = dist_change;
 
 			/* Clamp frequency so we know sound controller
 			 * plays the exact MAX frequency in order to

@@ -32,13 +32,18 @@
  */
 #define ACTIVITY_UPDATERATE 30
 
+/* Steps of the tone update in hz. */
+#define WARN_TONE_SPEED_HZ 11
+
 /* Time between every tone update when tone increase/decrease [ms]. */
 #define WARN_TONE_SPEED_MS                                                     \
 	((WARN_FREQ_MAX - WARN_FREQ_INIT) / WARN_TONE_SPEED_HZ /               \
 	 (WARN_MIN_DURATION_MS / 1000))
 
-/* Steps of the tone update in hz. */
-#define WARN_TONE_SPEED_HZ 11
+/* Time between every tone update when tone increase/decrease [ms]. */
+#define NEW_WARN_TONE_SPEED_MS                                                 \
+	(WARN_MIN_DURATION_MS /                                                \
+	 ((WARN_FREQ_MAX - WARN_FREQ_INIT) / WARN_TONE_SPEED_HZ))
 
 /* Defined update rate (msec) on GPS at max "intensity" (5Hz). */
 #define GPS_RATE_MAX 250

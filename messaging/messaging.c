@@ -769,7 +769,7 @@ int send_binary_message(uint8_t *data, size_t len)
 	/* We can only send 1 message at a time, use mutex. */
 	if (k_mutex_lock(&send_binary_mutex,
 			 K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC * 2)) == 0) {
-		uint16_t byteswap_size = BYTESWAP16(len - 2);
+		uint16_t byteswap_size = BYTESWAP16((uint16_t)(len - 2));
 		memcpy(&data[0], &byteswap_size, 2);
 
 		struct messaging_proto_out_event *msg2send =

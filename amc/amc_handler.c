@@ -78,6 +78,8 @@ static struct k_work handle_states_work;
 static struct k_work handle_corrections_work;
 static struct k_work handle_new_fence_work;
 
+static uint32_t maybe_out_of_fence_timestamp = 0;
+
 static inline int update_pasture_from_stg(void)
 {
 	int err = stg_read_pasture_data(set_pasture_cache);
@@ -153,7 +155,6 @@ void handle_states_fn()
 	/* Get states, and recalculate if we have new state changes. */
 	Mode amc_mode = calc_mode();
 	FenceStatus fence_status = get_fence_status();
-	uint32_t maybe_out_of_fence_timestamp = 0;
 
 	if (cur_zone != WARN_ZONE || buzzer_state ||
 	    fence_status == FenceStatus_NotStarted ||
@@ -162,8 +163,7 @@ void handle_states_fn()
 		 *        1.6 months, (1193) hours before it wraps around. Issue?
 		 *        We have k_uptime_get_32 other places as well.
 		 */
-		maybe_out_of_fence_timestamp =
-			(uint32_t)(k_uptime_get_32() / MSEC_PER_SEC);
+		maybe_out_of_fence_timestamp = k_uptime_get_32();
 	}
 
 	FenceStatus new_fence_status =
@@ -356,11 +356,6 @@ void handle_gnss_data_fn(struct k_work *item)
 		fifo_dist_elem_count = 0;
 		fifo_avg_dist_elem_count = 0;
 		zone_set(NO_ZONE);
-
-		/* Turn off sound. */
-		struct sound_event *snd_ev = new_sound_event();
-		snd_ev->type = SND_OFF;
-		EVENT_SUBMIT(snd_ev);
 	}
 
 cleanup:
@@ -369,6 +364,13 @@ cleanup:
 	 * As well as notifying we're not using fence data area. 
 	 */
 	k_sem_give(&fence_data_sem);
+}
+
+int gnss_timeout_reset_fifo()
+{
+	fifo_dist_elem_count = 0;
+	fifo_avg_dist_elem_count = 0;
+	return 0;
 }
 
 int amc_module_init(void)
@@ -384,6 +386,11 @@ int amc_module_init(void)
 	k_work_init(&handle_new_fence_work, handle_new_fence_fn);
 	k_work_init(&handle_corrections_work, handle_corrections_fn);
 	k_work_init(&handle_states_work, handle_states_fn);
+
+	int err = gnss_init(gnss_timeout_reset_fifo);
+	if (err) {
+		return err;
+	}
 
 	/* Checks and inits the mode we're in as well as caching variables. */
 	init_states_and_variables();

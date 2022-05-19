@@ -145,13 +145,13 @@ bool fnc_valid_fence(void)
 	    pasture->m.status == FenceStatus_TurnedOffByBLE) {
 		return false;
 	}
-	bool valid = true;
+
 	for (int i = 0; i < pasture->m.ul_total_fences; i++) {
 		if (!fnc_valid(&pasture->fences[i])) {
 			return false;
 		}
 	}
-	return pasture->m.ul_total_fences != 0 && valid;
+	return pasture->m.ul_total_fences != 0;
 }
 
 bool fnc_valid_def(void)

@@ -49,27 +49,21 @@ K_THREAD_STACK_DEFINE(pub_gnss_stack, STACK_SIZE);
 struct k_thread pub_gnss_thread;
 bool pub_gnss_started = false;
 
-int gnss_controller_init(void)
+/** @brief Sends a timeout event from the GNSS controller */
+static void gnss_controller_send_timeout_event(void) {
+	gnss_t gnss_no_fix;
+	memset(&gnss_no_fix, 0, sizeof(gnss_t));
+
+	struct gnss_data *new_data = new_gnss_data();
+	new_data->gnss_data = gnss_no_fix;
+	new_data->timed_out = true;
+	
+	EVENT_SUBMIT(new_data);
+}
+
+static int gnss_controller_setup(void)
 {
-	gnss_age = 0;
-	ts = 0;
-	previous_ts = 0;
-	gnss_reset_count = 0;
-	printk("Initializing gnss controller!\n");
-	gnss_dev = DEVICE_DT_GET(DT_ALIAS(gnss));
-	if (gnss_dev == NULL) {
-		char *msg = "Couldn't get instance of the GNSS device!";
-		printk("%s", msg);
-		nf_app_error(ERR_GNSS_CONTROLLER, -1, msg, sizeof(*msg));
-		return -1;
-	}
-	int ret = gnss_set_data_cb(gnss_dev, gnss_data_update_cb);
-	if (ret != 0) {
-		char *msg = "Failed to register data CB!";
-		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
-		return ret;
-	}
-	ret = gnss_setup(gnss_dev, false);
+	int ret = gnss_setup(gnss_dev, false);
 	if (ret != 0) {
 		char *msg = "Failed to set up GNSS receiver!";
 		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
@@ -93,6 +87,49 @@ int gnss_controller_init(void)
 		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
 		return ret;
 	}
+
+	return ret;
+}
+
+/** @brief Reset and initialize GNSS, send notification event. */
+static int gnss_controller_reset_gnss(uint16_t mask) 
+{
+	gnss_controller_send_timeout_event();
+
+	gnss_reset(gnss_dev, mask,
+			GNSS_RESET_MODE_HW_IMMEDIATELY);
+
+	return gnss_controller_setup();
+}
+
+int gnss_controller_init(void)
+{
+	gnss_age = 0;
+	ts = 0;
+	previous_ts = 0;
+	gnss_reset_count = 0;
+	printk("Initializing gnss controller!\n");
+	gnss_dev = DEVICE_DT_GET(DT_ALIAS(gnss));
+	if (gnss_dev == NULL) {
+		char *msg = "Couldn't get instance of the GNSS device!";
+		printk("%s", msg);
+		nf_app_error(ERR_GNSS_CONTROLLER, -1, msg, sizeof(*msg));
+		return -1;
+	}
+	int ret = gnss_set_data_cb(gnss_dev, gnss_data_update_cb);
+	if (ret != 0) {
+		char *msg = "Failed to register data CB!";
+		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
+		return ret;
+	}
+	
+	ret = gnss_controller_setup();
+	if (ret != 0) {
+		char *msg = "Failed setup of GNSS!";
+		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
+		return ret;
+	}
+
 	if (!pub_gnss_started) {
 		k_thread_create(&pub_gnss_thread, pub_gnss_stack,
 				K_KERNEL_STACK_SIZEOF(pub_gnss_stack),
@@ -147,6 +184,7 @@ _Noreturn void publish_gnss_data(void *ctx)
 
 			struct gnss_data *new_data = new_gnss_data();
 			new_data->gnss_data = gnss_data_buffer;
+			new_data->timed_out = false;
 			EVENT_SUBMIT(new_data);
 			if (k_sem_take(&cached_fix_sem, K_MSEC(100)) == 0) {
 				cached_gnss_data = gnss_data_buffer;
@@ -158,10 +196,8 @@ _Noreturn void publish_gnss_data(void *ctx)
 			char *msg = "GNSS data timed out!";
 			nf_app_error(ERR_GNSS_CONTROLLER, -ETIMEDOUT, msg,
 				     sizeof(*msg));
-			struct gnss_no_zone *noZone = new_gnss_no_zone();
-			EVENT_SUBMIT(noZone);
-			gnss_reset(gnss_dev, GNSS_RESET_MASK_COLD,
-				   GNSS_RESET_MODE_HW_IMMEDIATELY);
+
+			gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
 		}
 	}
 }
@@ -267,23 +303,13 @@ void check_gnss_age(uint32_t gnss_age)
 
 	if ((gnss_age > GNSS_5SEC) && (gnss_reset_count < 1)) {
 		gnss_reset_count++;
-		struct gnss_no_zone *noZone = new_gnss_no_zone();
-		EVENT_SUBMIT(noZone);
-		gnss_reset(gnss_dev, GNSS_RESET_MASK_HOT,
-			   GNSS_RESET_MODE_HW_IMMEDIATELY);
-		//TODO: check if gnss_setup() is required
+		gnss_controller_reset_gnss(GNSS_RESET_MASK_HOT);
 	} else if (gnss_age > GNSS_10SEC && gnss_reset_count < 2) {
 		gnss_reset_count++;
-		struct gnss_no_zone *noZone = new_gnss_no_zone();
-		EVENT_SUBMIT(noZone);
-		gnss_reset(gnss_dev, GNSS_RESET_MASK_WARM,
-			   GNSS_RESET_MODE_HW_IMMEDIATELY);
+		gnss_controller_reset_gnss(GNSS_RESET_MASK_WARM);
 	} else if (gnss_age > GNSS_20SEC && gnss_reset_count >= 2) {
 		gnss_reset_count++;
-		struct gnss_no_zone *noZone = new_gnss_no_zone();
-		EVENT_SUBMIT(noZone);
-		gnss_reset(gnss_dev, GNSS_RESET_MASK_COLD,
-			   GNSS_RESET_MODE_HW_IMMEDIATELY);
+		gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
 	} else if (gnss_age < GNSS_5SEC) {
 		gnss_reset_count = 0;
 	}

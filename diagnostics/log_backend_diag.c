@@ -13,7 +13,7 @@
 #define LOG_MODULE_NAME diag_back
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, 4);
 
-static atomic_t log_backend_interface = ATOMIC_INIT(DIAGNOSTICS_NONE);
+static atomic_t log_backend_interface = ATOMIC_INIT(DIAGNOSTICS_BLE);
 
 static struct log_backend_diag_action backend_diag_actions;
 
@@ -22,28 +22,28 @@ static uint32_t output_buffer_count = 0;
 
 static int char_out(uint8_t *data, size_t length, void *ctx)
 {
-        ARG_UNUSED(ctx);
+	ARG_UNUSED(ctx);
 
-        for (size_t i = 0; i < length; i++) {
-                output_buffer[output_buffer_count] = data[i];
-                output_buffer_count++;
+	for (size_t i = 0; i < length; i++) {
+		output_buffer[output_buffer_count] = data[i];
+		output_buffer_count++;
 
-                if ((data[i] == '\n') || 
-                    (output_buffer_count >= sizeof(output_buffer))) {
-                        enum diagnostics_interface intf = 
-                                        atomic_get(&log_backend_interface);
-                        if ((backend_diag_actions.send_resp != NULL) &&
-                            (intf != DIAGNOSTICS_NONE)) {
-                                backend_diag_actions.send_resp(
-                                                        intf, 
-                                                        output_buffer, 
-                                                        output_buffer_count);
-                                output_buffer_count = 0;
-                        }
-                }
-        }
+		if ((data[i] == '\n') || 
+			(output_buffer_count >= sizeof(output_buffer))) {
+			enum diagnostics_interface intf = 
+					atomic_get(&log_backend_interface);
+			if ((backend_diag_actions.send_resp != NULL) &&
+				(intf != DIAGNOSTICS_NONE)) {
+				backend_diag_actions.send_resp(
+							intf, 
+							output_buffer, 
+							output_buffer_count);
+			}
+			output_buffer_count = 0;
+		}
+	}
 
-        return length;
+	return length;
 }
 
 static uint8_t diag_output_buf[100];
@@ -77,16 +77,16 @@ int log_backend_diag_init(struct log_backend_diag_action* actions)
 
 int log_backend_diag_enable(enum diagnostics_interface intf)
 {
-        atomic_set(&log_backend_interface, intf);
+	atomic_set(&log_backend_interface, intf);
 
-        return 0;
+	return 0;
 }
 
 int log_backend_diag_disable(void)
 {
-        atomic_set(&log_backend_interface, DIAGNOSTICS_NONE);
+	atomic_set(&log_backend_interface, DIAGNOSTICS_NONE);
 
-        return 0;
+	return 0;
 }
 
 static void log_backend_diag_boot_init(struct log_backend const *const backend)
@@ -119,7 +119,7 @@ static void sync_string(const struct log_backend *const backend,
 static void sync_hexdump(const struct log_backend *const backend,
 			 struct log_msg_ids src_level, uint32_t timestamp,
 			 const char *metadata, 
-                         const uint8_t *data, uint32_t length)
+			 const uint8_t *data, uint32_t length)
 {
 	uint32_t flag = 0;
 

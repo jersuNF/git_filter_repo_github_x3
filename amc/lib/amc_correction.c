@@ -13,6 +13,8 @@ LOG_MODULE_REGISTER(amc_correction, CONFIG_AMC_LIB_LOG_LEVEL);
 #include "amc_handler.h"
 #include "messaging_module_events.h"
 
+#include "movement_controller.h"
+
 /* For playing sound and fetching freq limits and zapping. */
 #include "sound_event.h"
 #include "ep_event.h"
@@ -51,6 +53,8 @@ K_WORK_DELAYABLE_DEFINE(update_buzzer_work, buzzer_update_fn);
 static int64_t time_since_gnss_correction = 0;
 
 static int16_t prev_dist_change = 0;
+
+static bool first_correction_pause = false;
 
 K_SEM_DEFINE(freq_update_sem, 0, 1);
 
@@ -108,10 +112,10 @@ static void buzzer_update_fn()
 					EVENT_SUBMIT(ev);
 
 					/* We need to reschedule this function
-				 * after ZAP_EVALUATION_TIME, to be able to zap
-				 * again based on this variable, not buzzer
-				 * update rate.
-				 */
+				 	 * after ZAP_EVALUATION_TIME, to be able to zap
+				 	 * again based on this variable, not buzzer
+				 	 * update rate.
+				 	 */
 					k_work_reschedule(
 						&update_buzzer_work,
 						K_MSEC(ZAP_EVALUATION_TIME));
@@ -120,13 +124,6 @@ static void buzzer_update_fn()
 		}
 		k_work_schedule(&update_buzzer_work,
 				K_MSEC(WARN_BUZZER_UPDATE_RATE));
-	} else {
-		/** Turn off the sound buzzer. @note This will stop
-	 	 * any FIND_ME or other sound events as well. 
-	  	 */
-		struct sound_event *snd_ev = new_sound_event();
-		snd_ev->type = SND_OFF;
-		EVENT_SUBMIT(snd_ev);
 	}
 }
 
@@ -191,6 +188,8 @@ static void correction_start(int16_t mean_dist)
 			start_buzzer_updates();
 			prev_dist_change = 0;
 
+			first_correction_pause = true;
+
 			/* Set the timesince, because otherwise 
 			 * the freq update is waaay to big since it is
 			 * default to 0.
@@ -246,7 +245,17 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 	int16_t dist_add = 0;
 
 	atomic_set(&can_update_buzzer, false);
-	k_work_schedule(&update_buzzer_work, K_NO_WAIT);
+
+	/* No reason to spam event handler, we only submit this event once. */
+	if (first_correction_pause) {
+		/** Turn off the sound buzzer. @note This will stop
+	 	 *  any FIND_ME or other sound events as well. 
+	 	 */
+		struct sound_event *snd_ev = new_sound_event();
+		snd_ev->type = SND_OFF;
+		EVENT_SUBMIT(snd_ev);
+		first_correction_pause = false;
+	}
 
 	/* Everytime we pause, we set the previous distace to 0. */
 	prev_dist_change = 0;
@@ -408,14 +417,13 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 			if (gnss->mode == GNSSMODE_MAX) {
 				if (fs == FenceStatus_FenceStatus_Normal ||
 				    fs == FenceStatus_MaybeOutOfFence) {
-					/** @todo Fetch getActiveTime() from
-					 *  movement controller. What to check for?
-					 *
-					|| get_correction_status() > 0) { */
-					if (gnss_has_warn_fix()) {
-						correction_start(mean_dist);
+					if (get_active_delta() > 0 ||
+					    get_correction_status() > 0) {
+						if (gnss_has_warn_fix()) {
+							correction_start(
+								mean_dist);
+						}
 					}
-					//}
 				}
 			}
 		}

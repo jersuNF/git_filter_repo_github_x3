@@ -847,11 +847,12 @@ int messaging_module_init(void)
 	if (err < 0) {
 		return err;
 	}
-	err = k_work_schedule_for_queue(&send_q, &modem_poll_work, K_NO_WAIT);
+	err = k_work_schedule_for_queue(&send_q, &modem_poll_work,
+					K_SECONDS(2));
 	if (err < 0) {
 		return err;
 	}
-	err = k_work_schedule_for_queue(&send_q, &log_work, K_NO_WAIT);
+	err = k_work_schedule_for_queue(&send_q, &log_work, K_SECONDS(2));
 	if (err < 0) {
 		return err;
 	}

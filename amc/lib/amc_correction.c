@@ -11,6 +11,7 @@ LOG_MODULE_REGISTER(amc_correction, CONFIG_AMC_LIB_LOG_LEVEL);
 #include "amc_gnss.h"
 #include "amc_const.h"
 #include "amc_handler.h"
+#include "messaging_module_events.h"
 
 /* For playing sound and fetching freq limits and zapping. */
 #include "sound_event.h"
@@ -38,6 +39,8 @@ static uint8_t correction_started = 0;
 /* True from function correction start to correction_pause. (Sound is ON). */
 static uint8_t correction_warn_on = 0;
 
+static atomic_t last_mean_dist = ATOMIC_INIT(0);
+
 static void correction_start(int16_t mean_dist)
 {
 	uint32_t delta_correction_pause =
@@ -47,7 +50,14 @@ static void correction_start(int16_t mean_dist)
 		if (!correction_started) {
 			last_warn_freq = WARN_FREQ_INIT;
 			last_warn_dist = mean_dist;
-			/** @todo log_WriteCorrectionMessage(true); */
+
+			struct warn_correction_start_event *ev =
+				new_warn_correction_start_event();
+
+			ev->fence_dist = atomic_get(&last_mean_dist);
+			ev->has_fence_dist = true;
+
+			EVENT_SUBMIT(ev);
 
 			/** @deprecated ??
 			 *  g_i16_WarnStartWayP[0] = GPS()->X;
@@ -83,7 +93,10 @@ static void correction_start(int16_t mean_dist)
 			snd_ev->type = SND_WARN;
 			EVENT_SUBMIT(snd_ev);
 
-			/** @todo log_WriteCorrectionMessage(true); */
+			struct animal_warning_event *ev =
+				new_animal_warning_event();
+			EVENT_SUBMIT(ev);
+
 			increment_warn_count();
 			LOG_INF("Warn zone counter++ and told buzzer to enter WARN");
 		}
@@ -105,7 +118,13 @@ static void correction_end(void)
 		last_warn_dist = LIM_WARN_MIN_DM;
 		reset_zap_pain_cnt();
 
-		/** @todo log_WriteCorrectionMessage(false); */
+		struct warn_correction_end_event *ev =
+			new_warn_correction_end_event();
+
+		ev->fence_dist = atomic_get(&last_mean_dist);
+		ev->has_fence_dist = true;
+
+		EVENT_SUBMIT(ev);
 
 		/** @todo????
 		 * #ifdef GSMCONNECT_AFTER_WARN
@@ -143,21 +162,15 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 	 * and therefore did not reset the zap counter.
 	 */
 	if (correction_warn_on) {
-		/** @todo Notify messaging module and server. Reference old code:
-		 * SetStatusReason(reason);
-		 * const gps_last_fix_struct_t *gpsLastFixStruct = GPS_last_fix();
-		 * NofenceMessage
-		 * 	msg = { .which_m =
-		 * 			NofenceMessage_client_warning_message_tag,
-		 * 		.m.client_warning_message = {
-		 * 			.xDatePos = proto_getLastKnownDatePos(
-		 * 				gpsLastFixStruct),
-		 * 			.usDuration = WarnDuration(),
-		 * 			.has_sFenceDist = true,
-		 * 			.sFenceDist =
-		 * 				gpsp_get_inst_dist_to_border() } };
-		 * log_WriteNofenceMessage(&msg);
-		 */
+		struct warn_correction_pause_event *ev =
+			new_warn_correction_pause_event();
+
+		ev->fence_dist = atomic_get(&last_mean_dist);
+		ev->has_fence_dist = true;
+		ev->warn_duration =
+			correction_pause_timestamp - k_uptime_get_32();
+
+		EVENT_SUBMIT(ev);
 	}
 
 	switch (reason) {
@@ -218,23 +231,6 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 		uint32_t delta_zap_eval = k_uptime_get_32() - zap_timestamp;
 
 		if (delta_zap_eval >= ZAP_EVALUATION_TIME) {
-			/** @todo Notify server and log, i.e submit event to 
-			 *  the messaging module. Old code ref:
-			 * 
-			 * NofenceMessage msg = {
-			 * 	.which_m = NofenceMessage_client_zap_message_tag,
-			 * 	.m.client_zap_message = {
-			 * 		.xDatePos = proto_getLastKnownDatePos(gpsLastFix),
-			 * 		.has_sFenceDist = true,
-			 * 		.sFenceDist = gpsp_get_inst_dist_to_border()
-			 * 	}
-			 * };
-            		 * log_WriteNofenceMessage(&msg);
-			 * \* Makes sure the updated data is 
-			 *  * transferred immediately after every zap.
-			 *  *\
-			 * gsm_SetStatusToConnectAndTransfer(GSM_CALL_CORRECTIONZAP, false);
-			 */
 			zap_eval_doing = false;
 		}
 		return;
@@ -305,6 +301,15 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 					zap_timestamp = k_uptime_get_32();
 					increment_zap_count();
 					LOG_INF("AMC notified EP to zap!");
+
+					struct amc_zapped_now_event *ev =
+						new_amc_zapped_now_event();
+
+					ev->has_fence_dist = true;
+					ev->fence_dist =
+						atomic_get(&last_mean_dist);
+
+					EVENT_SUBMIT(ev);
 				}
 			}
 		} else {
@@ -322,6 +327,8 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 			FenceStatus fs, amc_zone_t zone, int16_t mean_dist,
 			int16_t dist_change)
 {
+	atomic_set(&last_mean_dist, mean_dist);
+
 	if (amc_mode == Mode_Teach || amc_mode == Mode_Fence) {
 		if (zone == WARN_ZONE) {
 			if (gnss->mode == GNSSMODE_MAX) {

@@ -148,6 +148,7 @@ int start_tcp(void)
 
 static bool cellular_controller_event_handler(const struct event_header *eh)
 {
+	static bool ready_for_new_msg = true;
 	uint8_t *CharMsgOut = NULL;
 	if (is_messaging_ack_event(eh)) {
 		k_sem_give(&messaging_ack);
@@ -173,7 +174,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			char *e_msg = "Failed to parse port number from new "
 				      "host address!";
 			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
-				     (e_msg));
+				(e_msg));
 			return false;
 		}
 		uint8_t ip_len;
@@ -190,29 +191,32 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		}
 		return false;
 	}else if (is_messaging_proto_out_event(eh)) {
-		/* Accessing event data. */
-		struct messaging_proto_out_event *event =
-			cast_messaging_proto_out_event(eh);
-		uint8_t *pCharMsgOut = event->buf;
-		size_t MsgOutLen = event->len;
-		
-		/* make a local copy of the message to send.*/
+		if (ready_for_new_msg) {
+			ready_for_new_msg = false;
+			struct messaging_proto_out_event *event =
+				cast_messaging_proto_out_event(eh);
+			uint8_t *pCharMsgOut = event->buf;
+			size_t MsgOutLen = event->len;
 
-		CharMsgOut = (char *) k_malloc(MsgOutLen);
-		if (CharMsgOut == memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
-			LOG_DBG("Publishing ack to messaging!\n");
-			struct cellular_ack_event *ack =
-				new_cellular_ack_event();
-			EVENT_SUBMIT(ack);
-		}
+			/* make a local copy of the message to send.*/
 
-		int err = send_tcp_q(CharMsgOut, MsgOutLen);
-		if (err != 0) {
-			char *e_msg = "Couldn't push message to queue!";
-			nf_app_error(ERR_MESSAGING, -EAGAIN, e_msg, strlen
-				(e_msg));
-			k_free(CharMsgOut);
-			return false;
+			CharMsgOut = (char *)k_malloc(MsgOutLen);
+			if (CharMsgOut ==
+			    memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
+				LOG_DBG("Publishing ack to messaging!\n");
+				struct cellular_ack_event *ack =
+					new_cellular_ack_event();
+				EVENT_SUBMIT(ack);
+			}
+
+			int err = send_tcp_q(CharMsgOut, MsgOutLen);
+			if (err != 0) {
+				char *e_msg = "Couldn't push message to queue!";
+				nf_app_error(ERR_MESSAGING, -EAGAIN, e_msg,
+					     strlen(e_msg));
+				k_free(CharMsgOut);
+				return false;
+			}
 		}
 		return false;
 	}else if(is_check_connection(eh)){
@@ -224,6 +228,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return false;
 	} else if (is_free_message_mem_event(eh)) {
 		k_free(CharMsgOut);
+		ready_for_new_msg = true;
 	}
 	return false;
 }

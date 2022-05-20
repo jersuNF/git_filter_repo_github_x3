@@ -327,9 +327,10 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 {
 	/* Variables used in the correction setup, calculation and end. */
+
 	if (correction_started) {
 		if (correction_warn_on) {
-			uint16_t inc_tone_slope = 0, dec_tone_slope = 0;
+			int16_t inc_tone_slope = 0, dec_tone_slope = 0;
 			uint16_t freq = atomic_get(&last_warn_freq);
 			if (amc_mode == Mode_Teach) {
 				inc_tone_slope = TEACHMODE_DIST_INCR_SLOPE_LIM;
@@ -414,13 +415,19 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 	atomic_set(&last_mean_dist, mean_dist);
 
 	if (amc_mode == Mode_Teach || amc_mode == Mode_Fence) {
+		LOG_INF("  amc_mode in teach or fence");
 		if (zone == WARN_ZONE) {
+			LOG_INF("  Zone is warn");
 			if (gnss->mode == GNSSMODE_MAX) {
+				LOG_INF("  GNSS in max");
 				if (fs == FenceStatus_FenceStatus_Normal ||
 				    fs == FenceStatus_MaybeOutOfFence) {
+					LOG_INF("  Fs is normal or maybe");
 					if (get_active_delta() > 0 ||
 					    get_correction_status() > 0) {
+						LOG_INF("  activedelta or correctionstat");
 						if (gnss_has_warn_fix()) {
+							LOG_INF("  has warn fix");
 							correction_start(
 								mean_dist);
 						}

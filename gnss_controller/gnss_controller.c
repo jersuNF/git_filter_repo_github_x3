@@ -197,7 +197,7 @@ _Noreturn void publish_gnss_data(void *ctx)
 			nf_app_error(ERR_GNSS_CONTROLLER, -ETIMEDOUT, msg,
 				     sizeof(*msg));
 
-			gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
+			//gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
 		}
 	}
 }
@@ -303,13 +303,13 @@ void check_gnss_age(uint32_t gnss_age)
 
 	if ((gnss_age > GNSS_5SEC) && (gnss_reset_count < 1)) {
 		gnss_reset_count++;
-		gnss_controller_reset_gnss(GNSS_RESET_MASK_HOT);
+		//gnss_controller_reset_gnss(GNSS_RESET_MASK_HOT);
 	} else if (gnss_age > GNSS_10SEC && gnss_reset_count < 2) {
 		gnss_reset_count++;
-		gnss_controller_reset_gnss(GNSS_RESET_MASK_WARM);
+		//gnss_controller_reset_gnss(GNSS_RESET_MASK_WARM);
 	} else if (gnss_age > GNSS_20SEC && gnss_reset_count >= 2) {
 		gnss_reset_count++;
-		gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
+		//gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
 	} else if (gnss_age < GNSS_5SEC) {
 		gnss_reset_count = 0;
 	}

@@ -189,6 +189,7 @@ void handle_states_fn()
 void handle_corrections_fn()
 {
 	/* Fetch cached gnss data. */
+	LOG_INF("  handle_corrections_fn");
 	gnss_t *gnss = NULL;
 	int err = get_gnss_cache(&gnss);
 	if (err || gnss == NULL) {
@@ -399,10 +400,10 @@ int amc_module_init(void)
 	k_work_init(&handle_corrections_work, handle_corrections_fn);
 	k_work_init(&handle_states_work, handle_states_fn);
 
-	int err = gnss_init(gnss_timeout_reset_fifo);
-	if (err) {
-		return err;
-	}
+	//int err = gnss_init(gnss_timeout_reset_fifo);
+	//if (err) {
+	//	return err;
+	//}
 
 	/* Checks and inits the mode we're in as well as caching variables. */
 	init_states_and_variables();

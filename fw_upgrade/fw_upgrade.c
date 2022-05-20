@@ -39,9 +39,9 @@ static void reboot_device_fn(struct k_work *item)
 static void fota_dl_handler(const struct fota_download_evt *evt)
 {
 	/* Start by setting status event to idle, nothing in progress. */
-	struct dfu_status_event *event = new_dfu_status_event();
 	switch (evt->id) {
-	case FOTA_DOWNLOAD_EVT_ERROR:
+	case FOTA_DOWNLOAD_EVT_ERROR: {
+		struct dfu_status_event *event = new_dfu_status_event();
 		LOG_ERR("Received error from fota_download %d", evt->cause);
 		char *e_msg = "Fota download error";
 		nf_app_error(ERR_FW_UPGRADE, -evt->cause, e_msg, strlen(e_msg));
@@ -52,7 +52,9 @@ static void fota_dl_handler(const struct fota_download_evt *evt)
 		EVENT_SUBMIT(event);
 
 		break;
-	case FOTA_DOWNLOAD_EVT_FINISHED:
+	}
+	case FOTA_DOWNLOAD_EVT_FINISHED: {
+		struct dfu_status_event *event = new_dfu_status_event();
 		LOG_INF("Fota download finished, scheduling reboot...");
 
 		event->dfu_status = DFU_STATUS_SUCCESS_REBOOT_SCHEDULED;
@@ -64,6 +66,7 @@ static void fota_dl_handler(const struct fota_download_evt *evt)
 		k_work_reschedule(&reboot_device_work,
 				  K_SECONDS(CONFIG_SCHEDULE_REBOOT_SECONDS));
 		break;
+	}
 	default:
 		break;
 	}

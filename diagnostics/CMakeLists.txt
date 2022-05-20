@@ -2,7 +2,8 @@
 if (CONFIG_DIAGNOSTICS)
 zephyr_include_directories(
     .
-    ./../../events/diagnostics/)
+    ./../../events/diagnostics/
+    ./../../modules/buzzer)
 
 target_sources(app PRIVATE 
     diagnostics.c

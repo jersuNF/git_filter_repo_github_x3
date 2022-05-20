@@ -61,4 +61,7 @@ int init_movement_controller(void);
 /** @brief Resets the total step count. */
 void reset_total_steps(void);
 
+/** @brief Used to get the delta of how long we've been in active state. */
+uint32_t get_active_delta(void);
+
 #endif /* _MOVEMENT_CONTROLLER_H_ */

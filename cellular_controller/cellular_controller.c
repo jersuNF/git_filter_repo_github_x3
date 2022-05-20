@@ -148,6 +148,7 @@ int start_tcp(void)
 
 static bool cellular_controller_event_handler(const struct event_header *eh)
 {
+	uint8_t *CharMsgOut = NULL;
 	if (is_messaging_ack_event(eh)) {
 		k_sem_give(&messaging_ack);
 		LOG_WRN("ACK received!\n");
@@ -196,7 +197,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		size_t MsgOutLen = event->len;
 		
 		/* make a local copy of the message to send.*/
-		uint8_t *CharMsgOut;
+
 		CharMsgOut = (char *) k_malloc(MsgOutLen);
 		if (CharMsgOut == memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
 			LOG_DBG("Publishing ack to messaging!\n");
@@ -213,7 +214,6 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			k_free(CharMsgOut);
 			return false;
 		}
-		k_free(CharMsgOut);
 		return false;
 	}else if(is_check_connection(eh)){
 		k_sem_give(&connection_state_sem);
@@ -222,6 +222,8 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		modem_is_ready = false;
 		connected = false;
 		return false;
+	} else if (is_free_message_mem_event(eh)) {
+		k_free(CharMsgOut);
 	}
 	return false;
 }
@@ -375,3 +377,4 @@ EVENT_SUBSCRIBE(MODULE, messaging_stop_connection_event);
 EVENT_SUBSCRIBE(MODULE, messaging_host_address_event);
 EVENT_SUBSCRIBE(MODULE, check_connection);
 EVENT_SUBSCRIBE(MODULE, cellular_error_event);
+EVENT_SUBSCRIBE(MODULE, free_message_mem_event);

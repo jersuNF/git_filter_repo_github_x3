@@ -263,6 +263,9 @@ void send_tcp_fn(void)
 					EVENT_SUBMIT(err);
 					LOG_WRN("Failed to send TCP message!");
 				}
+				struct free_message_mem_event *ev =
+					new_free_message_mem_event();
+				EVENT_SUBMIT(ev);
 			}
 		}
 		events[0].state = K_POLL_STATE_NOT_READY;
@@ -290,6 +293,7 @@ int check_ip(void){
 			ret = memcmp(collar_ip,"\"0.0.0.0\"",
 				     9);
 			if (ret > 0){
+				k_sleep(K_MSEC(50));
 				return 0;
 			}
 		}

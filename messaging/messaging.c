@@ -746,7 +746,8 @@ void proto_InitHeader(NofenceMessage *msg)
 	if (use_server_time) {
 		msg->header.ulUnixTimestamp = time_from_server;
 	} else {
-		msg->header.ulUnixTimestamp = cached_fix.unix_timestamp;
+		msg->header.ulUnixTimestamp =
+			(uint32_t)MAX(0, cached_fix.unix_timestamp);
 	}
 }
 

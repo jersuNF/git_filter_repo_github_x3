@@ -307,6 +307,7 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 	}
 
 	if (dist_add > 0) {
+		atomic_set(&last_warn_freq, WARN_FREQ_INIT);
 		/* If Distance is set, then restart further warning 
 		 * mentioned distance from this distance.
 		 */

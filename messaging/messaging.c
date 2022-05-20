@@ -141,6 +141,8 @@ struct k_work_delayable data_request_work;
 struct k_work_delayable process_escape_work;
 struct k_work_delayable process_zap_work;
 struct k_work_delayable process_warning_work;
+struct k_work_delayable process_warning_correction_start_work;
+struct k_work_delayable process_warning_correction_end_work;
 
 atomic_t poll_period_minutes = ATOMIC_INIT(5);
 atomic_t log_period_minutes = ATOMIC_INIT(30);
@@ -378,6 +380,38 @@ static void warning_work_fn()
 		LOG_ERR("Failed to encode warning msg: %d", ret);
 	}
 }
+
+static void warning_start_work_fn()
+{
+	NofenceMessage msg;
+	proto_InitHeader(&msg); /* fill up message header. */
+	msg.which_m =
+		(uint16_t)NofenceMessage_client_correction_start_message_tag;
+	msg.m.client_correction_start_message.has_sFenceDist = false;
+	proto_get_last_known_date_pos(
+		&cached_fix, &msg.m.client_correction_start_message.xDatePos);
+
+	int ret = encode_and_send_message(&msg);
+	if (ret) {
+		LOG_ERR("Failed to encode warning start msg: %d", ret);
+	}
+}
+
+static void warning_end_work_fn()
+{
+	NofenceMessage msg;
+	proto_InitHeader(&msg); /* fill up message header. */
+	msg.which_m =
+		(uint16_t)NofenceMessage_client_correction_end_message_tag;
+	msg.m.client_correction_end_message.has_sFenceDist = false;
+	proto_get_last_known_date_pos(
+		&cached_fix, &msg.m.client_correction_end_message.xDatePos);
+
+	int ret = encode_and_send_message(&msg);
+	if (ret) {
+		LOG_ERR("Failed to encode warning start msg: %d", ret);
+	}
+}
 /**
  * @brief Work function to periodic request sensor data etc.
  */
@@ -610,6 +644,27 @@ static bool event_handler(const struct event_header *eh)
 		atomic_set(&cached_temp, (uint32_t)ev->temp);
 		return false;
 	}
+	if (is_warn_correction_start_event(eh)) {
+		int err = k_work_reschedule_for_queue(
+			&send_q, &process_warning_correction_start_work,
+			K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Error reschedule warning correction start work: %d",
+				err);
+		}
+		return false;
+	}
+	if (is_warn_correction_end_event(eh)) {
+		int err = k_work_reschedule_for_queue(
+			&send_q, &process_warning_correction_end_work,
+			K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Error reschedule warning correction start work: %d",
+				err);
+		}
+		return false;
+	}
+
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -676,6 +731,8 @@ EVENT_SUBSCRIBE(MODULE, env_sensor_event);
 /** @todo add battery, histogram, gnss and modem event */
 EVENT_SUBSCRIBE(MODULE, gnss_data);
 EVENT_SUBSCRIBE(MODULE, send_poll_request_now);
+EVENT_SUBSCRIBE(MODULE, warn_correction_start_event);
+EVENT_SUBSCRIBE(MODULE, warn_correction_end_event);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -835,6 +892,10 @@ int messaging_module_init(void)
 	k_work_init_delayable(&process_escape_work, animal_escaped_work_fn);
 	k_work_init_delayable(&process_zap_work, zap_message_work_fn);
 	k_work_init_delayable(&process_warning_work, warning_work_fn);
+	k_work_init_delayable(&process_warning_correction_start_work,
+			      warning_start_work_fn);
+	k_work_init_delayable(&process_warning_correction_end_work,
+			      warning_end_work_fn);
 
 	memset(&pasture_temp, 0, sizeof(pasture_t));
 	cached_fences_counter = 0;

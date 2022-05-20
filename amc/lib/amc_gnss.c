@@ -160,11 +160,9 @@ int gnss_update(gnss_t *gnss_data)
 {
 	int ret = 0;
 
-	/* Reset timer if we have valid fix */
-	if (gnss_data->fix_ok) {
-		k_timer_start(&gnss_timeout_timer, K_MSEC(CONFIG_GNSS_TIMEOUT),
-			      K_NO_WAIT);
-	}
+	/* Reset timer if we have new data */
+	k_timer_start(&gnss_timeout_timer, K_MSEC(CONFIG_GNSS_TIMEOUT),
+			K_NO_WAIT);
 
 	ret = gnss_check_accuracy(gnss_data);
 	if (ret != 0) {

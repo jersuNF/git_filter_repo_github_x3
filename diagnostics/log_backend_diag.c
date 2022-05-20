@@ -17,7 +17,7 @@ static atomic_t log_backend_interface = ATOMIC_INIT(DIAGNOSTICS_BLE);
 
 static struct log_backend_diag_action backend_diag_actions;
 
-static uint8_t output_buffer[128];
+static uint8_t output_buffer[CONFIG_DIAGNOSTICS_LOG_BACKEND_BUFFER_SIZE];
 static uint32_t output_buffer_count = 0;
 
 static int char_out(uint8_t *data, size_t length, void *ctx)
@@ -46,9 +46,9 @@ static int char_out(uint8_t *data, size_t length, void *ctx)
 	return length;
 }
 
-static uint8_t diag_output_buf[100];
+static uint8_t diag_output_buf[CONFIG_DIAGNOSTICS_LOG_BACKEND_BUFFER_SIZE];
 
-LOG_OUTPUT_DEFINE(log_output_diag, char_out, diag_output_buf, 100);
+LOG_OUTPUT_DEFINE(log_output_diag, char_out, diag_output_buf, CONFIG_DIAGNOSTICS_LOG_BACKEND_BUFFER_SIZE);
 
 static void put(const struct log_backend *const backend,
 		struct log_msg *msg)

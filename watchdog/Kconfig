@@ -1,6 +1,7 @@
 menuconfig WATCHDOG_ENABLE
 	bool "Enable watchdog"
 	select WATCHDOG
+	depends on BEACON_SCAN_ENABLE
 	default y
 
 if WATCHDOG_ENABLE

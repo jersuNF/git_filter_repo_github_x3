@@ -13,6 +13,8 @@ LOG_MODULE_REGISTER(amc_correction, CONFIG_AMC_LIB_LOG_LEVEL);
 #include "amc_handler.h"
 #include "messaging_module_events.h"
 
+#include "movement_controller.h"
+
 /* For playing sound and fetching freq limits and zapping. */
 #include "sound_event.h"
 #include "ep_event.h"
@@ -26,7 +28,6 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change);
 static bool zap_eval_doing;
 static uint32_t zap_timestamp;
 static uint32_t correction_pause_timestamp;
-static uint16_t last_warn_freq;
 
 /* Distance from fence where the last warning was started. */
 static int16_t last_warn_dist;
@@ -39,7 +40,125 @@ static uint8_t correction_started = 0;
 /* True from function correction start to correction_pause. (Sound is ON). */
 static uint8_t correction_warn_on = 0;
 
+/* Atomic variables used by freq calculator thread
+ * and corrcetion consumer.
+ */
+
+static atomic_t last_warn_freq = ATOMIC_INIT(0);
+static atomic_t can_update_buzzer = ATOMIC_INIT(false);
 static atomic_t last_mean_dist = ATOMIC_INIT(0);
+static void buzzer_update_fn();
+K_WORK_DELAYABLE_DEFINE(update_buzzer_work, buzzer_update_fn);
+
+static int64_t time_since_gnss_correction = 0;
+
+static int16_t prev_dist_change = 0;
+
+static bool first_correction_pause = false;
+
+K_SEM_DEFINE(freq_update_sem, 0, 1);
+
+static void buzzer_update_fn()
+{
+	/* Update frequency only if we're in WARN/MAX state off buzzer. */
+	if (atomic_get(&can_update_buzzer)) {
+		uint16_t freq = atomic_get(&last_warn_freq);
+
+		if (zap_eval_doing) {
+			uint32_t delta_zap_eval =
+				k_uptime_get_32() - zap_timestamp;
+
+			if (delta_zap_eval >= ZAP_EVALUATION_TIME) {
+				zap_eval_doing = false;
+			}
+		}
+
+		if (!zap_eval_doing) {
+			/* Only submit events etc, if we have freq change and no zap eval. */
+			if (k_sem_take(&freq_update_sem, K_NO_WAIT) == 0) {
+				/** Update buzzer frequency event. */
+				struct sound_set_warn_freq_event *freq_ev =
+					new_sound_set_warn_freq_event();
+				freq_ev->freq = freq;
+				EVENT_SUBMIT(freq_ev);
+
+				/** @note It will zap immediately once we 
+			 	 *  reach WARN_FREQ_MAX, and wait 200ms 
+			 	 *  (ZAP_EVALUATION_TIME) until next zap
+			 	 *  up to 3 times untill it is considered
+			 	 *  "escaped."
+			 	 */
+				if (freq >= WARN_FREQ_MAX &&
+				    atomic_get(&sound_max_atomic)) {
+					correction_pause(
+						Reason_WARNPAUSEREASON_ZAP,
+						atomic_get(&last_mean_dist));
+					struct ep_status_event *ep_ev =
+						new_ep_status_event();
+					ep_ev->ep_status = EP_RELEASE;
+					EVENT_SUBMIT(ep_ev);
+					zap_eval_doing = true;
+					zap_timestamp = k_uptime_get_32();
+					increment_zap_count();
+					LOG_INF("AMC notified EP to zap!");
+
+					struct amc_zapped_now_event *ev =
+						new_amc_zapped_now_event();
+
+					ev->has_fence_dist = true;
+					ev->fence_dist =
+						atomic_get(&last_mean_dist);
+
+					EVENT_SUBMIT(ev);
+
+					/* We need to reschedule this function
+				 	 * after ZAP_EVALUATION_TIME, to be able to zap
+				 	 * again based on this variable, not buzzer
+				 	 * update rate.
+				 	 */
+					k_work_reschedule(
+						&update_buzzer_work,
+						K_MSEC(ZAP_EVALUATION_TIME));
+				}
+			}
+		}
+		k_work_schedule(&update_buzzer_work,
+				K_MSEC(WARN_BUZZER_UPDATE_RATE));
+	}
+}
+
+static void start_buzzer_updates()
+{
+	/** Submit warn zone event to buzzer. 
+	 * 
+	 * @note This warn zone event 
+	 * will play indefinitly
+	 * unless one of the three happens and 
+	 * it will turn off:
+	 * 1. amc_correction doesn't update the 
+	 *    warn frequency with a new value 
+	 *    within 1 second  timeout (1 sec 
+	 *    is the default value at least).
+	 * 2. A new sound event has been submitted 
+	 *    i.e. FIND_ME, or OFF, in which case 
+	 *    we have to resubmit the 
+	 *    SND_WARN event. This is currently 
+	 *    implemented when we update the freq.
+	 *    Where we submit the event if the
+	 *    buzzer is IDLE.
+	 * 3. It gets a frequency that is outside 
+	 *    the freq range for instance below 
+	 *    WARN_SOUND_INIT or higher than
+	 *    WARN_SOUND_MAX, in which case 
+	 *    it turns OFF.
+	 */
+	struct sound_event *snd_ev = new_sound_event();
+	snd_ev->type = SND_WARN;
+	EVENT_SUBMIT(snd_ev);
+
+	atomic_set(&can_update_buzzer, true);
+	k_work_reschedule(&update_buzzer_work, K_NO_WAIT);
+}
 
 static void correction_start(int16_t mean_dist)
 {
@@ -48,7 +167,7 @@ static void correction_start(int16_t mean_dist)
 
 	if (delta_correction_pause > CORRECTION_PAUSE_MIN_TIME) {
 		if (!correction_started) {
-			last_warn_freq = WARN_FREQ_INIT;
+			atomic_set(&last_warn_freq, WARN_FREQ_INIT);
 			last_warn_dist = mean_dist;
 
 			struct warn_correction_start_event *ev =
@@ -66,32 +185,16 @@ static void correction_start(int16_t mean_dist)
 			LOG_INF("Correction started.");
 		}
 		if (!correction_warn_on) {
-			/** Submit warn zone event to buzzer. 
-			 * 
-			 * @note This warn zone event 
-			 * will play indefinitly
-			 * unless one of the three happens and 
-			 * it will turn off:
-			 * 1. amc_correction doesn't update the 
-			 *    warn frequency with a new value 
-			 *    within 1 second  timeout (1 sec 
-			 *    is the default value at least).
-			 * 2. A new sound event has been submitted 
-			 *    i.e. FIND_ME, or OFF, in which case 
-			 *    we have to resubmit the 
-			 *    SND_WARN event. This is currently 
-			 *    implemented when we update the freq.
-			 *    Where we submit the event if the
-			 *    buzzer is IDLE.
-			 * 3. It gets a frequency that is outside 
-			 *    the freq range for instance below 
-			 *    WARN_SOUND_INIT or higher than
-			 *    WARN_SOUND_MAX, in which case 
-			 *    it turns OFF.
+			start_buzzer_updates();
+			prev_dist_change = 0;
+
+			first_correction_pause = true;
+
+			/* Set the timesince, because otherwise 
+			 * the freq update is waaay to big since it is
+			 * default to 0.
 			 */
-			struct sound_event *snd_ev = new_sound_event();
-			snd_ev->type = SND_WARN;
-			EVENT_SUBMIT(snd_ev);
+			time_since_gnss_correction = k_uptime_get();
 
 			struct animal_warning_event *ev =
 				new_animal_warning_event();
@@ -108,13 +211,6 @@ static void correction_start(int16_t mean_dist)
 static void correction_end(void)
 {
 	if (correction_started && !correction_warn_on) {
-		/** Turn off the sound buzzer. @note This will stop
-		 * any FIND_ME or other sound events as well. 
-		 */
-		struct sound_event *snd_ev = new_sound_event();
-		snd_ev->type = SND_OFF;
-		EVENT_SUBMIT(snd_ev);
-
 		last_warn_dist = LIM_WARN_MIN_DM;
 		reset_zap_pain_cnt();
 
@@ -148,12 +244,21 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 {
 	int16_t dist_add = 0;
 
-	/** Turn off the sound buzzer. @note This will stop
-	 * any FIND_ME or other sound events as well. 
-	 */
-	struct sound_event *snd_ev = new_sound_event();
-	snd_ev->type = SND_OFF;
-	EVENT_SUBMIT(snd_ev);
+	atomic_set(&can_update_buzzer, false);
+
+	/* No reason to spam event handler, we only submit this event once. */
+	if (first_correction_pause) {
+		/** Turn off the sound buzzer. @note This will stop
+	 	 *  any FIND_ME or other sound events as well. 
+	 	 */
+		struct sound_event *snd_ev = new_sound_event();
+		snd_ev->type = SND_OFF;
+		EVENT_SUBMIT(snd_ev);
+		first_correction_pause = false;
+	}
+
+	/* Everytime we pause, we set the previous distace to 0. */
+	prev_dist_change = 0;
 
 	LOG_INF("Paused correction warning due to reason %i.", reason);
 
@@ -202,9 +307,7 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 	}
 
 	if (dist_add > 0) {
-		/* Makes sure that sound starts over. */
-		last_warn_freq = WARN_FREQ_INIT;
-
+		atomic_set(&last_warn_freq, WARN_FREQ_INIT);
 		/* If Distance is set, then restart further warning 
 		 * mentioned distance from this distance.
 		 */
@@ -224,97 +327,78 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 {
 	/* Variables used in the correction setup, calculation and end. */
-	int16_t inc_tone_slope = 0, dec_tone_slope = 0;
-	static uint32_t timestamp;
-
-	if (zap_eval_doing) {
-		uint32_t delta_zap_eval = k_uptime_get_32() - zap_timestamp;
-
-		if (delta_zap_eval >= ZAP_EVALUATION_TIME) {
-			zap_eval_doing = false;
-		}
-		return;
-	} else if (correction_started) {
+	if (correction_started) {
 		if (correction_warn_on) {
-			if (last_warn_freq < WARN_FREQ_INIT) {
-				last_warn_freq = WARN_FREQ_INIT;
+			uint16_t inc_tone_slope = 0, dec_tone_slope = 0;
+			uint16_t freq = atomic_get(&last_warn_freq);
+			if (amc_mode == Mode_Teach) {
+				inc_tone_slope = TEACHMODE_DIST_INCR_SLOPE_LIM;
+				dec_tone_slope = TEACHMODE_DIST_DECR_SLOPE_LIM;
+			} else {
+				inc_tone_slope = DIST_INCR_SLOPE_LIM;
+				dec_tone_slope = DIST_DECR_SLOPE_LIM;
 			}
 
-			uint32_t delta_timestamp =
-				k_uptime_get_32() - timestamp;
-			if (delta_timestamp > WARN_TONE_SPEED_MS) {
-				timestamp = k_uptime_get_32();
+			uint16_t freq_gnss_multiple;
 
-				if (amc_mode == Mode_Teach) {
-					inc_tone_slope =
-						TEACHMODE_DIST_INCR_SLOPE_LIM;
-					dec_tone_slope =
-						TEACHMODE_DIST_DECR_SLOPE_LIM;
-				} else {
-					inc_tone_slope = DIST_INCR_SLOPE_LIM;
-					dec_tone_slope = DIST_DECR_SLOPE_LIM;
-				}
+			int64_t current_uptime = k_uptime_get();
 
-				if (dist_change > inc_tone_slope) {
-					last_warn_freq += WARN_TONE_SPEED_HZ;
-				}
-				if (dist_change < dec_tone_slope) {
-					last_warn_freq -= WARN_TONE_SPEED_HZ;
-				}
+			/* Calculates the time since last GNSS update, and
+			 * updates the frequency based on the previous distance.
+			 * The new incomming data is also taken into
+			 * consideration, hence -1 in the num_increments.
+			 * Example:
+			 * Let's say there's 250ms since last gnss data,
+			 * and we want to play each hz increase for 25ms
+			 * (NEW_WARN_TONE_SPEED_MS) based on how long it
+			 * takes to reach 5 seconds. This means we have
+			 * 250ms / 25ms = 10 increments, however, we already
+			 * have the current, which means we can subtract
+			 * one increment. Which means the buzzer increases
+			 * by 9 increments using old dist_change, while
+			 * the last 1 uses new dist_change.
+			 */
+			uint16_t num_increments =
+				((current_uptime - time_since_gnss_correction) /
+				 NEW_WARN_TONE_SPEED_MS) -
+				1;
+			freq_gnss_multiple =
+				num_increments * WARN_TONE_SPEED_HZ;
+
+			time_since_gnss_correction = current_uptime;
+
+			if (prev_dist_change > inc_tone_slope) {
+				freq += freq_gnss_multiple;
+			}
+			if (prev_dist_change < dec_tone_slope) {
+				freq -= freq_gnss_multiple;
 			}
 
-			bool try_zap = false;
-			/* Clamp max frequency so we know sound controller
+			if (dist_change > inc_tone_slope) {
+				freq += WARN_TONE_SPEED_HZ;
+			}
+			if (dist_change < dec_tone_slope) {
+				freq -= WARN_TONE_SPEED_HZ;
+			}
+
+			prev_dist_change = dist_change;
+
+			/* Clamp frequency so we know sound controller
 			 * plays the exact MAX frequency in order to
 			 * also publish an event of MAX.
 			 */
-			if (last_warn_freq >= WARN_FREQ_MAX) {
-				last_warn_freq = WARN_FREQ_MAX;
-				try_zap = true;
+			if (freq < WARN_FREQ_INIT) {
+				freq = WARN_FREQ_INIT;
+			}
+			if (freq > WARN_FREQ_MAX) {
+				freq = WARN_FREQ_MAX;
 			}
 
-			/* We check if we're within valid frequency ranges. */
-			if (last_warn_freq >= WARN_FREQ_INIT &&
-			    last_warn_freq <= WARN_FREQ_MAX) {
-				/** Update buzzer frequency event. */
-				struct sound_set_warn_freq_event *freq_ev =
-					new_sound_set_warn_freq_event();
-				freq_ev->freq = last_warn_freq;
-				EVENT_SUBMIT(freq_ev);
-
-				/** @note It will zap immediately once we 
-				 *  reach WARN_FREQ_MAX, and wait 200ms 
-				 *  (ZAP_EVALUATION_TIME) until next zap
-				 *  up to 3 times untill it is considered
-				 *  "escaped."
-				 */
-
-				if (try_zap && atomic_get(&sound_max_atomic)) {
-					correction_pause(
-						Reason_WARNPAUSEREASON_ZAP,
-						mean_dist);
-					struct ep_status_event *ep_ev =
-						new_ep_status_event();
-					ep_ev->ep_status = EP_RELEASE;
-					EVENT_SUBMIT(ep_ev);
-					zap_eval_doing = true;
-					zap_timestamp = k_uptime_get_32();
-					increment_zap_count();
-					LOG_INF("AMC notified EP to zap!");
-
-					struct amc_zapped_now_event *ev =
-						new_amc_zapped_now_event();
-
-					ev->has_fence_dist = true;
-					ev->fence_dist =
-						atomic_get(&last_mean_dist);
-
-					EVENT_SUBMIT(ev);
-				}
-			}
-		} else {
-			last_warn_dist = mean_dist + _LAST_DIST_ADD;
+			atomic_set(&last_warn_freq, freq);
+			k_sem_give(&freq_update_sem);
 		}
+	} else {
+		last_warn_dist = mean_dist + _LAST_DIST_ADD;
 	}
 }
 
@@ -334,14 +418,13 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 			if (gnss->mode == GNSSMODE_MAX) {
 				if (fs == FenceStatus_FenceStatus_Normal ||
 				    fs == FenceStatus_MaybeOutOfFence) {
-					/** @todo Fetch getActiveTime() from
-					 *  movement controller. What to check for?
-					 *
-					|| get_correction_status() > 0) { */
-					if (gnss_has_warn_fix()) {
-						correction_start(mean_dist);
+					if (get_active_delta() > 0 ||
+					    get_correction_status() > 0) {
+						if (gnss_has_warn_fix()) {
+							correction_start(
+								mean_dist);
+						}
 					}
-					//}
 				}
 			}
 		}

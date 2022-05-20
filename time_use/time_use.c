@@ -163,10 +163,12 @@ static bool event_handler(const struct event_header *eh)
 		struct xy_location *ev = cast_xy_location(eh);
 		fresh_pos[0] = ev->x;
 		fresh_pos[1] = ev->y;
+		return false;
 	}
 
 	if (is_save_histogram(eh)) {
 		save_and_reset = true;
+		return false;
 	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);

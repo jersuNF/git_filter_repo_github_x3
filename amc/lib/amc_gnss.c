@@ -2,6 +2,8 @@
 #include "amc_zone.h"
 #include "amc_const.h"
 #include "gnss_controller_events.h"
+#include <logging/log.h>
+LOG_MODULE_REGISTER(amc_gnss, CONFIG_AMC_LIB_LOG_LEVEL);
 
 gnss_mode_t gnss_mode = GNSSMODE_NOMODE;
 

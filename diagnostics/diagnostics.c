@@ -297,18 +297,27 @@ static void diagnostics_handle_ble_input(bool* got_data)
 		return;
 	}
 	if (k_mutex_lock(&ble_receive_buffer_mutex, K_MSEC(10)) == 0) {
-		uint32_t parsed_bytes = 
-			diagnostics_process_input(DIAGNOSTICS_BLE, 
-				ble_receive_buffer, ble_received_count);
+		if (true) {
+			if (ble_receive_buffer[0] == 'T') {
+				struct diag_force_teach_event *teach_ev =
+					new_diag_force_teach_event();
+				EVENT_SUBMIT(teach_ev);
+			}
+			ble_received_count = 0;
+		} else {
+			uint32_t parsed_bytes = 
+				diagnostics_process_input(DIAGNOSTICS_BLE, 
+					ble_receive_buffer, ble_received_count);
 
-		if (parsed_bytes > 0)
-		{
-			*got_data = true;
+			if (parsed_bytes > 0)
+			{
+				*got_data = true;
 
-			ble_received_count = diagnostics_buffer_consume(
-							ble_receive_buffer, 
-							parsed_bytes, 
-							ble_received_count);
+				ble_received_count = diagnostics_buffer_consume(
+								ble_receive_buffer, 
+								parsed_bytes, 
+								ble_received_count);
+			}
 		}
 
 		k_mutex_unlock(&ble_receive_buffer_mutex);

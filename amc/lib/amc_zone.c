@@ -44,7 +44,8 @@ int zone_update(int16_t instant_dist,
 	int ret = 0;
 	amc_zone_t new_zone;
 
-	if ((gnss_data->latest.msss > CONFIG_ZONE_MIN_TIME_SINCE_RESET) &&
+	if ((gnss_data->latest.pvt_flags & 1) &&
+	    (gnss_data->latest.msss > CONFIG_ZONE_MIN_TIME_SINCE_RESET) &&
 	    ((zone != PSM_ZONE) || \
 	     (zone_get_time_since_update() > CONFIG_ZONE_PSM_LEAST_TIME))) {
 

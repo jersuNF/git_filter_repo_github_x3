@@ -423,15 +423,15 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 				if (fs == FenceStatus_FenceStatus_Normal ||
 				    fs == FenceStatus_MaybeOutOfFence) {
 					LOG_INF("  Fs is normal or maybe");
-					if (get_active_delta() > 0 ||
-					    get_correction_status() > 0) {
+//					if (get_active_delta() > 0 ||
+//					    get_correction_status() > 0) {
 						LOG_INF("  activedelta or correctionstat");
 						if (gnss_has_warn_fix()) {
 							LOG_INF("  has warn fix");
 							correction_start(
 								mean_dist);
 						}
-					}
+//					}
 				}
 			}
 		}

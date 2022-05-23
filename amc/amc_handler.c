@@ -156,6 +156,10 @@ void handle_states_fn()
 	Mode amc_mode = calc_mode();
 	FenceStatus fence_status = get_fence_status();
 
+	LOG_INF("  AMC mode is: %d", amc_mode);
+	LOG_INF("  AMC zone is: %d", cur_zone);
+	LOG_INF("  Fence status is: %d", fence_status);
+
 	if (cur_zone != WARN_ZONE || buzzer_state ||
 	    fence_status == FenceStatus_NotStarted ||
 	    fence_status == FenceStatus_Escaped) {
@@ -230,6 +234,11 @@ void handle_gnss_data_fn(struct k_work *item)
 		/* Error handle. */
 		goto cleanup;
 	}
+	
+	LOG_INF("\n\n--== START ==--");
+	LOG_INF("  GNSS data: %d, %d, %d, %d, %d", gnss->latest.lon,
+		gnss->latest.lat, gnss->latest.pvt_flags, gnss->latest.h_acc_dm,
+		gnss->latest.num_sv);
 
 	/* Set local variables used in AMC logic. */
 	int16_t height_delta = INT16_MAX;
@@ -264,6 +273,8 @@ void handle_gnss_data_fn(struct k_work *item)
 		uint8_t vertex_index = 0;
 		instant_dist = fnc_calc_dist(pos_x, pos_y, &fence_index,
 					     &vertex_index);
+		LOG_INF("  Calculated distance: %d", instant_dist);
+
 
 		/* Reset dist_change since we acquired a new distance. */
 		dist_change = 0;
@@ -275,6 +286,8 @@ void handle_gnss_data_fn(struct k_work *item)
 		  * here. Either add check to has_accepted_fix, or explicit 
 		  * call to gnss_get_mode */
 		if (gnss_has_accepted_fix()) {
+			LOG_INF("  Has accepted fix!");
+
 			/* Accepted position. Fill FIFOs. */
 			fifo_put(gnss->lastfix.h_acc_dm, acc_array,
 				 FIFO_ELEMENTS);
@@ -299,6 +312,7 @@ void handle_gnss_data_fn(struct k_work *item)
 				}
 			}
 		} else {
+			LOG_INF("  Does not have accepted fix!");
 			fifo_dist_elem_count = 0;
 			fifo_avg_dist_elem_count = 0;
 		}
@@ -323,6 +337,9 @@ void handle_gnss_data_fn(struct k_work *item)
 						   FIFO_AVG_DISTANCE_ELEMENTS);
 			}
 		}
+		LOG_INF("  mean_dist: %d, dist_change: %d, dist_inc_count: %d, acc_delta: %d, height_delta: %d",
+			mean_dist, dist_change, dist_inc_count, acc_delta,
+			height_delta);
 
 		int16_t dist_incr_slope_lim = 0;
 		uint8_t dist_incr_count = 0;
@@ -364,6 +381,8 @@ cleanup:
 	 * As well as notifying we're not using fence data area. 
 	 */
 	k_sem_give(&fence_data_sem);
+
+	LOG_INF("--== END ==--\n\n");
 }
 
 int gnss_timeout_reset_fifo()

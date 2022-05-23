@@ -10,7 +10,7 @@ menuconfig ANIMAL_MONITOR_CONTROL
 if ANIMAL_MONITOR_CONTROL
 	config AMC_LOG_LEVEL
 		int "Log level for the AMC module"
-		default 4
+		default 2
 	
 	config STATIC_GNSSDATA_SIZE
 		int "Data size of the cached GNSS data"

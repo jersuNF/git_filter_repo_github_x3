@@ -11,6 +11,10 @@ if DIAGNOSTICS
 	config DIAGNOSTICS_RTT_UP_CHANNEL_INDEX
 		int "RTT Channel index to use for data up to host computer"
 		default 2
+	
+	config DIAGNOSTICS_LOG_BACKEND_BUFFER_SIZE
+		int "Size of the buffer used in the log backend to aggregate data before transmitting"
+		default 128
 
 	config DIAGNOSTICS_LOG_LEVEL
 		int "0 - 4 for logging. OFF -> ERR -> WRN -> INF -> DBG"

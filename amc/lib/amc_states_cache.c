@@ -552,7 +552,7 @@ CollarStatus calc_collar_status(void)
 
 	/* If new status, write to EEPROM. */
 	if (current_collar_status != new_collar_status) {
-		current_collar_status = CollarStatus_CollarStatus_Normal;
+		current_collar_status = new_collar_status;
 		int err = eep_uint8_write(EEP_COLLAR_STATUS,
 					  (uint8_t)current_collar_status);
 

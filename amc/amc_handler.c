@@ -59,7 +59,7 @@ atomic_t sound_max_atomic = ATOMIC_INIT(false);
 /* Beacon status used in calculating the fence status. */
 atomic_t current_beacon_status = ATOMIC_INIT(BEACON_STATUS_OUT_OF_RANGE);
 
-#define MODULE animal_monitor_control
+#define MODULE amc
 LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
 
 /* Thread stack area that we use for the calculation process. We add a work

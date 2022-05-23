@@ -58,6 +58,8 @@ static bool first_correction_pause = false;
 
 K_SEM_DEFINE(freq_update_sem, 0, 1);
 
+static bool queueZap = false;
+
 static void buzzer_update_fn()
 {
 	/* Update frequency only if we're in WARN/MAX state off buzzer. */
@@ -88,43 +90,50 @@ static void buzzer_update_fn()
 			 	 *  up to 3 times untill it is considered
 			 	 *  "escaped."
 			 	 */
-				if (freq >= WARN_FREQ_MAX &&
-				    atomic_get(&sound_max_atomic)) {
-					correction_pause(
-						Reason_WARNPAUSEREASON_ZAP,
-						atomic_get(&last_mean_dist));
-					struct ep_status_event *ep_ev =
-						new_ep_status_event();
-					ep_ev->ep_status = EP_RELEASE;
-					EVENT_SUBMIT(ep_ev);
-					zap_eval_doing = true;
-					zap_timestamp = k_uptime_get_32();
-					increment_zap_count();
-					LOG_INF("AMC notified EP to zap!");
+				if (queueZap) {
+					queueZap = false;
+					if (freq >= WARN_FREQ_MAX) {
+						correction_pause(
+							Reason_WARNPAUSEREASON_ZAP,
+							atomic_get(
+								&last_mean_dist));
+						struct ep_status_event *ep_ev =
+							new_ep_status_event();
+						ep_ev->ep_status = EP_RELEASE;
+						EVENT_SUBMIT(ep_ev);
+						zap_eval_doing = true;
+						zap_timestamp =
+							k_uptime_get_32();
+						increment_zap_count();
+						LOG_INF("AMC notified EP to zap!");
 
-					struct amc_zapped_now_event *ev =
-						new_amc_zapped_now_event();
+						struct amc_zapped_now_event *ev =
+							new_amc_zapped_now_event();
 
-					ev->has_fence_dist = true;
-					ev->fence_dist =
-						atomic_get(&last_mean_dist);
+						ev->has_fence_dist = true;
+						ev->fence_dist = atomic_get(
+							&last_mean_dist);
 
-					EVENT_SUBMIT(ev);
+						EVENT_SUBMIT(ev);
 
-					/* We need to reschedule this function
+						/* We need to reschedule this function
 				 	 * after ZAP_EVALUATION_TIME, to be able to zap
 				 	 * again based on this variable, not buzzer
 				 	 * update rate.
 				 	 */
-					k_work_reschedule(
-						&update_buzzer_work,
-						K_MSEC(ZAP_EVALUATION_TIME));
+						k_work_reschedule(
+							&update_buzzer_work,
+							K_MSEC(ZAP_EVALUATION_TIME));
+					}
+				}
+				if (freq >= WARN_FREQ_MAX &&
+				    atomic_get(&sound_max_atomic)) {
+					queueZap = true;
 				}
 			}
 		}
-		k_work_schedule(&update_buzzer_work,
-				K_MSEC(WARN_BUZZER_UPDATE_RATE));
 	}
+	k_work_schedule(&update_buzzer_work, K_MSEC(WARN_BUZZER_UPDATE_RATE));
 }
 
 static void start_buzzer_updates()
@@ -423,15 +432,14 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 				if (fs == FenceStatus_FenceStatus_Normal ||
 				    fs == FenceStatus_MaybeOutOfFence) {
 					LOG_INF("  Fs is normal or maybe");
-//					if (get_active_delta() > 0 ||
-//					    get_correction_status() > 0) {
-						LOG_INF("  activedelta or correctionstat");
-						if (gnss_has_warn_fix()) {
-							LOG_INF("  has warn fix");
-							correction_start(
-								mean_dist);
-						}
-//					}
+					//					if (get_active_delta() > 0 ||
+					//					    get_correction_status() > 0) {
+					LOG_INF("  activedelta or correctionstat");
+					if (gnss_has_warn_fix()) {
+						LOG_INF("  has warn fix");
+						correction_start(mean_dist);
+					}
+					//					}
 				}
 			}
 		}

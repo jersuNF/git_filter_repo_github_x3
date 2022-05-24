@@ -25,7 +25,7 @@
 #define WARN_MIN_DURATION 5
 
 /* How many MS inbetween each buzzer update with current warn HZ. */
-#define WARN_BUZZER_UPDATE_RATE 250
+#define WARN_BUZZER_UPDATE_RATE 420
 
 /* Time in sec every activity level has to be active 
  * before activity level is updated to a lower value. 

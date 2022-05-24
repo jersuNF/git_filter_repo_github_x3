@@ -60,6 +60,23 @@ K_SEM_DEFINE(freq_update_sem, 0, 1);
 
 static bool queueZap = false;
 
+
+#ifdef CONFIG_AMC_USE_LEGACY_STEP
+static uint32_t convert_to_legacy_frequency(uint32_t frequency)
+{
+	uint8_t ocr_value = (4000000/(2*32*frequency))-1;
+	frequency = 4000000/((ocr_value+1)*2*32);
+
+	if (frequency > WARN_FREQ_MAX) {
+		frequency = WARN_FREQ_MAX;
+	} else if (frequency < WARN_FREQ_INIT) {
+		frequency = WARN_FREQ_INIT;
+	}
+
+	return frequency;
+}
+#endif
+
 static void buzzer_update_fn()
 {
 	/* Update frequency only if we're in WARN/MAX state off buzzer. */
@@ -79,9 +96,13 @@ static void buzzer_update_fn()
 			/* Only submit events etc, if we have freq change and no zap eval. */
 			if (k_sem_take(&freq_update_sem, K_NO_WAIT) == 0) {
 				/** Update buzzer frequency event. */
+				uint32_t set_frequency = freq;
+#ifdef CONFIG_AMC_USE_LEGACY_STEP
+				set_frequency = convert_to_legacy_frequency(set_frequency);
+#endif
 				struct sound_set_warn_freq_event *freq_ev =
 					new_sound_set_warn_freq_event();
-				freq_ev->freq = freq;
+				freq_ev->freq = set_frequency;
 				EVENT_SUBMIT(freq_ev);
 
 				/** @note It will zap immediately once we 
@@ -334,14 +355,6 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 	}
 }
 
-static uint32_t convert_to_legacy_frequency(uint32_t freq)
-{
-	uint8_t ocr_value = (4000000/(2*32*freq))-1;
-	freq = 4000000/((ocr_value+1)*2*32);
-
-	return freq;
-}
-
 static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 {
 	/* Variables used in the correction setup, calculation and end. */
@@ -399,10 +412,6 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 			if (dist_change < dec_tone_slope) {
 				freq -= WARN_TONE_SPEED_HZ;
 			}
-
-#ifdef CONFIG_AMC_USE_LEGACY_STEP
-			freq = convert_to_legacy_frequency(freq);
-#endif
 
 			prev_dist_change = dist_change;
 

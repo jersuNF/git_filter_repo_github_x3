@@ -134,10 +134,6 @@ static void buzzer_update_fn()
 		}
 		k_work_schedule(&update_buzzer_work,
 				K_MSEC(WARN_BUZZER_UPDATE_RATE));
-	} else {
-		struct sound_event *snd_ev = new_sound_event();
-		snd_ev->type = SND_OFF;
-		EVENT_SUBMIT(snd_ev);
 	}
 }
 
@@ -342,8 +338,8 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 
 static uint32_t convert_to_legacy_frequency(uint32_t freq)
 {
-	uint8_t ocr_value = (4000000/(2*32*freq))-1;
-	freq = 4000000/((ocr_value+1)*2*32);
+	uint8_t ocr_value = (4000000 / (2 * 32 * freq)) - 1;
+	freq = 4000000 / ((ocr_value + 1) * 2 * 32);
 
 	return freq;
 }

@@ -2,6 +2,14 @@ config AMC_LIB_LOG_LEVEL
 	int "Log level for the AMC LIB modules"
 	default 4
 
+config AMC_USE_LEGACY_STEP
+	bool "Mimic the buzzer frequency steps in legacy code"
+	help
+	  Legacy collar uses the ATmega1284P, with a timer module
+	  using 4MHz reference clock and a prescaler of 32, causing
+	  the frequency changes to sound steppy. 
+	default y
+
 config FENCE_CACHE_TIMEOUT_SEC
 	int "Timeout in seconds when we try to access the cache"
 	default 5

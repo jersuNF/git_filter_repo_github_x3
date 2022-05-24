@@ -334,6 +334,14 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 	}
 }
 
+static uint32_t convert_to_legacy_frequency(uint32_t freq)
+{
+	uint8_t ocr_value = (4000000/(2*32*freq))-1;
+	freq = 4000000/((ocr_value+1)*2*32);
+
+	return freq;
+}
+
 static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 {
 	/* Variables used in the correction setup, calculation and end. */
@@ -391,6 +399,10 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 			if (dist_change < dec_tone_slope) {
 				freq -= WARN_TONE_SPEED_HZ;
 			}
+
+#ifdef CONFIG_AMC_USE_LEGACY_STEP
+			freq = convert_to_legacy_frequency(freq);
+#endif
 
 			prev_dist_change = dist_change;
 

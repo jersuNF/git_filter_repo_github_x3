@@ -98,13 +98,13 @@
 
 // The warning tone does not play up before the distance slope rate is higher than this, according to average of the last measurements
 // Lower value -> easier to play tone upwards
-#define DIST_INCR_SLOPE_LIM -8
+#define DIST_INCR_SLOPE_LIM -5
 #define TEACHMODE_DIST_INCR_SLOPE_LIM 0
 #define TEACHMODE_DIST_DECR_SLOPE_OFF_LIM -6
 
 // The warning plays down if the distance slope rate is lower than this, according to average of the last measurements
 // Higher value -> easer to play tones downwards
-#define DIST_DECR_SLOPE_LIM -9
+#define DIST_DECR_SLOPE_LIM -6
 #define TEACHMODE_DIST_DECR_SLOPE_LIM 0
 
 /**

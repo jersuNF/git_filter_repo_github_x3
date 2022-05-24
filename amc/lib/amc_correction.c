@@ -134,6 +134,10 @@ static void buzzer_update_fn()
 		}
 		k_work_schedule(&update_buzzer_work,
 				K_MSEC(WARN_BUZZER_UPDATE_RATE));
+	} else {
+		struct sound_event *snd_ev = new_sound_event();
+		snd_ev->type = SND_OFF;
+		EVENT_SUBMIT(snd_ev);
 	}
 }
 
@@ -255,6 +259,8 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 	int16_t dist_add = 0;
 
 	atomic_set(&can_update_buzzer, false);
+
+	LOG_ERR("Correction paused.");
 
 	/* No reason to spam event handler, we only submit this event once. */
 	if (first_correction_pause) {

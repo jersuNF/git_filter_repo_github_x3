@@ -60,12 +60,11 @@ K_SEM_DEFINE(freq_update_sem, 0, 1);
 
 static bool queueZap = false;
 
-
 #ifdef CONFIG_AMC_USE_LEGACY_STEP
 static uint32_t convert_to_legacy_frequency(uint32_t frequency)
 {
-	uint8_t ocr_value = (4000000/(2*32*frequency))-1;
-	frequency = 4000000/((ocr_value+1)*2*32);
+	uint8_t ocr_value = (4000000 / (2 * 32 * frequency)) - 1;
+	frequency = 4000000 / ((ocr_value + 1) * 2 * 32);
 
 	if (frequency > WARN_FREQ_MAX) {
 		frequency = WARN_FREQ_MAX;
@@ -98,7 +97,8 @@ static void buzzer_update_fn()
 				/** Update buzzer frequency event. */
 				uint32_t set_frequency = freq;
 #ifdef CONFIG_AMC_USE_LEGACY_STEP
-				set_frequency = convert_to_legacy_frequency(set_frequency);
+				set_frequency = convert_to_legacy_frequency(
+					set_frequency);
 #endif
 				struct sound_set_warn_freq_event *freq_ev =
 					new_sound_set_warn_freq_event();
@@ -276,8 +276,6 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 	int16_t dist_add = 0;
 
 	atomic_set(&can_update_buzzer, false);
-
-	LOG_ERR("Correction paused.");
 
 	/* No reason to spam event handler, we only submit this event once. */
 	if (first_correction_pause) {

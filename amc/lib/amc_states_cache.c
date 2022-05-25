@@ -281,6 +281,11 @@ Mode calc_mode(void)
 			/* See https://youtrack.axbit.com/youtrack/issue/NOF-310. */
 			new_mode = Mode_Fence;
 			teach_mode_finished = 1;
+			/** @todo Need to set to 0 when going from
+			 *  Fence -> Teach
+			 */
+			eep_uint8_write(EEP_TEACH_MODE_FINISHED,
+					teach_mode_finished);
 		}
 		break;
 	case Mode_Fence:

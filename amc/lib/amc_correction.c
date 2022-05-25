@@ -58,6 +58,24 @@ static bool first_correction_pause = false;
 
 K_SEM_DEFINE(freq_update_sem, 0, 1);
 
+static bool queueZap = false;
+
+#ifdef CONFIG_AMC_USE_LEGACY_STEP
+static uint32_t convert_to_legacy_frequency(uint32_t frequency)
+{
+	uint8_t ocr_value = (4000000 / (2 * 32 * frequency)) - 1;
+	frequency = 4000000 / ((ocr_value + 1) * 2 * 32);
+
+	if (frequency > WARN_FREQ_MAX) {
+		frequency = WARN_FREQ_MAX;
+	} else if (frequency < WARN_FREQ_INIT) {
+		frequency = WARN_FREQ_INIT;
+	}
+
+	return frequency;
+}
+#endif
+
 static void buzzer_update_fn()
 {
 	/* Update frequency only if we're in WARN/MAX state off buzzer. */
@@ -77,9 +95,14 @@ static void buzzer_update_fn()
 			/* Only submit events etc, if we have freq change and no zap eval. */
 			if (k_sem_take(&freq_update_sem, K_NO_WAIT) == 0) {
 				/** Update buzzer frequency event. */
+				uint32_t set_frequency = freq;
+#ifdef CONFIG_AMC_USE_LEGACY_STEP
+				set_frequency = convert_to_legacy_frequency(
+					set_frequency);
+#endif
 				struct sound_set_warn_freq_event *freq_ev =
 					new_sound_set_warn_freq_event();
-				freq_ev->freq = freq;
+				freq_ev->freq = set_frequency;
 				EVENT_SUBMIT(freq_ev);
 
 				/** @note It will zap immediately once we 
@@ -88,37 +111,45 @@ static void buzzer_update_fn()
 			 	 *  up to 3 times untill it is considered
 			 	 *  "escaped."
 			 	 */
-				if (freq >= WARN_FREQ_MAX &&
-				    atomic_get(&sound_max_atomic)) {
-					correction_pause(
-						Reason_WARNPAUSEREASON_ZAP,
-						atomic_get(&last_mean_dist));
-					struct ep_status_event *ep_ev =
-						new_ep_status_event();
-					ep_ev->ep_status = EP_RELEASE;
-					EVENT_SUBMIT(ep_ev);
-					zap_eval_doing = true;
-					zap_timestamp = k_uptime_get_32();
-					increment_zap_count();
-					LOG_INF("AMC notified EP to zap!");
+				if (queueZap) {
+					queueZap = false;
+					if (freq >= WARN_FREQ_MAX) {
+						correction_pause(
+							Reason_WARNPAUSEREASON_ZAP,
+							atomic_get(
+								&last_mean_dist));
+						struct ep_status_event *ep_ev =
+							new_ep_status_event();
+						ep_ev->ep_status = EP_RELEASE;
+						EVENT_SUBMIT(ep_ev);
+						zap_eval_doing = true;
+						zap_timestamp =
+							k_uptime_get_32();
+						increment_zap_count();
+						LOG_INF("AMC notified EP to zap!");
 
-					struct amc_zapped_now_event *ev =
-						new_amc_zapped_now_event();
+						struct amc_zapped_now_event *ev =
+							new_amc_zapped_now_event();
 
-					ev->has_fence_dist = true;
-					ev->fence_dist =
-						atomic_get(&last_mean_dist);
+						ev->has_fence_dist = true;
+						ev->fence_dist = atomic_get(
+							&last_mean_dist);
 
-					EVENT_SUBMIT(ev);
+						EVENT_SUBMIT(ev);
 
-					/* We need to reschedule this function
+						/* We need to reschedule this function
 				 	 * after ZAP_EVALUATION_TIME, to be able to zap
 				 	 * again based on this variable, not buzzer
 				 	 * update rate.
 				 	 */
-					k_work_reschedule(
-						&update_buzzer_work,
-						K_MSEC(ZAP_EVALUATION_TIME));
+						k_work_reschedule(
+							&update_buzzer_work,
+							K_MSEC(ZAP_EVALUATION_TIME));
+					}
+				}
+				if (freq >= WARN_FREQ_MAX &&
+				    atomic_get(&sound_max_atomic)) {
+					queueZap = true;
 				}
 			}
 		}
@@ -327,9 +358,10 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 {
 	/* Variables used in the correction setup, calculation and end. */
+
 	if (correction_started) {
 		if (correction_warn_on) {
-			uint16_t inc_tone_slope = 0, dec_tone_slope = 0;
+			int16_t inc_tone_slope = 0, dec_tone_slope = 0;
 			uint16_t freq = atomic_get(&last_warn_freq);
 			if (amc_mode == Mode_Teach) {
 				inc_tone_slope = TEACHMODE_DIST_INCR_SLOPE_LIM;
@@ -414,13 +446,19 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 	atomic_set(&last_mean_dist, mean_dist);
 
 	if (amc_mode == Mode_Teach || amc_mode == Mode_Fence) {
+		LOG_INF("  amc_mode in teach or fence");
 		if (zone == WARN_ZONE) {
+			LOG_INF("  Zone is warn");
 			if (gnss->mode == GNSSMODE_MAX) {
+				LOG_INF("  GNSS in max");
 				if (fs == FenceStatus_FenceStatus_Normal ||
 				    fs == FenceStatus_MaybeOutOfFence) {
+					LOG_INF("  Fs is normal or maybe");
 					if (get_active_delta() > 0 ||
 					    get_correction_status() > 0) {
+						LOG_INF("  activedelta or correctionstat");
 						if (gnss_has_warn_fix()) {
+							LOG_INF("  has warn fix");
 							correction_start(
 								mean_dist);
 						}

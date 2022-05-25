@@ -25,7 +25,7 @@
 #define WARN_MIN_DURATION 5
 
 /* How many MS inbetween each buzzer update with current warn HZ. */
-#define WARN_BUZZER_UPDATE_RATE 250
+#define WARN_BUZZER_UPDATE_RATE 420
 
 /* Time in sec every activity level has to be active 
  * before activity level is updated to a lower value. 
@@ -96,15 +96,19 @@
 #define DIST_INCR_COUNT 0
 #define TEACHMODE_DIST_INCR_COUNT 3
 
+/** @note The original values were -8 for INCR slope and -9 for DECR slope
+ *  respectively, but from the tests performed 23.05.22 & 24.05.22 tweaking to
+ *  -2/-3 seemed closest to legacy code.
+ */
 // The warning tone does not play up before the distance slope rate is higher than this, according to average of the last measurements
 // Lower value -> easier to play tone upwards
-#define DIST_INCR_SLOPE_LIM -8
+#define DIST_INCR_SLOPE_LIM -2
 #define TEACHMODE_DIST_INCR_SLOPE_LIM 0
 #define TEACHMODE_DIST_DECR_SLOPE_OFF_LIM -6
 
 // The warning plays down if the distance slope rate is lower than this, according to average of the last measurements
 // Higher value -> easer to play tones downwards
-#define DIST_DECR_SLOPE_LIM -9
+#define DIST_DECR_SLOPE_LIM -3
 #define TEACHMODE_DIST_DECR_SLOPE_LIM 0
 
 /**

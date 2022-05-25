@@ -116,7 +116,7 @@ uint32_t commander_handle(enum diagnostics_interface interface,
 				EVENT_SUBMIT(sound_event_warn);
 				
 				struct sound_set_warn_freq_event *sound_warn_freq = new_sound_set_warn_freq_event();
-				sound_warn_freq->freq = WARN_FREQ_MS_PERIOD_MAX;
+				sound_warn_freq->freq = WARN_FREQ_MAX;
 				EVENT_SUBMIT(sound_warn_freq);
 
 				cmd = COMMANDER_CMD_WARN_MAX;

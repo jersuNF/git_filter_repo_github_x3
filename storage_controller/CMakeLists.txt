@@ -9,6 +9,8 @@ list(APPEND ZEPHYR_EXTRA_MODULES
 target_include_directories(app PRIVATE 
 			.
 			./include/
+
+  			./../../modules/nf_settings/include
 			./fcb_ext/
 			./../../events/error_handler/
 			./../../events/storage/

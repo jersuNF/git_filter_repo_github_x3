@@ -218,7 +218,7 @@ void init_states_and_variables(void)
 	}
 	current_mode = (Mode)status_code;
 
-	if ((current_mode == Mode_Teach) || (current_mode == Mode_Mode_UNKNOWN)) {
+	if (current_mode == Mode_Teach) {
 		enter_teach_mode();
 	}
 

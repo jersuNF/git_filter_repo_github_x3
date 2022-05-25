@@ -14,7 +14,6 @@
 #include "amc_handler.h"
 #include <logging/log.h>
 #include "sound_event.h"
-#include "diagnostics_events.h"
 #include "request_events.h"
 #include "pasture_structure.h"
 #include "event_manager.h"
@@ -236,6 +235,7 @@ void handle_gnss_data_fn(struct k_work *item)
 		goto cleanup;
 	}
 	
+	LOG_INF("\n\n--== START ==--");
 	LOG_INF("  GNSS data: %d, %d, %d, %d, %d", gnss->latest.lon,
 		gnss->latest.lat, gnss->latest.pvt_flags, gnss->latest.h_acc_dm,
 		gnss->latest.num_sv);
@@ -375,6 +375,8 @@ cleanup:
 	 * As well as notifying we're not using fence data area. 
 	 */
 	k_sem_give(&fence_data_sem);
+
+	LOG_INF("--== END ==--\n\n");
 }
 
 int gnss_timeout_reset_fifo()
@@ -478,19 +480,6 @@ static bool event_handler(const struct event_header *eh)
 		update_movement_state(ev->state);
 		return false;
 	}
-	if (is_diag_force_teach_event(eh)) {
-		/** @todo - Replace this hack by proper impl. */
-		LOG_WRN("FORCING TEACH, by using a rough hack for now!");
-		eep_uint8_write(EEP_WARN_MAX_DURATION, 0xFF);
-		eep_uint8_write(EEP_WARN_MIN_DURATION, 0xFF);
-		eep_uint8_write(EEP_PAIN_CNT_DEF_ESCAPED, 0xFF);
-		eep_uint8_write(EEP_COLLAR_MODE, 0xFF);
-		eep_uint8_write(EEP_FENCE_STATUS, 0xFF);
-		eep_uint8_write(EEP_COLLAR_STATUS, 0xFF);
-		eep_uint8_write(EEP_TEACH_MODE_FINISHED, 0xFF);
-		init_states_and_variables();
-		return false;
-	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -503,4 +492,3 @@ EVENT_SUBSCRIBE(MODULE, new_fence_available);
 EVENT_SUBSCRIBE(MODULE, ble_beacon_event);
 EVENT_SUBSCRIBE(MODULE, sound_status_event);
 EVENT_SUBSCRIBE(MODULE, movement_out_event);
-EVENT_SUBSCRIBE(MODULE, diag_force_teach_event);

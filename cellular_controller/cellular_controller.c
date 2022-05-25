@@ -295,7 +295,7 @@ static void cellular_controller_keep_alive(void* dev)
 	while (true) {
 		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
 			if (!cellular_controller_is_ready()) {
-				ret = modem_nf_reset();
+				ret = reset_modem();
 				if (ret == 0) {
 					ret = cellular_controller_connect(dev);
 					if (ret == 0) {

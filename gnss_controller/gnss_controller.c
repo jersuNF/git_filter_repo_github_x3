@@ -50,16 +50,17 @@ struct k_thread pub_gnss_thread;
 bool pub_gnss_started = false;
 
 /** @brief Sends a timeout event from the GNSS controller */
-static void gnss_controller_send_timeout_event(void) {
+/*static void gnss_controller_send_timeout_event(void)
+{
 	gnss_t gnss_no_fix;
 	memset(&gnss_no_fix, 0, sizeof(gnss_t));
 
 	struct gnss_data *new_data = new_gnss_data();
 	new_data->gnss_data = gnss_no_fix;
 	new_data->timed_out = true;
-	
+
 	EVENT_SUBMIT(new_data);
-}
+}*/
 
 static int gnss_controller_setup(void)
 {
@@ -92,15 +93,17 @@ static int gnss_controller_setup(void)
 }
 
 /** @brief Reset and initialize GNSS, send notification event. */
-static int gnss_controller_reset_gnss(uint16_t mask) 
-{
-	gnss_controller_send_timeout_event();
-
-	gnss_reset(gnss_dev, mask,
-			GNSS_RESET_MODE_HW_IMMEDIATELY);
-
-	return gnss_controller_setup();
-}
+/** @todo In use? 
+ * static int gnss_controller_reset_gnss(uint16_t mask) 
+ *{
+ *	gnss_controller_send_timeout_event();
+ *
+ *	gnss_reset(gnss_dev, mask,
+ *			GNSS_RESET_MODE_HW_IMMEDIATELY);
+ *
+ *	return gnss_controller_setup();
+ *}
+ */
 
 int gnss_controller_init(void)
 {
@@ -122,7 +125,7 @@ int gnss_controller_init(void)
 		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
 		return ret;
 	}
-	
+
 	ret = gnss_controller_setup();
 	if (ret != 0) {
 		char *msg = "Failed setup of GNSS!";

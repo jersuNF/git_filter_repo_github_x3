@@ -50,16 +50,17 @@ struct k_thread pub_gnss_thread;
 bool pub_gnss_started = false;
 
 /** @brief Sends a timeout event from the GNSS controller */
-static void gnss_controller_send_timeout_event(void) {
+/*static void gnss_controller_send_timeout_event(void)
+{
 	gnss_t gnss_no_fix;
 	memset(&gnss_no_fix, 0, sizeof(gnss_t));
 
 	struct gnss_data *new_data = new_gnss_data();
 	new_data->gnss_data = gnss_no_fix;
 	new_data->timed_out = true;
-	
+
 	EVENT_SUBMIT(new_data);
-}
+}*/
 
 static int gnss_controller_setup(void)
 {
@@ -92,15 +93,17 @@ static int gnss_controller_setup(void)
 }
 
 /** @brief Reset and initialize GNSS, send notification event. */
-static int gnss_controller_reset_gnss(uint16_t mask) 
-{
-	gnss_controller_send_timeout_event();
-
-	gnss_reset(gnss_dev, mask,
-			GNSS_RESET_MODE_HW_IMMEDIATELY);
-
-	return gnss_controller_setup();
-}
+/** @todo In use? 
+ * static int gnss_controller_reset_gnss(uint16_t mask) 
+ *{
+ *	gnss_controller_send_timeout_event();
+ *
+ *	gnss_reset(gnss_dev, mask,
+ *			GNSS_RESET_MODE_HW_IMMEDIATELY);
+ *
+ *	return gnss_controller_setup();
+ *}
+ */
 
 int gnss_controller_init(void)
 {
@@ -122,7 +125,7 @@ int gnss_controller_init(void)
 		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
 		return ret;
 	}
-	
+
 	ret = gnss_controller_setup();
 	if (ret != 0) {
 		char *msg = "Failed setup of GNSS!";
@@ -197,7 +200,7 @@ _Noreturn void publish_gnss_data(void *ctx)
 			nf_app_error(ERR_GNSS_CONTROLLER, -ETIMEDOUT, msg,
 				     sizeof(*msg));
 
-			gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
+			//gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
 		}
 	}
 }
@@ -303,13 +306,13 @@ void check_gnss_age(uint32_t gnss_age)
 
 	if ((gnss_age > GNSS_5SEC) && (gnss_reset_count < 1)) {
 		gnss_reset_count++;
-		gnss_controller_reset_gnss(GNSS_RESET_MASK_HOT);
+		//gnss_controller_reset_gnss(GNSS_RESET_MASK_HOT);
 	} else if (gnss_age > GNSS_10SEC && gnss_reset_count < 2) {
 		gnss_reset_count++;
-		gnss_controller_reset_gnss(GNSS_RESET_MASK_WARM);
+		//gnss_controller_reset_gnss(GNSS_RESET_MASK_WARM);
 	} else if (gnss_age > GNSS_20SEC && gnss_reset_count >= 2) {
 		gnss_reset_count++;
-		gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
+		//gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
 	} else if (gnss_age < GNSS_5SEC) {
 		gnss_reset_count = 0;
 	}

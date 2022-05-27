@@ -464,6 +464,12 @@ static bool event_handler(const struct event_header *eh)
 		 */
 		struct gnss_data *ev = cast_gnss_data(eh);
 
+		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
+			if (k_sem_take(&cache_lock_sem, K_MSEC(200)) == 0) {
+				cached_fix = ev->gnss_data.lastfix;
+				k_sem_give(&cache_lock_sem);
+				}
+		}
 		if (!(ev->gnss_data.latest.pvt_valid & (1 << 0)) ||
 		    !(ev->gnss_data.latest.pvt_valid & (1 << 1))) {
 			return false;

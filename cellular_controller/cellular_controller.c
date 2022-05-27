@@ -123,6 +123,7 @@ void receive_tcp(struct data *sock_data)
 				socket_idle_count = 0;
 			}
 		}
+		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
 	}
 }
 

@@ -9,15 +9,6 @@
 #include "event_manager.h"
 #include "sound_event.h"
 
-/** Freq warning start. */
-#define WARN_FREQ_MS_PERIOD_INIT 2000
-
-/** Freq max warning. */
-#define WARN_FREQ_MS_PERIOD_MAX 4200
-
-/** Duration of the warning tone in ms. */
-#define WARN_MIN_DURATION_MS 5000
-
 /** Default loudness for the buzzer in percent. */
 #define BUZZER_SOUND_VOLUME_PERCENT 100
 

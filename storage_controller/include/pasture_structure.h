@@ -6,6 +6,7 @@
 #define _PASTURE_DEF_H_
 
 #include <zephyr.h>
+#include "embedded.pb.h"
 
 #define FENCE_MAX 10
 
@@ -42,6 +43,10 @@ typedef struct {
 	fence_coordinate_t coordinates[FENCE_MAX_TOTAL_COORDINATES];
 } fence_t;
 
+#define MAX_FENCE_DEFINITION_SIZE                                              \
+	sizeof(fence_t) +                                                      \
+		sizeof(fence_coordinate_t) * FENCE_MAX_TOTAL_COORDINATES
+
 typedef struct {
 	struct {
 		uint32_t ul_fence_def_version;
@@ -59,6 +64,9 @@ typedef struct {
 
 		uint16_t us_k_lat;
 		uint16_t us_k_lon;
+
+		/* WIP, need to set status somewhere. */
+		FenceStatus status;
 	} m;
 
 	fence_t fences[FENCE_MAX];

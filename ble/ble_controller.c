@@ -10,7 +10,6 @@
 #include <sys/ring_buffer.h>
 #include <zephyr.h>
 #include <zephyr/types.h>
-#include "nf_eeprom.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -26,7 +25,7 @@
 #include "msg_data_event.h"
 
 #include "nf_version.h"
-#include "nf_eeprom.h"
+#include "nf_settings.h"
 
 #include "beacon_processor.h"
 #include "ble_beacon_event.h"
@@ -55,7 +54,9 @@ static atomic_t atomic_bt_ready;
 static atomic_t atomic_bt_adv_active;
 static atomic_t atomic_bt_scan_active;
 static int64_t beacon_scanner_timer;
+#if CONFIG_BEACON_SCAN_ENABLE
 static struct k_work_delayable periodic_beacon_scanner_work;
+#endif
 static struct k_work_delayable disconnect_peer_work;
 
 static char bt_device_name[DEVICE_NAME_LEN + 1] = CONFIG_BT_DEVICE_NAME;
@@ -162,6 +163,7 @@ static struct bt_conn_cb conn_callbacks = {
 	.disconnected = disconnected,
 };
 
+#if CONFIG_BEACON_SCAN_ENABLE
 /**
  * @brief Periodic beacon scanner work function
  */
@@ -181,7 +183,7 @@ static void periodic_beacon_scanner_work_fn()
 	k_work_reschedule(&periodic_beacon_scanner_work,
 			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
 }
-
+#endif
 /**
  * @brief Work function to send data from rx ring buffer with bt nus
  * @param[in] work work item
@@ -637,7 +639,7 @@ static void disconnect_peer_work_fn()
 int ble_module_init()
 {
 	uint32_t serial_id = 0;
-	int err = eep_read_serial(&serial_id);
+	int err = eep_uint32_read(EEP_UID, &serial_id);
 	if (err != 0) {
 		char *e_msg = "Failed to read serial number from eeprom!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
@@ -678,7 +680,7 @@ int ble_module_init()
 #if CONFIG_BOARD_NF_X25_NRF52840
 	err = bt_dfu_init();
 #endif
-
+#if CONFIG_BEACON_SCAN_ENABLE
 	/* Start scanning after beacons. Set flag to true */
 	if (!atomic_set(&atomic_bt_scan_active, true)) {
 		scan_start();
@@ -689,7 +691,7 @@ int ble_module_init()
 			      periodic_beacon_scanner_work_fn);
 	k_work_reschedule(&periodic_beacon_scanner_work,
 			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
-
+#endif
 	k_work_init_delayable(&disconnect_peer_work, disconnect_peer_work_fn);
 	return 0;
 }

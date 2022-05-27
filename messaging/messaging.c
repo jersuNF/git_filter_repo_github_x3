@@ -23,6 +23,7 @@
 #include "unixTime.h"
 #include "error_event.h"
 #include "helpers.h"
+#include <power/reboot.h>
 
 #include "nf_crc16.h"
 
@@ -37,7 +38,7 @@
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
 #include "pwr_event.h"
-#include "nf_eeprom.h"
+#include "nf_settings.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
@@ -261,6 +262,12 @@ static bool event_handler(const struct event_header *eh)
 		 */
 		struct gnss_data *ev = cast_gnss_data(eh);
 
+		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
+			if (k_sem_take(&cache_lock_sem, K_MSEC(200)) == 0) {
+				cached_fix = ev->gnss_data.lastfix;
+				k_sem_give(&cache_lock_sem);
+			}
+		}
 		if (!(ev->gnss_data.latest.pvt_valid & (1 << 0)) ||
 		    !(ev->gnss_data.latest.pvt_valid & (1 << 1))) {
 			return false;
@@ -354,16 +361,6 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_cellular_ack_event(eh)) {
 		k_sem_give(&send_out_ack);
-		return false;
-	}
-	if (is_gnss_data(eh)) {
-		struct gnss_data *ev = cast_gnss_data(eh);
-		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
-			if (k_sem_take(&cache_lock_sem, K_MSEC(500)) == 0) {
-				cached_fix = ev->gnss_data.lastfix;
-				k_sem_give(&cache_lock_sem);
-			}
-		}
 		return false;
 	}
 	if (is_connection_state_event(eh)) {
@@ -604,8 +601,8 @@ void messaging_thread_fn()
 int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module.");
-	int err = eep_read_serial(&serial_id);
-	if (err != 0) {
+	int err = eep_uint32_read(EEP_UID, &serial_id);
+	if (err != 0) { //TODO: handle in a better way.
 		char *e_msg = "Failed to read serial number from eeprom!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
@@ -1210,7 +1207,7 @@ _DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix)
 		.usHeight = gpsLastFix->baro_Height,
 #endif
 		.has_ucGpsMode = true,
-		.ucGpsMode = gpsLastFix->gps_mode
+		.ucGpsMode = gpsLastFix->mode
 	};
 	return a;
 }

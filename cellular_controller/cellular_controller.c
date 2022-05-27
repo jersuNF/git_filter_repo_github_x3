@@ -3,7 +3,7 @@
 #include "cellular_helpers_header.h"
 #include "messaging_module_events.h"
 #include <zephyr.h>
-#include "nf_eeprom.h"
+#include "nf_settings.h"
 #include "error_event.h"
 
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
@@ -315,6 +315,7 @@ static int cellular_controller_connect(void *dev)
 		LOG_INF("Default server ip address will be "
 			"used.");
 	}
+
 	ret = 0;
 
 exit:

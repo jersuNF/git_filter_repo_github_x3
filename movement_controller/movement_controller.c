@@ -29,6 +29,7 @@ static int16_t acc_fifo_z[ACC_FIFO_ELEMENTS];
 static uint32_t first_inactive_timestamp = 0;
 static uint32_t total_steps = 0;
 static uint16_t activity_decrease_timestamp = 0;
+static uint32_t active_timestamp = 0;
 
 static movement_state_t prev_state = STATE_INACTIVE;
 
@@ -238,6 +239,7 @@ void process_acc_data(raw_acc_data_t *acc)
 	if (!is_active) {
 		m_state = STATE_INACTIVE;
 	} else {
+		active_timestamp = k_uptime_get_32();
 		if (acc_std_final >= acc_sigma_sleep_limit) {
 			m_state = STATE_NORMAL;
 		}
@@ -247,7 +249,7 @@ void process_acc_data(raw_acc_data_t *acc)
 	if (prev_state != m_state) {
 		struct movement_out_event *event = new_movement_out_event();
 		event->state = m_state;
-		/** @todo Add total_steps as well? */
+
 		LOG_DBG("Total steps is %i, state is %i, activity is %i, acc_std_final %i",
 			total_steps, m_state, cur_activity, acc_std_final);
 		EVENT_SUBMIT(event);
@@ -257,6 +259,13 @@ void process_acc_data(raw_acc_data_t *acc)
 	/* Reset the timer since we just consumed the data successfully. */
 	k_timer_start(&movement_timeout_timer,
 		      K_SECONDS(CONFIG_MOVEMENT_TIMEOUT_SEC), K_NO_WAIT);
+}
+
+uint32_t get_active_delta(void)
+{
+	return prev_state == STATE_INACTIVE ?
+		       0 :
+		       k_uptime_get_32() - active_timestamp;
 }
 
 void movement_thread_fn()

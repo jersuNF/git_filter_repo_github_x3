@@ -1,0 +1,17 @@
+menuconfig WATCHDOG_ENABLE
+	bool "Enable watchdog"
+	select WATCHDOG
+	depends on BEACON_SCAN_ENABLE
+	default y
+
+if WATCHDOG_ENABLE
+
+config WATCHDOG_TIMEOUT_SEC
+	int "Application watchdog timeout in seconds"
+	default 300
+
+endif # WATCHDOG_ENABLE
+
+module = WATCHDOG
+module-str = Watchdog
+source "subsys/logging/Kconfig.template.log_config"

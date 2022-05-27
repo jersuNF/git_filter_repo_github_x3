@@ -177,12 +177,10 @@ void process_acc_data(raw_acc_data_t *acc)
          * OH5 in windy conditions, and observing their collar status over time.
          */
 	if (acc_std < acc_sigma_noactivity_limit) {
-		printk("acc std = %d\n", acc_std);
 		cur_activity = ACTIVITY_NO;
 		stepcount = 0;
 	} else {
 		stepcount = acc_count_steps(gravity);
-		printk("step count = %d\n", stepcount);
 		if (stepcount == 0) {
 			cur_activity = ACTIVITY_LOW;
 		} /* resting or grazing. */
@@ -306,7 +304,7 @@ void fetch_and_display(const struct device *sensor)
 	data.y = (int16_t)(sensor_value_to_double(&accel[1]) * 1000);
 	data.z = (int16_t)(sensor_value_to_double(&accel[2]) * 1000);
 
-	printk("Acc X: %d, Y: %d, Z: %d", data.x, data.y, data.z);
+	LOG_DBG("Acc X: %d, Y: %d, Z: %d", data.x, data.y, data.z);
 
 	while (k_msgq_put(&acc_data_msgq, &data, K_NO_WAIT) != 0) {
 		/* Message queue is full: purge old data & try again */

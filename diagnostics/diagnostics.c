@@ -11,6 +11,7 @@
 #else
 #include "commander.h"
 #endif
+#include "log_backend_diag.h"
 
 #include "diagnostics_events.h"
 #include "msg_data_event.h"
@@ -174,6 +175,12 @@ int diagnostics_module_init()
 	};
 	commander_init(&actions);
 #endif
+
+	struct log_backend_diag_action backend_actions = {
+		.send_resp = diagnostics_send,
+		.thru_enable = passthrough_enable
+	};
+	log_backend_diag_init(&backend_actions);
 
 	return 0;
 }

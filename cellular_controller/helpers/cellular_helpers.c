@@ -10,7 +10,7 @@
 #include <net/socket.h>
 #include <modem_nf.h>
 #include "cellular_helpers_header.h"
-
+#include "cellular_controller_events.h"
 #include <logging/log.h>
 
 LOG_MODULE_REGISTER(cellular_helpers, LOG_LEVEL_DBG);
@@ -69,6 +69,7 @@ static size_t sendall(int sock, const void *buf, size_t len)
 	k_timer_start(&sendall_timer, K_MSEC(500), K_NO_WAIT);
 	while (len) {
 		size_t out_len = send(sock, buf, len, 0);
+
 		if (out_len < 0) {
 			return out_len;
 		}
@@ -87,9 +88,6 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 	int ret;
 
 	data->tcp.sock = socket(addr->sa_family, SOCK_STREAM, IPPROTO_TCP);
-	if (data->tcp.sock > 0){ /* socket 0 already created!*/
-		data->tcp.sock = 0;
-		}
 
 	if (data->tcp.sock < 0) {
 		LOG_ERR("Failed to create TCP socket (%s): %d", data->proto,
@@ -135,6 +133,34 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 	return ret;
 }
 
+int socket_listen(struct data *data)
+{
+	int ret;
+
+	data->tcp.sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+	if (data->tcp.sock < 0) {
+		LOG_ERR("Failed to create TCP listening socket (%s): %d",
+			data->proto, errno);
+		return -errno;
+	} else {
+		LOG_INF("Created TCP listening socket (%s): %d\n", data->proto,
+			data->tcp.sock);
+	}
+
+	k_sleep(K_MSEC(50));
+	ret = listen(data->tcp.sock, 1); //2nd parameter is backlog size, not
+	// important as we are not interested in the incoming data anyways.
+	if (ret < 0) {
+		LOG_ERR("Cannot start TCP listening socket (%s): %d",
+			data->proto, errno);
+		ret = -errno;
+	} else {
+		ret = data->tcp.sock;
+	}
+	return ret;
+}
+
 int socket_receive(struct data *data, char **msg)
 {
 	int received;
@@ -145,8 +171,8 @@ int socket_receive(struct data *data, char **msg)
 		*msg = buf;
 #if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
 		LOG_DBG("Socket received %d bytes!\n", received);
-		for (int i = 0; i<received; i++){
-			printk("\\x%02x",buf[i]);
+		for (int i = 0; i < received; i++) {
+			printk("\\x%02x", buf[i]);
 		}
 		printk("\n");
 #endif
@@ -180,17 +206,21 @@ int get_ip(char** collar_ip)
 	return ret;
 }
 
+/**
+ * will close the latest TCP socket with id greater than zero, as zero is
+ * reserved for the listening socket. */
+/* TODO: enhance robustness. */
 void stop_tcp(void)
 {
 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
-		if (conf.ipv6.tcp.sock >= 0) {
+		if (conf.ipv6.tcp.sock > 0) {
 			(void)close(conf.ipv6.tcp.sock);
 			memset(&conf, 0, sizeof(conf));
 		}
 	}
 
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
-		if (conf.ipv4.tcp.sock >= 0) {
+		if (conf.ipv4.tcp.sock > 0) {
 			(void)close(conf.ipv4.tcp.sock);
 			memset(&conf, 0, sizeof(conf));
 		}
@@ -215,8 +245,8 @@ int send_tcp(char *msg, size_t len)
 		}
 		printk("\n");
 #endif
-	size_t ret;
-	ret = sendall(conf.ipv4.tcp.sock, msg, len);
+	int ret;
+	ret = (int)sendall(conf.ipv4.tcp.sock, msg, len);
 	if (ret < 0) {
 		LOG_ERR("%s TCP: Failed to send data, errno %d",
 			conf.ipv4.proto, ret);
@@ -227,6 +257,7 @@ int send_tcp(char *msg, size_t len)
      * this should be handled here as well.*/
 	return ret;
 }
+
 
 /** put a message in the send out queue
  * The queue can hold a single message and it will be discarded on arrival of
@@ -271,8 +302,6 @@ void send_tcp_fn(void)
 		events[0].state = K_POLL_STATE_NOT_READY;
 	}
 }
-
-
 
 const struct device *bind_modem(void)
 {

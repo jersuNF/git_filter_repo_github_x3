@@ -13,7 +13,7 @@
 #include "ble_cmd_event.h"
 #include "nofence_service.h"
 #include "lte_proto_event.h"
-
+#include "watchdog_event.h"
 #include "cellular_controller_events.h"
 #include "gnss_controller_events.h"
 #include "request_events.h"
@@ -29,16 +29,21 @@
 
 #include "storage_event.h"
 
+#include <date_time.h>
+#include <time.h>
+
 #include "storage.h"
 
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
-#include "nf_eeprom.h"
+#include "pwr_event.h"
+#include "nf_settings.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
 #define SECONDS_IN_THREE_DAYS 259200
+#define TWO_DAYS_SEC SEC_DAY * 2
 
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
 
@@ -58,6 +63,10 @@ gnss_last_fix_struct_t cached_fix;
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
 static bool first_frame, first_ano_frame;
+
+/* Time since the server updated the date time in seconds. */
+static atomic_t server_timestamp_sec = ATOMIC_INIT(0);
+
 uint32_t serial_id = 0;
 
 void build_poll_request(NofenceMessage *);
@@ -222,6 +231,8 @@ void modem_poll_work_fn()
 	}
 }
 
+static int32_t sec_since_gnss_time = 0;
+
 /**
  * @brief Main event handler function. 
  * 
@@ -232,6 +243,56 @@ void modem_poll_work_fn()
  */
 static bool event_handler(const struct event_header *eh)
 {
+	if (is_gnss_data(eh)) {
+		/* Check when we received server time last. */
+		int32_t server_time =
+			(int32_t)atomic_get(&server_timestamp_sec);
+		int32_t delta_server_time =
+			(int32_t)(k_uptime_get_32() / 1000) - server_time;
+
+		/* If we already have server time, just return. */
+		if (delta_server_time <= TWO_DAYS_SEC && server_time != 0) {
+			return false;
+		}
+
+		/* Check if we can use GNSS data based on the pvt_valid bits
+		 * and timestamp since correction. Doesn't need to be
+		 * atomic, since event handler thead is the only one
+		 * accessing it.
+		 */
+		struct gnss_data *ev = cast_gnss_data(eh);
+
+		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
+			if (k_sem_take(&cache_lock_sem, K_MSEC(200)) == 0) {
+				cached_fix = ev->gnss_data.lastfix;
+				k_sem_give(&cache_lock_sem);
+			}
+		}
+		if (!(ev->gnss_data.latest.pvt_valid & (1 << 0)) ||
+		    !(ev->gnss_data.latest.pvt_valid & (1 << 1))) {
+			return false;
+		}
+
+		if ((int32_t)(k_uptime_get_32() / 1000) - sec_since_gnss_time <
+		    SEC_HOUR) {
+			return false;
+		}
+
+		/** @todo Check if uint32_t to time_t typecast works. */
+		time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
+		struct tm *tm_time = gmtime(&gm_time);
+		/* Update date_time library which storage uses for ANO data. */
+		if (!date_time_set(tm_time)) {
+			LOG_ERR("Could not set date time from GNSS data");
+			return false;
+		} else {
+			LOG_INF("Now using GNSS unix timestamp instead: %s",
+				asctime(tm_time));
+		}
+
+		sec_since_gnss_time = (int32_t)(k_uptime_get_32() / 1000);
+		return false;
+	}
 	if (is_ble_ctrl_event(eh)) {
 		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
 		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
@@ -302,16 +363,6 @@ static bool event_handler(const struct event_header *eh)
 		k_sem_give(&send_out_ack);
 		return false;
 	}
-	if (is_gnss_data(eh)) {
-		struct gnss_data *ev = cast_gnss_data(eh);
-		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
-			if (k_sem_take(&cache_lock_sem, K_MSEC(500)) == 0) {
-				cached_fix = ev->gnss_data.lastfix;
-				k_sem_give(&cache_lock_sem);
-			}
-		}
-		return false;
-	}
 	if (is_connection_state_event(eh)) {
 		struct connection_state_event *ev =
 			cast_connection_state_event(eh);
@@ -320,6 +371,18 @@ static bool event_handler(const struct event_header *eh)
 		} else {
 			/*TODO: take some action while waiting for cellular
 			 * controller to recover the connection.*/
+		}
+		return false;
+	}
+	if (is_send_poll_request_now(eh)) {
+		LOG_DBG("Received a nudge on listening socket!");
+		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
+						      K_NO_WAIT);
+		if (err < 0) {
+			char *e_msg =
+				"Error starting modem poll worker in response to nudge on listening socket.";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 		return false;
 	}
@@ -384,6 +447,8 @@ EVENT_SUBSCRIBE(MODULE, update_zap_count);
 EVENT_SUBSCRIBE(MODULE, animal_warning_event);
 EVENT_SUBSCRIBE(MODULE, animal_escape_event);
 EVENT_SUBSCRIBE(MODULE, connection_state_event);
+EVENT_SUBSCRIBE(MODULE, gnss_data);
+EVENT_SUBSCRIBE(MODULE, send_poll_request_now);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -391,7 +456,9 @@ static inline void process_ble_ctrl_event(void)
 
 	int err = k_msgq_get(&ble_ctrl_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting ble_ctrl_event: %d", err);
+		char *e_msg = "Error getting ble_ctrl_event";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
 }
@@ -402,7 +469,9 @@ static inline void process_ble_data_event(void)
 
 	int err = k_msgq_get(&ble_data_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting ble_data_event: %d", err);
+		char *e_msg = "Error getting ble_data_event";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
 }
@@ -413,7 +482,9 @@ static inline void process_ble_cmd_event(void)
 
 	int err = k_msgq_get(&ble_cmd_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting ble_cmd_event: %d\n", err);
+		char *e_msg = "Error getting ble_cmd_event";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
 
@@ -425,10 +496,7 @@ static inline void process_ble_cmd_event(void)
 		break;
 	}
 	case CMD_REBOOT_AVR_MCU: {
-		struct reboot_scheduled_event *r_ev =
-			new_reboot_scheduled_event();
-		r_ev->reboots_at = k_uptime_get_32() +
-				   (CONFIG_SHUTDOWN_TIMER_SEC * MSEC_PER_SEC);
+		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
 		EVENT_SUBMIT(r_ev);
 		break;
 	}
@@ -458,7 +526,9 @@ static void process_lte_proto_event(void)
 
 	int err = k_msgq_get(&lte_proto_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting lte_proto_event: %d", err);
+		char *e_msg = "Error getting lte_proto_event";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
 
@@ -477,13 +547,16 @@ static void process_lte_proto_event(void)
 	 */
 
 	if (err) {
-		LOG_ERR("Error decoding protobuf message. %i", err);
+		char *e_msg = "Error decoding protobuf message";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
 	struct messaging_ack_event *ack = new_messaging_ack_event();
 	EVENT_SUBMIT(ack);
 	/* process poll response */
 	if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
+		LOG_INF("Process poll reponse");
 		process_poll_response(&proto);
 		return;
 	} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
@@ -528,9 +601,11 @@ void messaging_thread_fn()
 int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module.");
-	int err = eep_read_serial(&serial_id);
-	if (err != 0){ //TODO: handle in a better way.
-		LOG_ERR("Failed to read serial number from eeprom!");
+	int err = eep_uint32_read(EEP_UID, &serial_id);
+	if (err != 0) { //TODO: handle in a better way.
+		char *e_msg = "Failed to read serial number from eeprom!";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return err;
 	}
 	LOG_WRN("Serial id = %d", serial_id);
@@ -607,10 +682,17 @@ void build_poll_request(NofenceMessage *poll_req)
 		//			EEPROM_GetOffAnimalTimeLimitSec();
 	}
 	if (m_confirm_ble_key) {
-		//		poll_req.m.poll_message_req.has_rgubcBleKey = true;
-		//		poll_req.m.poll_message_req.rgubcBleKey.size = EEP_BLE_SEC_KEY_LEN;
-		//		EEPROM_ReadBleSecKey(poll_req.m.poll_message_req.rgubcBleKey.bytes,
-		//				     EEP_BLE_SEC_KEY_LEN);
+		poll_req->m.poll_message_req.has_rgubcBleKey = true;
+		poll_req->m.poll_message_req.rgubcBleKey.size =
+			EEP_BLE_SEC_KEY_LEN;
+		int err = eep_read_ble_sec_key(
+			poll_req->m.poll_message_req.rgubcBleKey.bytes,
+			EEP_BLE_SEC_KEY_LEN);
+		if (err) {
+			char *e_msg = "Failed to read ble_sec_key";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
 	}
 	poll_req->m.poll_message_req.usGnssOnFixAgeSec = 123;
 	poll_req->m.poll_message_req.usGnssTTFFSec = 12;
@@ -649,8 +731,9 @@ int8_t request_fframe(uint32_t version, uint8_t frame)
 	fence_req.m.fence_definition_req.ucFrameNumber = frame;
 	int ret = encode_and_send_message(&fence_req);
 	if (ret) {
-		LOG_ERR("Failed to send request for fence frame %d, %d", frame,
-			ret);
+		char *e_msg = "Failed to send request for fence frame";
+		LOG_ERR("%s %d (%d)", log_strdup(e_msg), frame, ret);
+		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return -1;
 	}
 	return 0;
@@ -697,7 +780,9 @@ int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 	ano_req.m.ubx_ano_req.usStartAno = ano_start;
 	int ret = encode_and_send_message(&ano_req);
 	if (ret) {
-		LOG_ERR("Failed to send request for ano %d", ano_start);
+		char *e_msg = "Failed to send request for ano";
+		LOG_ERR("%s %d (%d)", log_strdup(e_msg), ano_start, ret);
+		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return -1;
 	}
 	return 0;
@@ -764,7 +849,9 @@ int send_binary_message(uint8_t *data, size_t len)
 	EVENT_SUBMIT(ev);
 	int ret = k_sem_take(&connection_ready, K_MINUTES(2));
 	if (ret != 0) {
-		LOG_ERR("Connection not ready, can't send message now!");
+		char *e_msg = "Connection not ready, can't send message now!";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
+		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return -ETIMEDOUT;
 	}
 	/* We can only send 1 message at a time, use mutex. */
@@ -806,7 +893,9 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 	int ret = collar_protocol_encode(msg_proto, &encoded_msg[2],
 					 NofenceMessage_size, &encoded_size);
 	if (ret) {
-		LOG_ERR("Error encoding nofence message. %i", ret);
+		char *e_msg = "Error encoding nofence message";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
+		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return ret;
 	}
 	return send_binary_message(encoded_msg, encoded_size + 2);
@@ -831,7 +920,8 @@ void process_poll_response(NofenceMessage *proto)
 	}
 	// If we are asked to, reboot
 	if (pResp->has_bReboot && pResp->bReboot) {
-		/* TODO: publish reboot event to power manager */
+		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
+		EVENT_SUBMIT(r_ev);
 	}
 	/* TODO: set activation mode to (pResp->eActivationMode); */
 
@@ -842,6 +932,22 @@ void process_poll_response(NofenceMessage *proto)
 		LOG_INF("Server time will be used.");
 		time_from_server = proto->header.ulUnixTimestamp;
 		use_server_time = true;
+		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
+		struct tm *tm_time = gmtime(&gm_time);
+		/* Update date_time library which storage uses for ANO data. */
+		int err = date_time_set(tm_time);
+		if (err) {
+			char *e_msg = "Error updating time from server";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		} else {
+			/** @note This prints UTC. */
+			LOG_INF("Set timestamp to date_time library from modem: %s",
+				asctime(tm_time));
+			atomic_set(&server_timestamp_sec,
+				   (atomic_val_t)(int32_t)(k_uptime_get_32() /
+							   1000));
+		}
 	}
 	if (pResp->has_usPollConnectIntervalSec) {
 		atomic_set(&poll_period_minutes,
@@ -865,8 +971,24 @@ void process_poll_response(NofenceMessage *proto)
 		/* TODO: submit pResp->usOffAnimalTimeLimitSec to AMC. */
 	}
 	if (pResp->has_rgubcBleKey) {
-		/* TODO: submit pResp->rgubcBleKey.bytes,pResp->rgubcBleKey
-		 * .size to BLE controller. */
+		LOG_INF("Received a ble_sec_key of size %d",
+			pResp->rgubcBleKey.size);
+		uint8_t current_ble_sec_key[EEP_BLE_SEC_KEY_LEN];
+		eep_read_ble_sec_key(current_ble_sec_key, EEP_BLE_SEC_KEY_LEN);
+		int ret = memcmp(pResp->rgubcBleKey.bytes, current_ble_sec_key,
+				 pResp->rgubcBleKey.size);
+		if (ret != 0) {
+			LOG_INF("New ble sec key is different. Will update eeprom");
+			ret = eep_write_ble_sec_key(pResp->rgubcBleKey.bytes,
+						    pResp->rgubcBleKey.size);
+			if (ret < 0) {
+				char *e_msg =
+					"Failed to write ble sec key to EEPROM";
+				LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
+				nf_app_error(ERR_MESSAGING, ret, e_msg,
+					     strlen(e_msg));
+			}
+		}
 	}
 	if (pResp->has_versionInfo) {
 		process_upgrade_request(&pResp->versionInfo);
@@ -946,7 +1068,11 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	if (fenceResp->which_m == FenceDefinitionResponse_xHeader_tag) {
 		if (frame != 0) {
 			/* We always expect the header to be the first frame. */
-			LOG_ERR("Unexpected frame count for pasture header.");
+			char *e_msg =
+				"Unexpected frame count for pasture header.";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), -EIO);
+			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
+
 			return 0;
 		}
 
@@ -996,16 +1122,23 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 			LOG_ERR("Cached %i frames, but expected %i.",
 				cached_fences_counter,
 				pasture_temp.m.ul_total_fences);
+			char *e_msg = "Fence frames out of sync";
+			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
+
 			return 0;
 		}
 
 		if (pasture_temp.m.ul_total_fences == 0) {
-			LOG_ERR("Error, pasture cached is empty.");
+			char *e_msg = "Error, pasture cached is empty.";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), -EIO);
+			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
 			return 0;
 		}
 
 		if (!validate_pasture()) {
-			LOG_ERR("CRC was not correct for new pasture.");
+			char *e_msg = "CRC was not correct for new pasture.";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), -EIO);
+			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
 			return 0;
 		}
 
@@ -1040,8 +1173,9 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 				     anoResp->rgucBuf.size);
 
 	if (err) {
-		LOG_ERR("Error writing ano frame to storage controller %i",
-			err);
+		char *e_msg = "Error writing ano frame to storage controller";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	}
 
 	if (age > time_from_server + SECONDS_IN_THREE_DAYS) {
@@ -1074,7 +1208,7 @@ _DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix)
 		.usHeight = gpsLastFix->baro_Height,
 #endif
 		.has_ucGpsMode = true,
-		.ucGpsMode = gpsLastFix->gps_mode
+		.ucGpsMode = gpsLastFix->mode
 	};
 	return a;
 }

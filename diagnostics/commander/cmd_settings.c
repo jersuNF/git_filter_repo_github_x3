@@ -1,6 +1,6 @@
 #include "cmd_settings.h"
 
-#include "nf_eeprom.h"
+#include "nf_settings.h"
 
 #include <string.h>
 
@@ -72,7 +72,7 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 		case SERIAL:
 		{
 			uint32_t serial = 0;
-			err = eep_read_serial(&serial);
+			err = eep_uint32_read(EEP_UID, &serial);
 
 			if (err == 0) {
 				memcpy(&buf[1], &serial, sizeof(uint32_t));
@@ -108,7 +108,7 @@ static int commander_settings_write(enum diagnostics_interface interface, settin
 						  (data[1]<<8) +
 						  (data[2]<<16) +
 						  (data[3]<<24);
-				err = eep_write_serial(serial);
+				err = eep_uint32_write(EEP_UID, serial);
 			}
 			break;
 		}

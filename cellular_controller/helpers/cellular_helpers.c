@@ -111,7 +111,7 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 		LOG_ERR("Cannot connect to TCP remote (%s): %d", data->proto,
 			errno);
 		ret = -errno;
-	}else{
+	} else {
 		ret = data->tcp.sock;
 	}
 	return ret;
@@ -125,8 +125,7 @@ int socket_listen(struct data *data)
 
 	if (data->tcp.sock < 0) {
 		LOG_ERR("Failed to create TCP listening socket (%s): %d",
-			data->proto,
-			errno);
+			data->proto, errno);
 		return -errno;
 	} else {
 		LOG_INF("Created TCP listening socket (%s): %d\n", data->proto,
@@ -138,10 +137,9 @@ int socket_listen(struct data *data)
 	// important as we are not interested in the incoming data anyways.
 	if (ret < 0) {
 		LOG_ERR("Cannot start TCP listening socket (%s): %d",
-			data->proto,
-			errno);
+			data->proto, errno);
 		ret = -errno;
-	}else{
+	} else {
 		ret = data->tcp.sock;
 	}
 	return ret;
@@ -157,8 +155,8 @@ int socket_receive(struct data *data, char **msg)
 		*msg = buf;
 #if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
 		LOG_DBG("Socket received %d bytes!\n", received);
-		for (int i = 0; i<received; i++){
-			printk("\\x%02x",buf[i]);
+		for (int i = 0; i < received; i++) {
+			printk("\\x%02x", buf[i]);
 		}
 		printk("\n");
 #endif
@@ -186,8 +184,8 @@ int reset_modem(void)
  * @param collar_ip
  * @return
  */
-int get_ip(char** collar_ip)
-{/*TODO: extract the quoted address if needed and return the exact length. */
+int get_ip(char **collar_ip)
+{ /*TODO: extract the quoted address if needed and return the exact length. */
 	get_pdp_addr(collar_ip);
 	return 0;
 }
@@ -195,7 +193,7 @@ int get_ip(char** collar_ip)
 /**
  * will close the latest TCP socket with id greater than zero, as zero is
  * reserved for the listening socket. */
- /* TODO: enhance robustness. */
+/* TODO: enhance robustness. */
 void stop_tcp(void)
 {
 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
@@ -233,20 +231,20 @@ const struct device *bind_modem(void)
 	return device_get_binding(GSM_DEVICE);
 }
 
-int check_ip(void){
+int check_ip(void)
+{
 	k_sleep(K_MSEC(500));
-	char* collar_ip = NULL;
+	char *collar_ip = NULL;
 	uint8_t timeout_counter = 0;
-	while(timeout_counter++ <= 40){
+	while (timeout_counter++ <= 40) {
 		int ret = get_ip(&collar_ip);
-		if (ret != 0){
+		if (ret != 0) {
 			LOG_ERR("Failed to get ip from sara r4 driver!");
 			return -1;
 			/*TODO: reset modem?*/
-		}else {
-			ret = memcmp(collar_ip,"\"0.0.0.0\"",
-				     9);
-			if (ret != 0){
+		} else {
+			ret = memcmp(collar_ip, "\"0.0.0.0\"", 9);
+			if (ret != 0) {
 				return 0;
 			}
 		}

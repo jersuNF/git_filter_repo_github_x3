@@ -10,7 +10,6 @@
 #include <sys/ring_buffer.h>
 #include <zephyr.h>
 #include <zephyr/types.h>
-#include "nf_eeprom.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -26,7 +25,7 @@
 #include "msg_data_event.h"
 
 #include "nf_version.h"
-#include "nf_eeprom.h"
+#include "nf_settings.h"
 
 #include "beacon_processor.h"
 #include "ble_beacon_event.h"
@@ -640,7 +639,7 @@ static void disconnect_peer_work_fn()
 int ble_module_init()
 {
 	uint32_t serial_id = 0;
-	int err = eep_read_serial(&serial_id);
+	int err = eep_uint32_read(EEP_UID, &serial_id);
 	if (err != 0) {
 		char *e_msg = "Failed to read serial number from eeprom!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);

@@ -3,8 +3,8 @@
 * Copyright (c) 2022 Nofence AS
 */
 
-#ifndef X3_FW_NF_EEPROM_PRIVATE_H
-#define X3_FW_NF_EEPROM_PRIVATE_H
+#ifndef X3_FW_NF_SETTINGS_PRIVATE_H
+#define X3_FW_NF_SETTINGS_PRIVATE_H
 
 #include <stdint.h>
 #include <nf_settings.h>
@@ -69,8 +69,8 @@ __packed struct eemem {
 	  */
 	uint8_t eep_teach_mode_finished;
 
-	/** Security key for bluetooth connections. */
+	/** Store the ble security key */
 	uint8_t ble_sec_key[EEP_BLE_SEC_KEY_LEN];
 };
 
-#endif /* X3_FW_NF_EEPROM_PRIVATE_H */
+#endif /* X3_FW_NF_SETTINGS_PRIVATE_H */

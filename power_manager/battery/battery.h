@@ -72,4 +72,16 @@ uint16_t approx_moving_average(mov_avg_t *p, uint16_t val);
  */
 int battery_setup(void);
 
+/** 
+ * @brief Get the highest measured battery voltage
+ * @return battery voltage in mV
+ */
+uint16_t battery_get_max(void);
+
+/** 
+ * @brief Get the lowest measured battery voltage
+ * @return battery voltage in mV
+ */
+uint16_t battery_get_min(void);
+
 #endif /* APPLICATION_BATTERY_H_ */

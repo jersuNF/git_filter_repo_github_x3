@@ -47,6 +47,10 @@ int stg_fcb_reset_and_init();
  *        external flash based on the given pointer. 
  *        The caller must deal with given data allocation itself.
  * 
+ * @note Padding is added if the payload is not a multiple of 4. The caller 
+ *       has to handle the removal of the padding itself, and also include
+ *       the length in the first two bytes of the incomming data packet.
+ * 
  * @param[in] partition which partition to write to.
  * @param[in] data input where the flash data is written from.
  * @param[in] len input regarding the size of the written data.

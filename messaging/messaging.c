@@ -36,6 +36,8 @@
 
 #include "storage.h"
 
+#include "movement_events.h"
+
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
@@ -467,7 +469,7 @@ static bool event_handler(const struct event_header *eh)
 			if (k_sem_take(&cache_lock_sem, K_MSEC(200)) == 0) {
 				cached_fix = ev->gnss_data.lastfix;
 				k_sem_give(&cache_lock_sem);
-				}
+			}
 		}
 		if (!(ev->gnss_data.latest.pvt_valid & (1 << 0)) ||
 		    !(ev->gnss_data.latest.pvt_valid & (1 << 1))) {
@@ -892,7 +894,7 @@ int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module.");
 	int err = eep_uint32_read(EEP_UID, &serial_id);
-	if (err != 0) { 
+	if (err != 0) {
 		char *e_msg = "Failed to read serial number from eeprom!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
@@ -976,15 +978,43 @@ void build_poll_request(NofenceMessage *poll_req)
 			current_state.flash_erase_count;
 	}
 	if (m_confirm_acc_limits) {
-		//		poll_req.m.poll_message_req.has_usAccSigmaSleepLimit = true;
-		//		poll_req.m.poll_message_req.usAccSigmaSleepLimit =
-		//			EEPROM_GetAccSigmaSleepLimit();
-		//		poll_req.m.poll_message_req.has_usAccSigmaNoActivityLimit = true;
-		//		poll_req.m.poll_message_req.usAccSigmaNoActivityLimit =
-		//			EEPROM_GetAccSigmaNoActivityLimit();
-		//		poll_req.m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
-		//		poll_req.m.poll_message_req.usOffAnimalTimeLimitSec =
-		//			EEPROM_GetOffAnimalTimeLimitSec();
+		/** @warning Assumes all the activity values are given with the
+		 *  m_confirm_acc_limits flag set in poll response from server.
+		 */
+		poll_req->m.poll_message_req.has_usAccSigmaSleepLimit = true;
+		poll_req->m.poll_message_req.has_usAccSigmaNoActivityLimit =
+			true;
+		poll_req->m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
+
+		int err = eep_uint16_read(
+			EEP_ACC_SIGMA_SLEEP_LIMIT,
+			&poll_req->m.poll_message_req.usAccSigmaSleepLimit);
+		if (err) {
+			char *e_msg =
+				"Failed to read EEP_ACC_SIGMA_SLEEP_LIMIT";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
+
+		err = eep_uint16_read(
+			EEP_ACC_SIGMA_NOACTIVITY_LIMIT,
+			&poll_req->m.poll_message_req.usAccSigmaNoActivityLimit);
+		if (err) {
+			char *e_msg =
+				"Failed to read EEP_ACC_SIGMA_NOACTIVITY_LIMIT";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
+
+		err = eep_uint16_read(
+			EEP_OFF_ANIMAL_TIME_LIMIT_SEC,
+			&poll_req->m.poll_message_req.usOffAnimalTimeLimitSec);
+		if (err) {
+			char *e_msg =
+				"Failed to read EEP_OFF_ANIMAL_TIME_LIMIT_SEC";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
 	}
 	if (m_confirm_ble_key) {
 		poll_req->m.poll_message_req.has_rgubcBleKey = true;
@@ -1003,27 +1033,29 @@ void build_poll_request(NofenceMessage *poll_req)
 	poll_req->m.poll_message_req.usGnssTTFFSec = 12;
 
 	if (m_transfer_boot_params) {
-		//		poll_req.m.poll_message_req.has_versionInfo = true;
-		//		uint16_t xbootVersion;
-		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
-		//			poll_req.m.poll_message_req.versionInfo
-		//				.usATmegaBootloaderVersion =
-		//				xbootVersion;
-		//			poll_req.m.poll_message_req.versionInfo
-		//				.has_usATmegaBootloaderVersion = true;
-		//		}
-		//		poll_req.m.poll_message_req.has_versionInfoHW = true;
-		//		poll_req.m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
-		//			EEPROM_GetHwVersion();
-		//		poll_req.m.poll_message_req.versionInfoHW.usPCB_Product_Type =
-		//			(uint8_t)EEPROM_GetProductType();
-		//		poll_req.m.poll_message_req.has_xSimCardId = true;
-		//		memcpy(poll_req.m.poll_message_req.xSimCardId, BGS_SCID(),
-		//		       sizeof(poll_req.m.poll_message_req.xSimCardId));
-		//		poll_req.m.poll_message_req.versionInfo.has_ulATmegaVersion =
-		//			true;
-		//		poll_req.m.poll_message_req.versionInfo.ulATmegaVersion =
-		//			NF_X25_VERSION_NUMBER;
+		/** @todo?????	
+		  * poll_req.m.poll_message_req.has_versionInfo = true;
+		  * uint16_t xbootVersion;
+		  * if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
+		  * 	poll_req.m.poll_message_req.versionInfo
+		  * 		.usATmegaBootloaderVersion =
+		  * 		xbootVersion;
+		  * 	poll_req.m.poll_message_req.versionInfo
+		  * 		.has_usATmegaBootloaderVersion = true;
+		  * }
+		  * poll_req.m.poll_message_req.has_versionInfoHW = true;
+		  * poll_req.m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
+		  * 	EEPROM_GetHwVersion();
+		  * poll_req.m.poll_message_req.versionInfoHW.usPCB_Product_Type =
+		  * 	(uint8_t)EEPROM_GetProductType();
+		  * poll_req.m.poll_message_req.has_xSimCardId = true;
+		  * memcpy(poll_req.m.poll_message_req.xSimCardId, BGS_SCID(),
+		  *        sizeof(poll_req.m.poll_message_req.xSimCardId));
+		  * poll_req.m.poll_message_req.versionInfo.has_ulATmegaVersion =
+		  * 	true;
+		  * poll_req.m.poll_message_req.versionInfo.ulATmegaVersion =
+		  *			NF_X25_VERSION_NUMBER;
+		  */
 	}
 }
 
@@ -1228,7 +1260,9 @@ void process_poll_response(NofenceMessage *proto)
 		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
 		EVENT_SUBMIT(r_ev);
 	}
-	/* TODO: set activation mode to (pResp->eActivationMode); */
+	/** TODO: set activation mode to (pResp->eActivationMode); 
+	  * Not used in legacy code? 
+	  */
 
 	if (pResp->has_bUseUbloxAno) {
 		/* TODO: publish enable ANO event to GPS controller */
@@ -1239,7 +1273,7 @@ void process_poll_response(NofenceMessage *proto)
 		use_server_time = true;
 		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
 		struct tm *tm_time = gmtime(&gm_time);
-		/* Update date_time library which storage uses for ANO data. */
+		/* Updates date_time library which storage uses for ANO data. */
 		int err = date_time_set(tm_time);
 		if (err) {
 			char *e_msg = "Error updating time from server";
@@ -1264,18 +1298,60 @@ void process_poll_response(NofenceMessage *proto)
 		LOG_INF("Poll period of %d minutes will be used.",
 			atomic_get(&poll_period_minutes));
 	}
+	m_confirm_acc_limits = false;
 	if (pResp->has_usAccSigmaSleepLimit) {
-		/* TODO: submit pResp->usAccSigmaSleepLimit to AMC module.
-		 * AMC will store it in eeprom or external flash. */
+		m_confirm_acc_limits = true;
+		int err = eep_uint16_write(EEP_ACC_SIGMA_SLEEP_LIMIT,
+					   pResp->usAccSigmaSleepLimit);
+		if (err) {
+			char *e_msg = "Error updating sleep sigma to eeprom";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
+
+		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
+		sigma_ev->type = SLEEP_SIGMA;
+		sigma_ev->param.sleep_sigma_value = pResp->usAccSigmaSleepLimit;
+		EVENT_SUBMIT(sigma_ev);
 	}
 	if (pResp->has_usAccSigmaNoActivityLimit) {
-		/* TODO: submit pResp->usAccSigmaNoActivityLimit to AMC
-		 * module. */
+		m_confirm_acc_limits = true;
+		int err = eep_uint16_write(EEP_ACC_SIGMA_NOACTIVITY_LIMIT,
+					   pResp->usAccSigmaNoActivityLimit);
+		if (err) {
+			char *e_msg =
+				"Error updating no activity sigma to eeprom";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
+
+		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
+		sigma_ev->type = NO_ACTIVITY_SIGMA;
+		sigma_ev->param.no_activity_sigma =
+			pResp->usAccSigmaNoActivityLimit;
+		EVENT_SUBMIT(sigma_ev);
 	}
 	if (pResp->has_usOffAnimalTimeLimitSec) {
-		/* TODO: submit pResp->usOffAnimalTimeLimitSec to AMC. */
+		m_confirm_acc_limits = true;
+		int err = eep_uint16_write(EEP_OFF_ANIMAL_TIME_LIMIT_SEC,
+					   pResp->usOffAnimalTimeLimitSec);
+		if (err) {
+			char *e_msg =
+				"Error updating off animal sigma to eeprom";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
+
+		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
+		sigma_ev->type = OFF_ANIMAL_SIGMA;
+		sigma_ev->param.off_animal_value =
+			pResp->usOffAnimalTimeLimitSec;
+		EVENT_SUBMIT(sigma_ev);
 	}
+
+	m_confirm_ble_key = false;
 	if (pResp->has_rgubcBleKey) {
+		m_confirm_ble_key = true;
 		LOG_INF("Received a ble_sec_key of size %d",
 			pResp->rgubcBleKey.size);
 		uint8_t current_ble_sec_key[EEP_BLE_SEC_KEY_LEN];
@@ -1300,9 +1376,7 @@ void process_poll_response(NofenceMessage *proto)
 	}
 	if (pResp->ulFenceDefVersion != current_state.fence_version &&
 	    new_fence_in_progress != pResp->ulFenceDefVersion) {
-		/* TODO: Download new fence and submit pResp->ulFenceDefVersion
-		 * to AMC */
-		//request frame 0
+		/* Request frame 0. */
 		first_frame = true;
 		LOG_INF("Requesting frame 0 for fence version %i.",
 			pResp->ulFenceDefVersion);

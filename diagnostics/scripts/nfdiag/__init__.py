@@ -19,7 +19,7 @@ class NFDiag:
 		time.sleep(0.1)
 		while True:
 			self.cmndr.send_cmd(0x02, 0x12)
-			time.sleep(0.1)
+			time.sleep(0.05)
 
 	def __del__(self):
 		self.cmndr.stop()

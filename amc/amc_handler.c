@@ -106,7 +106,10 @@ void handle_new_fence_fn(struct k_work *item)
 	int err = k_sem_take(&fence_data_sem,
 			     K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
-		LOG_ERR("Error taking pasture semaphore for version check.");
+		char *e_msg =
+			"Error taking pasture semaphore for version check.";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
 		return;
 	}
 
@@ -115,7 +118,10 @@ void handle_new_fence_fn(struct k_work *item)
 
 	if (cache_ret) {
 		pasture->m.ul_fence_def_version = 0;
-		LOG_ERR("Error caching new pasture from storage controller.");
+		char *e_msg =
+			"Error caching new pasture from storage controller.";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_AMC, cache_ret, e_msg, strlen(e_msg));
 		return;
 	}
 
@@ -215,7 +221,10 @@ void handle_gnss_data_fn(struct k_work *item)
 	int err = k_sem_take(&fence_data_sem,
 			     K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
-		LOG_ERR("Error waiting for fence data semaphore to release.");
+		char *e_msg =
+			"Error waiting for fence data semaphore to release.";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
 		goto cleanup;
 	}
 
@@ -235,7 +244,7 @@ void handle_gnss_data_fn(struct k_work *item)
 		/* Error handle. */
 		goto cleanup;
 	}
-	
+
 	LOG_INF("\n\n--== START ==--");
 	LOG_INF("  GNSS data: %d, %d, %d, %d, %d", gnss->latest.lon,
 		gnss->latest.lat, gnss->latest.pvt_flags, gnss->latest.h_acc_dm,
@@ -275,7 +284,6 @@ void handle_gnss_data_fn(struct k_work *item)
 		instant_dist = fnc_calc_dist(pos_x, pos_y, &fence_index,
 					     &vertex_index);
 		LOG_INF("  Calculated distance: %d", instant_dist);
-
 
 		/* Reset dist_change since we acquired a new distance. */
 		dist_change = 0;

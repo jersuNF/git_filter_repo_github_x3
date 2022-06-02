@@ -11,21 +11,21 @@ int commander_system_handler(enum diagnostics_interface interface,
 	switch (cmd) {
 		case PING:
 		{
-			resp = PONG;
+			commander_send_resp(interface, SYSTEM, cmd, DATA, data, size);
 			break;
 		}
 		case REBOOT:
 		{
 			resp = ACK;
 			/** @todo Schedule reboot after 1s */
+			commander_send_resp(interface, SYSTEM, cmd, resp, NULL, 0);
 			break;
 		}
 		default:
 			resp = UNKNOWN_CMD;
+			commander_send_resp(interface, SYSTEM, cmd, resp, NULL, 0);
 			break;
 	}
-
-	commander_send_resp(interface, SYSTEM, cmd, resp, NULL, 0);
 
 	return err;
 }

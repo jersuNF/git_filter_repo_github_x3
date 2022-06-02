@@ -5,6 +5,9 @@ import crc
 import threading
 import time
 
+import logging
+logging.basicConfig(level=logging.INFO)
+
 class Commander(threading.Thread):
 	def __init__(self, stream):
 		threading.Thread.__init__(self)
@@ -19,6 +22,8 @@ class Commander(threading.Thread):
 			reverse_output=True,
 		)
 		self.crc_calc = crc.CrcCalculator(crc16_conf)
+
+		self.resp_queue = Queue()
 
 		self.running = True
 		self.daemon = True
@@ -44,21 +49,38 @@ class Commander(threading.Thread):
 		raw_cmd[2] = checksum&0xFF
 		raw_cmd[3] = (checksum>>8)&0xFF
 
-		print("Sending: " + str(raw_cmd))
+		logging.debug("Sending: " + str(raw_cmd))
 
 		self.stream.write(cobs.encode(raw_cmd) + b"\x00")
-	
+
+		return self.get_resp(group, cmd)
+
+	def get_resp(self, group, cmd, timeout=0.5):
+		resp = None
+		end_time = time.time() + timeout
+		while (not resp) and (time.time() < end_time):
+			try:
+				resp = self.resp_queue.get(timeout=end_time - time.time())
+
+				if resp["group"] != group or resp["cmd"] != cmd:
+					resp = None
+			except:
+				pass
+		
+		return resp
+
 	def handle_resp(self, resp):
-		print("Response: " + str(resp))
+		logging.debug("Response: " + str(resp))
 
 		resp_struct_format = "<BBBH"
 		
 		size = len(resp)
 		if size < struct.Struct(resp_struct_format).size:
-			print("Response too short")
+			logging.warning("Response too short")
 			return
 		
 		data_size = size - struct.Struct(resp_struct_format).size
+		data = None
 		if data_size > 0:
 			resp_struct_format += str(data_size) + "s"
 			group, cmd, code, checksum, data = struct.unpack(resp_struct_format, resp)
@@ -71,14 +93,22 @@ class Commander(threading.Thread):
 		resp[4] = 0
 		calc_checksum = self.crc_calc.calculate_checksum(resp)
 		if checksum != calc_checksum:
-			print("Invalid checksum")
+			logging.warning("Invalid checksum")
 			return
 		
-		print("Got response: ")
-		print("    group=" + str(group))
-		print("    cmd=" + str(cmd))
-		print("    code=" + str(code))
-		print("    data=" + str(data))
+		logging.debug("Got response: ")
+		logging.debug("    group=" + str(group))
+		logging.debug("    cmd=" + str(cmd))
+		logging.debug("    code=" + str(code))
+		logging.debug("    data=" + str(data))
+
+		response = {}
+		response["group"] = group
+		response["cmd"] = cmd
+		response["code"] = code
+		response["data"] = data
+
+		self.resp_queue.put(response)
 
 
 	def run(self):
@@ -99,19 +129,19 @@ class Commander(threading.Thread):
 						found_zero = (ind >= 0)
 						if found_zero:
 							# Identified a COBS encoded packet, fetch and remove from buffer
-							print("Received: " + str(receive_buffer))
+							logging.debug("Received: " + str(receive_buffer))
 							enc = data[:ind]
 							receive_buffer = receive_buffer[ind+1:]
 
-							print("COBS-data: " + str(enc))
+							logging.debug("COBS-data: " + str(enc))
 							resp = cobs.decode(enc)
-							print("Decoded data: " + str(resp))
+							logging.debug("Decoded data: " + str(resp))
 
 							self.handle_resp(resp)
 				else:
-					time.sleep(0.01)
+					time.sleep(0.001)
 			except Exception as e:
-				time.sleep(0.01)
+				time.sleep(0.001)
 
 class TestStream:
 	def __init__(self):
@@ -129,7 +159,7 @@ class TestStream:
 		return data
 	
 	def write(self, data):
-		print("Writing: " + str(data))
+		logging.debug("Writing: " + str(data))
 
 if __name__ == "__main__":
 	stream = TestStream()

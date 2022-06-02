@@ -54,6 +54,7 @@ int commander_stimulator_handler(enum diagnostics_interface interface,
 				/* Create and send data response */
 				resp = DATA;
 				size = MIN(size, 100);
+
 				commander_send_resp(interface, STIMULATOR, cmd, resp, buffer, size);
 				gnss_hub_rx_consume(GNSS_HUB_ID_DIAGNOSTICS, size);
 			} else {

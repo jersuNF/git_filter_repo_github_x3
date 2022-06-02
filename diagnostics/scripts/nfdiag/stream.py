@@ -46,7 +46,7 @@ class NFDiagnostics(BLEDriverObserver, BLEAdapterObserver):
             self.adapter.driver.ble_enable()
 
     def close(self):
-        print("Closing")
+        logging.debug("Closing")
         self.adapter.close()
 
     def connect_and_discover(self):
@@ -66,7 +66,7 @@ class NFDiagnostics(BLEDriverObserver, BLEAdapterObserver):
             #self.adapter.enable_notification(new_conn, BLEUUID(BLEUUID.Standard.heart_rate))
             return new_conn
         except Exception as e:
-            print(f"No heart rate collector advertising with name {self.dev_name} found." + str(e))
+            logging.debug(f"No nrfuart advertising with name {self.dev_name} found." + str(e))
             return None
 
     def send_data(self, conn, data):
@@ -80,11 +80,11 @@ class NFDiagnostics(BLEDriverObserver, BLEAdapterObserver):
     def on_gap_evt_connected(
         self, ble_driver, conn_handle, peer_addr, role, conn_params
     ):
-        print("New connection: {}".format(conn_handle))
+        logging.debug("New connection: {}".format(conn_handle))
         self.conn_q.put(conn_handle)
 
     def on_gap_evt_disconnected(self, ble_driver, conn_handle, reason):
-        print("Disconnected: {} {}".format(conn_handle, reason))
+        logging.debug("Disconnected: {} {}".format(conn_handle, reason))
 
     def on_gap_evt_adv_report(
         self, ble_driver, conn_handle, peer_addr, rssi, adv_type, adv_data
@@ -100,7 +100,7 @@ class NFDiagnostics(BLEDriverObserver, BLEAdapterObserver):
 
         dev_name = "".join(chr(e) for e in dev_name_list)
         address_string = "".join("{0:02X}".format(b) for b in peer_addr.addr)
-        print(
+        logging.debug(
             "Received advertisment report, address: 0x{}, device_name: {}".format(
                 address_string, dev_name
             )
@@ -112,7 +112,7 @@ class NFDiagnostics(BLEDriverObserver, BLEAdapterObserver):
     def on_notification(self, ble_adapter, conn_handle, uuid, data):
         #if len(data) > 32:
         #    data = "({}...)".format(data[0:10])
-        print("Connection: {}, {} = {}".format(conn_handle, uuid, data))
+        logging.debug("Connection: {}, {} = {}".format(conn_handle, uuid, data))
 
         self.rsp_q.put(bytes(data))
 
@@ -143,13 +143,16 @@ class BLEStream:
         global nrf_sd_ble_api_ver
         nrf_sd_ble_api_ver = config.sd_api_ver_get()
 
-        print("Serial port used: {}".format(port))
+        logging.debug("Serial port used: {}".format(port))
         self.driver = BLEDriver(
             serial_port=port, auto_flash=False, baud_rate=1000000, log_severity_level="info"
         )
 
         self.adapter = BLEAdapter(self.driver)
-        self.nfdiag = NFDiagnostics(self.adapter, "NF000674", wildcard=False)
+        if serial is None:
+            self.nfdiag = NFDiagnostics(self.adapter)
+        else:
+            self.nfdiag = NFDiagnostics(self.adapter, dev_name="NF" + str(serial).zfill(6), wildcard=False)
         self.nfdiag.open()
     
         self.conn = self.nfdiag.connect_and_discover()
@@ -200,7 +203,10 @@ class JLinkStream(threading.Thread):
 
         self.jlink_proc = None
         if JLINK_EXE:
-            cmd = [JLINK_EXE, '-device', 'nRF52840_xxAA', '-if', 'swd', '-speed', '8000', '-autoconnect', '1']
+            cmd = [JLINK_EXE, '-device', 'nRF52840_xxAA', '-if', 'swd', '-speed', '4000', '-autoconnect', '1']
+            if serial:
+                cmd.append('-USB')
+                cmd.append(serial)
             self.jlink_proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
         self.running = True
@@ -282,4 +288,4 @@ class JLinkStream(threading.Thread):
                     self._add_received_data(data)
                     logging.debug(data.decode("utf-8"))
             except Exception as e:
-                time.sleep(0.01)
+                time.sleep(0.001)

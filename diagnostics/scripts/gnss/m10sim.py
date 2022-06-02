@@ -10,6 +10,31 @@ UBX_SYNC_CHAR_2 = 0x62
 UBX_MIN_PACKET = 8
 
 UBX_CFG_UART1_BAUDRATE = 0x40520001
+UBX_CFG_UART1OUTPRO_NMEA = 0x10740002
+UBX_CFG_MSGOUT_UBX_NAV_PVT_UART1 = 0x20910007
+UBX_CFG_MSGOUT_UBX_NAV_DOP_UART1 = 0x20910039
+UBX_CFG_MSGOUT_UBX_NAV_STATUS_UART1 = 0x2091001b
+UBX_CFG_MSGOUT_UBX_NAV_SAT_UART1 = 0x20910016
+UBX_CFG_NAVSPG_ACKAIDING = 0x10110025
+
+UBX_ACK = 0x05
+UBX_ACK_ACK = 0x01
+UBX_ACK_NAK = 0x00
+
+UBX_CFG = 0x06
+UBX_CFG_RST = 0x04
+UBX_CFG_VALDEL = 0x8C
+UBX_CFG_VALGET = 0x8B
+UBX_CFG_VALSET = 0x8A
+
+UBX_MGA = 0x13
+UBX_MGA_ANO = 0x20
+UBX_MGA_ACK = 0x60
+
+UBX_NAV = 0x01
+UBX_NAV_DOP = 0x04
+UBX_NAV_PVT = 0x07
+UBX_NAV_STATUS = 0x03
 
 class M10Simulator(threading.Thread):
     def __init__(self):
@@ -108,6 +133,8 @@ class M10Simulator(threading.Thread):
             self._ubx_cfg_reset()
         elif parsed_message.identity == "CFG-VALGET":
             self._ubx_cfg_valget(parsed_message.keys_01, parsed_message.layer, parsed_message.position)
+        elif parser_message.identity == "CFG-VALSET":
+            print(parsed_message)
         else:
             print(parsed_message)
 
@@ -121,10 +148,20 @@ class M10Simulator(threading.Thread):
     
     def _ubx_cfg_valget(self, key, layer, position):
         print("VALGET")
-        # Only supports single value
+
+        binary_resp = b""
+        
+        found_key = False
         if key == UBX_CFG_UART1_BAUDRATE:
             data = UBXMessage('CFG','CFG-VALGET', GET, version=1, layer=layer, position=position, payload=struct.pack("<I", self.baudrate))
-            self.send_data(data.serialize())
+            binary_resp += data.serialize()
+            
+            found_key = True
+
+        data = UBXMessage('ACK', 'ACK-ACK' if found_key else 'ACK-NAK', GET, clsID=UBX_CFG, msgID=UBX_CFG_VALGET)
+        binary_resp += data.serialize()
+
+        self.send_data(binary_resp)
 
     def _calc_chk(data):
         ck_a = 0

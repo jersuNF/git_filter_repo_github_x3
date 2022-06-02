@@ -389,6 +389,7 @@ void announce_connection_state(bool state){
 	ev->state = state;
 	EVENT_SUBMIT(ev);
 	if (state == false){
+		stop_tcp();
 		modem_is_ready = false;
 		connected = false;
 	}

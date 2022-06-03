@@ -40,13 +40,11 @@ cmndr = nfdiag.Commander(stream)
 def signal_handler(sig, frame):
 	global cmndr
 	global stream
-	global gnss_file
 
 	cmndr.stop()
 
 	del cmndr
 	del stream
-	del gnss_file
 
 	sys.exit(0)
 signal.signal(signal.SIGINT, signal_handler)

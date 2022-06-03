@@ -11,6 +11,7 @@ UBX_MIN_PACKET = 8
 
 UBX_CFG_UART1_BAUDRATE = 0x40520001
 UBX_CFG_UART1OUTPRO_NMEA = 0x10740002
+UBX_CFG_RATE_MEAS = 0x30210001
 UBX_CFG_MSGOUT_UBX_NAV_PVT_UART1 = 0x20910007
 UBX_CFG_MSGOUT_UBX_NAV_DOP_UART1 = 0x20910039
 UBX_CFG_MSGOUT_UBX_NAV_STATUS_UART1 = 0x2091001b
@@ -45,6 +46,8 @@ class M10Simulator(threading.Thread):
         self.out_data = Queue()
 
         self._ubx_cfg_reset()
+
+        self.prev_data_timestamp = time.time()
         
         self.running = True
         self.daemon = True
@@ -60,10 +63,27 @@ class M10Simulator(threading.Thread):
     def run(self):
         while self.running:
             try:
-                time.sleep(1)
-            except:
-                pass
-    
+                itow = int(time.time()*1000)%3600000
+                if self.ubx_nav_status_uart1:
+                    msg = UBXMessage('NAV','NAV-STATUS', GET, iTOW=itow, gpsFix=0, flags=0, fixStat=0, flags2=0, ttff=0, msss=0)
+                    self.send_data(msg.serialize())
+                if self.ubx_nav_status_uart1:
+                    msg = UBXMessage('NAV','NAV-DOP', GET, iTOW=itow, gDOP=0, pDOP=0, tDOP=0, vDOP=0, hDOP=0, nDOP=0, eDOP=0)
+                    self.send_data(msg.serialize())
+                if self.ubx_nav_pvt_uart1:
+                    msg = UBXMessage('NAV','NAV-PVT', GET, iTOW=itow, year=0, month=0, day=0, hour=0, min=0, second=0, valid=0, 
+                                                            tAcc=0, nano=0, fixType=0, flags=0, flags2=0, numSV=0, lon=0, lat=0, height=0, 
+                                                            hMSL=0, hAcc=0, vAcc=0, velN=0, velE=0, velD=0, gSpeed=0, headMot=0, sAcc=0, headAcc=0, 
+                                                            pDOP=0, flags3=0, headVeh=0, magDec=0, magAcc=0)
+                    self.send_data(msg.serialize())
+
+                self.prev_data_timestamp += self.rate/1000
+
+                while time.time() < (self.prev_data_timestamp + (self.rate/1000)):
+                    time.sleep(0.01)
+            except Exception as e:
+                print(e)
+
     def send_data(self, data):
         self.out_data.put(data)
 
@@ -133,8 +153,9 @@ class M10Simulator(threading.Thread):
             self._ubx_cfg_reset()
         elif parsed_message.identity == "CFG-VALGET":
             self._ubx_cfg_valget(parsed_message.keys_01, parsed_message.layer, parsed_message.position)
-        elif parser_message.identity == "CFG-VALSET":
+        elif parsed_message.identity == "CFG-VALSET":
             print(parsed_message)
+            self._ubx_cfg_valset(parsed_message.payload)
         else:
             print(parsed_message)
 
@@ -143,9 +164,50 @@ class M10Simulator(threading.Thread):
         # Reset internal values
         self.baudrate = 38400
         self.rate = 1000
+        self.nmea_enabled = True
+        self.ubx_nav_pvt_uart1 = False
+        self.ubx_nav_dop_uart1 = False
+        self.ubx_nav_status_uart1 = False
+        self.ubx_nav_sat_uart1 = False
+
+        self.next_data_timestamp = time.time() + self.rate/1000
+
         # No response expected
+        
         return
     
+    def _ubx_cfg_valset(self, payload):
+        version, layers, reserved0, key = struct.unpack("<BBHI", payload[:8])
+
+        found_key = False
+        if key == UBX_CFG_UART1_BAUDRATE:
+            self.baudrate = struct.unpack("<I", payload[8:])[0]
+            found_key = True
+        elif key == UBX_CFG_RATE_MEAS:
+            self.rate = struct.unpack("<H", payload[8:])[0]
+            found_key = True
+        elif key == UBX_CFG_MSGOUT_UBX_NAV_PVT_UART1:
+            self.ubx_nav_pvt_uart1 = struct.unpack("<B", payload[8:])[0] == 1
+            found_key = True
+        elif key == UBX_CFG_MSGOUT_UBX_NAV_DOP_UART1:
+            self.ubx_nav_dop_uart1 = struct.unpack("<B", payload[8:])[0] == 1
+            found_key = True
+        elif key == UBX_CFG_MSGOUT_UBX_NAV_STATUS_UART1:
+            self.ubx_nav_status_uart1 = struct.unpack("<B", payload[8:])[0] == 1
+            found_key = True
+        elif key == UBX_CFG_MSGOUT_UBX_NAV_SAT_UART1:
+            self.ubx_nav_sat_uart1 = struct.unpack("<B", payload[8:])[0] == 1
+            found_key = True
+        elif key == UBX_CFG_UART1OUTPRO_NMEA:
+            self.nmea_enabled = struct.unpack("<B", payload[8:])[0] == 1
+            found_key = True
+        elif key == UBX_CFG_NAVSPG_ACKAIDING:
+            self.ackaiding_enabled = struct.unpack("<B", payload[8:])[0] == 1
+            found_key = True
+
+        data = UBXMessage('ACK', 'ACK-ACK' if found_key else 'ACK-NAK', GET, clsID=UBX_CFG, msgID=UBX_CFG_VALSET)
+        self.send_data(data.serialize())
+
     def _ubx_cfg_valget(self, key, layer, position):
         print("VALGET")
 
@@ -153,7 +215,12 @@ class M10Simulator(threading.Thread):
         
         found_key = False
         if key == UBX_CFG_UART1_BAUDRATE:
-            data = UBXMessage('CFG','CFG-VALGET', GET, version=1, layer=layer, position=position, payload=struct.pack("<I", self.baudrate))
+            data = UBXMessage('CFG','CFG-VALGET', POLL, payload=struct.pack("<BBHII", 1, layer, position, key, self.baudrate))
+            binary_resp += data.serialize()
+            
+            found_key = True
+        elif key == UBX_CFG_RATE_MEAS:
+            data = UBXMessage('CFG','CFG-VALGET', POLL, payload=struct.pack("<BBHIH", 1, layer, position, key, self.rate))
             binary_resp += data.serialize()
             
             found_key = True

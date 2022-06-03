@@ -9,8 +9,8 @@ menuconfig ANIMAL_MONITOR_CONTROL
 
 if ANIMAL_MONITOR_CONTROL
 	config AMC_LOG_LEVEL
-		int "Log level for the messaging module"
-		default 4
+		int "Log level for the AMC module"
+		default 2
 	
 	config STATIC_GNSSDATA_SIZE
 		int "Data size of the cached GNSS data"
@@ -37,4 +37,8 @@ if ANIMAL_MONITOR_CONTROL
 		  may be supplanted at any time if a cooperative thread, 
 		  or a preemptible thread of higher or equal priority, 
 		  becomes ready.
+
+	menu "AMC LIBS"
+	rsource "lib/Kconfig"
+	endmenu # AMC LIBS
 endif

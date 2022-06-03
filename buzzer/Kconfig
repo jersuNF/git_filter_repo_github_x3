@@ -29,7 +29,7 @@ if BUZZER
 
 	config BUZZER_UPDATE_WARN_FREQ_TIMEOUT
 		int "Timeout in sec if we do not get new warn zone freq from AMC."
-		default 1
+		default 3
 
 	config BUZZER_LONGEST_NOTE_SUSTAIN
 		int "Maximum length of sustain notes in s, prevents timeouts on sems."

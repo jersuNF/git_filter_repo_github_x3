@@ -1,0 +1,83 @@
+config AMC_LIB_LOG_LEVEL
+	int "Log level for the AMC LIB modules"
+	default 3
+
+config AMC_USE_LEGACY_STEP
+	bool "Mimic the buzzer frequency steps in legacy code"
+	help
+	  Legacy collar uses the ATmega1284P, with a timer module
+	  using 4MHz reference clock and a prescaler of 32, causing
+	  the frequency changes to sound steppy. 
+	default y
+
+config FENCE_CACHE_TIMEOUT_SEC
+	int "Timeout in seconds when we try to access the cache"
+	default 5
+	
+config GNSS_CACHE_TIMEOUT_SEC
+	int "Timeout in seconds when we try to access the cache"
+	default 5
+
+config ZONE_CAUTION_DIST
+	int "Caution zone distance from border in dm"
+	default -110
+	
+config ZONE_CAUTION_HYST
+	int "Hysteresis of caution zone distance in dm"
+	default 10
+
+config ZONE_PREWARN_DIST
+	int "Prewarn zone distance from border in dm"
+	default -60
+	
+config ZONE_PREWARN_HYST
+	int "Hysteresis of prewarn zone distance in dm"
+	default 10
+
+config ZONE_WARN_DIST
+	int "Warn zone distance from border in dm"
+	default 0
+	help
+	  No corrections can be started with a distance-to-pasture less than 
+	  this value. However, due to dynamic limits and GPS limitations, 
+	  warnings can be started at a greater distance.
+	
+config ZONE_WARN_HYST
+	int "Hysteresis of warn zone distance in dm"
+	default 0
+
+config MAX_PSM_FIX_AGE
+	int "Maximum number of seconds before PSM fix lead to no zone"
+	default 3
+
+config ZONE_MIN_TIME_SINCE_RESET
+	int "Minimum time in milliseconds since GNSS reset for further processing of position"
+	default 10000
+
+config ZONE_PSM_LEAST_TIME
+	int "Minimum time in milliseconds for changing from PSM mode"
+	default 15000
+
+config ZONE_LEAST_TIME
+	int "Minimum time in milliseconds for zone duration before resetting after position is uncertain"
+	default 6000
+
+config GNSS_TIMEOUT
+	int "Timeout in milliseconds before position data is considered unreliable"
+	default 1500
+
+config GNSS_NUMSV_LIMIT
+	int "Minimum number of satellites required"
+	default 6
+
+config GNSS_HDOP_LIMIT
+	int "Maximum horizontal dilution of precision"
+	default 200
+
+config GNSS_HACC_LIMIT
+	int "Maximum horizontal accuracy in dm"
+	default 35
+
+config GNSS_CACC_LIMIT
+	int "Maximum course heading accuracy in centidegrees, deg*100"
+	default 36000

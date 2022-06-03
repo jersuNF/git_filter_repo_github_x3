@@ -10,7 +10,6 @@
 #include <sys/ring_buffer.h>
 #include <zephyr.h>
 #include <zephyr/types.h>
-#include "nf_eeprom.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -26,7 +25,7 @@
 #include "msg_data_event.h"
 
 #include "nf_version.h"
-#include "nf_eeprom.h"
+#include "nf_settings.h"
 
 #include "beacon_processor.h"
 #include "ble_beacon_event.h"
@@ -55,7 +54,9 @@ static atomic_t atomic_bt_ready;
 static atomic_t atomic_bt_adv_active;
 static atomic_t atomic_bt_scan_active;
 static int64_t beacon_scanner_timer;
+#if CONFIG_BEACON_SCAN_ENABLE
 static struct k_work_delayable periodic_beacon_scanner_work;
+#endif
 static struct k_work_delayable disconnect_peer_work;
 
 static char bt_device_name[DEVICE_NAME_LEN + 1] = CONFIG_BT_DEVICE_NAME;
@@ -162,11 +163,15 @@ static struct bt_conn_cb conn_callbacks = {
 	.disconnected = disconnected,
 };
 
+#if CONFIG_BEACON_SCAN_ENABLE
 /**
  * @brief Periodic beacon scanner work function
  */
 static void periodic_beacon_scanner_work_fn()
 {
+	/* Reschedule worker to start again after given interval */
+	k_work_reschedule(&periodic_beacon_scanner_work,
+			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
 #if defined(CONFIG_WATCHDOG_ENABLE)
 	/* Report alive */
 	watchdog_report_module_alive(WDG_BLE_SCAN);
@@ -177,11 +182,8 @@ static void periodic_beacon_scanner_work_fn()
 		event->cmd = BLE_CTRL_SCAN_START;
 		EVENT_SUBMIT(event);
 	}
-	/* Reschedule worker to start again after given interval */
-	k_work_reschedule(&periodic_beacon_scanner_work,
-			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
 }
-
+#endif
 /**
  * @brief Work function to send data from rx ring buffer with bt nus
  * @param[in] work work item
@@ -566,10 +568,13 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 		bc_event->status = BEACON_STATUS_NOT_FOUND;
 		EVENT_SUBMIT(bc_event);
 
-		/* Stop beacon scanner */
-		struct ble_ctrl_event *ctrl_event = new_ble_ctrl_event();
-		ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
-		EVENT_SUBMIT(ctrl_event);
+		/* Stop beacon scanner. Check if scan is active */
+		if (atomic_get(&atomic_bt_scan_active) == true) {
+			struct ble_ctrl_event *ctrl_event =
+				new_ble_ctrl_event();
+			ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
+			EVENT_SUBMIT(ctrl_event);
+		}
 	}
 }
 
@@ -637,7 +642,7 @@ static void disconnect_peer_work_fn()
 int ble_module_init()
 {
 	uint32_t serial_id = 0;
-	int err = eep_read_serial(&serial_id);
+	int err = eep_uint32_read(EEP_UID, &serial_id);
 	if (err != 0) {
 		char *e_msg = "Failed to read serial number from eeprom!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
@@ -678,10 +683,11 @@ int ble_module_init()
 #if CONFIG_BOARD_NF_X25_NRF52840
 	err = bt_dfu_init();
 #endif
-
+#if CONFIG_BEACON_SCAN_ENABLE
 	/* Start scanning after beacons. Set flag to true */
-	if (!atomic_set(&atomic_bt_scan_active, true)) {
+	if (atomic_get(&atomic_bt_scan_active) == false) {
 		scan_start();
+		atomic_set(&atomic_bt_scan_active, true);
 	}
 
 	/* Init and start periodic scan work function */
@@ -689,7 +695,7 @@ int ble_module_init()
 			      periodic_beacon_scanner_work_fn);
 	k_work_reschedule(&periodic_beacon_scanner_work,
 			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
-
+#endif
 	k_work_init_delayable(&disconnect_peer_work, disconnect_peer_work_fn);
 	return 0;
 }
@@ -780,13 +786,15 @@ static bool event_handler(const struct event_header *eh)
 			fence_def_ver_update(event->param.fence_def_ver);
 			break;
 		case BLE_CTRL_SCAN_START:
-			if (!atomic_set(&atomic_bt_scan_active, true)) {
+			if (atomic_get(&atomic_bt_scan_active) == false) {
 				scan_start();
+				atomic_set(&atomic_bt_scan_active, true);
 			}
 			break;
 		case BLE_CTRL_SCAN_STOP:
-			if (atomic_set(&atomic_bt_scan_active, false)) {
+			if (atomic_get(&atomic_bt_scan_active) == true) {
 				scan_stop();
+				atomic_set(&atomic_bt_scan_active, false);
 			}
 			break;
 		case BLE_CTRL_DISCONNECT_PEER:

@@ -64,6 +64,9 @@ mov_avg_t v_batt_mov_avg;
 
 static bool battery_ok;
 
+static atomic_t battery_min_mv = ATOMIC_INIT(UINT16_MAX);
+static atomic_t battery_max_mv = ATOMIC_INIT(0);
+
 static const struct divider_config divider_config = {
 #if DT_NODE_HAS_STATUS(VBATT, okay)
 	.io_channel = {
@@ -286,6 +289,29 @@ int battery_sample_averaged(void)
 		LOG_ERR("Failed to read battery voltage: %d", batt_mV);
 		return -ENOENT;
 	}
-	uint16_t approx_batt_value = approx_moving_average(&v_batt_mov_avg, batt_mV);
+	uint16_t curr_batt_max = atomic_get(&battery_max_mv);
+	uint16_t curr_batt_min = atomic_get(&battery_min_mv);
+
+	if (batt_mV < curr_batt_min) {
+		atomic_set(&battery_min_mv, batt_mV);
+	}
+	if (batt_mV > curr_batt_max) {
+		atomic_set(&battery_max_mv, batt_mV);
+	}
+
+	uint16_t approx_batt_value =
+		approx_moving_average(&v_batt_mov_avg, batt_mV);
 	return approx_batt_value;
+}
+
+uint16_t battery_get_max(void)
+{
+	uint16_t curr_batt_max = (uint16_t)atomic_get(&battery_max_mv);
+	return curr_batt_max;
+}
+
+uint16_t battery_get_min(void)
+{
+	uint16_t curr_batt_min = (uint16_t)atomic_get(&battery_min_mv);
+	return curr_batt_min;
 }

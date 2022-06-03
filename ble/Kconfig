@@ -66,3 +66,7 @@ config BEACON_SCAN_DURATION
 config BEACON_SCAN_PERIODIC_INTERVAL
 	int "Set the periodic interval to start beacon scanner. In seconds"
 	default 60
+
+config BEACON_SCAN_ENABLE
+	bool "Enable scanning for beacon"
+	default y

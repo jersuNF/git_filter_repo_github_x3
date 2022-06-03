@@ -20,7 +20,7 @@
 #include <zephyr.h>
 #include <zephyr/types.h>
 
-#include "nf_eeprom_private.h"
+#include "nf_settings.h"
 #include "ble_cmd_event.h"
 #include "ble_ctrl_event.h"
 

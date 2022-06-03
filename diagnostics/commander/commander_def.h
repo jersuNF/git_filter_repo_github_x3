@@ -31,8 +31,6 @@ typedef enum {
 	ACK = 0x00,
 	DATA = 0x01,
 
-	PONG = 0xAA,
-
 	CHK_FAILED = 0xC0,
 	NOT_ENOUGH = 0xD0,
 	ERROR = 0xE0,

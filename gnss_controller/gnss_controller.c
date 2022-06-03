@@ -165,7 +165,6 @@ power consumption crude test - end */
 	return 0;
 }
 
-#include "sound_event.h"
 _Noreturn void publish_gnss_data(void *ctx)
 {
 	while (true) {
@@ -183,11 +182,6 @@ _Noreturn void publish_gnss_data(void *ctx)
 				check_gnss_age(gnss_age);
 				previous_ts = ts;
 			}
-
-			LOG_ERR("Got GNSS data!\n");
-	/*struct sound_event *ev = new_sound_event();
-	ev->type = SND_SHORT_100;
-	EVENT_SUBMIT(ev);*/
 
 			struct gnss_data *new_data = new_gnss_data();
 			new_data->gnss_data = gnss_data_buffer;

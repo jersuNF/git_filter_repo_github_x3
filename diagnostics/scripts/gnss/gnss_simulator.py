@@ -25,6 +25,7 @@ if (args.ble and args.rtt):
 elif (not args.ble) and (not args.rtt):
 	print("Didn't specify a connection. RTT will be used on any available J-Link devices.")
 
+global stream
 stream = None
 if args.ble:
 	stream = nfdiag.BLEStream("COM4", serial=args.ble)
@@ -34,12 +35,15 @@ else:
 while not stream.is_connected():
 	time.sleep(0.1)
 
+global cmndr
 cmndr = nfdiag.Commander(stream)
 
 # Signal handler for stopping with CTRL+C
 def signal_handler(sig, frame):
-	global cmndr
 	global stream
+	global cmndr
+	# Setting default mode in GNSS hub
+	cmndr.send_cmd(0x02, 0x10, b"\x00")
 
 	cmndr.stop()
 
@@ -61,7 +65,7 @@ while time.time() < (start_time + 5) and (not got_ping):
 if not got_ping:
 	raise Exception("Did not get ping...")
 
-# Setting sniffer mode in GNSS hub
+# Setting simulator mode in GNSS hub
 cmndr.send_cmd(0x02, 0x10, b"\x03")
 
 # Loop for collecting and writing data for GNSS

@@ -9,7 +9,7 @@
 
 static void commander_gnss_data_received(void)
 {
-
+	
 }
 
 int commander_stimulator_handler(enum diagnostics_interface interface, 
@@ -28,9 +28,12 @@ int commander_stimulator_handler(enum diagnostics_interface interface,
 			}
 
 			uint8_t hub_mode = data[0];
-			if (hub_mode == GNSS_HUB_MODE_SNIFFER) {
+			if ((hub_mode == GNSS_HUB_MODE_SNIFFER) ||
+			    (hub_mode == GNSS_HUB_MODE_SIMULATOR)) {
 				gnss_hub_set_diagnostics_callback(
 						commander_gnss_data_received);
+			} else {
+				gnss_hub_set_diagnostics_callback(NULL);
 			}
 			if (gnss_hub_configure(hub_mode) != 0) {
 				resp = ERROR;

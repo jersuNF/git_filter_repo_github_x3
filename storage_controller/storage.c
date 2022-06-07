@@ -287,7 +287,7 @@ int stg_init_storage_controller(void)
 	/* Check which ANO partition is active. We just booted, so
 	 * we have to go through every entry.
 	 */
-//	update_ano_active_entry(NULL);
+	update_ano_active_entry(NULL);
 
 	return 0;
 }

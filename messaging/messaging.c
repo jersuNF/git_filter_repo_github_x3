@@ -467,7 +467,7 @@ static bool event_handler(const struct event_header *eh)
 			if (k_sem_take(&cache_lock_sem, K_MSEC(200)) == 0) {
 				cached_fix = ev->gnss_data.lastfix;
 				k_sem_give(&cache_lock_sem);
-				}
+			}
 		}
 		if (!(ev->gnss_data.latest.pvt_valid & (1 << 0)) ||
 		    !(ev->gnss_data.latest.pvt_valid & (1 << 1))) {
@@ -642,12 +642,12 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_env_sensor_event(eh)) {
 		struct env_sensor_event *ev = cast_env_sensor_event(eh);
-		LOG_DBG("Event Temp: %.2f, humid %.2f, press %.2f", ev->temp,
+		LOG_DBG("Event Temp: %.2f, humid %.3f, press %.3f", ev->temp,
 			ev->humidity, ev->press);
 		/* Update shaddow register */
-		atomic_set(&cached_press, (uint32_t)ev->press);
-		atomic_set(&cached_hum, (uint32_t)ev->humidity);
-		atomic_set(&cached_temp, (uint32_t)ev->temp);
+		atomic_set(&cached_press, (uint32_t)ev->press * 1000);
+		atomic_set(&cached_hum, (uint32_t)ev->humidity * 1000);
+		atomic_set(&cached_temp, (uint32_t)ev->temp * 100);
 		return false;
 	}
 	if (is_warn_correction_start_event(eh)) {
@@ -892,7 +892,7 @@ int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module.");
 	int err = eep_uint32_read(EEP_UID, &serial_id);
-	if (err != 0) { 
+	if (err != 0) {
 		char *e_msg = "Failed to read serial number from eeprom!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));

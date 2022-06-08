@@ -61,7 +61,6 @@ static uint32_t steps, steps_old;
 int16_t m_i16_way_pnt[2], fresh_pos[2];
 static gnss_mode_t cur_gnss_pwr_m = GNSSMODE_NOMODE;
 static modem_pwr_mode cur_modem_pwr_m = POWER_ON;
-static uint16_t cur_bat_volt, cur_min_bat_volt, cur_max_bat_volt;
 static uint32_t m_u32_timeuse_sample_gps = 0;
 static int16_t m_i16_heightmax = INT16_MIN;
 static int16_t m_i16_heightmin = INT16_MAX;
@@ -151,9 +150,14 @@ static bool event_handler(const struct event_header *eh)
 	if (is_pwr_status_event(eh)) {
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
 		if (ev->pwr_state == PWR_BATTERY) {
-			cur_bat_volt = ev->battery_mv;
-			cur_min_bat_volt = ev->battery_mv_min;
-			cur_max_bat_volt = ev->battery_mv_max;
+			/* Add battery max/min voltage [centi-voltage] */
+			histogram.qc_battery.usVbattMax =
+				(uint16_t)(ev->battery_mv_max / 10);
+			histogram.qc_battery.usVbattMin =
+				(uint16_t)(ev->battery_mv_min / 10);
+			LOG_INF("Save to histogram.qc_battery: max: %u, min: %u",
+				histogram.qc_battery.usVbattMax,
+				histogram.qc_battery.usVbattMin);
 		}
 		return false;
 	}
@@ -373,11 +377,6 @@ void collect_stats(void)
 					m_u32_speedmean /
 					m_u32_timeuse_sample_gps;
 			}
-			/* Add battery max/min voltage [centi-voltage] */
-			histogram.qc_battery.usVbattMax =
-				(uint16_t)cur_max_bat_volt / 10;
-			histogram.qc_battery.usVbattMin =
-				(uint16_t)cur_min_bat_volt / 10;
 		}
 		if (save_and_reset) {
 			save_and_reset = false;

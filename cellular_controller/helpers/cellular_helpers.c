@@ -149,7 +149,7 @@ int socket_listen(struct data *data)
 	}
 
 	k_sleep(K_MSEC(50));
-	ret = listen(data->tcp.sock, 1); //2nd parameter is backlog size, not
+	ret = listen(data->tcp.sock, 10); //2nd parameter is backlog size, not
 	// important as we are not interested in the incoming data anyways.
 	if (ret < 0) {
 		LOG_ERR("Cannot start TCP listening socket (%s): %d",

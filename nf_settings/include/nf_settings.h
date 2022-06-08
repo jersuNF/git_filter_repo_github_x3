@@ -20,7 +20,7 @@ typedef enum {
 	EEP_OFF_ANIMAL_TIME_LIMIT_SEC,
 	EEP_ACC_SIGMA_SLEEP_LIMIT,
 	EEP_ZAP_CNT_TOT,
-	EEP_ZAP_CNT_DAY
+	EEP_ZAP_CNT_DAY,
 } eep_uint16_enum_t;
 
 typedef enum {

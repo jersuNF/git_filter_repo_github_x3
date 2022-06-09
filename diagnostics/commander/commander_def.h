@@ -53,6 +53,7 @@ typedef enum {
 
 typedef enum {
 	PING = 0x55,
+	TEST = 0x7E,
 	REBOOT = 0xEB,
 } system_cmd_t;
 

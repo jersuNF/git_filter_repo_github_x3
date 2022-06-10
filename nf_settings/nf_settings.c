@@ -145,6 +145,61 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		LOG_INF("Set teach mode finished to %i", *value);
 		break;
 	}
+	case EEP_EMS_PROVIDER: {
+		offset = offsetof(struct eemem, eep_ems_provider);
+
+		/* Check for default values, i.e value read is 0xFF,
+		 * set to defualt 0, not finished. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? 0 : *value;
+		LOG_INF("Set EMS provider to %i", *value);
+		break;
+	}
+	case EEP_PRODUCT_RECORD_REV: {
+		offset = offsetof(struct eemem, eep_product_record_rev);
+
+		/* Check for default values, i.e value read is 0xFF,
+		 * set to defualt 0, not finished. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? 0 : *value;
+		LOG_INF("Set EMS provider to %i", *value);
+		break;
+	}
+	case EEP_BOM_MEC_REV: {
+		offset = offsetof(struct eemem, eep_bom_mec_rev);
+
+		/* Check for default values, i.e value read is 0xFF,
+		 * set to defualt 0, not finished. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? 0 : *value;
+		LOG_INF("Set EMS provider to %i", *value);
+		break;
+	}
+	case EEP_BOM_PCB_REV: {
+		offset = offsetof(struct eemem, eep_bom_pcb_rev);
+
+		/* Check for default values, i.e value read is 0xFF,
+		 * set to defualt 0, not finished. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? 0 : *value;
+		LOG_INF("Set EMS provider to %i", *value);
+		break;
+	}
+	case EEP_HW_VERSION: {
+		offset = offsetof(struct eemem, eep_hw_version);
+
+		/* Check for default values, i.e value read is 0xFF,
+		 * set to defualt 0, not finished. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? 0 : *value;
+		LOG_INF("Set EMS provider to %i", *value);
+		break;
+	}
 	default: {
 		return -EINVAL;
 	}
@@ -184,6 +239,26 @@ int eep_uint8_write(eep_uint8_enum_t field, uint8_t value)
 	}
 	case EEP_TEACH_MODE_FINISHED: {
 		offset = offsetof(struct eemem, eep_teach_mode_finished);
+		break;
+	}
+	case EEP_EMS_PROVIDER: {
+		offset = offsetof(struct eemem, eep_ems_provider);
+		break;
+	}
+	case EEP_PRODUCT_RECORD_REV: {
+		offset = offsetof(struct eemem, eep_product_record_rev);
+		break;
+	}
+	case EEP_BOM_MEC_REV: {
+		offset = offsetof(struct eemem, eep_bom_mec_rev);
+		break;
+	}
+	case EEP_BOM_PCB_REV: {
+		offset = offsetof(struct eemem, eep_bom_pcb_rev);
+		break;
+	}
+	case EEP_HW_VERSION: {
+		offset = offsetof(struct eemem, eep_hw_version);
 		break;
 	}
 	default: {
@@ -261,6 +336,13 @@ int eep_uint16_read(eep_uint16_enum_t field, uint16_t *value)
 		LOG_INF("Set EEP_ZAP_CNT_DAY to %i", *value);
 		break;
 	}
+	case EEP_PRODUCT_TYPE: {
+		offset = offsetof(struct eemem, eep_product_type);
+
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		LOG_INF("Set EEP_PRODUCT_TYPE to %i", *value);
+		break;
+	}
 	default: {
 		return -EINVAL;
 	}
@@ -292,6 +374,10 @@ int eep_uint16_write(eep_uint16_enum_t field, uint16_t value)
 	}
 	case EEP_ZAP_CNT_DAY: {
 		offset = offsetof(struct eemem, eep_zap_cnt_day);
+		break;
+	}
+	case EEP_PRODUCT_TYPE: {
+		offset = offsetof(struct eemem, eep_product_type);
 		break;
 	}
 	default: {

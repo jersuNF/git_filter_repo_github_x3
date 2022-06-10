@@ -71,6 +71,24 @@ __packed struct eemem {
 
 	/** Security key for bluetooth connections. */
 	uint8_t ble_sec_key[EEP_BLE_SEC_KEY_LEN];
+	
+	/** EMS Provider. */
+	uint8_t eep_ems_provider;
+
+	/* Generation of product */
+	uint8_t eep_product_record_rev;
+	
+	/* Model of product */
+	uint8_t eep_bom_mec_rev;
+
+	/** Product Record version. */
+	uint8_t eep_bom_pcb_rev;
+
+	/** Hardware version. */
+	uint8_t eep_hw_version;
+
+	/** Product type; 1=Sheep/goat, 2=Cattle. */
+	uint16_t eep_product_type;
 };
 
 #endif /* X3_FW_NF_EEPROM_PRIVATE_H */

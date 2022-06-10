@@ -49,10 +49,17 @@ typedef enum {
 typedef enum {
 	SERIAL = 0x00,
 	HOST_PORT = 0x01,
+	EMS_PROVIDER = 0x02,
+	PRODUCT_RECORD_REV = 0x03,
+	BOM_MEC_REV = 0x04,
+	BOM_PCB_REV = 0x05,
+	HW_VERSION = 0x06,
+	PRODUCT_TYPE = 0x07,
 } settings_id_t;
 
 typedef enum {
 	PING = 0x55,
+	REPORT = 0x5E,
 	TEST = 0x7E,
 	REBOOT = 0xEB,
 } system_cmd_t;
@@ -67,6 +74,10 @@ typedef enum {
 	GNSS_HUB = 0x10,
 	GNSS_SEND = 0x11,
 	GNSS_RECEIVE = 0x12,
+
+	MODEM_HUB = 0x20,
+	MODEM_SEND = 0x21,
+	MODEM_RECEIVE = 0x22,
 
 	BUZZER_WARN = 0xB0,
 	ELECTRICAL_PULSE = 0xE0,

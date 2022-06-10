@@ -93,6 +93,7 @@ uint8_t process_fence_msg(FenceDefinitionResponse *);
 uint8_t process_ano_msg(UbxAnoReply *);
 
 int encode_and_send_message(NofenceMessage *);
+int encode_and_store_message(NofenceMessage *);
 int send_binary_message(uint8_t *, size_t);
 
 void messaging_thread_fn(void);
@@ -213,49 +214,14 @@ static void build_log_message()
 	seq_2.m.seq_msg_2.xBatteryQc.usTemperature =
 		(uint16_t)atomic_get(&cached_temp);
 
-	LOG_DBG("Max_voltage: %u, min voltage: %u, temp: %u",
-		seq_2.m.seq_msg_2.xBatteryQc.usVbattMax,
-		seq_2.m.seq_msg_2.xBatteryQc.usVbattMin,
-		seq_2.m.seq_msg_2.xBatteryQc.usTemperature);
-
-	uint8_t header_size = 2;
-	uint8_t encoded_msg_seq_1[NofenceMessage_size + header_size];
-	uint8_t encoded_msg_seq_2[NofenceMessage_size + header_size];
-
-	memset(encoded_msg_seq_1, 0, sizeof(encoded_msg_seq_1));
-	memset(encoded_msg_seq_2, 0, sizeof(encoded_msg_seq_2));
-
-	size_t encoded_seq_1_size = 0;
-
-	size_t encoded_seq_2_size = 0;
-
-	/* Encode the seq_1 struct created. */
-	err = collar_protocol_encode(&seq_1, &encoded_msg_seq_1[2],
-				     NofenceMessage_size, &encoded_seq_1_size);
+	err = encode_and_store_message(&seq_1);
 	if (err) {
-		LOG_ERR("Error encoding nofence message seq 1 (%i)", err);
-		return;
+		LOG_ERR("Failed to encode zap status msg: %d", err);
 	}
-
-	/* Store the length of the message in the two first bytes */
-	encoded_msg_seq_1[0] = (uint8_t)encoded_seq_1_size;
-	encoded_msg_seq_1[1] = (uint8_t)(encoded_seq_1_size >> 8);
-
-	/* Encode the seq_2 struct created. */
-	err = collar_protocol_encode(&seq_2, &encoded_msg_seq_2[2],
-				     NofenceMessage_size, &encoded_seq_2_size);
+	err = encode_and_store_message(&seq_2);
 	if (err) {
-		LOG_ERR("Error encoding nofence message seq 2 (%i)", err);
-		return;
+		LOG_ERR("Failed to encode zap status msg: %d", err);
 	}
-
-	/* Store the length of the message in the two first bytes */
-	encoded_msg_seq_2[0] = (uint8_t)encoded_seq_2_size;
-	encoded_msg_seq_2[1] = (uint8_t)(encoded_seq_2_size >> 8);
-
-	/* Store the encoded message to external flash ring buffer */
-	stg_write_log_data(encoded_msg_seq_1, encoded_seq_1_size + header_size);
-	stg_write_log_data(encoded_msg_seq_2, encoded_seq_2_size + header_size);
 }
 
 int read_log_data_cb(uint8_t *data, size_t len)
@@ -341,10 +307,12 @@ static void zap_message_work_fn()
 	proto_get_last_known_date_pos(&cached_fix,
 				      &msg.m.client_zap_message.xDatePos);
 
-	int ret = encode_and_send_message(&msg);
+	int ret = encode_and_store_message(&msg);
 	if (ret) {
 		LOG_ERR("Failed to encode zap status msg: %d", ret);
 	}
+	/* Send data stored in external flash immediately */
+	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 }
 
 static void animal_escaped_work_fn()
@@ -361,10 +329,13 @@ static void animal_escaped_work_fn()
 	msg.m.status_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	msg.m.status_msg.has_ucGpsMode = true;
 	msg.m.status_msg.ucGpsMode = (uint8_t)cached_gnss_mode;
-	int ret = encode_and_send_message(&msg);
+	/* Store struct in external flash */
+	int ret = encode_and_store_message(&msg);
 	if (ret) {
 		LOG_ERR("Failed to encode escaped status msg: %d", ret);
 	}
+	/* Send data stored in external flash immediately */
+	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 }
 
 static void warning_work_fn()
@@ -375,11 +346,13 @@ static void warning_work_fn()
 	msg.m.client_warning_message.has_sFenceDist = false;
 	proto_get_last_known_date_pos(&cached_fix,
 				      &msg.m.client_zap_message.xDatePos);
-
-	int ret = encode_and_send_message(&msg);
+	/* Store struct in external flash */
+	int ret = encode_and_store_message(&msg);
 	if (ret) {
 		LOG_ERR("Failed to encode warning msg: %d", ret);
 	}
+	/* Send data stored in external flash immediately */
+	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 }
 
 static void warning_start_work_fn()
@@ -391,11 +364,13 @@ static void warning_start_work_fn()
 	msg.m.client_correction_start_message.has_sFenceDist = false;
 	proto_get_last_known_date_pos(
 		&cached_fix, &msg.m.client_correction_start_message.xDatePos);
-
-	int ret = encode_and_send_message(&msg);
+	/* Store struct in external flash */
+	int ret = encode_and_store_message(&msg);
 	if (ret) {
 		LOG_ERR("Failed to encode warning start msg: %d", ret);
 	}
+	/* Send data stored in external flash immediately */
+	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 }
 
 static void warning_end_work_fn()
@@ -407,11 +382,13 @@ static void warning_end_work_fn()
 	msg.m.client_correction_end_message.has_sFenceDist = false;
 	proto_get_last_known_date_pos(
 		&cached_fix, &msg.m.client_correction_end_message.xDatePos);
-
-	int ret = encode_and_send_message(&msg);
+	/* Store struct in external flash */
+	int ret = encode_and_store_message(&msg);
 	if (ret) {
 		LOG_ERR("Failed to encode warning start msg: %d", ret);
 	}
+	/* Send data stored in external flash immediately */
+	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 }
 /**
  * @brief Work function to periodic request sensor data etc.
@@ -1224,6 +1201,7 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 	uint8_t encoded_msg[NofenceMessage_size + 2];
 	memset(encoded_msg, 0, sizeof(encoded_msg));
 	size_t encoded_size = 0;
+	size_t header_size = 2;
 
 	LOG_INF("Start message encoding, size: %d, version: %u",
 		sizeof(msg_proto), msg_proto->header.ulVersion);
@@ -1235,7 +1213,27 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return ret;
 	}
-	return send_binary_message(encoded_msg, encoded_size + 2);
+	return send_binary_message(encoded_msg, encoded_size + header_size);
+}
+
+int encode_and_store_message(NofenceMessage *msg_proto)
+{
+	uint8_t encoded_msg[NofenceMessage_size + 2];
+	memset(encoded_msg, 0, sizeof(encoded_msg));
+	size_t encoded_size = 0;
+	size_t header_size = 2;
+
+	LOG_INF("Start message encoding, size: %d, version: %u",
+		sizeof(msg_proto), msg_proto->header.ulVersion);
+	int ret = collar_protocol_encode(msg_proto, &encoded_msg[2],
+					 NofenceMessage_size, &encoded_size);
+	if (ret) {
+		char *e_msg = "Error encoding nofence message";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
+		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
+		return ret;
+	}
+	return stg_write_log_data(encoded_msg, encoded_size + header_size);
 }
 
 void process_poll_response(NofenceMessage *proto)

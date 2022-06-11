@@ -5,14 +5,15 @@
 #include <zephyr.h>
 #include "nf_settings.h"
 #include "error_event.h"
+#include <modem_nf.h>
+#include "fw_upgrade_events.h"
+
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define MY_PRIORITY CONFIG_RECV_THREAD_PRIORITY
 #define SOCKET_POLL_INTERVAL 0.25
 #define SOCK_RECV_TIMEOUT 15
 #define MODULE cellular_controller
 #define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_SEC
-#include <modem_nf.h>
-#include "fw_upgrade_events.h"
 
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 

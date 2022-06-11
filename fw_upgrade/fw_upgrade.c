@@ -31,7 +31,8 @@ static void reboot_device_fn(struct k_work *item)
 /* Add a check that we are using NRF board
  * since they are the ones supported by nordic's <power/reboot.h>
  */
-#ifdef CONFIG_BOARD_NF_X25_NRF52840
+#if defined CONFIG_BOARD_NF_X25_NRF52840 || \
+	defined CONFIG_BOARD_NF_C25_25G_NRF52840
 	sys_reboot(SYS_REBOOT_COLD);
 #endif
 }

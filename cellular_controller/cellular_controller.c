@@ -12,6 +12,7 @@
 #define MODULE cellular_controller
 #define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_SEC
 #include <modem_nf.h>
+#include "fw_upgrade_events.h"
 
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
@@ -37,12 +38,13 @@ int socket_receive(struct data *, char **);
 void listen_sock_poll(void);
 int8_t lte_init(void);
 bool lte_is_ready(void);
+
 K_SEM_DEFINE(listen_sem, 0, 1); /* this semaphore will be given by the modem
  * driver when receiving the UUSOLI urc code. Socket 0 is the listening
  * socket by design, however the 'socket' number returned in the UUSOLI =
  * number of currently opened sockets + 1 */
 static bool modem_is_ready = false;
-
+static bool keep_modem_awake = false;
 APP_DMEM struct configs conf = {
 	.ipv4 = {
 		.proto = "IPv4",
@@ -110,7 +112,7 @@ void receive_tcp(struct data *sock_data)
 				socket_idle_count += SOCKET_POLL_INTERVAL;
 				if (socket_idle_count > SOCK_RECV_TIMEOUT){
 					LOG_WRN("Socket receive timed out!");
-					stop_tcp();
+					if (!keep_modem_awake) stop_tcp();
 					connected = false;
 					socket_idle_count = 0;
 				}
@@ -118,7 +120,7 @@ void receive_tcp(struct data *sock_data)
 				char *e_msg = "Socket receive error!";
 				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
 					(e_msg));
-				stop_tcp();
+				if (!keep_modem_awake) stop_tcp();
 				connected = false;
 				socket_idle_count = 0;
 			}
@@ -202,7 +204,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		LOG_WRN("ACK received!\n");
 		return true;
 	} else if (is_messaging_stop_connection_event(eh)) {
-		stop_tcp();
+		if (!keep_modem_awake) stop_tcp();
 		connected = false;
 		return true;
 	}else if (is_messaging_host_address_event(eh)) {
@@ -276,6 +278,14 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 	} else if (is_free_message_mem_event(eh)) {
 		k_free(CharMsgOut);
 		ready_for_new_msg = true;
+	} else if (is_dfu_status_event(eh)) {
+		struct dfu_status_event *fw_upgrade_event =
+			cast_dfu_status_event(eh);
+		if (fw_upgrade_event->dfu_status == DFU_STATUS_IN_PROGRESS) {
+			keep_modem_awake = true;
+		} else {
+			keep_modem_awake = false;
+		}
 	}
 	return false;
 }
@@ -354,16 +364,16 @@ static void cellular_controller_keep_alive(void* dev)
 					}
 				}
 			}
-			if (cellular_controller_is_ready()) {
+			if (cellular_controller_is_ready() && !keep_modem_awake) {
 				if(!connected){//check_ip
 					// takes place in start_tcp() in this
 					// case.
 					ret = start_tcp();
-					if (ret >= 0){
+					if (ret >= 0 ){
 						connected = true;
 						announce_connection_state(true);
 					}else {
-						stop_tcp();
+						if (!keep_modem_awake) stop_tcp();
 						announce_connection_state
 							(false);
 						/*TODO: notify error handler*/
@@ -389,7 +399,7 @@ void announce_connection_state(bool state){
 	ev->state = state;
 	EVENT_SUBMIT(ev);
 	if (state == false){
-		stop_tcp();
+		if (!keep_modem_awake) stop_tcp();
 		modem_is_ready = false;
 		connected = false;
 	}
@@ -433,3 +443,5 @@ EVENT_SUBSCRIBE(MODULE, messaging_stop_connection_event);
 EVENT_SUBSCRIBE(MODULE, messaging_host_address_event);
 EVENT_SUBSCRIBE(MODULE, check_connection);
 EVENT_SUBSCRIBE(MODULE, free_message_mem_event);
+EVENT_SUBSCRIBE(MODULE, dfu_status_event);
+

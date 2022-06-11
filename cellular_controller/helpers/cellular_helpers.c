@@ -121,13 +121,14 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 			return ret;
 		}
 	}
-
 	ret = connect(data->tcp.sock, addr, addrlen);
+	k_sleep(K_MSEC(50));
+	ret = set_socket_linger_time((uint8_t)data->tcp.sock, 3000);
 	if (ret < 0) {
 		LOG_ERR("Cannot connect to TCP remote (%s): %d", data->proto,
 			errno);
 		ret = -errno;
-	}else{
+	} else {
 		ret = data->tcp.sock;
 	}
 	return ret;
@@ -226,9 +227,6 @@ void stop_tcp(void)
 		}
 	}
 
-	k_sleep(K_SECONDS(3)); /*wait until socket is closed (USOSO delay is
-* 3 seconds)
-* * TODO: set change delay to a configuration symbol*/
 	int ret = modem_nf_sleep();
 	if (ret != 0){
 		LOG_ERR("Failed to switch modem to power saving!");

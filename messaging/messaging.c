@@ -88,7 +88,8 @@ void messaging_thread_fn(void);
 _DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *);
 bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *);
 static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
-bool m_confirm_acc_limits, m_confirm_ble_key, m_transfer_boot_params;
+bool m_confirm_acc_limits, m_confirm_ble_key;
+bool m_transfer_boot_params = true;
 bool use_server_time;
 
 K_MUTEX_DEFINE(send_binary_mutex);
@@ -650,18 +651,21 @@ void build_poll_request(NofenceMessage *poll_req)
 	poll_req->m.poll_message_req.eFenceStatus = current_state.fence_status;
 	poll_req->m.poll_message_req.ulFenceDefVersion =
 		current_state.fence_version;
-	poll_req->m.poll_message_req.usBatteryVoltage = 378; /* TODO: get
- * value from battery voltage event.*/
+	poll_req->m.poll_message_req.usBatteryVoltage = 378; 
+	/** @todo get value from battery voltage event.*/
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
 
 	/* Fw info. */
 	poll_req->m.poll_message_req.has_versionInfoHW = true;
 	poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version = 1;
-	/* TODO: get gsm info from modem driver */
-	//	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
-	//	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
-	//	poll_req->m.poll_message_req.has_xGsmInfo = false;
+	
+	/** @todo get gsm info from modem driver */
+#if 0
+	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
+	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
+	poll_req->m.poll_message_req.has_xGsmInfo = false;
+#endif
 
 	if (current_state.flash_erase_count) {
 		// m_flash_erase_count is reset when we receive a poll reply
@@ -670,15 +674,18 @@ void build_poll_request(NofenceMessage *poll_req)
 			current_state.flash_erase_count;
 	}
 	if (m_confirm_acc_limits) {
-		//		poll_req.m.poll_message_req.has_usAccSigmaSleepLimit = true;
-		//		poll_req.m.poll_message_req.usAccSigmaSleepLimit =
-		//			EEPROM_GetAccSigmaSleepLimit();
-		//		poll_req.m.poll_message_req.has_usAccSigmaNoActivityLimit = true;
-		//		poll_req.m.poll_message_req.usAccSigmaNoActivityLimit =
-		//			EEPROM_GetAccSigmaNoActivityLimit();
-		//		poll_req.m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
-		//		poll_req.m.poll_message_req.usOffAnimalTimeLimitSec =
-		//			EEPROM_GetOffAnimalTimeLimitSec();
+		/** @todo Add EEPROM storage read for movement */
+#if 0
+		poll_req.m.poll_message_req.has_usAccSigmaSleepLimit = true;
+		poll_req.m.poll_message_req.usAccSigmaSleepLimit =
+			EEPROM_GetAccSigmaSleepLimit();
+		poll_req.m.poll_message_req.has_usAccSigmaNoActivityLimit = true;
+		poll_req.m.poll_message_req.usAccSigmaNoActivityLimit =
+			EEPROM_GetAccSigmaNoActivityLimit();
+		poll_req.m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
+		poll_req.m.poll_message_req.usOffAnimalTimeLimitSec =
+			EEPROM_GetOffAnimalTimeLimitSec();
+#endif
 	}
 	if (m_confirm_ble_key) {
 		poll_req->m.poll_message_req.has_rgubcBleKey = true;
@@ -693,10 +700,12 @@ void build_poll_request(NofenceMessage *poll_req)
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 	}
+	/** @todo Add GNSS info */
 	poll_req->m.poll_message_req.usGnssOnFixAgeSec = 123;
 	poll_req->m.poll_message_req.usGnssTTFFSec = 12;
 
 	if (m_transfer_boot_params) {
+		/** @todo Add information of bootloader */
 		//		poll_req.m.poll_message_req.has_versionInfo = true;
 		//		uint16_t xbootVersion;
 		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
@@ -706,18 +715,47 @@ void build_poll_request(NofenceMessage *poll_req)
 		//			poll_req.m.poll_message_req.versionInfo
 		//				.has_usATmegaBootloaderVersion = true;
 		//		}
-		//		poll_req.m.poll_message_req.has_versionInfoHW = true;
-		//		poll_req.m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
-		//			EEPROM_GetHwVersion();
-		//		poll_req.m.poll_message_req.versionInfoHW.usPCB_Product_Type =
-		//			(uint8_t)EEPROM_GetProductType();
-		//		poll_req.m.poll_message_req.has_xSimCardId = true;
-		//		memcpy(poll_req.m.poll_message_req.xSimCardId, BGS_SCID(),
-		//		       sizeof(poll_req.m.poll_message_req.xSimCardId));
-		//		poll_req.m.poll_message_req.versionInfo.has_ulATmegaVersion =
-		//			true;
-		//		poll_req.m.poll_message_req.versionInfo.ulATmegaVersion =
-		//			NF_X25_VERSION_NUMBER;
+		poll_req->m.poll_message_req.has_versionInfoHW = true;
+
+		uint8_t pcb_rf_version = 0;
+		eep_uint8_read(EEP_HW_VERSION, &pcb_rf_version);
+		poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
+							pcb_rf_version;
+		
+		uint16_t pcb_product_type = 0;
+		eep_uint16_read(EEP_PRODUCT_TYPE, &pcb_product_type);
+		poll_req->m.poll_message_req.versionInfoHW.usPCB_Product_Type =
+							pcb_product_type;
+
+		poll_req->m.poll_message_req.has_versionInfoBOM = true;
+		
+		uint8_t bom_mec_rev = 0;
+		eep_uint8_read(EEP_BOM_MEC_REV, &bom_mec_rev);
+		poll_req->m.poll_message_req.versionInfoBOM.ucBom_mec_rev =
+							bom_mec_rev;
+		uint8_t bom_pcb_rev = 0;
+		eep_uint8_read(EEP_BOM_PCB_REV, &bom_pcb_rev);
+		poll_req->m.poll_message_req.versionInfoBOM.ucBom_pcb_rev =
+							bom_pcb_rev;
+		uint8_t ems_provider = 0;
+		eep_uint8_read(EEP_EMS_PROVIDER, &ems_provider);
+		poll_req->m.poll_message_req.versionInfoBOM.ucEms_provider =
+							ems_provider;
+		uint8_t product_record_rev = 0;
+		eep_uint8_read(EEP_PRODUCT_RECORD_REV, &product_record_rev);
+		poll_req->m.poll_message_req.versionInfoBOM.ucProduct_record_rev =
+							product_record_rev;
+
+		/** @todo Add information of SIM card */
+#if 0
+		poll_req.m.poll_message_req.has_xSimCardId = true;
+		memcpy(poll_req.m.poll_message_req.xSimCardId, BGS_SCID(),
+			sizeof(poll_req.m.poll_message_req.xSimCardId));
+		poll_req.m.poll_message_req.versionInfo.has_ulATmegaVersion =
+			true;
+		poll_req.m.poll_message_req.versionInfo.ulATmegaVersion =
+			NF_X25_VERSION_NUMBER;
+#endif
 	}
 }
 
@@ -902,6 +940,7 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 
 void process_poll_response(NofenceMessage *proto)
 {
+	m_transfer_boot_params = false;
 	PollMessageResponse *pResp = &proto->m.poll_message_resp;
 	if (pResp->has_xServerIp && strlen(pResp->xServerIp) > 0) {
 		struct messaging_host_address_event *host_add_event =

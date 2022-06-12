@@ -14,6 +14,7 @@
 #define SELFTEST_EEPROM_POS		1
 #define SELFTEST_ACCELEROMETER_POS	2
 #define SELFTEST_GNSS_POS		3
+#define SELFTEST_MODEM_POS		4
 
 /**
  * @brief Used to initialize and clear the selftest flags. 

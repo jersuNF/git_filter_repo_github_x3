@@ -91,10 +91,10 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 		}
 		case HOST_PORT:
 		{
-			err = eep_read_host_port(buf, sizeof(buf));
+			err = eep_read_host_port(&buf[1], sizeof(buf)-1);
 
 			if (err == 0) {
-				commander_send_resp(interface, SETTINGS, READ, DATA, buf, 1 + strnlen(buf, sizeof(buf)));
+				commander_send_resp(interface, SETTINGS, READ, DATA, buf, 1 + strnlen(&buf[1], sizeof(buf)-1));
 			} else {
 				commander_send_resp(interface, SETTINGS, READ, ERROR, NULL, 0);
 			}
@@ -106,7 +106,8 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 			err = eep_uint8_read(EEP_EMS_PROVIDER, &ems_provider);
 
 			if (err == 0) {
-				commander_send_resp(interface, SETTINGS, READ, DATA, &ems_provider, 1+sizeof(uint8_t));
+				buf[1] = ems_provider;
+				commander_send_resp(interface, SETTINGS, READ, DATA, buf, 1+sizeof(uint8_t));
 			} else {
 				commander_send_resp(interface, SETTINGS, READ, ERROR, NULL, 0);
 			}
@@ -118,7 +119,8 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 			err = eep_uint8_read(EEP_PRODUCT_RECORD_REV, &product_record_rev);
 
 			if (err == 0) {
-				commander_send_resp(interface, SETTINGS, READ, DATA, &product_record_rev, 1+sizeof(uint8_t));
+				buf[1] = product_record_rev;
+				commander_send_resp(interface, SETTINGS, READ, DATA, buf, 1+sizeof(uint8_t));
 			} else {
 				commander_send_resp(interface, SETTINGS, READ, ERROR, NULL, 0);
 			}
@@ -130,7 +132,8 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 			err = eep_uint8_read(EEP_BOM_MEC_REV, &bom_mec_rev);
 
 			if (err == 0) {
-				commander_send_resp(interface, SETTINGS, READ, DATA, &bom_mec_rev, 1+sizeof(uint8_t));
+				buf[1] = bom_mec_rev;
+				commander_send_resp(interface, SETTINGS, READ, DATA, buf, 1+sizeof(uint8_t));
 			} else {
 				commander_send_resp(interface, SETTINGS, READ, ERROR, NULL, 0);
 			}
@@ -142,7 +145,8 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 			err = eep_uint8_read(EEP_BOM_PCB_REV, &bom_pcb_rev);
 
 			if (err == 0) {
-				commander_send_resp(interface, SETTINGS, READ, DATA, &bom_pcb_rev, 1+sizeof(uint8_t));
+				buf[1] = bom_pcb_rev;
+				commander_send_resp(interface, SETTINGS, READ, DATA, buf, 1+sizeof(uint8_t));
 			} else {
 				commander_send_resp(interface, SETTINGS, READ, ERROR, NULL, 0);
 			}
@@ -154,7 +158,8 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 			err = eep_uint8_read(EEP_HW_VERSION, &hw_ver);
 
 			if (err == 0) {
-				commander_send_resp(interface, SETTINGS, READ, DATA, &hw_ver, 1+sizeof(uint8_t));
+				buf[1] = hw_ver;
+				commander_send_resp(interface, SETTINGS, READ, DATA, buf, 1+sizeof(uint8_t));
 			} else {
 				commander_send_resp(interface, SETTINGS, READ, ERROR, NULL, 0);
 			}
@@ -272,11 +277,11 @@ static int commander_settings_write(enum diagnostics_interface interface, settin
 	}
 
 	if (err == 0) {
-		commander_send_resp(interface, SETTINGS, READ, ACK, NULL, 0);
+		commander_send_resp(interface, SETTINGS, WRITE, ACK, NULL, 0);
 	} else if (err == -EINVAL) {
-		commander_send_resp(interface, SETTINGS, READ, UNKNOWN, NULL, 0);
+		commander_send_resp(interface, SETTINGS, WRITE, UNKNOWN, NULL, 0);
 	} else {
-		commander_send_resp(interface, SETTINGS, READ, ERROR, NULL, 0);
+		commander_send_resp(interface, SETTINGS, WRITE, ERROR, NULL, 0);
 	}
 
 	return err;

@@ -18,8 +18,8 @@ LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
 K_SEM_DEFINE(messaging_ack, 1, 1);
 
-char server_address[EEP_HOST_PORT_BUF_SIZE - 1];
-char server_address_tmp[EEP_HOST_PORT_BUF_SIZE - 1];
+char server_address[EEP_HOST_PORT_BUF_SIZE];
+char server_address_tmp[EEP_HOST_PORT_BUF_SIZE];
 static int server_port;
 static char server_ip[15];
 

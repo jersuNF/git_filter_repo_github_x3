@@ -164,7 +164,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
 		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? 0 : *value;
-		LOG_INF("Set EMS provider to %i", *value);
+		LOG_INF("Set product record rev to %i", *value);
 		break;
 	}
 	case EEP_BOM_MEC_REV: {
@@ -175,7 +175,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
 		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? 0 : *value;
-		LOG_INF("Set EMS provider to %i", *value);
+		LOG_INF("Set BOM mec rev to %i", *value);
 		break;
 	}
 	case EEP_BOM_PCB_REV: {
@@ -186,7 +186,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
 		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? 0 : *value;
-		LOG_INF("Set EMS provider to %i", *value);
+		LOG_INF("Set BOM pcb rev to %i", *value);
 		break;
 	}
 	case EEP_HW_VERSION: {
@@ -197,7 +197,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
 		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? 0 : *value;
-		LOG_INF("Set EMS provider to %i", *value);
+		LOG_INF("Set hw version to %i", *value);
 		break;
 	}
 	default: {

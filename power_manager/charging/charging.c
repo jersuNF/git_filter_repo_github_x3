@@ -135,7 +135,9 @@ int charging_read_analog_channel(void)
 				  (CURRENT_SENSE_GAIN *
 				   CURRENT_SENSE_RESISTOR)) -
 				 CURRENT_OFFSET;
-
+			if (result < 0) {
+				return 0;
+			}
 			return (int)result;
 		}
 	} else {

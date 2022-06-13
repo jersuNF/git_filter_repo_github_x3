@@ -88,7 +88,10 @@ void messaging_thread_fn(void);
 _DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *);
 bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *);
 static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
-bool m_confirm_acc_limits, m_confirm_ble_key, m_transfer_boot_params;
+bool m_confirm_acc_limits, m_confirm_ble_key;
+static bool m_transfer_boot_params = true;
+bool m_confirm_acc_limits, m_confirm_ble_key;
+
 bool use_server_time;
 
 K_MUTEX_DEFINE(send_binary_mutex);
@@ -694,10 +697,17 @@ void build_poll_request(NofenceMessage *poll_req)
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 	}
-	poll_req->m.poll_message_req.usGnssOnFixAgeSec = 123;
-	poll_req->m.poll_message_req.usGnssTTFFSec = 12;
+	/* TODO pshustad, fill GNSSS parameters for MIA M10 */
+	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec = false;
+	poll_req->m.poll_message_req.has_usGnssTTFFSec = false;
+
 
 	if (m_transfer_boot_params) {
+		//		poll_req.m.poll_message_req.has_versionInfo = true;
+		poll_req->m.poll_message_req.has_versionInfo = true;
+		poll_req->m.poll_message_req.versionInfo.has_ulApplicationVersion = true;
+		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion = NF_X25_VERSION_NUMBER;
+
 		//		poll_req.m.poll_message_req.has_versionInfo = true;
 		//		uint16_t xbootVersion;
 		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
@@ -903,6 +913,7 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 
 void process_poll_response(NofenceMessage *proto)
 {
+	m_transfer_boot_params = false;
 	PollMessageResponse *pResp = &proto->m.poll_message_resp;
 	if (pResp->has_xServerIp && strlen(pResp->xServerIp) > 0) {
 		struct messaging_host_address_event *host_add_event =
@@ -1014,21 +1025,16 @@ void process_poll_response(NofenceMessage *proto)
 void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 {
 	//uint32_t app_ver = fw_ver_from_server->ulNRF52AppVersion;
-	uint32_t app_ver = fw_ver_from_server->ulATmegaVersion;
+	if (fw_ver_from_server->has_ulApplicationVersion && fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER) {
+		LOG_INF("Received new app version from server %i", fw_ver_from_server->ulApplicationVersion);
 
-	LOG_INF("Received app version from server %i", app_ver);
-
-	if (app_ver != NF_X25_VERSION_NUMBER) {
 		struct start_fota_event *ev = new_start_fota_event();
 		ev->override_default_host = false;
-		ev->version = app_ver;
+		ev->version = fw_ver_from_server->ulApplicationVersion;
 		EVENT_SUBMIT(ev);
 	} else {
-		LOG_INF("FW ver from server is same or older than current.");
-		return;
+		LOG_INF("FW ver from server is same as current or not set");
 	}
-
-	return;
 }
 
 /** @brief Process a fence frame and stores it into the cached pasture

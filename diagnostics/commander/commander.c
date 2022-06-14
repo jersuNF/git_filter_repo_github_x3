@@ -111,62 +111,68 @@ int commander_send_resp(enum diagnostics_interface interface,
 uint32_t commander_handle(enum diagnostics_interface interface, 
 			  uint8_t* data, uint32_t size)
 {
-	/* Look for 0 that marks end of COBS packet */
-	uint32_t packet_end = 0;
-	while (packet_end < size) {
-		if (data[packet_end] == 0) {
+	uint32_t parsed_bytes = 0;
+
+	while (parsed_bytes < size) {
+		/* Look for 0 that marks end of COBS packet */
+		uint32_t packet_end = parsed_bytes;
+		while (packet_end < size) {
+			if (data[packet_end] == 0) {
+				break;
+			}
+			packet_end++;
+		}
+		uint32_t bytes_in_packet = packet_end - parsed_bytes;
+
+		if (packet_end >= size) {
+			/* No completed COBS packet found */
 			break;
 		}
-		packet_end++;
-	}
 
-	if (packet_end >= size) {
-		/* No completed COBS packet found */
-		return 0;
-	}
+		/* Use COBS to decode packet data */
+		cobs_decode_result cobs_res;
+		cobs_res = cobs_decode(cobs_buffer, sizeof(cobs_buffer),
+				&data[parsed_bytes], bytes_in_packet);
 
-	/* Use COBS to decode packet data */
-	cobs_decode_result cobs_res;
-	cobs_res = cobs_decode(cobs_buffer, sizeof(cobs_buffer),
-			       data, packet_end);
+		/* Take action according to data */
+		if ((cobs_res.status == COBS_DECODE_OK) && (cobs_res.out_len >= sizeof(commander_cmd_header_t))) {
+			
+			commander_cmd_header_t* header = (commander_cmd_header_t*)cobs_buffer;
+			uint32_t packet_size = cobs_res.out_len;
 
-	/* Take action according to data */
-	if ((cobs_res.status == COBS_DECODE_OK) && (cobs_res.out_len >= sizeof(commander_cmd_header_t))) {
-		
-		commander_cmd_header_t* header = (commander_cmd_header_t*)cobs_buffer;
-		uint32_t packet_size = cobs_res.out_len;
+			uint8_t* data_buffer = &cobs_buffer[sizeof(commander_cmd_header_t)];
+			uint32_t data_size = cobs_res.out_len-sizeof(commander_cmd_header_t);
 
-		uint8_t* data_buffer = &cobs_buffer[sizeof(commander_cmd_header_t)];
-		uint32_t data_size = cobs_res.out_len-sizeof(commander_cmd_header_t);
-
-		/* Verify checksum */
-		uint16_t checksum = header->checksum;
-		header->checksum = 0x0000;
-		
-		if (checksum == crc16_ccitt(0x0000, (uint8_t*)header, packet_size)) {
-			/** Call group handler */
-			const group_handler_t *hndl = NULL;
-			for (int i = 0; i < sizeof(handlers)/sizeof(group_handler_t); i++) {
-				if (header->group == handlers[i].group) {
-					hndl = &handlers[i];
-					break;
+			/* Verify checksum */
+			uint16_t checksum = header->checksum;
+			header->checksum = 0x0000;
+			
+			if (checksum == crc16_ccitt(0x0000, (uint8_t*)header, packet_size)) {
+				/** Call group handler */
+				const group_handler_t *hndl = NULL;
+				for (int i = 0; i < sizeof(handlers)/sizeof(group_handler_t); i++) {
+					if (header->group == handlers[i].group) {
+						hndl = &handlers[i];
+						break;
+					}
 				}
-			}
-			if (hndl != NULL) {
-				hndl->handler(interface, 
-					header->command, 
-					data_buffer, 
-					data_size);
+				if (hndl != NULL) {
+					hndl->handler(interface, 
+						header->command, 
+						data_buffer, 
+						data_size);
+				} else {
+					/* Unknown group, send error */
+					commander_send_resp(interface, header->group, header->command, UNKNOWN_GRP, NULL, 0);
+				}
 			} else {
-				/* Unknown group, send error */
-				commander_send_resp(interface, header->group, header->command, UNKNOWN_GRP, NULL, 0);
+				/* Checksum failed, send error */
+				commander_send_resp(interface, header->group, header->command, CHK_FAILED, NULL, 0);
 			}
-		} else {
-			/* Checksum failed, send error */
-			commander_send_resp(interface, header->group, header->command, CHK_FAILED, NULL, 0);
 		}
+		parsed_bytes += bytes_in_packet+1;
 	}
 
 	/* We have consumed data up to and including the 0 delimiter */
-	return packet_end+1;
+	return parsed_bytes;
 }

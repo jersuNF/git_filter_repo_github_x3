@@ -469,12 +469,12 @@ static bool event_handler(const struct event_header *eh)
 		 */
 		struct gnss_data *ev = cast_gnss_data(eh);
 
-        /* TODO, pshustad, review, might block the EventManager for 200 ms ? */
+		/* TODO, pshustad, review, might block the EventManager for 200 ms ? */
 		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
 			if (k_sem_take(&cache_lock_sem, K_MSEC(200)) == 0) {
 				cached_fix = ev->gnss_data.lastfix;
 				k_sem_give(&cache_lock_sem);
-				}
+			}
 		}
 		if (!(ev->gnss_data.latest.pvt_valid & (1 << 0)) ||
 		    !(ev->gnss_data.latest.pvt_valid & (1 << 1))) {
@@ -583,7 +583,7 @@ static bool event_handler(const struct event_header *eh)
 	if (is_gnss_data(eh)) {
 		struct gnss_data *ev = cast_gnss_data(eh);
 		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
-            /* TODO, review pshustad, might block the event manager for 500 ms ? */
+			/* TODO, review pshustad, might block the event manager for 500 ms ? */
 			if (k_sem_take(&cache_lock_sem, K_MSEC(500)) == 0) {
 				cached_fix = ev->gnss_data.lastfix;
 				k_sem_give(&cache_lock_sem);
@@ -900,7 +900,7 @@ int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module.");
 	int err = eep_uint32_read(EEP_UID, &serial_id);
-	if (err != 0) { 
+	if (err != 0) {
 		char *e_msg = "Failed to read serial number from eeprom!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
@@ -1013,9 +1013,11 @@ void build_poll_request(NofenceMessage *poll_req)
 
 	if (m_transfer_boot_params) {
 		poll_req->m.poll_message_req.has_versionInfo = true;
-		poll_req->m.poll_message_req.versionInfo.has_ulApplicationVersion = true;
-		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion = NF_X25_VERSION_NUMBER;
-        /* TODO pshustad, clean up and re-enable the commented code below */
+		poll_req->m.poll_message_req.versionInfo
+			.has_ulApplicationVersion = true;
+		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion =
+			NF_X25_VERSION_NUMBER;
+		/* TODO pshustad, clean up and re-enable the commented code below */
 		//		uint16_t xbootVersion;
 		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
 		//			poll_req.m.poll_message_req.versionInfo
@@ -1146,7 +1148,7 @@ void proto_InitHeader(NofenceMessage *msg)
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
 	if (use_server_time) {
-        /* FIXME pshustad, the time_from_server is stale, this is a bug. It should be fed to the time system */
+		/* FIXME pshustad, the time_from_server is stale, this is a bug. It should be fed to the time system */
 
 		msg->header.ulUnixTimestamp = time_from_server;
 	} else {
@@ -1252,7 +1254,7 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_bUseServerTime && pResp->bUseServerTime) {
 		LOG_INF("Server time will be used.");
 		time_from_server = proto->header.ulUnixTimestamp;
-        /* FIXME, pshustad see XF-174 */
+		/* FIXME, pshustad see XF-174 */
 		use_server_time = true;
 		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
 		struct tm *tm_time = gmtime(&gm_time);
@@ -1335,9 +1337,10 @@ void process_poll_response(NofenceMessage *proto)
 /* @brief: starts a firmware download if a new version exists on the server. */
 void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 {
-
-	if (fw_ver_from_server->has_ulApplicationVersion && fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER) {
-		LOG_INF("Received new app version from server %i", fw_ver_from_server->ulApplicationVersion);
+	if (fw_ver_from_server->has_ulApplicationVersion &&
+	    fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER) {
+		LOG_INF("Received new app version from server %i",
+			fw_ver_from_server->ulApplicationVersion);
 		struct start_fota_event *ev = new_start_fota_event();
 		ev->override_default_host = false;
 		ev->version = fw_ver_from_server->ulApplicationVersion;

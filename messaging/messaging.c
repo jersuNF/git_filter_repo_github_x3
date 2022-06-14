@@ -597,8 +597,8 @@ static bool event_handler(const struct event_header *eh)
 
 	if (is_animal_warning_event(eh)) {
 		struct animal_warning_event *ev = cast_animal_warning_event(eh);
-		atomic_set(&cached_has_fence_dist, ev.has_fence_dist);
-		atomic_set(&cached_fence_dist, ev.fence_dist);
+		atomic_set(&cached_has_fence_dist, ev->has_fence_dist);
+		atomic_set(&cached_fence_dist, ev->fence_dist);
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_warning_work, K_NO_WAIT);
 		if (err < 0) {
@@ -646,8 +646,8 @@ static bool event_handler(const struct event_header *eh)
 	if (is_warn_correction_start_event(eh)) {
 		struct warn_correction_start_event *ev =
 			cast_warn_correction_start_event(eh);
-		atomic_set(&cached_has_fence_dist, ev.has_fence_dist);
-		atomic_set(&cached_fence_dist, ev.fence_dist);
+		atomic_set(&cached_has_fence_dist, ev->has_fence_dist);
+		atomic_set(&cached_fence_dist, ev->fence_dist);
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_warning_correction_start_work,
 			K_NO_WAIT);
@@ -660,8 +660,8 @@ static bool event_handler(const struct event_header *eh)
 	if (is_warn_correction_end_event(eh)) {
 		struct warn_correction_end_event *ev =
 			cast_warn_correction_end_event(eh);
-		atomic_set(&cached_has_fence_dist, ev.has_fence_dist);
-		atomic_set(&cached_fence_dist, ev.fence_dist);
+		atomic_set(&cached_has_fence_dist, ev->has_fence_dist);
+		atomic_set(&cached_fence_dist, ev->fence_dist);
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_warning_correction_end_work,
 			K_NO_WAIT);

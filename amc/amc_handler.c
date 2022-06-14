@@ -92,6 +92,19 @@ static inline int update_pasture_from_stg(void)
 		nf_app_fatal(ERR_AMC, err, err_msg, strlen(err_msg));
 		return err;
 	}
+
+	/* Success setting the pasture. set to teach mode if not keepmode active. */
+	uint8_t keep_mode;
+	err = eep_uint8_read(EEP_KEEP_MODE, &keep_mode);
+	if (err) {
+		/* We always expect the header to be the first frame. */
+		char *e_msg = "Error reading keep mode from eeprom.";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
+	}
+	if (!keep_mode) {
+		force_teach_mode();
+	}
 	return 0;
 }
 

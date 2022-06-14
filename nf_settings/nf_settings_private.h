@@ -71,6 +71,9 @@ __packed struct eemem {
 
 	/** Store the ble security key */
 	uint8_t ble_sec_key[EEP_BLE_SEC_KEY_LEN];
+
+	/** If we should keep teach mode or not on pasture update. */
+	uint8_t eep_keep_mode;
 };
 
 #endif /* X3_FW_NF_SETTINGS_PRIVATE_H */

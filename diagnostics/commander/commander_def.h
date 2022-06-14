@@ -44,6 +44,7 @@ typedef enum {
 	SETTINGS = 0x01,
 	STIMULATOR = 0x02,
 	STORAGE = 0x03,
+	MODEM = 0x04,
 } commander_group_t;
 
 typedef enum {
@@ -82,6 +83,10 @@ typedef enum {
 	BUZZER_WARN = 0xB0,
 	ELECTRICAL_PULSE = 0xE0,
 } simulator_cmd_t;
+
+typedef enum {
+	GET_CCID = 0x00,
+} modem_cmd_t;
 
 int commander_send_resp(enum diagnostics_interface interface, 
 			commander_group_t group, uint8_t cmd, 

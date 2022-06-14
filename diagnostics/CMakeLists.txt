@@ -25,6 +25,7 @@ target_sources(app PRIVATE
     ./commander/cmd_stimulator.c
     ./commander/cmd_storage.c
     ./commander/cmd_system.c
+    ./commander/cmd_modem.c
 )
 endif()
 

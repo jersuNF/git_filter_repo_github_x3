@@ -13,6 +13,7 @@
 #include "cmd_settings.h"
 #include "cmd_stimulator.h"
 #include "cmd_storage.h"
+#include "cmd_modem.h"
 
 #include <stdbool.h>
 #include <string.h>
@@ -20,16 +21,6 @@
 static struct commander_action commander_actions;
 
 uint8_t cobs_buffer[CONFIG_DIAGNOSTICS_RECEIVE_BUFFER_LENGTH+2];
-
-int commander_system_handler(enum diagnostics_interface interface, 
-				      uint8_t cmd, uint8_t* data, uint32_t size);
-
-
-int commander_stimulator_handler(enum diagnostics_interface interface, 
-					uint8_t cmd, uint8_t* data, uint32_t size);
-
-int commander_storage_handler(enum diagnostics_interface interface, 
-					uint8_t cmd, uint8_t* data, uint32_t size);
 
 typedef struct {
 	uint8_t group;
@@ -45,6 +36,8 @@ const group_handler_t handlers[] = {
 	  .handler = commander_stimulator_handler},
 	{ .group = STORAGE,
 	  .handler = commander_storage_handler},
+	{ .group = MODEM,
+	  .handler = commander_modem_handler},
 };
 
 int commander_init(struct commander_action* actions)

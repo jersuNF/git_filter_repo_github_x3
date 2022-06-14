@@ -101,7 +101,9 @@ static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix,
 					  _DatePos *pos);
 bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *);
 static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
-bool m_confirm_acc_limits, m_confirm_ble_key, m_transfer_boot_params;
+
+static bool m_transfer_boot_params = true;
+bool m_confirm_acc_limits, m_confirm_ble_key;
 bool use_server_time;
 
 K_MUTEX_DEFINE(send_binary_mutex);
@@ -337,6 +339,7 @@ static void zap_message_work_fn()
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m = (uint16_t)NofenceMessage_client_zap_message_tag;
+	/* TODO, pshustad must provide fenceDist */
 	msg.m.client_zap_message.has_sFenceDist = false;
 	proto_get_last_known_date_pos(&cached_fix,
 				      &msg.m.client_zap_message.xDatePos);
@@ -372,6 +375,7 @@ static void warning_work_fn()
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m = (uint16_t)NofenceMessage_client_warning_message_tag;
+	/* TODO, pshustad must provide fenceDist */
 	msg.m.client_warning_message.has_sFenceDist = false;
 	proto_get_last_known_date_pos(&cached_fix,
 				      &msg.m.client_zap_message.xDatePos);
@@ -388,6 +392,7 @@ static void warning_start_work_fn()
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m =
 		(uint16_t)NofenceMessage_client_correction_start_message_tag;
+	/* TODO, pshustad must provide fenceDist */
 	msg.m.client_correction_start_message.has_sFenceDist = false;
 	proto_get_last_known_date_pos(
 		&cached_fix, &msg.m.client_correction_start_message.xDatePos);
@@ -404,6 +409,7 @@ static void warning_end_work_fn()
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m =
 		(uint16_t)NofenceMessage_client_correction_end_message_tag;
+	/* TODO, pshustad must provide fenceDist */
 	msg.m.client_correction_end_message.has_sFenceDist = false;
 	proto_get_last_known_date_pos(
 		&cached_fix, &msg.m.client_correction_end_message.xDatePos);
@@ -465,6 +471,7 @@ static bool event_handler(const struct event_header *eh)
 		 */
 		struct gnss_data *ev = cast_gnss_data(eh);
 
+        /* TODO, pshustad, review, might block the EventManager for 200 ms ? */
 		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
 			if (k_sem_take(&cache_lock_sem, K_MSEC(200)) == 0) {
 				cached_fix = ev->gnss_data.lastfix;
@@ -578,6 +585,7 @@ static bool event_handler(const struct event_header *eh)
 	if (is_gnss_data(eh)) {
 		struct gnss_data *ev = cast_gnss_data(eh);
 		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
+            /* TODO, review pshustad, might block the event manager for 500 ms ? */
 			if (k_sem_take(&cache_lock_sem, K_MSEC(500)) == 0) {
 				cached_fix = ev->gnss_data.lastfix;
 				k_sem_give(&cache_lock_sem);
@@ -1029,33 +1037,35 @@ void build_poll_request(NofenceMessage *poll_req)
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 	}
-	poll_req->m.poll_message_req.usGnssOnFixAgeSec = 123;
-	poll_req->m.poll_message_req.usGnssTTFFSec = 12;
+	/* TODO pshustad, fill GNSSS parameters for MIA M10 */
+	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec = false;
+	poll_req->m.poll_message_req.has_usGnssTTFFSec = false;
 
 	if (m_transfer_boot_params) {
-		/** @todo?????	
-		  * poll_req.m.poll_message_req.has_versionInfo = true;
-		  * uint16_t xbootVersion;
-		  * if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
-		  * 	poll_req.m.poll_message_req.versionInfo
-		  * 		.usATmegaBootloaderVersion =
-		  * 		xbootVersion;
-		  * 	poll_req.m.poll_message_req.versionInfo
-		  * 		.has_usATmegaBootloaderVersion = true;
-		  * }
-		  * poll_req.m.poll_message_req.has_versionInfoHW = true;
-		  * poll_req.m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
-		  * 	EEPROM_GetHwVersion();
-		  * poll_req.m.poll_message_req.versionInfoHW.usPCB_Product_Type =
-		  * 	(uint8_t)EEPROM_GetProductType();
-		  * poll_req.m.poll_message_req.has_xSimCardId = true;
-		  * memcpy(poll_req.m.poll_message_req.xSimCardId, BGS_SCID(),
-		  *        sizeof(poll_req.m.poll_message_req.xSimCardId));
-		  * poll_req.m.poll_message_req.versionInfo.has_ulATmegaVersion =
-		  * 	true;
-		  * poll_req.m.poll_message_req.versionInfo.ulATmegaVersion =
-		  *			NF_X25_VERSION_NUMBER;
-		  */
+		poll_req->m.poll_message_req.has_versionInfo = true;
+		poll_req->m.poll_message_req.versionInfo.has_ulApplicationVersion = true;
+		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion = NF_X25_VERSION_NUMBER;
+        /* TODO pshustad, clean up and re-enable the commented code below */
+		//		uint16_t xbootVersion;
+		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
+		//			poll_req.m.poll_message_req.versionInfo
+		//				.usATmegaBootloaderVersion =
+		//				xbootVersion;
+		//			poll_req.m.poll_message_req.versionInfo
+		//				.has_usATmegaBootloaderVersion = true;
+		//		}
+		//		poll_req.m.poll_message_req.has_versionInfoHW = true;
+		//		poll_req.m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
+		//			EEPROM_GetHwVersion();
+		//		poll_req.m.poll_message_req.versionInfoHW.usPCB_Product_Type =
+		//			(uint8_t)EEPROM_GetProductType();
+		//		poll_req.m.poll_message_req.has_xSimCardId = true;
+		//		memcpy(poll_req.m.poll_message_req.xSimCardId, BGS_SCID(),
+		//		       sizeof(poll_req.m.poll_message_req.xSimCardId));
+		//		poll_req.m.poll_message_req.versionInfo.has_ulATmegaVersion =
+		//			true;
+		//		poll_req.m.poll_message_req.versionInfo.ulATmegaVersion =
+		//			NF_X25_VERSION_NUMBER;
 	}
 }
 
@@ -1166,6 +1176,8 @@ void proto_InitHeader(NofenceMessage *msg)
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
 	if (use_server_time) {
+        /* FIXME pshustad, the time_from_server is stale, this is a bug. It should be fed to the time system */
+
 		msg->header.ulUnixTimestamp = time_from_server;
 	} else {
 		msg->header.ulUnixTimestamp = cached_fix.unix_timestamp;
@@ -1240,6 +1252,8 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 
 void process_poll_response(NofenceMessage *proto)
 {
+	/* When we receive a poll reply, we don't want to transfer boot params */
+	m_transfer_boot_params = false;
 	PollMessageResponse *pResp = &proto->m.poll_message_resp;
 	if (pResp->has_xServerIp && strlen(pResp->xServerIp) > 0) {
 		struct messaging_host_address_event *host_add_event =
@@ -1270,6 +1284,7 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_bUseServerTime && pResp->bUseServerTime) {
 		LOG_INF("Server time will be used.");
 		time_from_server = proto->header.ulUnixTimestamp;
+        /* FIXME, pshustad see XF-174 */
 		use_server_time = true;
 		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
 		struct tm *tm_time = gmtime(&gm_time);
@@ -1392,22 +1407,16 @@ void process_poll_response(NofenceMessage *proto)
 /* @brief: starts a firmware download if a new version exists on the server. */
 void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 {
-	//uint32_t app_ver = fw_ver_from_server->ulNRF52AppVersion;
-	uint32_t app_ver = fw_ver_from_server->ulATmegaVersion;
 
-	LOG_INF("Received app version from server %i", app_ver);
-
-	if (app_ver != NF_X25_VERSION_NUMBER) {
+	if (fw_ver_from_server->has_ulApplicationVersion && fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER) {
+		LOG_INF("Received new app version from server %i", fw_ver_from_server->ulApplicationVersion);
 		struct start_fota_event *ev = new_start_fota_event();
 		ev->override_default_host = false;
-		ev->version = app_ver;
+		ev->version = fw_ver_from_server->ulApplicationVersion;
 		EVENT_SUBMIT(ev);
 	} else {
-		LOG_INF("FW ver from server is same or older than current.");
-		return;
+		LOG_INF("FW ver from server is same as current or not set");
 	}
-
-	return;
 }
 
 /** @brief Process a fence frame and stores it into the cached pasture

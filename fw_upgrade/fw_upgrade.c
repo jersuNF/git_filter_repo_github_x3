@@ -21,7 +21,15 @@
 LOG_MODULE_REGISTER(MODULE, CONFIG_FW_UPGRADE_LOG_LEVEL);
 
 #define CACHE_HOST_NAME "172.31.36.11:5252"
-#define CACHE_PATH_NAME "firmware/x25/%i/app_update.bin"
+
+/** @brief Make sure we give the FOTA path to the hardware we built on. */
+#ifdef CONFIG_BOARD_NF_SG25_27O_NRF52840
+#define CACHE_PATH_NAME "firmware/x25/%i/nf_sg25_27o_nrf52840/app_update.bin"
+#elif CONFIG_BOARD_NF_C25_25G_NRF52840
+#define CACHE_PATH_NAME "firmware/x25/%i/nf_c25_25g_nrf52840/app_update.bin"
+#else
+#error Unsupported boardfile for performing Nofence FOTA! (SG25/C25 only)
+#endif
 
 static void fota_dl_handler(const struct fota_download_evt *evt)
 {

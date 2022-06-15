@@ -12,7 +12,7 @@
 #include "trigonometry.h"
 #define STEPS_TRIGGER 5
 
-LOG_MODULE_REGISTER(move_controller, 4);
+LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 
 static const struct device *sensor;
 

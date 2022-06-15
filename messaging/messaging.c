@@ -363,8 +363,6 @@ static void warning_work_fn()
 	if (ret) {
 		LOG_ERR("Failed to encode warning msg: %d", ret);
 	}
-	/* Send data stored in external flash immediately */
-	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 }
 
 static void warning_start_work_fn()
@@ -385,8 +383,6 @@ static void warning_start_work_fn()
 	if (ret) {
 		LOG_ERR("Failed to encode warning start msg: %d", ret);
 	}
-	/* Send data stored in external flash immediately */
-	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 }
 
 static void warning_end_work_fn()
@@ -407,8 +403,6 @@ static void warning_end_work_fn()
 	if (ret) {
 		LOG_ERR("Failed to encode warning start msg: %d", ret);
 	}
-	/* Send data stored in external flash immediately */
-	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 }
 /**
  * @brief Work function to periodic request sensor data etc.
@@ -561,7 +555,6 @@ static bool event_handler(const struct event_header *eh)
 	if (is_update_zap_count(eh)) {
 		struct update_zap_count *ev = cast_update_zap_count(eh);
 		current_state.zap_count = ev->count;
-
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_zap_work, K_NO_WAIT);
 		if (err < 0) {
@@ -1254,6 +1247,10 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return ret;
 	}
+	/* Store the length of the message in the two first bytes */
+	encoded_msg[0] = (uint8_t)encoded_size;
+	encoded_msg[1] = (uint8_t)(encoded_size >> 8);
+
 	return send_binary_message(encoded_msg, encoded_size + header_size);
 }
 
@@ -1274,6 +1271,11 @@ int encode_and_store_message(NofenceMessage *msg_proto)
 		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return ret;
 	}
+
+	/* Store the length of the message in the two first bytes */
+	encoded_msg[0] = (uint8_t)encoded_size;
+	encoded_msg[1] = (uint8_t)(encoded_size >> 8);
+
 	return stg_write_log_data(encoded_msg, encoded_size + header_size);
 }
 

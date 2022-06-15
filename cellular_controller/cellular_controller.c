@@ -7,6 +7,7 @@
 #include "error_event.h"
 #include <modem_nf.h>
 #include "fw_upgrade_events.h"
+#include "selftest.h"
 
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define MY_PRIORITY CONFIG_RECV_THREAD_PRIORITY
@@ -63,8 +64,7 @@ void submit_error(int8_t cause, int8_t err_code)
 }
 
 void receive_tcp(struct data *);
-K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK,
-		receive_tcp, &conf.ipv4, NULL, NULL,
+K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK, receive_tcp, &conf.ipv4, NULL, NULL,
 		MY_PRIORITY, 0, 0);
 
 extern struct k_sem listen_sem;
@@ -82,6 +82,7 @@ void receive_tcp(struct data *sock_data)
 	uint8_t *pMsgIn = NULL;
 	static float socket_idle_count;
 	while (1) {
+		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
 		if (connected) {
 			received = socket_receive(sock_data, &buf);
 			if (received > 0) {
@@ -216,15 +217,15 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		struct messaging_host_address_event *event =
 			cast_messaging_host_address_event(eh);
 		memcpy(&server_address[0], event->address,
-		       sizeof(event->address)-1);
+		       sizeof(event->address) - 1);
 		char *ptr_port;
 		ptr_port = strchr(server_address, ':') + 1;
 		server_port = atoi(ptr_port);
 		if (server_port <= 0) {
 			char *e_msg = "Failed to parse port number from new "
 				      "host address!";
-			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
-				(e_msg));
+			nf_app_error(ERR_MESSAGING, -EILSEQ, e_msg,
+				     strlen(e_msg));
 			return false;
 		}
 		uint8_t ip_len;
@@ -269,7 +270,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			}
 		}
 		return false;
-	}else if(is_check_connection(eh)){
+	} else if (is_check_connection(eh)) {
 		k_sem_give(&connection_state_sem);
 		return false;
 	} else if (is_cellular_error_event(eh)) {
@@ -321,7 +322,7 @@ int8_t cache_server_address(void)
 	}
 }
 
-static int cellular_controller_connect(void* dev)
+static int cellular_controller_connect(void *dev)
 {
 	int ret = lte_init();
 	if (ret != 0) {
@@ -350,7 +351,7 @@ exit:
 	return ret;
 }
 
-static void cellular_controller_keep_alive(void* dev)
+static void cellular_controller_keep_alive(void *dev)
 {
 	int ret;
 	while (true) {
@@ -385,7 +386,7 @@ static void cellular_controller_keep_alive(void* dev)
 						announce_connection_state
 							(false);
 						/*TODO: notify error handler*/
-					}else {
+					} else {
 						announce_connection_state(true);
 					}
 				}
@@ -414,7 +415,6 @@ bool cellular_controller_is_ready(void)
 int8_t cellular_controller_init(void)
 {
 	connected = false;
-	
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {
 		char *e_msg = "GSM driver was not found!";

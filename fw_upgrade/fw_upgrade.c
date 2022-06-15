@@ -7,7 +7,6 @@
 
 #include "fw_upgrade_events.h"
 #include "fw_upgrade.h"
-#include <power/reboot.h>
 #include <logging/log.h>
 
 #include "error_event.h"
@@ -16,26 +15,13 @@
 #include <dfu/dfu_target_mcuboot.h>
 #include <net/fota_download.h>
 
+#include "pwr_event.h"
+
 #define MODULE fw_upgrade
 LOG_MODULE_REGISTER(MODULE, CONFIG_FW_UPGRADE_LOG_LEVEL);
 
-struct k_work_delayable reboot_device_work;
-
 #define CACHE_HOST_NAME "172.31.36.11:5252"
 #define CACHE_PATH_NAME "firmware/x25/%i/app_update.bin"
-
-static void reboot_device_fn(struct k_work *item)
-{
-	ARG_UNUSED(item);
-
-/* Add a check that we are using NRF board
- * since they are the ones supported by nordic's <power/reboot.h>
- */
-#if defined CONFIG_BOARD_NF_X25_NRF52840 || \
-	defined CONFIG_BOARD_NF_C25_25G_NRF52840
-	sys_reboot(SYS_REBOOT_COLD);
-#endif
-}
 
 static void fota_dl_handler(const struct fota_download_evt *evt)
 {
@@ -64,8 +50,8 @@ static void fota_dl_handler(const struct fota_download_evt *evt)
 		/* Submit event. */
 		EVENT_SUBMIT(event);
 
-		k_work_reschedule(&reboot_device_work,
-				  K_SECONDS(CONFIG_SCHEDULE_REBOOT_SECONDS));
+		struct pwr_reboot_event *reboot_ev = new_pwr_reboot_event();
+		EVENT_SUBMIT(reboot_ev);
 		break;
 	}
 	default:
@@ -83,9 +69,6 @@ int fw_upgrade_module_init()
 
 	/* Submit event. */
 	EVENT_SUBMIT(event);
-
-	/* Initialize the reboot work function. */
-	k_work_init_delayable(&reboot_device_work, reboot_device_fn);
 
 	return fota_download_init(fota_dl_handler);
 }

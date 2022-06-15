@@ -13,6 +13,9 @@
 #include "ble_cmd_event.h"
 #include "nofence_service.h"
 #include "lte_proto_event.h"
+#include "pwr_event.h"
+#include "env_sensor_event.h"
+
 #include "watchdog_event.h"
 #include "cellular_controller_events.h"
 #include "gnss_controller_events.h"
@@ -23,7 +26,6 @@
 #include "unixTime.h"
 #include "error_event.h"
 #include "helpers.h"
-#include <power/reboot.h>
 
 #include "nf_crc16.h"
 
@@ -37,8 +39,8 @@
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
-#include "pwr_event.h"
 #include "nf_settings.h"
+#include "histogram_events.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
@@ -51,7 +53,15 @@
 static pasture_t pasture_temp;
 static uint8_t cached_fences_counter = 0;
 
+/** @todo This should be fetched from EEPROM */
+static gnss_mode_t cached_gnss_mode = GNSSMODE_NOMODE;
+
 uint32_t time_from_server;
+atomic_t cached_batt = ATOMIC_INIT(0);
+atomic_t cached_chrg = ATOMIC_INIT(0);
+atomic_t cached_temp = ATOMIC_INIT(0);
+atomic_t cached_press = ATOMIC_INIT(0);
+atomic_t cached_hum = ATOMIC_INIT(0);
 
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
 K_SEM_DEFINE(send_out_ack, 0, 1);
@@ -85,13 +95,13 @@ int send_binary_message(uint8_t *, size_t);
 
 void messaging_thread_fn(void);
 
-_DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *);
+static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix,
+					  _DatePos *pos);
 bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *);
 static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
-bool m_confirm_acc_limits, m_confirm_ble_key;
+
 static bool m_transfer_boot_params = true;
 bool m_confirm_acc_limits, m_confirm_ble_key;
-
 bool use_server_time;
 
 K_MUTEX_DEFINE(send_binary_mutex);
@@ -128,6 +138,12 @@ struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
 static struct k_work_q send_q;
 struct k_work_delayable modem_poll_work;
 struct k_work_delayable log_work;
+struct k_work_delayable data_request_work;
+struct k_work_delayable process_escape_work;
+struct k_work_delayable process_zap_work;
+struct k_work_delayable process_warning_work;
+struct k_work_delayable process_warning_correction_start_work;
+struct k_work_delayable process_warning_correction_end_work;
 
 atomic_t poll_period_minutes = ATOMIC_INIT(5);
 atomic_t log_period_minutes = ATOMIC_INIT(30);
@@ -139,40 +155,121 @@ K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE,
 K_KERNEL_STACK_DEFINE(messaging_send_thread,
 		      CONFIG_MESSAGING_SEND_THREAD_STACK_SIZE);
 
-void build_log_message()
+/**
+ * @brief Build the log message with latest data.
+ */
+static void build_log_message()
 {
-	/* Fill in NofenceMessage and encode it, then store on fcb. Do it twice,
-	 * once for seq message 1 and once for seq message 2. As such;
+	/* Fetch histogram data */
+	struct save_histogram *histogram_snapshot = new_save_histogram();
+	EVENT_SUBMIT(histogram_snapshot);
+	collar_histogram histogram;
+	int err = k_msgq_get(&histogram_msgq, &histogram, K_SECONDS(10));
+	if (err) {
+		LOG_ERR("Timeout on waiting for histogram %i", err);
+		return;
+	}
 
-	 * NofenceMessage seq_1;
-	 * NofenceMessage seq_2;
-	 * 
-	 * seq_1.which_m = NofenceMessage_seq_msg_tag;
-	 * seq_2.which_m = NofenceMessage_seq_msg_2_tag;
-	 * ...
-	 * ...
-	 * 
-	 * collar_protocol_encode(seq_1, dst1, dst_max_size1, dst_size1);
-	 * collar_protocol_encode(seq_2, dst2, dst_max_size2, dst_size2);
-	 * 
-	 * stg_write_log_data(dst1, dst_size1);
-	 * stg_write_log_data(dst2, dst_size2);
-	 * 
-	 * DONE.
-	 */
-	return;
+	/* Fill in NofenceMessage struct */
+	NofenceMessage seq_1;
+	NofenceMessage seq_2;
+	/** @todo also include gprs_stat msg
+	NofenceMessage grps;
+	proto_InitHeader(&grps);
+	gprs.m.gprs_stat_msg.has_xGprsErrorDetails = true;
+	gprs.m.gprs_stat_msg.xGprsErrorDetails = ...
+	*/
+	proto_InitHeader(&seq_1); /* fill up message header. */
+	proto_InitHeader(&seq_2); /* fill up message header. */
+
+	seq_1.m.seq_msg.has_usBatteryVoltage = true;
+	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
+	seq_1.m.seq_msg.has_usChargeMah = true;
+	seq_1.m.seq_msg.usChargeMah = (uint16_t)atomic_get(&cached_chrg);
+	//seq_1.m.seq_msg.xGprsRssi = cached_rssi; // not implemented
+	seq_1.m.seq_msg.has_xHistogramCurrentProfile = true;
+	seq_1.m.seq_msg.has_xHistogramZone = true;
+	seq_1.m.seq_msg.has_xHistogramAnimalBehave = true;
+	memcpy(&seq_1.m.seq_msg.xHistogramAnimalBehave,
+	       &histogram.animal_behave, sizeof(histogram.animal_behave));
+	memcpy(&seq_1.m.seq_msg.xHistogramCurrentProfile,
+	       &histogram.current_profile, sizeof(histogram.current_profile));
+	memcpy(&seq_1.m.seq_msg.xHistogramZone, &histogram.in_zone,
+	       sizeof(histogram.in_zone));
+	seq_1.which_m = (uint16_t)NofenceMessage_seq_msg_tag;
+
+	seq_2.m.seq_msg_2.has_bme280 = true;
+	seq_2.m.seq_msg_2.bme280.ulPressure =
+		(uint32_t)atomic_get(&cached_press);
+	seq_2.m.seq_msg_2.bme280.ulTemperature =
+		(uint32_t)atomic_get(&cached_temp);
+	seq_2.m.seq_msg_2.bme280.ulHumidity = (uint32_t)atomic_get(&cached_hum);
+	seq_2.which_m = (uint16_t)NofenceMessage_seq_msg_2_tag;
+	seq_2.m.seq_msg_2.has_xBatteryQc = true;
+	seq_2.m.seq_msg_2.xBatteryQc.usVbattMax =
+		histogram.qc_battery.usVbattMax;
+	seq_2.m.seq_msg_2.xBatteryQc.usVbattMin =
+		histogram.qc_battery.usVbattMin;
+	seq_2.m.seq_msg_2.xBatteryQc.usTemperature =
+		(uint16_t)atomic_get(&cached_temp);
+
+	LOG_DBG("Max_voltage: %u, min voltage: %u, temp: %u",
+		seq_2.m.seq_msg_2.xBatteryQc.usVbattMax,
+		seq_2.m.seq_msg_2.xBatteryQc.usVbattMin,
+		seq_2.m.seq_msg_2.xBatteryQc.usTemperature);
+
+	uint8_t header_size = 2;
+	uint8_t encoded_msg_seq_1[NofenceMessage_size + header_size];
+	uint8_t encoded_msg_seq_2[NofenceMessage_size + header_size];
+
+	memset(encoded_msg_seq_1, 0, sizeof(encoded_msg_seq_1));
+	memset(encoded_msg_seq_2, 0, sizeof(encoded_msg_seq_2));
+
+	size_t encoded_seq_1_size = 0;
+
+	size_t encoded_seq_2_size = 0;
+
+	/* Encode the seq_1 struct created. */
+	err = collar_protocol_encode(&seq_1, &encoded_msg_seq_1[2],
+				     NofenceMessage_size, &encoded_seq_1_size);
+	if (err) {
+		LOG_ERR("Error encoding nofence message seq 1 (%i)", err);
+		return;
+	}
+
+	/* Store the length of the message in the two first bytes */
+	encoded_msg_seq_1[0] = (uint8_t)encoded_seq_1_size;
+	encoded_msg_seq_1[1] = (uint8_t)(encoded_seq_1_size >> 8);
+
+	/* Encode the seq_2 struct created. */
+	err = collar_protocol_encode(&seq_2, &encoded_msg_seq_2[2],
+				     NofenceMessage_size, &encoded_seq_2_size);
+	if (err) {
+		LOG_ERR("Error encoding nofence message seq 2 (%i)", err);
+		return;
+	}
+
+	/* Store the length of the message in the two first bytes */
+	encoded_msg_seq_2[0] = (uint8_t)encoded_seq_2_size;
+	encoded_msg_seq_2[1] = (uint8_t)(encoded_seq_2_size >> 8);
+
+	/* Store the encoded message to external flash ring buffer */
+	stg_write_log_data(encoded_msg_seq_1, encoded_seq_1_size + header_size);
+	stg_write_log_data(encoded_msg_seq_2, encoded_seq_2_size + header_size);
 }
 
 int read_log_data_cb(uint8_t *data, size_t len)
 {
-	uint8_t *bytes = k_malloc(len + 2);
-	memcpy(&bytes[2], data, len);
-
-	int err = send_binary_message(bytes, len + 2);
+	LOG_DBG("Send log message fetched from flash");
+	/* Fetch the lenght from the two first bytes */
+	uint16_t new_len = (uint16_t)((data[1] << 8) + (data[0] & 0x00ff) + 2);
+	uint8_t *new_data = k_malloc(new_len);
+	memcpy(new_data, &data[0], new_len);
+	int err = send_binary_message(new_data, new_len);
 	if (err) {
 		LOG_ERR("Error sending binary message for log data %i", err);
 	}
-	k_free(bytes);
+	k_free(new_data);
 	return err;
 }
 
@@ -236,6 +333,114 @@ void modem_poll_work_fn()
 
 static int32_t sec_since_gnss_time = 0;
 
+static void zap_message_work_fn()
+{
+	NofenceMessage msg;
+	proto_InitHeader(&msg); /* fill up message header. */
+	msg.which_m = (uint16_t)NofenceMessage_client_zap_message_tag;
+	/* TODO, pshustad must provide fenceDist */
+	msg.m.client_zap_message.has_sFenceDist = false;
+	proto_get_last_known_date_pos(&cached_fix,
+				      &msg.m.client_zap_message.xDatePos);
+
+	int ret = encode_and_send_message(&msg);
+	if (ret) {
+		LOG_ERR("Failed to encode zap status msg: %d", ret);
+	}
+}
+
+static void animal_escaped_work_fn()
+{
+	NofenceMessage msg;
+	proto_InitHeader(&msg); /* fill up message header. */
+	msg.which_m = (uint16_t)NofenceMessage_status_msg_tag;
+	msg.m.status_msg.has_datePos = true;
+	proto_get_last_known_date_pos(&cached_fix, &msg.m.status_msg.datePos);
+	msg.m.status_msg.eMode = current_state.collar_mode;
+	msg.m.status_msg.eReason = Reason_WARNSTOPREASON_ESCAPED;
+	msg.m.status_msg.eCollarStatus = current_state.collar_status;
+	msg.m.status_msg.eFenceStatus = current_state.fence_status;
+	msg.m.status_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
+	msg.m.status_msg.has_ucGpsMode = true;
+	msg.m.status_msg.ucGpsMode = (uint8_t)cached_gnss_mode;
+	int ret = encode_and_send_message(&msg);
+	if (ret) {
+		LOG_ERR("Failed to encode escaped status msg: %d", ret);
+	}
+}
+
+static void warning_work_fn()
+{
+	NofenceMessage msg;
+	proto_InitHeader(&msg); /* fill up message header. */
+	msg.which_m = (uint16_t)NofenceMessage_client_warning_message_tag;
+	/* TODO, pshustad must provide fenceDist */
+	msg.m.client_warning_message.has_sFenceDist = false;
+	proto_get_last_known_date_pos(&cached_fix,
+				      &msg.m.client_zap_message.xDatePos);
+
+	int ret = encode_and_send_message(&msg);
+	if (ret) {
+		LOG_ERR("Failed to encode warning msg: %d", ret);
+	}
+}
+
+static void warning_start_work_fn()
+{
+	NofenceMessage msg;
+	proto_InitHeader(&msg); /* fill up message header. */
+	msg.which_m =
+		(uint16_t)NofenceMessage_client_correction_start_message_tag;
+	/* TODO, pshustad must provide fenceDist */
+	msg.m.client_correction_start_message.has_sFenceDist = false;
+	proto_get_last_known_date_pos(
+		&cached_fix, &msg.m.client_correction_start_message.xDatePos);
+
+	int ret = encode_and_send_message(&msg);
+	if (ret) {
+		LOG_ERR("Failed to encode warning start msg: %d", ret);
+	}
+}
+
+static void warning_end_work_fn()
+{
+	NofenceMessage msg;
+	proto_InitHeader(&msg); /* fill up message header. */
+	msg.which_m =
+		(uint16_t)NofenceMessage_client_correction_end_message_tag;
+	/* TODO, pshustad must provide fenceDist */
+	msg.m.client_correction_end_message.has_sFenceDist = false;
+	proto_get_last_known_date_pos(
+		&cached_fix, &msg.m.client_correction_end_message.xDatePos);
+
+	int ret = encode_and_send_message(&msg);
+	if (ret) {
+		LOG_ERR("Failed to encode warning start msg: %d", ret);
+	}
+}
+/**
+ * @brief Work function to periodic request sensor data etc.
+ */
+void data_request_work_fn()
+{
+	LOG_INF("Periodic request data");
+	k_work_reschedule_for_queue(&send_q, &data_request_work, K_MINUTES(1));
+
+	/* Request of battery voltage */
+	struct request_pwr_battery_event *ev_batt =
+		new_request_pwr_battery_event();
+	EVENT_SUBMIT(ev_batt);
+
+	/* Request of charging current */
+	struct request_pwr_charging_event *ev_charge =
+		new_request_pwr_charging_event();
+	EVENT_SUBMIT(ev_charge);
+
+	/* Request of temp, press, humidity */
+	struct request_env_sensor_event *ev_env =
+		new_request_env_sensor_event();
+	EVENT_SUBMIT(ev_env);
+}
 /**
  * @brief Main event handler function. 
  * 
@@ -265,6 +470,7 @@ static bool event_handler(const struct event_header *eh)
 		 */
 		struct gnss_data *ev = cast_gnss_data(eh);
 
+		/* TODO, pshustad, review, might block the EventManager for 200 ms ? */
 		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
 			if (k_sem_take(&cache_lock_sem, K_MSEC(200)) == 0) {
 				cached_fix = ev->gnss_data.lastfix;
@@ -294,8 +500,11 @@ static bool event_handler(const struct event_header *eh)
 		}
 
 		sec_since_gnss_time = (int32_t)(k_uptime_get_32() / 1000);
+
+		cached_gnss_mode = (gnss_mode_t)ev->gnss_data.lastfix.mode;
 		return false;
 	}
+
 	if (is_ble_ctrl_event(eh)) {
 		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
 		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
@@ -360,12 +569,39 @@ static bool event_handler(const struct event_header *eh)
 	if (is_update_zap_count(eh)) {
 		struct update_zap_count *ev = cast_update_zap_count(eh);
 		current_state.zap_count = ev->count;
+
+		int err = k_work_reschedule_for_queue(
+			&send_q, &process_zap_work, K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Error reschedule zap work: %d", err);
+		}
 		return false;
 	}
 	if (is_cellular_ack_event(eh)) {
 		k_sem_give(&send_out_ack);
 		return false;
 	}
+	if (is_gnss_data(eh)) {
+		struct gnss_data *ev = cast_gnss_data(eh);
+		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
+			/* TODO, review pshustad, might block the event manager for 500 ms ? */
+			if (k_sem_take(&cache_lock_sem, K_MSEC(500)) == 0) {
+				cached_fix = ev->gnss_data.lastfix;
+				k_sem_give(&cache_lock_sem);
+			}
+		}
+		return false;
+	}
+
+	if (is_animal_escape_event(eh)) {
+		int err = k_work_reschedule_for_queue(
+			&send_q, &process_escape_work, K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Error reschedule escape work %d", err);
+		}
+		return false;
+	}
+
 	if (is_connection_state_event(eh)) {
 		struct connection_state_event *ev =
 			cast_connection_state_event(eh);
@@ -374,6 +610,30 @@ static bool event_handler(const struct event_header *eh)
 		} else {
 			/*TODO: take some action while waiting for cellular
 			 * controller to recover the connection.*/
+		}
+		return false;
+	}
+
+	if (is_animal_warning_event(eh)) {
+		int err = k_work_reschedule_for_queue(
+			&send_q, &process_warning_work, K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Error reschedule warning work: %d", err);
+		}
+
+		return false;
+	}
+	if (is_pwr_status_event(eh)) {
+		struct pwr_status_event *ev = cast_pwr_status_event(eh);
+		/* Update shaddow register */
+		if (ev->pwr_state == PWR_BATTERY) {
+			/* We want battery voltage in deci volt */
+			atomic_set(&cached_batt,
+				   (uint16_t)(ev->battery_mv / 10));
+			LOG_DBG("Battery event: %u mV", ev->battery_mv);
+		} else if (ev->pwr_state == PWR_CHARGING) {
+			LOG_DBG("Charge event: %u mA", ev->charging_ma);
+			atomic_set(&cached_chrg, ev->charging_ma);
 		}
 		return false;
 	}
@@ -389,6 +649,37 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	if (is_env_sensor_event(eh)) {
+		struct env_sensor_event *ev = cast_env_sensor_event(eh);
+		LOG_DBG("Event Temp: %.2f, humid %.2f, press %.2f", ev->temp,
+			ev->humidity, ev->press);
+		/* Update shaddow register */
+		atomic_set(&cached_press, (uint32_t)ev->press);
+		atomic_set(&cached_hum, (uint32_t)ev->humidity);
+		atomic_set(&cached_temp, (uint32_t)ev->temp);
+		return false;
+	}
+	if (is_warn_correction_start_event(eh)) {
+		int err = k_work_reschedule_for_queue(
+			&send_q, &process_warning_correction_start_work,
+			K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Error reschedule warning correction start work: %d",
+				err);
+		}
+		return false;
+	}
+	if (is_warn_correction_end_event(eh)) {
+		int err = k_work_reschedule_for_queue(
+			&send_q, &process_warning_correction_end_work,
+			K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Error reschedule warning correction start work: %d",
+				err);
+		}
+		return false;
+	}
+
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -450,8 +741,13 @@ EVENT_SUBSCRIBE(MODULE, update_zap_count);
 EVENT_SUBSCRIBE(MODULE, animal_warning_event);
 EVENT_SUBSCRIBE(MODULE, animal_escape_event);
 EVENT_SUBSCRIBE(MODULE, connection_state_event);
+EVENT_SUBSCRIBE(MODULE, pwr_status_event);
+EVENT_SUBSCRIBE(MODULE, env_sensor_event);
+/** @todo add battery, histogram, gnss and modem event */
 EVENT_SUBSCRIBE(MODULE, gnss_data);
 EVENT_SUBSCRIBE(MODULE, send_poll_request_now);
+EVENT_SUBSCRIBE(MODULE, warn_correction_start_event);
+EVENT_SUBSCRIBE(MODULE, warn_correction_end_event);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -605,13 +901,12 @@ int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module.");
 	int err = eep_uint32_read(EEP_UID, &serial_id);
-	if (err != 0) { //TODO: handle in a better way.
+	if (err != 0) {
 		char *e_msg = "Failed to read serial number from eeprom!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return err;
 	}
-	LOG_WRN("Serial id = %d", serial_id);
 
 	k_work_queue_init(&send_q);
 	k_work_queue_start(&send_q, messaging_send_thread,
@@ -620,18 +915,32 @@ int messaging_module_init(void)
 
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
 	k_work_init_delayable(&log_work, log_data_periodic_fn);
+	k_work_init_delayable(&data_request_work, data_request_work_fn);
+	k_work_init_delayable(&process_escape_work, animal_escaped_work_fn);
+	k_work_init_delayable(&process_zap_work, zap_message_work_fn);
+	k_work_init_delayable(&process_warning_work, warning_work_fn);
+	k_work_init_delayable(&process_warning_correction_start_work,
+			      warning_start_work_fn);
+	k_work_init_delayable(&process_warning_correction_end_work,
+			      warning_end_work_fn);
 
 	memset(&pasture_temp, 0, sizeof(pasture_t));
 	cached_fences_counter = 0;
 	pasture_temp.m.us_pasture_crc = EMPTY_FENCE_CRC;
 
-	err = 0;
-
-	err = k_work_schedule_for_queue(&send_q, &modem_poll_work, K_NO_WAIT);
+	/** @todo Should add semaphore and only start these queues when
+	 *  we get connection to network with modem.
+	 */
+	err = k_work_schedule_for_queue(&send_q, &data_request_work, K_NO_WAIT);
 	if (err < 0) {
 		return err;
 	}
-	err = k_work_schedule_for_queue(&send_q, &log_work, K_NO_WAIT);
+	err = k_work_schedule_for_queue(&send_q, &modem_poll_work,
+					K_SECONDS(2));
+	if (err < 0) {
+		return err;
+	}
+	err = k_work_schedule_for_queue(&send_q, &log_work, K_SECONDS(2));
 	if (err < 0) {
 		return err;
 	}
@@ -643,8 +952,8 @@ void build_poll_request(NofenceMessage *poll_req)
 {
 	proto_InitHeader(poll_req); /* fill up message header. */
 	poll_req->which_m = NofenceMessage_poll_message_req_tag;
-	poll_req->m.poll_message_req.datePos =
-		proto_get_last_known_date_pos(&cached_fix);
+	proto_get_last_known_date_pos(&cached_fix,
+				      &poll_req->m.poll_message_req.datePos);
 	poll_req->m.poll_message_req.has_datePos =
 		proto_has_last_known_date_pos(&cached_fix);
 	poll_req->m.poll_message_req.eMode = current_state.collar_mode;
@@ -654,18 +963,17 @@ void build_poll_request(NofenceMessage *poll_req)
 	poll_req->m.poll_message_req.eFenceStatus = current_state.fence_status;
 	poll_req->m.poll_message_req.ulFenceDefVersion =
 		current_state.fence_version;
-	poll_req->m.poll_message_req.usBatteryVoltage = 378; /* TODO: get
- * value from battery voltage event.*/
+	poll_req->m.poll_message_req.usBatteryVoltage =
+		(uint16_t)atomic_get(&cached_batt);
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
-
-	/* Fw info. */
-	poll_req->m.poll_message_req.has_versionInfoHW = true;
-	poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version = 1;
-	/* TODO: get gsm info from modem driver */
-	//	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
-	//	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
-	//	poll_req->m.poll_message_req.has_xGsmInfo = false;
+	
+	/** @todo get gsm info from modem driver */
+#if 0
+	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
+	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
+	poll_req->m.poll_message_req.has_xGsmInfo = false;
+#endif
 
 	if (current_state.flash_erase_count) {
 		// m_flash_erase_count is reset when we receive a poll reply
@@ -674,15 +982,18 @@ void build_poll_request(NofenceMessage *poll_req)
 			current_state.flash_erase_count;
 	}
 	if (m_confirm_acc_limits) {
-		//		poll_req.m.poll_message_req.has_usAccSigmaSleepLimit = true;
-		//		poll_req.m.poll_message_req.usAccSigmaSleepLimit =
-		//			EEPROM_GetAccSigmaSleepLimit();
-		//		poll_req.m.poll_message_req.has_usAccSigmaNoActivityLimit = true;
-		//		poll_req.m.poll_message_req.usAccSigmaNoActivityLimit =
-		//			EEPROM_GetAccSigmaNoActivityLimit();
-		//		poll_req.m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
-		//		poll_req.m.poll_message_req.usOffAnimalTimeLimitSec =
-		//			EEPROM_GetOffAnimalTimeLimitSec();
+		/** @todo Add EEPROM storage read for movement */
+#if 0
+		poll_req.m.poll_message_req.has_usAccSigmaSleepLimit = true;
+		poll_req.m.poll_message_req.usAccSigmaSleepLimit =
+			EEPROM_GetAccSigmaSleepLimit();
+		poll_req.m.poll_message_req.has_usAccSigmaNoActivityLimit = true;
+		poll_req.m.poll_message_req.usAccSigmaNoActivityLimit =
+			EEPROM_GetAccSigmaNoActivityLimit();
+		poll_req.m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
+		poll_req.m.poll_message_req.usOffAnimalTimeLimitSec =
+			EEPROM_GetOffAnimalTimeLimitSec();
+#endif
 	}
 	if (m_confirm_ble_key) {
 		poll_req->m.poll_message_req.has_rgubcBleKey = true;
@@ -701,14 +1012,13 @@ void build_poll_request(NofenceMessage *poll_req)
 	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec = false;
 	poll_req->m.poll_message_req.has_usGnssTTFFSec = false;
 
-
 	if (m_transfer_boot_params) {
-		//		poll_req.m.poll_message_req.has_versionInfo = true;
 		poll_req->m.poll_message_req.has_versionInfo = true;
-		poll_req->m.poll_message_req.versionInfo.has_ulApplicationVersion = true;
-		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion = NF_X25_VERSION_NUMBER;
-
-		//		poll_req.m.poll_message_req.has_versionInfo = true;
+		poll_req->m.poll_message_req.versionInfo
+			.has_ulApplicationVersion = true;
+		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion =
+			NF_X25_VERSION_NUMBER;
+		/* TODO pshustad, clean up and re-enable the commented code below */
 		//		uint16_t xbootVersion;
 		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
 		//			poll_req.m.poll_message_req.versionInfo
@@ -717,18 +1027,47 @@ void build_poll_request(NofenceMessage *poll_req)
 		//			poll_req.m.poll_message_req.versionInfo
 		//				.has_usATmegaBootloaderVersion = true;
 		//		}
-		//		poll_req.m.poll_message_req.has_versionInfoHW = true;
-		//		poll_req.m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
-		//			EEPROM_GetHwVersion();
-		//		poll_req.m.poll_message_req.versionInfoHW.usPCB_Product_Type =
-		//			(uint8_t)EEPROM_GetProductType();
-		//		poll_req.m.poll_message_req.has_xSimCardId = true;
-		//		memcpy(poll_req.m.poll_message_req.xSimCardId, BGS_SCID(),
-		//		       sizeof(poll_req.m.poll_message_req.xSimCardId));
-		//		poll_req.m.poll_message_req.versionInfo.has_ulATmegaVersion =
-		//			true;
-		//		poll_req.m.poll_message_req.versionInfo.ulATmegaVersion =
-		//			NF_X25_VERSION_NUMBER;
+		poll_req->m.poll_message_req.has_versionInfoHW = true;
+
+		uint8_t pcb_rf_version = 0;
+		eep_uint8_read(EEP_HW_VERSION, &pcb_rf_version);
+		poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
+							pcb_rf_version;
+		
+		uint16_t pcb_product_type = 0;
+		eep_uint16_read(EEP_PRODUCT_TYPE, &pcb_product_type);
+		poll_req->m.poll_message_req.versionInfoHW.usPCB_Product_Type =
+							pcb_product_type;
+
+		poll_req->m.poll_message_req.has_versionInfoBOM = true;
+		
+		uint8_t bom_mec_rev = 0;
+		eep_uint8_read(EEP_BOM_MEC_REV, &bom_mec_rev);
+		poll_req->m.poll_message_req.versionInfoBOM.ucBom_mec_rev =
+							bom_mec_rev;
+		uint8_t bom_pcb_rev = 0;
+		eep_uint8_read(EEP_BOM_PCB_REV, &bom_pcb_rev);
+		poll_req->m.poll_message_req.versionInfoBOM.ucBom_pcb_rev =
+							bom_pcb_rev;
+		uint8_t ems_provider = 0;
+		eep_uint8_read(EEP_EMS_PROVIDER, &ems_provider);
+		poll_req->m.poll_message_req.versionInfoBOM.ucEms_provider =
+							ems_provider;
+		uint8_t product_record_rev = 0;
+		eep_uint8_read(EEP_PRODUCT_RECORD_REV, &product_record_rev);
+		poll_req->m.poll_message_req.versionInfoBOM.ucProduct_record_rev =
+							product_record_rev;
+
+		/** @todo Add information of SIM card */
+#if 0
+		poll_req.m.poll_message_req.has_xSimCardId = true;
+		memcpy(poll_req.m.poll_message_req.xSimCardId, BGS_SCID(),
+			sizeof(poll_req.m.poll_message_req.xSimCardId));
+		poll_req.m.poll_message_req.versionInfo.has_ulATmegaVersion =
+			true;
+		poll_req.m.poll_message_req.versionInfo.ulATmegaVersion =
+			NF_X25_VERSION_NUMBER;
+#endif
 	}
 }
 
@@ -839,10 +1178,11 @@ void proto_InitHeader(NofenceMessage *msg)
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
 	if (use_server_time) {
+		/* FIXME pshustad, the time_from_server is stale, this is a bug. It should be fed to the time system */
+
 		msg->header.ulUnixTimestamp = time_from_server;
 	} else {
-		msg->header.ulUnixTimestamp =
-			(uint32_t)MAX(0, cached_fix.unix_timestamp);
+		msg->header.ulUnixTimestamp = cached_fix.unix_timestamp;
 	}
 }
 
@@ -867,7 +1207,7 @@ int send_binary_message(uint8_t *data, size_t len)
 	/* We can only send 1 message at a time, use mutex. */
 	if (k_mutex_lock(&send_binary_mutex,
 			 K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC * 2)) == 0) {
-		uint16_t byteswap_size = BYTESWAP16((uint16_t)(len - 2));
+		uint16_t byteswap_size = BYTESWAP16(len - 2);
 		memcpy(&data[0], &byteswap_size, 2);
 
 		struct messaging_proto_out_event *msg2send =
@@ -890,6 +1230,7 @@ int send_binary_message(uint8_t *data, size_t len)
 	} else {
 		return -ETIMEDOUT;
 	}
+	return 0;
 }
 
 int encode_and_send_message(NofenceMessage *msg_proto)
@@ -913,6 +1254,7 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 
 void process_poll_response(NofenceMessage *proto)
 {
+	/* When we receive a poll reply, we don't want to transfer boot params */
 	m_transfer_boot_params = false;
 	PollMessageResponse *pResp = &proto->m.poll_message_resp;
 	if (pResp->has_xServerIp && strlen(pResp->xServerIp) > 0) {
@@ -942,6 +1284,7 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_bUseServerTime && pResp->bUseServerTime) {
 		LOG_INF("Server time will be used.");
 		time_from_server = proto->header.ulUnixTimestamp;
+		/* FIXME, pshustad see XF-174 */
 		use_server_time = true;
 		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
 		struct tm *tm_time = gmtime(&gm_time);
@@ -1024,10 +1367,10 @@ void process_poll_response(NofenceMessage *proto)
 /* @brief: starts a firmware download if a new version exists on the server. */
 void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 {
-	//uint32_t app_ver = fw_ver_from_server->ulNRF52AppVersion;
-	if (fw_ver_from_server->has_ulApplicationVersion && fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER) {
-		LOG_INF("Received new app version from server %i", fw_ver_from_server->ulApplicationVersion);
-
+	if (fw_ver_from_server->has_ulApplicationVersion &&
+	    fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER) {
+		LOG_INF("Received new app version from server %i",
+			fw_ver_from_server->ulApplicationVersion);
 		struct start_fota_event *ev = new_start_fota_event();
 		ev->override_default_host = false;
 		ev->version = fw_ver_from_server->ulApplicationVersion;
@@ -1190,7 +1533,8 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 	return rec_ano_frames;
 }
 
-_DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix)
+static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix,
+					  _DatePos *pos)
 {
 	bool valid_headVeh = (bool)(gpsLastFix->pvt_flags &
 				    GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK);
@@ -1216,7 +1560,7 @@ _DatePos proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix)
 		.has_ucGpsMode = true,
 		.ucGpsMode = gpsLastFix->mode
 	};
-	return a;
+	memcpy(pos, &a, sizeof(_DatePos));
 }
 
 bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *gps)

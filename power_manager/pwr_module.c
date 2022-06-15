@@ -78,6 +78,8 @@ static void battery_poll_work_fn()
 	struct pwr_status_event *event = new_pwr_status_event();
 	event->pwr_state = PWR_BATTERY;
 	event->battery_mv = batt_voltage;
+	event->battery_mv_min = battery_get_min();
+	event->battery_mv_max = battery_get_max();
 	EVENT_SUBMIT(event);
 
 	/* Keep old state as reference for later */
@@ -157,7 +159,7 @@ static void charging_poll_work_fn()
 
 static void reboot_work_fn()
 {
-#ifdef CONFIG_BOARD_NF_X25_NRF52840
+#ifdef CONFIG_SOC_NRF52840_QIAA
 	/* Add a check that we are using NRF board
 	* since they are the ones supported by nordic's <power/reboot.h>
 	*/
@@ -242,20 +244,56 @@ int log_and_fetch_battery_voltage(void)
 	event->param.battery = batt_soc;
 	EVENT_SUBMIT(event);
 
-	LOG_INF("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
+	LOG_DBG("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
 		batt_soc);
 
 	return batt_mV;
 }
 
 /**
- * @brief Event handler function
- * @param[in] eh Pointer to event handler struct
- * @return true to consume the event (event is not propagated to further
- * listners), false otherwise
+ * @brief Main event handler function. 
+ * 
+ * @param[in] eh Event_header for the if-chain to 
+ *               use to recognize which event triggered.
+ * 
+ * @return True or false based on if we want to consume the event or not.
  */
 static bool event_handler(const struct event_header *eh)
 {
+	if (is_request_pwr_battery_event(eh)) {
+		int batt_voltage = log_and_fetch_battery_voltage();
+		if (batt_voltage < 0) {
+			char *e_msg = "Error in fetching battery voltage";
+			nf_app_error(ERR_PWR_MODULE, batt_voltage, e_msg,
+				     strlen(e_msg));
+			return false;
+		}
+
+		/* Publish battery event with averaged voltage */
+		struct pwr_status_event *event = new_pwr_status_event();
+		event->pwr_state = PWR_BATTERY;
+		event->battery_mv = batt_voltage;
+		event->battery_mv_min = battery_get_min();
+		event->battery_mv_max = battery_get_max();
+		EVENT_SUBMIT(event);
+		return false;
+	}
+#if CONFIG_ADC_NRFX_SAADC
+	if (is_request_pwr_charging_event(eh)) {
+		int charging_current_avg = charging_current_sample_averaged();
+		if (charging_current_avg < 0) {
+			char *msg = "Unable fetch charging data";
+			nf_app_error(ERR_PWR_MODULE, charging_current_avg, msg,
+				     strlen(msg));
+			return false;
+		}
+		struct pwr_status_event *event = new_pwr_status_event();
+		event->pwr_state = PWR_CHARGING;
+		event->charging_ma = charging_current_avg;
+		EVENT_SUBMIT(event);
+		return false;
+	}
+#endif
 	/* Received reboot event */
 	if (is_pwr_reboot_event(eh)) {
 		LOG_INF("Reboot event received!");
@@ -263,7 +301,6 @@ static bool event_handler(const struct event_header *eh)
 				  K_SECONDS(CONFIG_SHUTDOWN_TIMER_SEC));
 		return false;
 	}
-
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -271,4 +308,6 @@ static bool event_handler(const struct event_header *eh)
 }
 
 EVENT_LISTENER(MODULE, event_handler);
+EVENT_SUBSCRIBE(MODULE, request_pwr_battery_event);
+EVENT_SUBSCRIBE(MODULE, request_pwr_charging_event);
 EVENT_SUBSCRIBE_FINAL(MODULE, pwr_reboot_event);

@@ -50,7 +50,7 @@ struct k_thread pub_gnss_thread;
 bool pub_gnss_started = false;
 
 /** @brief Sends a timeout event from the GNSS controller */
-/*static void gnss_controller_send_timeout_event(void)
+static void gnss_controller_send_timeout_event(void)
 {
 	gnss_t gnss_no_fix;
 	memset(&gnss_no_fix, 0, sizeof(gnss_t));
@@ -60,7 +60,7 @@ bool pub_gnss_started = false;
 	new_data->timed_out = true;
 
 	EVENT_SUBMIT(new_data);
-}*/
+}
 
 static int gnss_controller_setup(void)
 {
@@ -93,17 +93,15 @@ static int gnss_controller_setup(void)
 }
 
 /** @brief Reset and initialize GNSS, send notification event. */
-/** @todo In use? 
- * static int gnss_controller_reset_gnss(uint16_t mask) 
- *{
- *	gnss_controller_send_timeout_event();
- *
- *	gnss_reset(gnss_dev, mask,
- *			GNSS_RESET_MODE_HW_IMMEDIATELY);
- *
- *	return gnss_controller_setup();
- *}
- */
+static int gnss_controller_reset_gnss(uint16_t mask) 
+{
+	gnss_controller_send_timeout_event();
+
+	gnss_reset(gnss_dev, mask,
+			GNSS_RESET_MODE_HW_IMMEDIATELY);
+
+	return gnss_controller_setup();
+}
 
 int gnss_controller_init(void)
 {
@@ -200,7 +198,7 @@ _Noreturn void publish_gnss_data(void *ctx)
 			nf_app_error(ERR_GNSS_CONTROLLER, -ETIMEDOUT, msg,
 				     sizeof(*msg));
 
-			//gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
+			gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
 		}
 	}
 }
@@ -306,13 +304,13 @@ void check_gnss_age(uint32_t gnss_age)
 
 	if ((gnss_age > GNSS_5SEC) && (gnss_reset_count < 1)) {
 		gnss_reset_count++;
-		//gnss_controller_reset_gnss(GNSS_RESET_MASK_HOT);
+		gnss_controller_reset_gnss(GNSS_RESET_MASK_HOT);
 	} else if (gnss_age > GNSS_10SEC && gnss_reset_count < 2) {
 		gnss_reset_count++;
-		//gnss_controller_reset_gnss(GNSS_RESET_MASK_WARM);
+		gnss_controller_reset_gnss(GNSS_RESET_MASK_WARM);
 	} else if (gnss_age > GNSS_20SEC && gnss_reset_count >= 2) {
 		gnss_reset_count++;
-		//gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
+		gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
 	} else if (gnss_age < GNSS_5SEC) {
 		gnss_reset_count = 0;
 	}

@@ -169,6 +169,9 @@ static struct bt_conn_cb conn_callbacks = {
  */
 static void periodic_beacon_scanner_work_fn()
 {
+	/* Reschedule worker to start again after given interval */
+	k_work_reschedule(&periodic_beacon_scanner_work,
+			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
 #if defined(CONFIG_WATCHDOG_ENABLE)
 	/* Report alive */
 	watchdog_report_module_alive(WDG_BLE_SCAN);
@@ -179,9 +182,6 @@ static void periodic_beacon_scanner_work_fn()
 		event->cmd = BLE_CTRL_SCAN_START;
 		EVENT_SUBMIT(event);
 	}
-	/* Reschedule worker to start again after given interval */
-	k_work_reschedule(&periodic_beacon_scanner_work,
-			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
 }
 #endif
 /**
@@ -568,10 +568,13 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 		bc_event->status = BEACON_STATUS_NOT_FOUND;
 		EVENT_SUBMIT(bc_event);
 
-		/* Stop beacon scanner */
-		struct ble_ctrl_event *ctrl_event = new_ble_ctrl_event();
-		ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
-		EVENT_SUBMIT(ctrl_event);
+		/* Stop beacon scanner. Check if scan is active */
+		if (atomic_get(&atomic_bt_scan_active) == true) {
+			struct ble_ctrl_event *ctrl_event =
+				new_ble_ctrl_event();
+			ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
+			EVENT_SUBMIT(ctrl_event);
+		}
 	}
 }
 
@@ -682,8 +685,9 @@ int ble_module_init()
 #endif
 #if CONFIG_BEACON_SCAN_ENABLE
 	/* Start scanning after beacons. Set flag to true */
-	if (!atomic_set(&atomic_bt_scan_active, true)) {
+	if (atomic_get(&atomic_bt_scan_active) == false) {
 		scan_start();
+		atomic_set(&atomic_bt_scan_active, true);
 	}
 
 	/* Init and start periodic scan work function */
@@ -782,13 +786,15 @@ static bool event_handler(const struct event_header *eh)
 			fence_def_ver_update(event->param.fence_def_ver);
 			break;
 		case BLE_CTRL_SCAN_START:
-			if (!atomic_set(&atomic_bt_scan_active, true)) {
+			if (atomic_get(&atomic_bt_scan_active) == false) {
 				scan_start();
+				atomic_set(&atomic_bt_scan_active, true);
 			}
 			break;
 		case BLE_CTRL_SCAN_STOP:
-			if (atomic_set(&atomic_bt_scan_active, false)) {
+			if (atomic_get(&atomic_bt_scan_active) == true) {
 				scan_stop();
+				atomic_set(&atomic_bt_scan_active, false);
 			}
 			break;
 		case BLE_CTRL_DISCONNECT_PEER:

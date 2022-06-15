@@ -159,7 +159,7 @@ static void charging_poll_work_fn()
 
 static void reboot_work_fn()
 {
-#ifdef CONFIG_BOARD_NF_X25_NRF52840
+#ifdef CONFIG_SOC_NRF52840_QIAA
 	/* Add a check that we are using NRF board
 	* since they are the ones supported by nordic's <power/reboot.h>
 	*/

@@ -182,6 +182,12 @@ _Noreturn void publish_gnss_data(void *ctx)
 				check_gnss_age(gnss_age);
 				previous_ts = ts;
 			}
+			LOG_WRN("GNSS uptime = %d ms, Sattelites = %d, "
+				"Location: %d, %d",
+				gnss_data_buffer.latest.msss, gnss_data_buffer
+					.latest.num_sv, gnss_data_buffer
+					.latest.lat, gnss_data_buffer
+					.latest.lon);
 
 			struct gnss_data *new_data = new_gnss_data();
 			new_data->gnss_data = gnss_data_buffer;

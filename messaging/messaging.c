@@ -424,7 +424,7 @@ static void warning_end_work_fn()
 void data_request_work_fn()
 {
 	LOG_INF("Periodic request data");
-	k_work_reschedule_for_queue(&send_q, &data_request_work, K_MINUTES(1));
+	k_work_reschedule_for_queue(&send_q, &data_request_work, K_SECONDS(10));
 
 	/* Request of battery voltage */
 	struct request_pwr_battery_event *ev_batt =
@@ -651,7 +651,8 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_env_sensor_event(eh)) {
 		struct env_sensor_event *ev = cast_env_sensor_event(eh);
-		LOG_DBG("Event Temp: %.2f, humid %.2f, press %.2f", ev->temp,
+		LOG_WRN("\n\nEvent Temp: %.2f, humid %.2f, press %.2f\n\n",
+			ev->temp,
 			ev->humidity, ev->press);
 		/* Update shaddow register */
 		atomic_set(&cached_press, (uint32_t)ev->press);

@@ -362,8 +362,9 @@ static void diagnostics_handler(void)
 		/* Only delay when no data was processed*/
 		if (!(rtt_got_data || ble_got_data || passthrough_got_data)) {
 			/* Sleep longer when RTT is inactive */
-			if (diagnostics_rtt_is_active()) {
-				k_msleep(10);
+			if (atomic_test_bit(&ble_is_connected, 0) || 
+			    diagnostics_rtt_is_active()) {
+				k_msleep(5);
 			} else {
 				k_msleep(1000);
 			}

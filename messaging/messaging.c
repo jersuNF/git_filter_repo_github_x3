@@ -471,7 +471,7 @@ static bool event_handler(const struct event_header *eh)
 		 */
 		struct gnss_data *ev = cast_gnss_data(eh);
 
-        /* TODO, pshustad, review, might block the EventManager for 200 ms ? */
+		/* TODO, pshustad, review, might block the EventManager for 200 ms ? */
 		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
 			if (k_sem_take(&cache_lock_sem, K_MSEC(200)) == 0) {
 				cached_fix = ev->gnss_data.lastfix;
@@ -585,7 +585,7 @@ static bool event_handler(const struct event_header *eh)
 	if (is_gnss_data(eh)) {
 		struct gnss_data *ev = cast_gnss_data(eh);
 		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
-            /* TODO, review pshustad, might block the event manager for 500 ms ? */
+			/* TODO, review pshustad, might block the event manager for 500 ms ? */
 			if (k_sem_take(&cache_lock_sem, K_MSEC(500)) == 0) {
 				cached_fix = ev->gnss_data.lastfix;
 				k_sem_give(&cache_lock_sem);
@@ -968,16 +968,13 @@ void build_poll_request(NofenceMessage *poll_req)
 		(uint16_t)atomic_get(&cached_batt);
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
-
-	/* Fw info. */
-	poll_req->m.poll_message_req.has_versionInfoHW = true;
-	poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version = 1;
-	poll_req->m.poll_message_req.versionInfoHW.ucPCB_HV_Version = 1;
-	poll_req->m.poll_message_req.versionInfoHW.usPCB_Product_Type = 1;
-	/* TODO: get gsm info from modem driver */
-	//	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
-	//	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
-	//	poll_req->m.poll_message_req.has_xGsmInfo = false;
+	
+	/** @todo get gsm info from modem driver */
+#if 0
+	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
+	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
+	poll_req->m.poll_message_req.has_xGsmInfo = false;
+#endif
 
 	if (current_state.flash_erase_count) {
 		// m_flash_erase_count is reset when we receive a poll reply
@@ -1043,9 +1040,11 @@ void build_poll_request(NofenceMessage *poll_req)
 
 	if (m_transfer_boot_params) {
 		poll_req->m.poll_message_req.has_versionInfo = true;
-		poll_req->m.poll_message_req.versionInfo.has_ulApplicationVersion = true;
-		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion = NF_X25_VERSION_NUMBER;
-        /* TODO pshustad, clean up and re-enable the commented code below */
+		poll_req->m.poll_message_req.versionInfo
+			.has_ulApplicationVersion = true;
+		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion =
+			NF_X25_VERSION_NUMBER;
+		/* TODO pshustad, clean up and re-enable the commented code below */
 		//		uint16_t xbootVersion;
 		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
 		//			poll_req.m.poll_message_req.versionInfo
@@ -1054,18 +1053,47 @@ void build_poll_request(NofenceMessage *poll_req)
 		//			poll_req.m.poll_message_req.versionInfo
 		//				.has_usATmegaBootloaderVersion = true;
 		//		}
-		//		poll_req.m.poll_message_req.has_versionInfoHW = true;
-		//		poll_req.m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
-		//			EEPROM_GetHwVersion();
-		//		poll_req.m.poll_message_req.versionInfoHW.usPCB_Product_Type =
-		//			(uint8_t)EEPROM_GetProductType();
-		//		poll_req.m.poll_message_req.has_xSimCardId = true;
-		//		memcpy(poll_req.m.poll_message_req.xSimCardId, BGS_SCID(),
-		//		       sizeof(poll_req.m.poll_message_req.xSimCardId));
-		//		poll_req.m.poll_message_req.versionInfo.has_ulATmegaVersion =
-		//			true;
-		//		poll_req.m.poll_message_req.versionInfo.ulATmegaVersion =
-		//			NF_X25_VERSION_NUMBER;
+		poll_req->m.poll_message_req.has_versionInfoHW = true;
+
+		uint8_t pcb_rf_version = 0;
+		eep_uint8_read(EEP_HW_VERSION, &pcb_rf_version);
+		poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
+							pcb_rf_version;
+		
+		uint16_t pcb_product_type = 0;
+		eep_uint16_read(EEP_PRODUCT_TYPE, &pcb_product_type);
+		poll_req->m.poll_message_req.versionInfoHW.usPCB_Product_Type =
+							pcb_product_type;
+
+		poll_req->m.poll_message_req.has_versionInfoBOM = true;
+		
+		uint8_t bom_mec_rev = 0;
+		eep_uint8_read(EEP_BOM_MEC_REV, &bom_mec_rev);
+		poll_req->m.poll_message_req.versionInfoBOM.ucBom_mec_rev =
+							bom_mec_rev;
+		uint8_t bom_pcb_rev = 0;
+		eep_uint8_read(EEP_BOM_PCB_REV, &bom_pcb_rev);
+		poll_req->m.poll_message_req.versionInfoBOM.ucBom_pcb_rev =
+							bom_pcb_rev;
+		uint8_t ems_provider = 0;
+		eep_uint8_read(EEP_EMS_PROVIDER, &ems_provider);
+		poll_req->m.poll_message_req.versionInfoBOM.ucEms_provider =
+							ems_provider;
+		uint8_t product_record_rev = 0;
+		eep_uint8_read(EEP_PRODUCT_RECORD_REV, &product_record_rev);
+		poll_req->m.poll_message_req.versionInfoBOM.ucProduct_record_rev =
+							product_record_rev;
+
+		/** @todo Add information of SIM card */
+#if 0
+		poll_req.m.poll_message_req.has_xSimCardId = true;
+		memcpy(poll_req.m.poll_message_req.xSimCardId, BGS_SCID(),
+			sizeof(poll_req.m.poll_message_req.xSimCardId));
+		poll_req.m.poll_message_req.versionInfo.has_ulATmegaVersion =
+			true;
+		poll_req.m.poll_message_req.versionInfo.ulATmegaVersion =
+			NF_X25_VERSION_NUMBER;
+#endif
 	}
 }
 
@@ -1176,7 +1204,7 @@ void proto_InitHeader(NofenceMessage *msg)
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
 	if (use_server_time) {
-        /* FIXME pshustad, the time_from_server is stale, this is a bug. It should be fed to the time system */
+		/* FIXME pshustad, the time_from_server is stale, this is a bug. It should be fed to the time system */
 
 		msg->header.ulUnixTimestamp = time_from_server;
 	} else {
@@ -1274,9 +1302,7 @@ void process_poll_response(NofenceMessage *proto)
 		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
 		EVENT_SUBMIT(r_ev);
 	}
-	/** TODO: set activation mode to (pResp->eActivationMode); 
-	  * Not used in legacy code? 
-	  */
+	/* TODO: set activation mode to (pResp->eActivationMode); */
 
 	if (pResp->has_bUseUbloxAno) {
 		/* TODO: publish enable ANO event to GPS controller */
@@ -1284,11 +1310,11 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_bUseServerTime && pResp->bUseServerTime) {
 		LOG_INF("Server time will be used.");
 		time_from_server = proto->header.ulUnixTimestamp;
-        /* FIXME, pshustad see XF-174 */
+		/* FIXME, pshustad see XF-174 */
 		use_server_time = true;
 		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
 		struct tm *tm_time = gmtime(&gm_time);
-		/* Updates date_time library which storage uses for ANO data. */
+		/* Update date_time library which storage uses for ANO data. */
 		int err = date_time_set(tm_time);
 		if (err) {
 			char *e_msg = "Error updating time from server";
@@ -1407,9 +1433,10 @@ void process_poll_response(NofenceMessage *proto)
 /* @brief: starts a firmware download if a new version exists on the server. */
 void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 {
-
-	if (fw_ver_from_server->has_ulApplicationVersion && fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER) {
-		LOG_INF("Received new app version from server %i", fw_ver_from_server->ulApplicationVersion);
+	if (fw_ver_from_server->has_ulApplicationVersion &&
+	    fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER) {
+		LOG_INF("Received new app version from server %i",
+			fw_ver_from_server->ulApplicationVersion);
 		struct start_fota_event *ev = new_start_fota_event();
 		ev->override_default_host = false;
 		ev->version = fw_ver_from_server->ulApplicationVersion;

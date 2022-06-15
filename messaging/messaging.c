@@ -307,11 +307,14 @@ static void zap_message_work_fn()
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m = (uint16_t)NofenceMessage_client_zap_message_tag;
-	/* TODO, pshustad must provide fenceDist */
-	msg.m.client_zap_message.has_sFenceDist = false;
+	msg.m.client_zap_message.has_sFenceDist =
+		(bool)atomic_get(&cached_has_fence_dist);
+	msg.m.client_zap_message.sFenceDist =
+		(uint16_t)atomic_get(&cached_fence_dist);
 	proto_get_last_known_date_pos(&cached_fix,
 				      &msg.m.client_zap_message.xDatePos);
-
+	msg.m.client_zap_message.ucReaction = 0;
+	msg.m.client_zap_message.usReactionDuration = 0;
 	int ret = encode_and_store_message(&msg);
 	if (ret) {
 		LOG_ERR("Failed to encode zap status msg: %d", ret);

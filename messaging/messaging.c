@@ -313,6 +313,8 @@ static void zap_message_work_fn()
 		(uint16_t)atomic_get(&cached_fence_dist);
 	proto_get_last_known_date_pos(&cached_fix,
 				      &msg.m.client_zap_message.xDatePos);
+	LOG_INF("Lat: %d, Lon: %d", msg.m.client_zap_message.xDatePos.lLat,
+		msg.m.client_zap_message.xDatePos.lLon);
 	msg.m.client_zap_message.ucReaction = 0;
 	msg.m.client_zap_message.usReactionDuration = 0;
 	int ret = encode_and_store_message(&msg);
@@ -459,6 +461,7 @@ static bool event_handler(const struct event_header *eh)
 		/* TODO, pshustad, review, might block the EventManager for 200 ms ? */
 		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
 			if (k_sem_take(&cache_lock_sem, K_MSEC(200)) == 0) {
+				LOG_INF("Update last GNSS fix");
 				cached_fix = ev->gnss_data.lastfix;
 				k_sem_give(&cache_lock_sem);
 			}
@@ -965,16 +968,13 @@ void build_poll_request(NofenceMessage *poll_req)
 		(uint16_t)atomic_get(&cached_batt);
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
-
-	/* Fw info. */
-	poll_req->m.poll_message_req.has_versionInfoHW = true;
-	poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version = 1;
-	poll_req->m.poll_message_req.versionInfoHW.ucPCB_HV_Version = 1;
-	poll_req->m.poll_message_req.versionInfoHW.usPCB_Product_Type = 1;
-	/* TODO: get gsm info from modem driver */
-	//	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
-	//	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
-	//	poll_req->m.poll_message_req.has_xGsmInfo = false;
+	
+	/** @todo get gsm info from modem driver */
+#if 0
+	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
+	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
+	poll_req->m.poll_message_req.has_xGsmInfo = false;
+#endif
 
 	if (current_state.flash_erase_count) {
 		// m_flash_erase_count is reset when we receive a poll reply
@@ -1053,18 +1053,47 @@ void build_poll_request(NofenceMessage *poll_req)
 		//			poll_req.m.poll_message_req.versionInfo
 		//				.has_usATmegaBootloaderVersion = true;
 		//		}
-		//		poll_req.m.poll_message_req.has_versionInfoHW = true;
-		//		poll_req.m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
-		//			EEPROM_GetHwVersion();
-		//		poll_req.m.poll_message_req.versionInfoHW.usPCB_Product_Type =
-		//			(uint8_t)EEPROM_GetProductType();
-		//		poll_req.m.poll_message_req.has_xSimCardId = true;
-		//		memcpy(poll_req.m.poll_message_req.xSimCardId, BGS_SCID(),
-		//		       sizeof(poll_req.m.poll_message_req.xSimCardId));
-		//		poll_req.m.poll_message_req.versionInfo.has_ulATmegaVersion =
-		//			true;
-		//		poll_req.m.poll_message_req.versionInfo.ulATmegaVersion =
-		//			NF_X25_VERSION_NUMBER;
+		poll_req->m.poll_message_req.has_versionInfoHW = true;
+
+		uint8_t pcb_rf_version = 0;
+		eep_uint8_read(EEP_HW_VERSION, &pcb_rf_version);
+		poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
+			pcb_rf_version;
+
+		uint16_t pcb_product_type = 0;
+		eep_uint16_read(EEP_PRODUCT_TYPE, &pcb_product_type);
+		poll_req->m.poll_message_req.versionInfoHW.usPCB_Product_Type =
+			pcb_product_type;
+
+		poll_req->m.poll_message_req.has_versionInfoBOM = true;
+
+		uint8_t bom_mec_rev = 0;
+		eep_uint8_read(EEP_BOM_MEC_REV, &bom_mec_rev);
+		poll_req->m.poll_message_req.versionInfoBOM.ucBom_mec_rev =
+			bom_mec_rev;
+		uint8_t bom_pcb_rev = 0;
+		eep_uint8_read(EEP_BOM_PCB_REV, &bom_pcb_rev);
+		poll_req->m.poll_message_req.versionInfoBOM.ucBom_pcb_rev =
+			bom_pcb_rev;
+		uint8_t ems_provider = 0;
+		eep_uint8_read(EEP_EMS_PROVIDER, &ems_provider);
+		poll_req->m.poll_message_req.versionInfoBOM.ucEms_provider =
+			ems_provider;
+		uint8_t product_record_rev = 0;
+		eep_uint8_read(EEP_PRODUCT_RECORD_REV, &product_record_rev);
+		poll_req->m.poll_message_req.versionInfoBOM
+			.ucProduct_record_rev = product_record_rev;
+
+		/** @todo Add information of SIM card */
+#if 0
+		poll_req.m.poll_message_req.has_xSimCardId = true;
+		memcpy(poll_req.m.poll_message_req.xSimCardId, BGS_SCID(),
+			sizeof(poll_req.m.poll_message_req.xSimCardId));
+		poll_req.m.poll_message_req.versionInfo.has_ulATmegaVersion =
+			true;
+		poll_req.m.poll_message_req.versionInfo.ulATmegaVersion =
+			NF_X25_VERSION_NUMBER;
+#endif
 	}
 }
 

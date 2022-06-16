@@ -31,10 +31,14 @@
 #include "ble_beacon_event.h"
 #include "watchdog_event.h"
 #include "error_event.h"
-
-#if CONFIG_BOARD_NF_X25_NRF52840
+#if defined(CONFIG_BOARD_NF_SG25_27O_NRF52840) ||                              \
+	defined(CONFIG_BOARD_NF_C25_25G_NRF52840)
 #include "ble_dfu.h"
+#elif CONFIG_BOARD_NATIVE_POSIX
+#else
+#error "Build with supported boardfile"
 #endif
+
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_CONTROLLER_LOG_LEVEL);
 
 static void bt_send_work_handler(struct k_work *work);
@@ -680,9 +684,14 @@ int ble_module_init()
 
 	/* Callback to monitor connected/disconnected state */
 	bt_conn_cb_register(&conn_callbacks);
-#if CONFIG_BOARD_NF_X25_NRF52840
+#if defined(CONFIG_BOARD_NF_SG25_27O_NRF52840) ||                              \
+	defined(CONFIG_BOARD_NF_C25_25G_NRF52840)
 	err = bt_dfu_init();
+#elif CONFIG_BOARD_NATIVE_POSIX
+#else
+#error "Build with supported boardfile"
 #endif
+
 #if CONFIG_BEACON_SCAN_ENABLE
 	/* Start scanning after beacons. Set flag to true */
 	if (atomic_get(&atomic_bt_scan_active) == false) {

@@ -175,18 +175,12 @@ static void build_log_message()
 		return;
 	}
 
-	/* Fill in NofenceMessage struct */
+	/* Fill in sequence message 1 */
 	NofenceMessage seq_1;
-	NofenceMessage seq_2;
-	/** @todo also include gprs_stat msg
-	NofenceMessage grps;
-	proto_InitHeader(&grps);
-	gprs.m.gprs_stat_msg.has_xGprsErrorDetails = true;
-	gprs.m.gprs_stat_msg.xGprsErrorDetails = ...
-	*/
 	proto_InitHeader(&seq_1); /* fill up message header. */
-	proto_InitHeader(&seq_2); /* fill up message header. */
-
+	seq_1.which_m = (uint16_t)NofenceMessage_seq_msg_tag;
+	seq_1.m.seq_msg.has_xGprsRssi = false;
+	seq_1.m.seq_msg.has_xPOS_QC_MMM = false;
 	seq_1.m.seq_msg.has_usBatteryVoltage = true;
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	seq_1.m.seq_msg.has_usChargeMah = true;
@@ -201,15 +195,24 @@ static void build_log_message()
 	       &histogram.current_profile, sizeof(histogram.current_profile));
 	memcpy(&seq_1.m.seq_msg.xHistogramZone, &histogram.in_zone,
 	       sizeof(histogram.in_zone));
-	seq_1.which_m = (uint16_t)NofenceMessage_seq_msg_tag;
 
+	err = encode_and_store_message(&seq_1);
+	if (err) {
+		LOG_ERR("Failed to encode and save sequence message 1: %d",
+			err);
+		return;
+	}
+
+	/* Fill in sequence message 2 */
+	NofenceMessage seq_2;
+	proto_InitHeader(&seq_2); /* fill up message header. */
+	seq_2.which_m = (uint16_t)NofenceMessage_seq_msg_2_tag;
 	seq_2.m.seq_msg_2.has_bme280 = true;
 	seq_2.m.seq_msg_2.bme280.ulPressure =
 		(uint32_t)atomic_get(&cached_press);
 	seq_2.m.seq_msg_2.bme280.ulTemperature =
 		(uint32_t)atomic_get(&cached_temp);
 	seq_2.m.seq_msg_2.bme280.ulHumidity = (uint32_t)atomic_get(&cached_hum);
-	seq_2.which_m = (uint16_t)NofenceMessage_seq_msg_2_tag;
 	seq_2.m.seq_msg_2.has_xBatteryQc = true;
 	seq_2.m.seq_msg_2.xBatteryQc.usVbattMax =
 		histogram.qc_battery.usVbattMax;
@@ -217,14 +220,13 @@ static void build_log_message()
 		histogram.qc_battery.usVbattMin;
 	seq_2.m.seq_msg_2.xBatteryQc.usTemperature =
 		(uint16_t)atomic_get(&cached_temp);
+	seq_2.m.seq_msg_2.has_xGnssModeCounts = false;
 
-	err = encode_and_store_message(&seq_1);
-	if (err) {
-		LOG_ERR("Failed to encode zap status msg: %d", err);
-	}
 	err = encode_and_store_message(&seq_2);
 	if (err) {
-		LOG_ERR("Failed to encode zap status msg: %d", err);
+		LOG_ERR("Failed to encode and save sequence message 2: %d",
+			err);
+		return;
 	}
 }
 
@@ -968,7 +970,7 @@ void build_poll_request(NofenceMessage *poll_req)
 		(uint16_t)atomic_get(&cached_batt);
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
-	
+
 	/** @todo get gsm info from modem driver */
 #if 0
 	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();

@@ -22,4 +22,10 @@ int pwr_module_init(void);
  */
 int log_and_fetch_battery_voltage(void);
 
+/**
+ * @brief Fetches the battery percent.
+ * @return battery percent.
+ */
+int fetch_battery_percent(void);
+
 #endif /* _PWR_MODULE_H_ */

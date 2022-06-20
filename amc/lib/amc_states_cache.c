@@ -246,6 +246,11 @@ void init_states_and_variables(void)
 		total_zap_cnt, total_warn_cnt, zap_count_day);
 }
 
+uint16_t get_total_zap_count(void)
+{
+	return total_zap_cnt;
+}
+
 Mode get_mode(void)
 {
 	return current_mode;

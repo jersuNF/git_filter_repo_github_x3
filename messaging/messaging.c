@@ -43,6 +43,7 @@
 #include "sound_event.h"
 #include "nf_settings.h"
 #include "histogram_events.h"
+#include "amc_states_cache.h"
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
@@ -71,7 +72,15 @@ K_SEM_DEFINE(cache_lock_sem, 1, 1);
 K_SEM_DEFINE(send_out_ack, 0, 1);
 K_SEM_DEFINE(connection_ready, 0, 1);
 
-collar_state_struct_t current_state;
+collar_state_struct_t current_state = {
+	.collar_mode = Mode_Mode_UNKNOWN,
+	.fence_status = FenceStatus_FenceStatus_UNKNOWN,
+	.collar_status = CollarStatus_CollarStatus_UNKNOWN,
+	.fence_version = 0,
+	.flash_erase_count = 0,
+	.zap_count = 0,
+};
+
 gnss_last_fix_struct_t cached_fix;
 
 static uint32_t new_fence_in_progress;
@@ -533,6 +542,7 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_update_collar_status(eh)) {
 		struct update_collar_status *ev = cast_update_collar_status(eh);
+		LOG_INF("Update collar status %d", ev->collar_status);
 		current_state.collar_status = ev->collar_status;
 		return false;
 	}
@@ -910,6 +920,10 @@ int messaging_module_init(void)
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return err;
 	}
+	current_state.collar_mode = get_mode(),
+	current_state.fence_status = get_fence_status(),
+	current_state.collar_status = get_collar_status(),
+	current_state.zap_count = get_total_zap_count(),
 
 	k_work_queue_init(&send_q);
 	k_work_queue_start(&send_q, messaging_send_thread,

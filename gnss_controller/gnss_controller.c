@@ -100,6 +100,8 @@ static int gnss_controller_reset_gnss(uint16_t mask)
 
 int gnss_controller_init(void)
 {
+	gnss_reset_count = 0;
+
 	printk("Initializing gnss controller!\n");
 	gnss_dev = DEVICE_DT_GET(DT_ALIAS(gnss));
 	if (gnss_dev == NULL) {

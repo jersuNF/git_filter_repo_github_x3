@@ -5,6 +5,7 @@
 #include <zephyr.h>
 #include "nf_settings.h"
 #include "error_event.h"
+#include "selftest.h"
 
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define MY_PRIORITY CONFIG_RECV_THREAD_PRIORITY
@@ -17,8 +18,8 @@ LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
 K_SEM_DEFINE(messaging_ack, 1, 1);
 
-char server_address[EEP_HOST_PORT_BUF_SIZE - 1];
-char server_address_tmp[EEP_HOST_PORT_BUF_SIZE - 1];
+char server_address[EEP_HOST_PORT_BUF_SIZE];
+char server_address_tmp[EEP_HOST_PORT_BUF_SIZE];
 static int server_port;
 static char server_ip[15];
 
@@ -350,6 +351,7 @@ static void cellular_controller_keep_alive(void *dev)
 				if (!connected) { //check_ip takes place in start_tcp()
 					// in this case.
 					int ret = start_tcp();
+					selftest_mark_state(SELFTEST_MODEM_POS, ret >= 0);
 					if (ret >= 0) {
 						connected = true;
 						announce_connection_state(true);

@@ -654,10 +654,10 @@ static bool event_handler(const struct event_header *eh)
 		struct env_sensor_event *ev = cast_env_sensor_event(eh);
 		LOG_DBG("Event Temp: %.2f, humid %.3f, press %.3f", ev->temp,
 			ev->humidity, ev->press);
-		/* Update shaddow register */
-		atomic_set(&cached_press, (uint32_t)ev->press * 1000);
-		atomic_set(&cached_hum, (uint32_t)ev->humidity * 1000);
-		atomic_set(&cached_temp, (uint32_t)ev->temp * 100);
+		/* Update shaddow register. Multiply with scaling factor */
+		atomic_set(&cached_press, (uint32_t)(ev->press * 1000));
+		atomic_set(&cached_hum, (uint32_t)(ev->humidity * 1000));
+		atomic_set(&cached_temp, (uint32_t)(ev->temp * 100));
 		return false;
 	}
 	if (is_warn_correction_start_event(eh)) {

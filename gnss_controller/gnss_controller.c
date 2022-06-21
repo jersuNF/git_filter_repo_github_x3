@@ -165,22 +165,27 @@ power consumption crude test - end */
 	return 0;
 }
 
+static bool first_fix = true;
 _Noreturn void publish_gnss_data(void *ctx)
-{
+{	
 	while (true) {
 		if (k_sem_take(&new_data_sem, K_SECONDS(25)) == 0) {
 			if (gnss_data_buffer.fix_ok) {
-				ts = k_uptime_get_32();
-				if (ts >= previous_ts) {
-					gnss_age = ts - previous_ts;
-				} else { //handle overflow
-					gnss_age =
-						UINT32_MAX + ts - previous_ts;
+				if (!first_fix) {
+					ts = k_uptime_get_32();
+					if (ts >= previous_ts) {
+						gnss_age = ts - previous_ts;
+					} else { //handle overflow
+						gnss_age =
+							UINT32_MAX + ts - previous_ts;
+					}
+					LOG_DBG("gnss fix age = age:%d, ts:%d",
+						gnss_age, ts);
+/* TODO: this is not working well on the GNSS receiver with the new FW (requires deep dive into the GNSS data published by the reciever)
+					check_gnss_age(gnss_age); */
+					previous_ts = ts;
 				}
-				LOG_DBG("gnss fix age = age:%d, ts:%d",
-					gnss_age, ts);
-				check_gnss_age(gnss_age);
-				previous_ts = ts;
+				first_fix = false;
 			}
 			LOG_WRN("GNSS uptime = %d ms, Sattelites = %d, "
 				"Location: %d, %d",
@@ -311,12 +316,15 @@ void check_gnss_age(uint32_t gnss_age)
 	if ((gnss_age > GNSS_5SEC) && (gnss_reset_count < 1)) {
 		gnss_reset_count++;
 		gnss_controller_reset_gnss(GNSS_RESET_MASK_HOT);
+		first_fix = true;
 	} else if (gnss_age > GNSS_10SEC && gnss_reset_count < 2) {
 		gnss_reset_count++;
 		gnss_controller_reset_gnss(GNSS_RESET_MASK_WARM);
+		first_fix = true;
 	} else if (gnss_age > GNSS_20SEC && gnss_reset_count >= 2) {
 		gnss_reset_count++;
 		gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
+		first_fix = true;
 	} else if (gnss_age < GNSS_5SEC) {
 		gnss_reset_count = 0;
 	}

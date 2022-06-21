@@ -424,7 +424,7 @@ static void warning_end_work_fn()
 void data_request_work_fn()
 {
 	LOG_INF("Periodic request data");
-	k_work_reschedule_for_queue(&send_q, &data_request_work, K_SECONDS(10));
+	k_work_reschedule_for_queue(&send_q, &data_request_work, K_MINUTES(1));
 
 	/* Request of battery voltage */
 	struct request_pwr_battery_event *ev_batt =
@@ -493,7 +493,6 @@ static bool event_handler(const struct event_header *eh)
 		/* Update date_time library which storage uses for ANO data. */
 		if (!date_time_set(tm_time)) {
 			LOG_ERR("Could not set date time from GNSS data");
-			return false;
 		} else {
 			LOG_INF("Now using GNSS unix timestamp instead: %s",
 				asctime(tm_time));
@@ -630,9 +629,7 @@ static bool event_handler(const struct event_header *eh)
 			/* We want battery voltage in deci volt */
 			atomic_set(&cached_batt,
 				   (uint16_t)(ev->battery_mv / 10));
-			LOG_DBG("Battery event: %u mV", ev->battery_mv);
 		} else if (ev->pwr_state == PWR_CHARGING) {
-			LOG_DBG("Charge event: %u mA", ev->charging_ma);
 			atomic_set(&cached_chrg, ev->charging_ma);
 		}
 		return false;
@@ -651,9 +648,6 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_env_sensor_event(eh)) {
 		struct env_sensor_event *ev = cast_env_sensor_event(eh);
-		LOG_WRN("\n\nEvent Temp: %.2f, humid %.2f, press %.2f\n\n",
-			ev->temp,
-			ev->humidity, ev->press);
 		/* Update shaddow register */
 		atomic_set(&cached_press, (uint32_t)ev->press);
 		atomic_set(&cached_hum, (uint32_t)ev->humidity);

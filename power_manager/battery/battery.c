@@ -21,7 +21,7 @@
 #define MODULE battery
 #include <logging/log.h>
 
-LOG_MODULE_REGISTER(MODULE, 4);
+LOG_MODULE_REGISTER(MODULE, CONFIG_BATTERY_LOG_LEVEL);
 
 #define VBATT DT_PATH(vbatt)
 #define ADC_DEVICE_EMUL DT_LABEL(DT_INST(0, zephyr_adc_emul))
@@ -289,7 +289,6 @@ int battery_sample_averaged(void)
 		LOG_ERR("Failed to read battery voltage: %d", batt_mV);
 		return -ENOENT;
 	}
-
 	uint16_t curr_batt_max = atomic_get(&battery_max_mv);
 	uint16_t curr_batt_min = atomic_get(&battery_min_mv);
 

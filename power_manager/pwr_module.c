@@ -147,7 +147,6 @@ static void charging_poll_work_fn()
 			     strlen(msg));
 		return;
 	}
-	LOG_WRN("Solar charging current: %d mA", charging_current_avg);
 	struct pwr_status_event *event = new_pwr_status_event();
 	event->pwr_state = PWR_CHARGING;
 	event->charging_ma = charging_current_avg;

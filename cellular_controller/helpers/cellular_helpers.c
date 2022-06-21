@@ -85,8 +85,7 @@ static size_t sendall(int sock, const void *buf, size_t len)
 int8_t socket_connect(struct data *data, struct sockaddr *addr,
 		      socklen_t addrlen)
 {
-	int ret;
-
+	int ret, socket_id;
 	data->tcp.sock = socket(addr->sa_family, SOCK_STREAM, IPPROTO_TCP);
 
 	if (data->tcp.sock < 0) {
@@ -96,6 +95,7 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 	} else {
 		LOG_INF("Created TCP socket (%s): %d\n", data->proto,
 			data->tcp.sock);
+		socket_id = data->tcp.sock;
 	}
 
 	if (IS_ENABLED(CONFIG_SOCKS)) {
@@ -122,16 +122,13 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 		}
 	}
 	ret = connect(data->tcp.sock, addr, addrlen);
-	k_sleep(K_MSEC(50));
-	ret = set_socket_linger_time((uint8_t)data->tcp.sock, 3000);
 	if (ret < 0) {
 		LOG_ERR("Cannot connect to TCP remote (%s): %d", data->proto,
 			errno);
 		ret = -errno;
-	} else {
-		ret = data->tcp.sock;
+		return ret;
 	}
-	return ret;
+	return socket_id;
 }
 
 int socket_listen(struct data *data)
@@ -150,8 +147,7 @@ int socket_listen(struct data *data)
 	}
 
 	k_sleep(K_MSEC(50));
-	ret = listen(data->tcp.sock, 10); //2nd parameter is backlog size, not
-	// important as we are not interested in the incoming data anyways.
+	ret = listen(data->tcp.sock, 5);
 	if (ret < 0) {
 		LOG_ERR("Cannot start TCP listening socket (%s): %d",
 			data->proto, errno);

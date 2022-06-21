@@ -237,6 +237,7 @@ static void build_log_message()
 			err);
 		return;
 	}
+	LOG_INF("Store seq_1 and seq_2 to flash");
 }
 
 int read_log_data_cb(uint8_t *data, size_t len)
@@ -282,8 +283,9 @@ void log_data_periodic_fn()
 		err = stg_clear_partition(STG_PARTITION_LOG);
 		if (err) {
 			LOG_ERR("Error clearing FCB storage for LOG %i", err);
+		} else {
+			LOG_INF("Emptied LOG partition data as we have read everything.");
 		}
-		LOG_INF("Emptied LOG partition data as we have read everything.");
 	}
 }
 
@@ -307,7 +309,6 @@ void modem_poll_work_fn()
 		LOG_ERR("Cached state semaphore hanged, retrying in 1 second.");
 		k_work_reschedule_for_queue(&send_q, &modem_poll_work,
 					    K_SECONDS(1));
-		return;
 	}
 }
 
@@ -331,9 +332,11 @@ static void zap_message_work_fn()
 	int ret = encode_and_store_message(&msg);
 	if (ret) {
 		LOG_ERR("Failed to encode zap status msg: %d", ret);
+	} else {
+		LOG_INF("Store zap message to flash");
 	}
 	/* Send data stored in external flash immediately */
-	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
+	//k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 }
 
 static void animal_escaped_work_fn()
@@ -354,9 +357,11 @@ static void animal_escaped_work_fn()
 	int ret = encode_and_store_message(&msg);
 	if (ret) {
 		LOG_ERR("Failed to encode escaped status msg: %d", ret);
+	} else {
+		LOG_INF("Store escaped message to flash");
 	}
 	/* Send data stored in external flash immediately */
-	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
+	//k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 }
 
 static void warning_work_fn()
@@ -375,6 +380,8 @@ static void warning_work_fn()
 	int ret = encode_and_store_message(&msg);
 	if (ret) {
 		LOG_ERR("Failed to encode warning msg: %d", ret);
+	} else {
+		LOG_INF("Store warning message to flash");
 	}
 }
 

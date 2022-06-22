@@ -82,11 +82,19 @@ int commander_stimulator_handler(enum diagnostics_interface interface,
 		}
 		case ELECTRICAL_PULSE:
 		{
+			struct sound_status_event *ev_test_release_zap =
+				new_sound_status_event();
+			ev_test_release_zap->status = SND_STATUS_PLAYING_MAX;
+			EVENT_SUBMIT(ev_test_release_zap);
+			k_sleep(K_MSEC(200));
 			/* Send electric pulse */
 			struct ep_status_event *ready_ep_event = new_ep_status_event();
 			ready_ep_event->ep_status = EP_RELEASE;
 			EVENT_SUBMIT(ready_ep_event);
-
+			k_sleep(K_SECONDS(2));
+			struct sound_status_event *ev_idle = new_sound_status_event();
+			ev_idle->status = SND_STATUS_IDLE;
+			EVENT_SUBMIT(ev_idle);
 			break;
 		}
 		default:

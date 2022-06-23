@@ -650,10 +650,12 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_env_sensor_event(eh)) {
 		struct env_sensor_event *ev = cast_env_sensor_event(eh);
-		/* Update shaddow register */
-		atomic_set(&cached_press, (uint32_t)ev->press);
-		atomic_set(&cached_hum, (uint32_t)ev->humidity);
-		atomic_set(&cached_temp, (uint32_t)ev->temp);
+		LOG_DBG("Event Temp: %.2f, humid %.3f, press %.3f", ev->temp,
+			ev->humidity, ev->press);
+		/* Update shaddow register. Multiply with scaling factor */
+		atomic_set(&cached_press, (uint32_t)(ev->press * 1000));
+		atomic_set(&cached_hum, (uint32_t)(ev->humidity * 1000));
+		atomic_set(&cached_temp, (uint32_t)(ev->temp * 100));
 		return false;
 	}
 	if (is_warn_correction_start_event(eh)) {
@@ -964,7 +966,7 @@ void build_poll_request(NofenceMessage *poll_req)
 		(uint16_t)atomic_get(&cached_batt);
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
-	
+
 	/** @todo get gsm info from modem driver */
 #if 0
 	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
@@ -1054,31 +1056,31 @@ void build_poll_request(NofenceMessage *poll_req)
 		uint8_t pcb_rf_version = 0;
 		eep_uint8_read(EEP_HW_VERSION, &pcb_rf_version);
 		poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
-							pcb_rf_version;
-		
+			pcb_rf_version;
+
 		uint16_t pcb_product_type = 0;
 		eep_uint16_read(EEP_PRODUCT_TYPE, &pcb_product_type);
 		poll_req->m.poll_message_req.versionInfoHW.usPCB_Product_Type =
-							pcb_product_type;
+			pcb_product_type;
 
 		poll_req->m.poll_message_req.has_versionInfoBOM = true;
-		
+
 		uint8_t bom_mec_rev = 0;
 		eep_uint8_read(EEP_BOM_MEC_REV, &bom_mec_rev);
 		poll_req->m.poll_message_req.versionInfoBOM.ucBom_mec_rev =
-							bom_mec_rev;
+			bom_mec_rev;
 		uint8_t bom_pcb_rev = 0;
 		eep_uint8_read(EEP_BOM_PCB_REV, &bom_pcb_rev);
 		poll_req->m.poll_message_req.versionInfoBOM.ucBom_pcb_rev =
-							bom_pcb_rev;
+			bom_pcb_rev;
 		uint8_t ems_provider = 0;
 		eep_uint8_read(EEP_EMS_PROVIDER, &ems_provider);
 		poll_req->m.poll_message_req.versionInfoBOM.ucEms_provider =
-							ems_provider;
+			ems_provider;
 		uint8_t product_record_rev = 0;
 		eep_uint8_read(EEP_PRODUCT_RECORD_REV, &product_record_rev);
-		poll_req->m.poll_message_req.versionInfoBOM.ucProduct_record_rev =
-							product_record_rev;
+		poll_req->m.poll_message_req.versionInfoBOM
+			.ucProduct_record_rev = product_record_rev;
 
 		/** @todo Add information of SIM card */
 #if 0

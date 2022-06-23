@@ -114,7 +114,7 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_step_counter_event(eh)) {
 		struct step_counter_event *ev = cast_step_counter_event(eh);
-		steps = ev->steps;
+		steps = ev->steps-steps;
 		histogram.animal_behave.has_usStepCounter = true;
 		return false;
 	}
@@ -267,7 +267,7 @@ void collect_stats(void)
 
 			//******************Add Stepcounter value*************************
 			if (histogram.animal_behave.has_usStepCounter) {
-				histogram.animal_behave.usStepCounter = steps;
+				histogram.animal_behave.usStepCounter += steps;
 				LOG_INF("Steps: %d", histogram.animal_behave.usStepCounter);
 			}
 

@@ -13,7 +13,7 @@
 #define LOG_MODULE_NAME diag_back
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, 4);
 
-static atomic_t log_backend_interface = ATOMIC_INIT(DIAGNOSTICS_NONE);
+static atomic_t log_backend_interface = ATOMIC_INIT(DIAGNOSTICS_BLE);
 
 static struct log_backend_diag_action backend_diag_actions;
 

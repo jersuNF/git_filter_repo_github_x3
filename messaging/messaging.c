@@ -59,7 +59,6 @@ static uint8_t cached_fences_counter = 0;
 /** @todo This should be fetched from EEPROM */
 static gnss_mode_t cached_gnss_mode = GNSSMODE_NOMODE;
 
-uint32_t time_from_server;
 atomic_t cached_batt = ATOMIC_INIT(0);
 atomic_t cached_chrg = ATOMIC_INIT(0);
 atomic_t cached_temp = ATOMIC_INIT(0);
@@ -116,7 +115,6 @@ static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
 
 static bool m_transfer_boot_params = true;
 bool m_confirm_acc_limits, m_confirm_ble_key;
-bool use_server_time;
 
 K_MUTEX_DEFINE(send_binary_mutex);
 
@@ -1224,12 +1222,13 @@ void proto_InitHeader(NofenceMessage *msg)
 	msg->header.ulId = serial_id;
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
-	if (use_server_time) {
-		/* FIXME pshustad, the time_from_server is stale, this is a bug. It should be fed to the time system */
-
-		msg->header.ulUnixTimestamp = time_from_server;
+	int64_t curr_time = 0;
+	if (!date_time_now(&curr_time)) {
+		/* Convert to seconds since 1.1.1970 */
+		msg->header.ulUnixTimestamp = (uint32_t)(curr_time / 1000);
 	} else {
-		msg->header.ulUnixTimestamp = cached_fix.unix_timestamp;
+		/** @todo: Add uptime instead? */
+		msg->header.ulUnixTimestamp = 0;
 	}
 }
 
@@ -1359,10 +1358,7 @@ void process_poll_response(NofenceMessage *proto)
 		/* TODO: publish enable ANO event to GPS controller */
 	}
 	if (pResp->has_bUseServerTime && pResp->bUseServerTime) {
-		LOG_INF("Server time will be used.");
-		time_from_server = proto->header.ulUnixTimestamp;
-		/* FIXME, pshustad see XF-174 */
-		use_server_time = true;
+		LOG_INF("Set date and time from server");
 		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
 		struct tm *tm_time = gmtime(&gm_time);
 		/* Update date_time library which storage uses for ANO data. */
@@ -1631,9 +1627,6 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 	uint32_t age = ano_date_to_unixtime_midday(
 		temp->mga_ano.year, temp->mga_ano.month, temp->mga_ano.day);
 
-	LOG_INF("Relative age of received ANO frame = %d, %d", age,
-		time_from_server);
-
 	/* Write to storage controller's ANO WRITE partition. */
 	int err = stg_write_ano_data((uint8_t *)&anoResp->rgucBuf,
 				     anoResp->rgucBuf.size);
@@ -1643,8 +1636,14 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	}
-
-	if (age > time_from_server + SECONDS_IN_THREE_DAYS) {
+	int64_t current_time_ms = 0;
+	err = date_time_now(&current_time_ms);
+	if (err) {
+		char *e_msg = "Error fetching date time";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+	}
+	if (age > (current_time_ms / 1000) + SECONDS_IN_THREE_DAYS) {
 		return DOWNLOAD_COMPLETE;
 	}
 	return rec_ano_frames;

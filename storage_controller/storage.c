@@ -609,7 +609,6 @@ int stg_write_log_data(uint8_t *data, size_t len)
 	if (k_mutex_lock(&log_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
 	}
-
 	int err = stg_write_to_partition(STG_PARTITION_LOG, data, len);
 
 	if (err) {

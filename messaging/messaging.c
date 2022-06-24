@@ -70,6 +70,7 @@ K_SEM_DEFINE(connection_ready, 0, 1);
 
 collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
+static int rat, mnc, rssi, min_rssi, max_rssi;
 
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
@@ -186,7 +187,9 @@ static void build_log_message()
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	seq_1.m.seq_msg.has_usChargeMah = true;
 	seq_1.m.seq_msg.usChargeMah = (uint16_t)atomic_get(&cached_chrg);
-	//seq_1.m.seq_msg.xGprsRssi = cached_rssi; // not implemented
+	seq_1.m.seq_msg.has_xGprsRssi = true;
+	seq_1.m.seq_msg.xGprsRssi.ucMaxRSSI = (uint8_t)max_rssi;
+	seq_1.m.seq_msg.xGprsRssi.ucMinRSSI = (uint8_t)min_rssi;
 	seq_1.m.seq_msg.has_xHistogramCurrentProfile = true;
 	seq_1.m.seq_msg.has_xHistogramZone = true;
 	seq_1.m.seq_msg.has_xHistogramAnimalBehave = true;
@@ -676,6 +679,18 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	if (is_gsm_info_event(eh)) {
+		LOG_WRN("GSM info received!");
+		struct gsm_info_event *ev = cast_gsm_info_event(eh);
+		rat = ev->gsm_info.rat;
+		mnc = ev->gsm_info.mnc;
+		rssi = ev->gsm_info.rssi;
+		min_rssi = ev->gsm_info.min_rssi;
+		max_rssi = ev->gsm_info.max_rssi;
+		LOG_WRN("RSSI, rat: %d, %d, %d, %d", rssi, min_rssi,
+			max_rssi,  rat);
+		return false;
+	}
 
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
@@ -745,6 +760,7 @@ EVENT_SUBSCRIBE(MODULE, gnss_data);
 EVENT_SUBSCRIBE(MODULE, send_poll_request_now);
 EVENT_SUBSCRIBE(MODULE, warn_correction_start_event);
 EVENT_SUBSCRIBE(MODULE, warn_correction_end_event);
+EVENT_SUBSCRIBE(MODULE, gsm_info_event);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -965,12 +981,12 @@ void build_poll_request(NofenceMessage *poll_req)
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
 
-	/** @todo get gsm info from modem driver */
-#if 0
-	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
-	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
-	poll_req->m.poll_message_req.has_xGsmInfo = false;
-#endif
+	_GSM_INFO p_gsm_info;
+	p_gsm_info.ucRAT = (uint8_t)rat;
+	sprintf(p_gsm_info.xMMC_MNC,"%d", mnc);
+
+	poll_req->m.poll_message_req.xGsmInfo = p_gsm_info;
+	poll_req->m.poll_message_req.has_xGsmInfo = true;
 
 	if (current_state.flash_erase_count) {
 		// m_flash_erase_count is reset when we receive a poll reply

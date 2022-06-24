@@ -405,6 +405,15 @@ void announce_connection_state(bool state){
 		modem_is_ready = false;
 		connected = false;
 	}
+	struct gsm_info this_session_info;
+	int ret = get_gsm_info(&this_session_info);
+	if (ret == 0) {
+		struct gsm_info_event *session_info
+			= new_gsm_info_event();
+		memcpy(&session_info->gsm_info, &this_session_info,
+		       sizeof(struct gsm_info));
+		EVENT_SUBMIT(session_info);
+		}
 }
 
 bool cellular_controller_is_ready(void)

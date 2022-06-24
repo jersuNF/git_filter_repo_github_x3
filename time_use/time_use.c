@@ -204,10 +204,11 @@ EVENT_SUBSCRIBE(MODULE, save_histogram);
 
 void collect_stats(void)
 {
-	static int64_t elapsed_time_sec, uptime;
+	static int64_t elapsed_time_ms = 0;
+	static int64_t uptime = 0;
 	while (true) {
-		elapsed_time_sec += (int64_t)(k_uptime_delta(&uptime) / 1000);
-		if (elapsed_time_sec >= CONFIG_TIME_USE_RESOLUTION_SEC &&
+		elapsed_time_ms += k_uptime_delta(&uptime);
+		if (elapsed_time_ms >= CONFIG_TIME_USE_RESOLUTION_MS &&
 		    !save_and_reset) {
 			if (cur_activity_level == ACTIVITY_LOW) {
 				cur_animal_state = RESTING;
@@ -223,14 +224,16 @@ void collect_stats(void)
 			case RESTING:
 				histogram.animal_behave.has_usRestingTime =
 					true;
-				histogram.animal_behave.usRestingTime +=
-					elapsed_time_sec;
+				histogram.animal_behave.usRestingTime =
+					histogram.animal_behave.usRestingTime +
+					(elapsed_time_ms / MSEC_PER_SEC);
 				break;
 			case WALKING:
 				histogram.animal_behave.has_usWalkingTime =
 					true;
-				histogram.animal_behave.usWalkingTime +=
-					elapsed_time_sec;
+				histogram.animal_behave.usWalkingTime =
+					histogram.animal_behave.usWalkingTime +
+					(elapsed_time_ms / MSEC_PER_SEC);
 				histogram.animal_behave.has_usWalkingDist =
 					true;
 				histogram.animal_behave.usWalkingDist +=
@@ -240,8 +243,9 @@ void collect_stats(void)
 			case RUNNING:
 				histogram.animal_behave.has_usRunningTime =
 					true;
-				histogram.animal_behave.usRunningTime +=
-					elapsed_time_sec;
+				histogram.animal_behave.usRunningTime =
+					histogram.animal_behave.usRunningTime +
+					(elapsed_time_ms / MSEC_PER_SEC);
 				histogram.animal_behave.has_usRunningDist =
 					true;
 				histogram.animal_behave.usRunningDist +=
@@ -251,14 +255,16 @@ void collect_stats(void)
 			case GRAZING:
 				histogram.animal_behave.has_usGrazingTime =
 					true;
-				histogram.animal_behave.usGrazingTime +=
-					elapsed_time_sec;
+				histogram.animal_behave.usGrazingTime =
+					histogram.animal_behave.usGrazingTime +
+					(elapsed_time_ms / MSEC_PER_SEC);
 				break;
 			case UNKNOWN:
 				histogram.animal_behave.has_usUnknownTime =
 					true;
-				histogram.animal_behave.usUnknownTime +=
-					elapsed_time_sec;
+				histogram.animal_behave.usUnknownTime =
+					histogram.animal_behave.usUnknownTime +
+					(elapsed_time_ms / MSEC_PER_SEC);
 				break;
 			}
 
@@ -275,48 +281,55 @@ void collect_stats(void)
 
 			if (cur_collar_status == CollarStatus_Sleep ||
 			    cur_collar_status == CollarStatus_OffAnimal) {
-				histogram.current_profile.usCC_Sleep +=
-					elapsed_time_sec;
+				histogram.current_profile.usCC_Sleep =
+					histogram.current_profile.usCC_Sleep +
+					(elapsed_time_ms / MSEC_PER_SEC);
 			} //"Ultra" Low power
 			else if (cur_fence_status ==
 					 FenceStatus_BeaconContact ||
 				 cur_fence_status ==
 					 FenceStatus_BeaconContactNormal) {
-				histogram.current_profile.usCC_BeaconZone +=
-					elapsed_time_sec;
+				histogram.current_profile.usCC_BeaconZone =
+					histogram.current_profile
+						.usCC_BeaconZone +
+					((elapsed_time_ms / MSEC_PER_SEC));
 			} //"Ultra" Low power
 			/*TODO: fix when GNSS modes are available. */
 			//			else if(cur_gnss_pwr_m == POWER_OPTIMIZED_TRACKING){
 			//				histogram.current_profile
-			//					.usCC_GNSS_SuperE_POT += elapsed_time_sec; }					//Low power
-			//			else if(cur_gnss_pwr_m == TRACKING){ histogram_current_profile.usCC_GNSS_SuperE_Tracking += elapsed_time_sec; }				//Med power
+			//					.usCC_GNSS_SuperE_POT += (elapsed_time_ms  / 1000); }					//Low power
+			//			else if(cur_gnss_pwr_m == TRACKING){ histogram_current_profile.usCC_GNSS_SuperE_Tracking += (elapsed_time_ms  / 1000); }				//Med power
 			//			else if((cur_gnss_pwr_m == ACQUSITION) ||
-			//				 (gpsp_getPSMState() == ENABLED))	{ histogram.current_profile.usCC_GNSS_SuperE_Acquition += elapsed_time_sec; }			//High power
+			//				 (gpsp_getPSMState() == ENABLED))	{ histogram.current_profile.usCC_GNSS_SuperE_Acquition += (elapsed_time_ms  / 1000); }			//High power
 			//			else if((cur_gnss_pwr_m == DISABLED) && (GPS_GetMode
-			//								  () != GPSMODE_INACTIVE)){ histogram.current_profile.usCC_GNSS_MAX += elapsed_time_sec; }							//High power
+			//								  () != GPSMODE_INACTIVE)){ histogram.current_profile.usCC_GNSS_MAX += (elapsed_time_ms  / 1000); }							//High power
 			//			else if(GPS_GetMode() == GPSMODE_INACTIVE)
 			//			{
 			//				histogram.current_profile.usCC_Sleep +=
-			//					elapsed_time_sec;
+			//					(elapsed_time_ms  / 1000);
 			//			} //"Ultra" Low power
 
 			if (cur_modem_pwr_m == POWER_ON) {
-				histogram.current_profile.usCC_Modem_Active +=
-					elapsed_time_sec;
+				histogram.current_profile.usCC_Modem_Active =
+					histogram.current_profile
+						.usCC_Modem_Active +
+					(elapsed_time_ms / MSEC_PER_SEC);
 			} //High power++
 
 			//*****************Histogram for different zone********************
 			if (cur_collar_status == CollarStatus_Sleep ||
 			    cur_collar_status == CollarStatus_OffAnimal) {
-				histogram.in_zone.usInSleepTime +=
-					elapsed_time_sec;
+				histogram.in_zone.usInSleepTime =
+					histogram.in_zone.usInSleepTime +
+					(elapsed_time_ms / MSEC_PER_SEC);
 				in_beacon_or_sleep = true;
 			}
 			if (cur_fence_status == FenceStatus_BeaconContact ||
 			    cur_fence_status ==
 				    FenceStatus_BeaconContactNormal) {
-				histogram.in_zone.usBeaconZoneTime +=
-					elapsed_time_sec;
+				histogram.in_zone.usBeaconZoneTime =
+					histogram.in_zone.usBeaconZoneTime +
+					(elapsed_time_ms / MSEC_PER_SEC);
 				in_beacon_or_sleep = true;
 			}
 
@@ -324,17 +337,26 @@ void collect_stats(void)
 				//Time use in the different zones
 				if (cur_zone == WARN_ZONE ||
 				    cur_zone == PREWARN_ZONE) {
-					histogram.in_zone.usMAXZoneTime +=
-						elapsed_time_sec;
+					histogram.in_zone.usMAXZoneTime =
+						histogram.in_zone.usMAXZoneTime +
+						(elapsed_time_ms /
+						 MSEC_PER_SEC);
 				} else if (cur_zone == CAUTION_ZONE) {
-					histogram.in_zone.usCAUTIONZoneTime +=
-						elapsed_time_sec;
+					histogram.in_zone.usCAUTIONZoneTime =
+						histogram.in_zone
+							.usCAUTIONZoneTime +
+						(elapsed_time_ms /
+						 MSEC_PER_SEC);
 				} else if (cur_zone == PSM_ZONE) {
-					histogram.in_zone.usPSMZoneTime +=
-						elapsed_time_sec;
+					histogram.in_zone.usPSMZoneTime =
+						histogram.in_zone.usPSMZoneTime +
+						(elapsed_time_ms /
+						 MSEC_PER_SEC);
 				} else if (cur_zone == NO_ZONE) {
-					histogram.in_zone.usNOZoneTime +=
-						elapsed_time_sec;
+					histogram.in_zone.usNOZoneTime =
+						histogram.in_zone.usNOZoneTime +
+						(elapsed_time_ms /
+						 MSEC_PER_SEC);
 				}
 			}
 
@@ -378,6 +400,7 @@ void collect_stats(void)
 					m_u32_speedmean /
 					m_u32_timeuse_sample_gps;
 			}
+			elapsed_time_ms = 0; /* Reset timer */
 		}
 		if (save_and_reset) {
 			save_and_reset = false;

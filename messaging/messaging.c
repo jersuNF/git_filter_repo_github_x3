@@ -1584,7 +1584,7 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	}
 	int64_t current_time_ms = 0;
-	err = date_time_now(&curr_time_ms);
+	err = date_time_now(&current_time_ms);
 	if (err) {
 		char *e_msg = "Error fetching date time";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);

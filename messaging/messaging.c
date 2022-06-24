@@ -36,6 +36,8 @@
 
 #include "storage.h"
 
+#include "movement_events.h"
+
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
@@ -316,6 +318,7 @@ void modem_poll_work_fn()
 		&send_q, &modem_poll_work,
 		K_MINUTES(atomic_get(&poll_period_minutes)));
 	/* Add logic for the periodic protobuf modem poller. */
+	LOG_INF("Starting periodic poll work and building poll request.");
 	NofenceMessage new_poll_msg;
 
 	if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
@@ -492,7 +495,6 @@ static bool event_handler(const struct event_header *eh)
 		/* Update date_time library which storage uses for ANO data. */
 		if (!date_time_set(tm_time)) {
 			LOG_ERR("Could not set date time from GNSS data");
-			return false;
 		} else {
 			LOG_INF("Now using GNSS unix timestamp instead: %s",
 				asctime(tm_time));
@@ -629,9 +631,7 @@ static bool event_handler(const struct event_header *eh)
 			/* We want battery voltage in deci volt */
 			atomic_set(&cached_batt,
 				   (uint16_t)(ev->battery_mv / 10));
-			LOG_DBG("Battery event: %u mV", ev->battery_mv);
 		} else if (ev->pwr_state == PWR_CHARGING) {
-			LOG_DBG("Charge event: %u mA", ev->charging_ma);
 			atomic_set(&cached_chrg, ev->charging_ma);
 		}
 		return false;
@@ -650,12 +650,12 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_env_sensor_event(eh)) {
 		struct env_sensor_event *ev = cast_env_sensor_event(eh);
-		LOG_DBG("Event Temp: %.2f, humid %.2f, press %.2f", ev->temp,
+		LOG_DBG("Event Temp: %.2f, humid %.3f, press %.3f", ev->temp,
 			ev->humidity, ev->press);
-		/* Update shaddow register */
-		atomic_set(&cached_press, (uint32_t)ev->press);
-		atomic_set(&cached_hum, (uint32_t)ev->humidity);
-		atomic_set(&cached_temp, (uint32_t)ev->temp);
+		/* Update shaddow register. Multiply with scaling factor */
+		atomic_set(&cached_press, (uint32_t)(ev->press * 1000));
+		atomic_set(&cached_hum, (uint32_t)(ev->humidity * 1000));
+		atomic_set(&cached_temp, (uint32_t)(ev->temp * 100));
 		return false;
 	}
 	if (is_warn_correction_start_event(eh)) {
@@ -981,18 +981,43 @@ void build_poll_request(NofenceMessage *poll_req)
 			current_state.flash_erase_count;
 	}
 	if (m_confirm_acc_limits) {
-		/** @todo Add EEPROM storage read for movement */
-#if 0
-		poll_req.m.poll_message_req.has_usAccSigmaSleepLimit = true;
-		poll_req.m.poll_message_req.usAccSigmaSleepLimit =
-			EEPROM_GetAccSigmaSleepLimit();
-		poll_req.m.poll_message_req.has_usAccSigmaNoActivityLimit = true;
-		poll_req.m.poll_message_req.usAccSigmaNoActivityLimit =
-			EEPROM_GetAccSigmaNoActivityLimit();
-		poll_req.m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
-		poll_req.m.poll_message_req.usOffAnimalTimeLimitSec =
-			EEPROM_GetOffAnimalTimeLimitSec();
-#endif
+		/** @warning Assumes all the activity values are given with the
+		 *  m_confirm_acc_limits flag set in poll response from server.
+		 */
+		poll_req->m.poll_message_req.has_usAccSigmaSleepLimit = true;
+		poll_req->m.poll_message_req.has_usAccSigmaNoActivityLimit =
+			true;
+		poll_req->m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
+
+		int err = eep_uint16_read(
+			EEP_ACC_SIGMA_SLEEP_LIMIT,
+			&poll_req->m.poll_message_req.usAccSigmaSleepLimit);
+		if (err) {
+			char *e_msg =
+				"Failed to read EEP_ACC_SIGMA_SLEEP_LIMIT";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
+
+		err = eep_uint16_read(
+			EEP_ACC_SIGMA_NOACTIVITY_LIMIT,
+			&poll_req->m.poll_message_req.usAccSigmaNoActivityLimit);
+		if (err) {
+			char *e_msg =
+				"Failed to read EEP_ACC_SIGMA_NOACTIVITY_LIMIT";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
+
+		err = eep_uint16_read(
+			EEP_OFF_ANIMAL_TIME_LIMIT_SEC,
+			&poll_req->m.poll_message_req.usOffAnimalTimeLimitSec);
+		if (err) {
+			char *e_msg =
+				"Failed to read EEP_OFF_ANIMAL_TIME_LIMIT_SEC";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
 	}
 	if (m_confirm_ble_key) {
 		poll_req->m.poll_message_req.has_rgubcBleKey = true;
@@ -1218,7 +1243,7 @@ int send_binary_message(uint8_t *data, size_t len)
 
 		int err = k_sem_take(&send_out_ack,
 				     K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC));
-		if (err) {
+		if (err != 0) {
 			char *e_msg = "Timed out waiting for cellular ack";
 			nf_app_error(ERR_MESSAGING, -ETIMEDOUT, e_msg,
 				     strlen(e_msg));
@@ -1313,18 +1338,60 @@ void process_poll_response(NofenceMessage *proto)
 		LOG_INF("Poll period of %d minutes will be used.",
 			atomic_get(&poll_period_minutes));
 	}
+	m_confirm_acc_limits = false;
 	if (pResp->has_usAccSigmaSleepLimit) {
-		/* TODO: submit pResp->usAccSigmaSleepLimit to AMC module.
-		 * AMC will store it in eeprom or external flash. */
+		m_confirm_acc_limits = true;
+		int err = eep_uint16_write(EEP_ACC_SIGMA_SLEEP_LIMIT,
+					   pResp->usAccSigmaSleepLimit);
+		if (err) {
+			char *e_msg = "Error updating sleep sigma to eeprom";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
+
+		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
+		sigma_ev->type = SLEEP_SIGMA;
+		sigma_ev->param.sleep_sigma_value = pResp->usAccSigmaSleepLimit;
+		EVENT_SUBMIT(sigma_ev);
 	}
 	if (pResp->has_usAccSigmaNoActivityLimit) {
-		/* TODO: submit pResp->usAccSigmaNoActivityLimit to AMC
-		 * module. */
+		m_confirm_acc_limits = true;
+		int err = eep_uint16_write(EEP_ACC_SIGMA_NOACTIVITY_LIMIT,
+					   pResp->usAccSigmaNoActivityLimit);
+		if (err) {
+			char *e_msg =
+				"Error updating no activity sigma to eeprom";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
+
+		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
+		sigma_ev->type = NO_ACTIVITY_SIGMA;
+		sigma_ev->param.no_activity_sigma =
+			pResp->usAccSigmaNoActivityLimit;
+		EVENT_SUBMIT(sigma_ev);
 	}
 	if (pResp->has_usOffAnimalTimeLimitSec) {
-		/* TODO: submit pResp->usOffAnimalTimeLimitSec to AMC. */
+		m_confirm_acc_limits = true;
+		int err = eep_uint16_write(EEP_OFF_ANIMAL_TIME_LIMIT_SEC,
+					   pResp->usOffAnimalTimeLimitSec);
+		if (err) {
+			char *e_msg =
+				"Error updating off animal sigma to eeprom";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
+
+		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
+		sigma_ev->type = OFF_ANIMAL_SIGMA;
+		sigma_ev->param.off_animal_value =
+			pResp->usOffAnimalTimeLimitSec;
+		EVENT_SUBMIT(sigma_ev);
 	}
+
+	m_confirm_ble_key = false;
 	if (pResp->has_rgubcBleKey) {
+		m_confirm_ble_key = true;
 		LOG_INF("Received a ble_sec_key of size %d",
 			pResp->rgubcBleKey.size);
 		uint8_t current_ble_sec_key[EEP_BLE_SEC_KEY_LEN];
@@ -1349,9 +1416,7 @@ void process_poll_response(NofenceMessage *proto)
 	}
 	if (pResp->ulFenceDefVersion != current_state.fence_version &&
 	    new_fence_in_progress != pResp->ulFenceDefVersion) {
-		/* TODO: Download new fence and submit pResp->ulFenceDefVersion
-		 * to AMC */
-		//request frame 0
+		/* Request frame 0. */
 		first_frame = true;
 		LOG_INF("Requesting frame 0 for fence version %i.",
 			pResp->ulFenceDefVersion);

@@ -24,26 +24,21 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_GNSS_CONTROLLER_LOG_LEVEL);
 
 #define MIN_GNSS_RATE CONFIG_MINIMUM_ALLOWED_GNSS_RATE
 
-_Noreturn void publish_gnss_data(void *ctx);
-void set_gnss_rate(enum gnss_data_rate);
+static _Noreturn void publish_gnss_data(void *ctx);
 static int gnss_data_update_cb(const gnss_t *);
-void check_gnss_age(uint32_t);
+static void gnss_timed_out(void);
+static void gnss_clear_reset_count(void);
+static int gnss_set_mode(gnss_mode_t mode);
 
 static uint16_t current_rate;
 
 static gnss_t gnss_data_buffer;
-uint32_t gnss_age, ts, previous_ts;
 gnss_mode_t current_mode = GNSSMODE_NOMODE;
 
 gnss_t cached_gnss_data;
 
 const struct device *gnss_dev = NULL;
 uint8_t gnss_reset_count;
-/*
-K_THREAD_DEFINE(pub_gnss, STACK_SIZE,
-		publish_gnss_data, NULL, NULL, NULL,
-		PRIORITY, 0, 0);
-		*/
 
 K_THREAD_STACK_DEFINE(pub_gnss_stack, STACK_SIZE);
 struct k_thread pub_gnss_thread;
@@ -105,10 +100,8 @@ static int gnss_controller_reset_gnss(uint16_t mask)
 
 int gnss_controller_init(void)
 {
-	gnss_age = 0;
-	ts = 0;
-	previous_ts = 0;
 	gnss_reset_count = 0;
+
 	printk("Initializing gnss controller!\n");
 	gnss_dev = DEVICE_DT_GET(DT_ALIAS(gnss));
 	if (gnss_dev == NULL) {
@@ -165,27 +158,18 @@ power consumption crude test - end */
 	return 0;
 }
 
-_Noreturn void publish_gnss_data(void *ctx)
+static _Noreturn void publish_gnss_data(void *ctx)
 {
 	while (true) {
-		if (k_sem_take(&new_data_sem, K_SECONDS(25)) == 0) {
-			if (gnss_data_buffer.fix_ok) {
-				ts = k_uptime_get_32();
-				if (ts >= previous_ts) {
-					gnss_age = ts - previous_ts;
-				} else { //handle overflow
-					gnss_age =
-						UINT32_MAX + ts - previous_ts;
-				}
-				LOG_DBG("gnss fix age = age:%d, ts:%d",
-					gnss_age, ts);
-				check_gnss_age(gnss_age);
-				previous_ts = ts;
-			}
+		if (k_sem_take(&new_data_sem, K_SECONDS(5)) == 0) {
+			gnss_clear_reset_count();
 
 			struct gnss_data *new_data = new_gnss_data();
 			new_data->gnss_data = gnss_data_buffer;
 			new_data->timed_out = false;
+			LOG_INF("  GNSS data: %d, %d, %d, %d, %d", gnss_data_buffer.latest.lon,
+				gnss_data_buffer.latest.lat, gnss_data_buffer.latest.pvt_flags, gnss_data_buffer.latest.h_acc_dm,
+				gnss_data_buffer.latest.num_sv);
 			EVENT_SUBMIT(new_data);
 			if (k_sem_take(&cached_fix_sem, K_MSEC(100)) == 0) {
 				cached_gnss_data = gnss_data_buffer;
@@ -194,11 +178,7 @@ _Noreturn void publish_gnss_data(void *ctx)
 				LOG_WRN("Failed to update cached GNSS fix!\n");
 			}
 		} else {
-			char *msg = "GNSS data timed out!";
-			nf_app_error(ERR_GNSS_CONTROLLER, -ETIMEDOUT, msg,
-				     sizeof(*msg));
-
-			gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
+			gnss_timed_out();
 		}
 	}
 }
@@ -210,7 +190,7 @@ static int gnss_data_update_cb(const gnss_t *data)
 	return 0;
 }
 
-int gnss_set_mode(gnss_mode_t mode)
+static int gnss_set_mode(gnss_mode_t mode)
 {
 	/** @todo Add mode changes here. Should be in the gnss driver???? */
 	switch (mode) {
@@ -290,29 +270,25 @@ EVENT_SUBSCRIBE(MODULE, gnss_switch_on);
 EVENT_SUBSCRIBE(MODULE, gnss_set_mode_event);
 
 /**
- * @brief check whether the gnss fix is too old.
+ * @brief Handles GNSS timeouts when no messages has been received. 
+ *        Will reset GNSS with various modes depending on reset count. 
  *
- * @param[in] data Pointer to available gnss fix age.
- *
- * @return none, but GNSS receiver might be reset if the fix is too old.
- *
+ * @return None
  *
  */
-void check_gnss_age(uint32_t gnss_age)
+static void gnss_timed_out(void)
 {
 	LOG_DBG("resets %d", gnss_reset_count);
 
-	if ((gnss_age > GNSS_5SEC) && (gnss_reset_count < 1)) {
+	if (gnss_reset_count < 1) {
 		gnss_reset_count++;
 		gnss_controller_reset_gnss(GNSS_RESET_MASK_HOT);
-	} else if (gnss_age > GNSS_10SEC && gnss_reset_count < 2) {
+	} else if (gnss_reset_count < 2) {
 		gnss_reset_count++;
 		gnss_controller_reset_gnss(GNSS_RESET_MASK_WARM);
-	} else if (gnss_age > GNSS_20SEC && gnss_reset_count >= 2) {
+	} else if (gnss_reset_count >= 2) {
 		gnss_reset_count++;
 		gnss_controller_reset_gnss(GNSS_RESET_MASK_COLD);
-	} else if (gnss_age < GNSS_5SEC) {
-		gnss_reset_count = 0;
 	}
 
 	if (gnss_reset_count >= 3) {
@@ -321,4 +297,16 @@ void check_gnss_age(uint32_t gnss_age)
 		nf_app_error(ERR_GNSS_CONTROLLER, -ETIMEDOUT, msg,
 			     sizeof(*msg));
 	}
+}
+
+/**
+ * @brief Clears the reset count. Supposed to be called whenever 
+ *        a new GNSS data packet is received. 
+ *
+ * @return None
+ *
+ */
+static void gnss_clear_reset_count(void)
+{
+	gnss_reset_count = 0;
 }

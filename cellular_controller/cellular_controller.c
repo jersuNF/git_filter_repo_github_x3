@@ -5,12 +5,14 @@
 #include <zephyr.h>
 #include "nf_settings.h"
 #include "error_event.h"
+#include <modem_nf.h>
+#include "fw_upgrade_events.h"
 #include "selftest.h"
 
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define MY_PRIORITY CONFIG_RECV_THREAD_PRIORITY
 #define SOCKET_POLL_INTERVAL 0.25
-#define SOCK_RECV_TIMEOUT 45
+#define SOCK_RECV_TIMEOUT 15
 #define MODULE cellular_controller
 #define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_SEC
 
@@ -18,8 +20,12 @@ LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
 K_SEM_DEFINE(messaging_ack, 1, 1);
 
-char server_address[EEP_HOST_PORT_BUF_SIZE];
-char server_address_tmp[EEP_HOST_PORT_BUF_SIZE];
+K_THREAD_DEFINE(send_tcp_from_q, CONFIG_SEND_THREAD_STACK_SIZE,
+		send_tcp_fn, NULL, NULL, NULL,
+		CONFIG_SEND_THREAD_PRIORITY, 0, 0);
+
+char server_address[EEP_HOST_PORT_BUF_SIZE-1];
+char server_address_tmp[EEP_HOST_PORT_BUF_SIZE-1];
 static int server_port;
 static char server_ip[15];
 
@@ -34,12 +40,13 @@ int socket_receive(struct data *, char **);
 void listen_sock_poll(void);
 int8_t lte_init(void);
 bool lte_is_ready(void);
+
 K_SEM_DEFINE(listen_sem, 0, 1); /* this semaphore will be given by the modem
  * driver when receiving the UUSOLI urc code. Socket 0 is the listening
  * socket by design, however the 'socket' number returned in the UUSOLI =
  * number of currently opened sockets + 1 */
 static bool modem_is_ready = false;
-
+static bool keep_modem_awake = false;
 APP_DMEM struct configs conf = {
 	.ipv4 = {
 		.proto = "IPv4",
@@ -84,14 +91,11 @@ void receive_tcp(struct data *sock_data)
 				LOG_WRN("received %d bytes!\n", received);
 #endif
 				LOG_WRN("will take semaphore!\n");
-				if (k_sem_take(
-					    &messaging_ack,
-					    K_SECONDS(MESSAGING_ACK_TIMEOUT)) !=
-				    0) {
-					/* TODO: notify the error handler */
-					LOG_ERR("New message received while the messaging module "
-						"hasn't consumed the previous one!\n");
-					submit_error(OTHER, -1);
+				if (k_sem_take(&messaging_ack, K_SECONDS
+					       (MESSAGING_ACK_TIMEOUT)) != 0) {
+					char *e_msg = "Missed messaging ack!";
+					nf_app_error(ERR_MESSAGING, -EINPROGRESS, e_msg, strlen
+						(e_msg));
 				} else {
 					if (pMsgIn != NULL) {
 						k_free(pMsgIn);
@@ -108,23 +112,22 @@ void receive_tcp(struct data *sock_data)
 				}
 			} else if (received == 0) {
 				socket_idle_count += SOCKET_POLL_INTERVAL;
-				if (socket_idle_count > SOCK_RECV_TIMEOUT) {
-					LOG_ERR("Socket receive timed out!, "
-						"%f\n",
-						socket_idle_count);
-					submit_error(SOCKET_RECV, -ETIMEDOUT);
-					stop_tcp();
+				if (socket_idle_count > SOCK_RECV_TIMEOUT){
+					LOG_WRN("Socket receive timed out!");
+					if (!keep_modem_awake) stop_tcp();
 					connected = false;
 					socket_idle_count = 0;
 				}
 			} else {
-				LOG_ERR("Socket receive error!\n");
-				submit_error(SOCKET_RECV, received);
-				stop_tcp();
+				char *e_msg = "Socket receive error!";
+				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
+					(e_msg));
+				if (!keep_modem_awake) stop_tcp();
 				connected = false;
 				socket_idle_count = 0;
 			}
 		}
+		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
 	}
 }
 
@@ -142,11 +145,17 @@ void listen_sock_poll(void)
 
 int start_tcp(void)
 {
-	int ret = check_ip();
+	int ret = modem_nf_wakeup();
 	if (ret != 0) {
-		LOG_ERR("Failed to get ip "
-			"address!");
-		/*TODO: notify error handler*/
+		LOG_ERR("Failed to wake up the modem!");
+		modem_nf_reset();
+		return ret;
+	}
+	ret = check_ip();
+	if (ret != 0){
+		LOG_ERR("Failed to get ip address!");
+		char *e_msg = "Failed to get ip address!";
+		nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
 		return ret;
 	}
 	struct sockaddr_in addr4;
@@ -159,7 +168,9 @@ int start_tcp(void)
 		ret = socket_connect(&conf.ipv4, (struct sockaddr *)&addr4,
 				     sizeof(addr4));
 		if (ret < 0) {
-			submit_error(SOCKET_CONNECT, ret);
+			char *e_msg = "Socket connect error!";
+			nf_app_error(ERR_MESSAGING, -ECONNREFUSED, e_msg, strlen
+				(e_msg));
 			return ret;
 		}
 	}
@@ -188,18 +199,19 @@ int listen_tcp(void)
 
 static bool cellular_controller_event_handler(const struct event_header *eh)
 {
+	static bool ready_for_new_msg = true;
+	uint8_t *CharMsgOut = NULL;
 	if (is_messaging_ack_event(eh)) {
 		k_sem_give(&messaging_ack);
 		LOG_WRN("ACK received!\n");
 		return true;
 	} else if (is_messaging_stop_connection_event(eh)) {
-		stop_tcp();
+		if (!keep_modem_awake) stop_tcp();
 		connected = false;
 		return true;
-	} else if (is_messaging_host_address_event(eh)) {
-		int ret = eep_read_host_port(&server_address_tmp[0],
-					     EEP_HOST_PORT_BUF_SIZE - 1);
-		if (ret != 0) {
+	}else if (is_messaging_host_address_event(eh)) {
+		int ret = eep_read_host_port(&server_address_tmp[0], EEP_HOST_PORT_BUF_SIZE-1);
+		if (ret != 0){
 			LOG_ERR("Failed to read host address from eeprom!\n");
 		}
 		struct messaging_host_address_event *event =
@@ -219,54 +231,63 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		uint8_t ip_len;
 		ip_len = ptr_port - 1 - &server_address[0];
 		memcpy(&server_ip[0], &server_address[0], ip_len);
-		ret = memcmp(server_address, server_address_tmp,
-			     EEP_HOST_PORT_BUF_SIZE - 1);
-		if (ret != 0) {
+		ret = memcmp(server_address, server_address_tmp, EEP_HOST_PORT_BUF_SIZE-1);
+		if (ret != 0){
 			LOG_INF("New host address received!\n");
 			ret = eep_write_host_port(server_address);
-			if (ret != 0) {
+			if (ret != 0){
 				LOG_ERR("Failed to write new host address to "
 					"eeprom!\n");
 			}
 		}
 		return false;
-	} else if (is_messaging_proto_out_event(eh)) {
-		/* Accessing event data. */
-		struct messaging_proto_out_event *event =
-			cast_messaging_proto_out_event(eh);
-		uint8_t *pCharMsgOut = event->buf;
-		size_t MsgOutLen = event->len;
+	}else if (is_messaging_proto_out_event(eh)) {
+		if (ready_for_new_msg) {
+			ready_for_new_msg = false;
+			struct messaging_proto_out_event *event =
+				cast_messaging_proto_out_event(eh);
+			uint8_t *pCharMsgOut = event->buf;
+			size_t MsgOutLen = event->len;
 
-		int8_t err;
+			/* make a local copy of the message to send.*/
 
-		/* make a local copy of the message to send.*/
-		uint8_t *CharMsgOut;
-		CharMsgOut = (char *)k_malloc(MsgOutLen);
-		if (CharMsgOut == memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
-			LOG_DBG("Publishing ack to messaging!\n");
-			struct cellular_ack_event *ack =
-				new_cellular_ack_event();
-			EVENT_SUBMIT(ack);
-		}
+			CharMsgOut = (char *)k_malloc(MsgOutLen);
+			if (CharMsgOut ==
+			    memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
+				LOG_DBG("Publishing ack to messaging!\n");
+				struct cellular_ack_event *ack =
+					new_cellular_ack_event();
+				EVENT_SUBMIT(ack);
+			}
 
-		err = send_tcp(CharMsgOut, MsgOutLen);
-#if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
-		LOG_INF("Sending tcp message with len: %d", MsgOutLen);
-		for (int i = 0; i < MsgOutLen; i++) {
-			printk("\\x%02x", CharMsgOut[i]);
+			int err = send_tcp_q(CharMsgOut, MsgOutLen);
+			if (err != 0) {
+				char *e_msg = "Couldn't push message to queue!";
+				nf_app_error(ERR_MESSAGING, -EAGAIN, e_msg,
+					     strlen(e_msg));
+				k_free(CharMsgOut);
+				return false;
+			}
 		}
-		printk("\n");
-#endif
-		if (err < 0) { /* TODO: notify error handler! */
-			submit_error(SOCKET_SEND, err);
-			k_free(CharMsgOut);
-			return false;
-		}
-		k_free(CharMsgOut);
 		return false;
 	} else if (is_check_connection(eh)) {
 		k_sem_give(&connection_state_sem);
 		return false;
+	} else if (is_cellular_error_event(eh)) {
+		modem_is_ready = false;
+		connected = false;
+		return false;
+	} else if (is_free_message_mem_event(eh)) {
+		k_free(CharMsgOut);
+		ready_for_new_msg = true;
+	} else if (is_dfu_status_event(eh)) {
+		struct dfu_status_event *fw_upgrade_event =
+			cast_dfu_status_event(eh);
+		if (fw_upgrade_event->dfu_status == DFU_STATUS_IN_PROGRESS) {
+			keep_modem_awake = true;
+		} else {
+			keep_modem_awake = false;
+		}
 	}
 	return false;
 }
@@ -332,11 +353,11 @@ exit:
 
 static void cellular_controller_keep_alive(void *dev)
 {
+	int ret;
 	while (true) {
 		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
 			if (!cellular_controller_is_ready()) {
-				stop_tcp();
-				int ret = reset_modem();
+				ret = reset_modem();
 				if (ret == 0) {
 					ret = cellular_controller_connect(dev);
 					if (ret == 0) {
@@ -345,36 +366,25 @@ static void cellular_controller_keep_alive(void *dev)
 					}
 				}
 			}
-			if (cellular_controller_is_ready()) {
-				/*TODO: check actual socket connection
-				 * statusto determine the value of connected.*/
-				if (!connected) { //check_ip takes place in start_tcp()
-					// in this case.
-					int ret = start_tcp();
-					selftest_mark_state(SELFTEST_MODEM_POS, ret >= 0);
-					if (ret >= 0) {
+			if (cellular_controller_is_ready() && !keep_modem_awake) {
+				if(!connected){//check_ip
+					// takes place in start_tcp() in this
+					// case.
+					ret = start_tcp();
+					if (ret >= 0 ){
 						connected = true;
 						announce_connection_state(true);
-					} else {
-						LOG_WRN("Connection failed!");
-						stop_tcp();
-						announce_connection_state(
-							false);
+					}else {
+						if (!keep_modem_awake) stop_tcp();
+						announce_connection_state
+							(false);
 						/*TODO: notify error handler*/
 					}
 				} else {
-					int ret = check_ip();
-					if (ret != 0) {
-						char *e_msg =
-							"Failed to get ip address!";
-						LOG_ERR("%s (%d)",
-							log_strdup(e_msg), ret);
-						nf_app_error(
-							ERR_CELLULAR_CONTROLLER,
-							ret, e_msg,
-							strlen(e_msg));
-						announce_connection_state(
-							false);
+					ret = check_ip();
+					if (ret != 0){
+						announce_connection_state
+							(false);
 						/*TODO: notify error handler*/
 					} else {
 						announce_connection_state(true);
@@ -385,11 +395,16 @@ static void cellular_controller_keep_alive(void *dev)
 	}
 }
 
-void announce_connection_state(bool state)
-{
-	struct connection_state_event *ev = new_connection_state_event();
+void announce_connection_state(bool state){
+	struct connection_state_event *ev
+		= new_connection_state_event();
 	ev->state = state;
 	EVENT_SUBMIT(ev);
+	if (state == false){
+		if (!keep_modem_awake) stop_tcp();
+		modem_is_ready = false;
+		connected = false;
+	}
 }
 
 bool cellular_controller_is_ready(void)
@@ -400,14 +415,12 @@ bool cellular_controller_is_ready(void)
 int8_t cellular_controller_init(void)
 {
 	connected = false;
-
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {
 		char *e_msg = "GSM driver was not found!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), -ENODEV);
 		nf_app_error(ERR_CELLULAR_CONTROLLER, -ENODEV, e_msg,
 			     strlen(e_msg));
-		submit_error(OTHER, -1);
 		return -1;
 	}
 
@@ -430,3 +443,6 @@ EVENT_SUBSCRIBE(MODULE, messaging_proto_out_event);
 EVENT_SUBSCRIBE(MODULE, messaging_stop_connection_event);
 EVENT_SUBSCRIBE(MODULE, messaging_host_address_event);
 EVENT_SUBSCRIBE(MODULE, check_connection);
+EVENT_SUBSCRIBE(MODULE, free_message_mem_event);
+EVENT_SUBSCRIBE(MODULE, dfu_status_event);
+

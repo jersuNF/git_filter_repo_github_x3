@@ -299,6 +299,7 @@ void modem_poll_work_fn()
 		&send_q, &modem_poll_work,
 		K_MINUTES(atomic_get(&poll_period_minutes)));
 	/* Add logic for the periodic protobuf modem poller. */
+	LOG_INF("Starting periodic poll work and building poll request.");
 	NofenceMessage new_poll_msg;
 
 	if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
@@ -500,7 +501,6 @@ static bool event_handler(const struct event_header *eh)
 		/* Update date_time library which storage uses for ANO data. */
 		if (!date_time_set(tm_time)) {
 			LOG_ERR("Could not set date time from GNSS data");
-			return false;
 		} else {
 			LOG_INF("Now using GNSS unix timestamp instead: %s",
 				asctime(tm_time));
@@ -640,9 +640,7 @@ static bool event_handler(const struct event_header *eh)
 			/* We want battery voltage in deci volt */
 			atomic_set(&cached_batt,
 				   (uint16_t)(ev->battery_mv / 10));
-			LOG_DBG("Battery event: %u mV", ev->battery_mv);
 		} else if (ev->pwr_state == PWR_CHARGING) {
-			LOG_DBG("Charge event: %u mA", ev->charging_ma);
 			atomic_set(&cached_chrg, ev->charging_ma);
 		}
 		return false;
@@ -666,9 +664,9 @@ static bool event_handler(const struct event_header *eh)
 		/* Update shaddow register. Multiply with factor to get correct 
 		 * scaling on cloud side and include decmials. 
 		 */
-		atomic_set(&cached_press, (uint32_t)ev->press * 1000);
-		atomic_set(&cached_hum, (uint32_t)ev->humidity * 1000);
-		atomic_set(&cached_temp, (uint32_t)ev->temp * 100);
+		atomic_set(&cached_press, (uint32_t)(ev->press * 1000));
+		atomic_set(&cached_hum, (uint32_t)(ev->humidity * 1000));
+		atomic_set(&cached_temp, (uint32_t)(ev->temp * 100));
 		return false;
 	}
 	if (is_warn_correction_start_event(eh)) {
@@ -1267,7 +1265,7 @@ int send_binary_message(uint8_t *data, size_t len)
 
 		int err = k_sem_take(&send_out_ack,
 				     K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC));
-		if (err) {
+		if (err != 0) {
 			char *e_msg = "Timed out waiting for cellular ack";
 			nf_app_error(ERR_MESSAGING, -ETIMEDOUT, e_msg,
 				     strlen(e_msg));
@@ -1355,9 +1353,7 @@ void process_poll_response(NofenceMessage *proto)
 		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
 		EVENT_SUBMIT(r_ev);
 	}
-	/** TODO: set activation mode to (pResp->eActivationMode); 
-	  * Not used in legacy code? 
-	  */
+	/* TODO: set activation mode to (pResp->eActivationMode); */
 
 	if (pResp->has_bUseUbloxAno) {
 		/* TODO: publish enable ANO event to GPS controller */
@@ -1369,7 +1365,7 @@ void process_poll_response(NofenceMessage *proto)
 		use_server_time = true;
 		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
 		struct tm *tm_time = gmtime(&gm_time);
-		/* Updates date_time library which storage uses for ANO data. */
+		/* Update date_time library which storage uses for ANO data. */
 		int err = date_time_set(tm_time);
 		if (err) {
 			char *e_msg = "Error updating time from server";

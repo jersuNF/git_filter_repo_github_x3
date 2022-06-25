@@ -71,6 +71,7 @@ K_SEM_DEFINE(connection_ready, 0, 1);
 collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
 static int rat, mnc, rssi, min_rssi, max_rssi;
+static uint8_t ccid[20];
 
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
@@ -103,6 +104,7 @@ bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *);
 static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
 
 static bool m_transfer_boot_params = true;
+static bool gsm_ready = false;
 bool m_confirm_acc_limits, m_confirm_ble_key;
 
 K_MUTEX_DEFINE(send_binary_mutex);
@@ -318,11 +320,19 @@ void modem_poll_work_fn()
 	k_work_reschedule_for_queue(
 		&send_q, &modem_poll_work,
 		K_MINUTES(atomic_get(&poll_period_minutes)));
-	/* Add logic for the periodic protobuf modem poller. */
+	struct check_connection *ev = new_check_connection();
+	EVENT_SUBMIT(ev);
+
+	struct request_gsm_info_event *req_gsm_info
+		= new_request_gsm_info_event();
+	if (k_sem_take(&cache_lock_sem, K_SECONDS(30)) == 0) {
+		EVENT_SUBMIT(req_gsm_info);
+	}
+
 	LOG_INF("Starting periodic poll work and building poll request.");
 	NofenceMessage new_poll_msg;
 
-	if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
+	if (k_sem_take(&cache_lock_sem, K_SECONDS(30)) == 0) {
 		build_poll_request(&new_poll_msg);
 		encode_and_send_message(&new_poll_msg);
 		k_sem_give(&cache_lock_sem);
@@ -687,8 +697,10 @@ static bool event_handler(const struct event_header *eh)
 		rssi = ev->gsm_info.rssi;
 		min_rssi = ev->gsm_info.min_rssi;
 		max_rssi = ev->gsm_info.max_rssi;
-		LOG_WRN("RSSI, rat: %d, %d, %d, %d", rssi, min_rssi,
-			max_rssi,  rat);
+		memcpy(ccid, ev->gsm_info.ccid, sizeof(ccid));
+		LOG_WRN("RSSI, rat: %d, %d, %d, %d, %s", rssi, min_rssi,
+			max_rssi,  rat, ccid);
+		k_sem_give(&cache_lock_sem);
 		return false;
 	}
 
@@ -980,13 +992,11 @@ void build_poll_request(NofenceMessage *poll_req)
 		(uint16_t)atomic_get(&cached_batt);
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
-
+	poll_req->m.poll_message_req.has_xGsmInfo = true;
 	_GSM_INFO p_gsm_info;
 	p_gsm_info.ucRAT = (uint8_t)rat;
 	sprintf(p_gsm_info.xMMC_MNC,"%d", mnc);
-
 	poll_req->m.poll_message_req.xGsmInfo = p_gsm_info;
-	poll_req->m.poll_message_req.has_xGsmInfo = true;
 
 	if (current_state.flash_erase_count) {
 		// m_flash_erase_count is reset when we receive a poll reply
@@ -1056,6 +1066,8 @@ void build_poll_request(NofenceMessage *poll_req)
 			.has_ulApplicationVersion = true;
 		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion =
 			NF_X25_VERSION_NUMBER;
+		poll_req->m.poll_message_req.has_xSimCardId= true;
+		memcpy(poll_req->m.poll_message_req.xSimCardId, ccid, sizeof(poll_req->m.poll_message_req.xSimCardId));
 		/* TODO pshustad, clean up and re-enable the commented code below */
 		//		uint16_t xbootVersion;
 		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {

@@ -280,6 +280,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 	} else if (is_free_message_mem_event(eh)) {
 		k_free(CharMsgOut);
 		ready_for_new_msg = true;
+		return false;
 	} else if (is_dfu_status_event(eh)) {
 		struct dfu_status_event *fw_upgrade_event =
 			cast_dfu_status_event(eh);
@@ -288,6 +289,18 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		} else {
 			keep_modem_awake = false;
 		}
+		return false;
+	} else if (is_request_gsm_info_event(eh)) {
+		struct gsm_info this_session_info;
+		int ret = get_gsm_info(&this_session_info);
+		if (ret == 0) {
+			struct gsm_info_event *session_info
+				= new_gsm_info_event();
+			memcpy(&session_info->gsm_info, &this_session_info,
+			       sizeof(struct gsm_info));
+			EVENT_SUBMIT(session_info);
+		}
+		return false;
 	}
 	return false;
 }
@@ -351,6 +364,17 @@ exit:
 	return ret;
 }
 
+static void publish_gsm_info(void)
+{
+	struct gsm_info this_session_info;
+	if (get_gsm_info(&this_session_info) == 0) {
+		struct gsm_info_event *session_info = new_gsm_info_event();
+		memcpy(&session_info->gsm_info, &this_session_info,
+		       sizeof(struct gsm_info));
+		EVENT_SUBMIT(session_info);
+	}
+}
+
 static void cellular_controller_keep_alive(void *dev)
 {
 	int ret;
@@ -359,6 +383,7 @@ static void cellular_controller_keep_alive(void *dev)
 			if (!cellular_controller_is_ready()) {
 				ret = reset_modem();
 				if (ret == 0) {
+					publish_gsm_info();
 					ret = cellular_controller_connect(dev);
 					if (ret == 0) {
 						listen_tcp();
@@ -405,15 +430,7 @@ void announce_connection_state(bool state){
 		modem_is_ready = false;
 		connected = false;
 	}
-	struct gsm_info this_session_info;
-	int ret = get_gsm_info(&this_session_info);
-	if (ret == 0) {
-		struct gsm_info_event *session_info
-			= new_gsm_info_event();
-		memcpy(&session_info->gsm_info, &this_session_info,
-		       sizeof(struct gsm_info));
-		EVENT_SUBMIT(session_info);
-		}
+	publish_gsm_info();
 }
 
 bool cellular_controller_is_ready(void)
@@ -442,7 +459,6 @@ int8_t cellular_controller_init(void)
 			(void *)gsm_dev, NULL, NULL,
 			K_PRIO_COOP(CONFIG_CELLULAR_KEEP_ALIVE_THREAD_PRIORITY),
 			0, K_NO_WAIT);
-
 	return 0;
 }
 
@@ -454,4 +470,5 @@ EVENT_SUBSCRIBE(MODULE, messaging_host_address_event);
 EVENT_SUBSCRIBE(MODULE, check_connection);
 EVENT_SUBSCRIBE(MODULE, free_message_mem_event);
 EVENT_SUBSCRIBE(MODULE, dfu_status_event);
+EVENT_SUBSCRIBE(MODULE, request_gsm_info_event);
 

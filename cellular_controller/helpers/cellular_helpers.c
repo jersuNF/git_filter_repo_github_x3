@@ -186,6 +186,9 @@ int socket_receive(struct data *data, char **msg)
 
 int reset_modem(void)
 {
+	for (int i=0; i<=6; i++) {
+		(void)close(i);
+	}
 	return modem_nf_reset();
 }
 

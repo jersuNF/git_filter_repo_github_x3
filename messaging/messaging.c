@@ -334,8 +334,6 @@ void modem_poll_work_fn()
 	}
 }
 
-static int32_t sec_since_gnss_time = 0;
-
 static void zap_message_work_fn()
 {
 	NofenceMessage msg;

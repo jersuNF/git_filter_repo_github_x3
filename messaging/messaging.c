@@ -324,8 +324,8 @@ void modem_poll_work_fn()
 
 	if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
 		build_poll_request(&new_poll_msg);
-		encode_and_send_message(&new_poll_msg);
 		k_sem_give(&cache_lock_sem);
+		encode_and_send_message(&new_poll_msg);
 	} else {
 		LOG_ERR("Cached state semaphore hanged, retrying in 1 second.");
 		k_work_reschedule_for_queue(&send_q, &modem_poll_work,
@@ -455,79 +455,44 @@ void data_request_work_fn()
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_gnss_data(eh)) {
-		/* Check when we received server time last. */
-		int32_t server_time =
-			(int32_t)atomic_get(&server_timestamp_sec);
-		int32_t delta_server_time =
-			(int32_t)(k_uptime_get_32() / 1000) - server_time;
-
-		/* If we already have server time, just return. */
-		if (delta_server_time <= TWO_DAYS_SEC && server_time != 0) {
-			return false;
-		}
-
-		/* Check if we can use GNSS data based on the pvt_valid bits
-		 * and timestamp since correction. Doesn't need to be
-		 * atomic, since event handler thead is the only one
-		 * accessing it.
-		 */
 		struct gnss_data *ev = cast_gnss_data(eh);
-
-		/* TODO, pshustad, review, might block the EventManager for 200 ms ? */
-		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
-			if (k_sem_take(&cache_lock_sem, K_MSEC(200)) == 0) {
-				cached_fix = ev->gnss_data.lastfix;
-				k_sem_give(&cache_lock_sem);
-			}
-		}
-		if (!(ev->gnss_data.latest.pvt_valid & (1 << 0)) ||
-		    !(ev->gnss_data.latest.pvt_valid & (1 << 1))) {
-			return false;
-		}
-
-		if ((int32_t)(k_uptime_get_32() / 1000) - sec_since_gnss_time <
-		    SEC_HOUR) {
-			return false;
-		}
-
+		cached_gnss_mode = (gnss_mode_t)ev->gnss_data.lastfix.mode;
 		/** @todo Check if uint32_t to time_t typecast works. */
 		time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
 		struct tm *tm_time = gmtime(&gm_time);
 		/* Update date_time library which storage uses for ANO data. */
-		if (!date_time_set(tm_time)) {
-			LOG_ERR("Could not set date time from GNSS data");
-		} else {
-			LOG_INF("Now using GNSS unix timestamp instead: %s",
-				asctime(tm_time));
+		date_time_set(tm_time);
+
+		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
+			/* TODO, review pshustad, might block the event manager for 500 ms ? */
+			if (k_sem_take(&cache_lock_sem, K_MSEC(50)) == 0) {
+				cached_fix = ev->gnss_data.lastfix;
+				k_sem_give(&cache_lock_sem);
+			}
 		}
-
-		sec_since_gnss_time = (int32_t)(k_uptime_get_32() / 1000);
-
-		cached_gnss_mode = (gnss_mode_t)ev->gnss_data.lastfix.mode;
 		return false;
 	}
-
 	if (is_ble_ctrl_event(eh)) {
 		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
 		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
 			/* Message queue is full: purge old data & try again */
 			k_msgq_purge(&ble_ctrl_msgq);
 		}
-		return false;
+		return true;
 	}
 	if (is_ble_cmd_event(eh)) {
 		struct ble_cmd_event *ev = cast_ble_cmd_event(eh);
 		while (k_msgq_put(&ble_cmd_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&ble_cmd_msgq);
 		}
-		return false;
+		return true;
 	}
 	if (is_ble_data_event(eh)) {
 		struct ble_data_event *ev = cast_ble_data_event(eh);
 		while (k_msgq_put(&ble_data_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&ble_data_msgq);
 		}
-		return false;
+		return true;
 	}
 	if (is_cellular_proto_in_event(eh)) {
 		struct cellular_proto_in_event *ev =
@@ -535,7 +500,7 @@ static bool event_handler(const struct event_header *eh)
 		while (k_msgq_put(&lte_proto_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&lte_proto_msgq);
 		}
-		return false;
+		return true;
 	}
 	if (is_update_collar_mode(eh)) {
 		struct update_collar_mode *ev = cast_update_collar_mode(eh);
@@ -581,17 +546,6 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_cellular_ack_event(eh)) {
 		k_sem_give(&send_out_ack);
-		return false;
-	}
-	if (is_gnss_data(eh)) {
-		struct gnss_data *ev = cast_gnss_data(eh);
-		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
-			/* TODO, review pshustad, might block the event manager for 500 ms ? */
-			if (k_sem_take(&cache_lock_sem, K_MSEC(500)) == 0) {
-				cached_fix = ev->gnss_data.lastfix;
-				k_sem_give(&cache_lock_sem);
-			}
-		}
 		return false;
 	}
 

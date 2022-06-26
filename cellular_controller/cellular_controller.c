@@ -47,6 +47,7 @@ K_SEM_DEFINE(listen_sem, 0, 1); /* this semaphore will be given by the modem
  * number of currently opened sockets + 1 */
 static bool modem_is_ready = false;
 static bool keep_modem_awake = false;
+static bool sending_in_progress = false;
 APP_DMEM struct configs conf = {
 	.ipv4 = {
 		.proto = "IPv4",
@@ -114,17 +115,37 @@ void receive_tcp(struct data *sock_data)
 				socket_idle_count += SOCKET_POLL_INTERVAL;
 				if (socket_idle_count > SOCK_RECV_TIMEOUT){
 					LOG_WRN("Socket receive timed out!");
-					if (!keep_modem_awake) stop_tcp();
-					connected = false;
-					socket_idle_count = 0;
+					if (!keep_modem_awake &&
+					    !sending_in_progress) {
+						int ret = stop_tcp();
+						if (ret == 0) {
+							struct modem_state
+								*modem_inavtive =
+								new_modem_state();
+							modem_inavtive->mode
+								= SLEEP;
+						}
+						connected = false;
+						socket_idle_count = 0;
+					}
 				}
 			} else {
 				char *e_msg = "Socket receive error!";
 				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
 					(e_msg));
-				if (!keep_modem_awake) stop_tcp();
-				connected = false;
-				socket_idle_count = 0;
+				if (!keep_modem_awake && !sending_in_progress) {
+					int ret = stop_tcp();
+					if (ret == 0) {
+						struct modem_state
+							*modem_inavtive =
+							new_modem_state();
+						modem_inavtive->mode
+							= SLEEP;
+					}
+					connected = false;
+					socket_idle_count = 0;
+				}
+
 			}
 		}
 		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
@@ -206,10 +227,19 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		LOG_WRN("ACK received!\n");
 		return true;
 	} else if (is_messaging_stop_connection_event(eh)) {
-		if (!keep_modem_awake) stop_tcp();
-		connected = false;
+		if (!keep_modem_awake && !sending_in_progress) {
+			int ret = stop_tcp();
+			if (ret == 0) {
+				struct modem_state
+					*modem_inavtive =
+					new_modem_state();
+				modem_inavtive->mode
+					= SLEEP;
+			}
+			connected = false;
+		}
 		return true;
-	}else if (is_messaging_host_address_event(eh)) {
+	} else if (is_messaging_host_address_event(eh)) {
 		int ret = eep_read_host_port(&server_address_tmp[0], EEP_HOST_PORT_BUF_SIZE-1);
 		if (ret != 0){
 			LOG_ERR("Failed to read host address from eeprom!\n");
@@ -242,6 +272,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		}
 		return false;
 	}else if (is_messaging_proto_out_event(eh)) {
+		sending_in_progress = true;
 		if (ready_for_new_msg) {
 			ready_for_new_msg = false;
 			struct messaging_proto_out_event *event =
@@ -273,13 +304,10 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 	} else if (is_check_connection(eh)) {
 		k_sem_give(&connection_state_sem);
 		return false;
-	} else if (is_cellular_error_event(eh)) {
-		modem_is_ready = false;
-		connected = false;
-		return false;
 	} else if (is_free_message_mem_event(eh)) {
 		k_free(CharMsgOut);
 		ready_for_new_msg = true;
+		sending_in_progress = false;
 	} else if (is_dfu_status_event(eh)) {
 		struct dfu_status_event *fw_upgrade_event =
 			cast_dfu_status_event(eh);
@@ -374,8 +402,17 @@ static void cellular_controller_keep_alive(void *dev)
 					if (ret >= 0 ){
 						connected = true;
 						announce_connection_state(true);
-					}else {
-						if (!keep_modem_awake) stop_tcp();
+					} else {
+						if (!keep_modem_awake) {
+							int ret = stop_tcp();
+							if (ret == 0) {
+								struct modem_state
+									*modem_inavtive =
+									new_modem_state();
+								modem_inavtive->mode
+									= SLEEP;
+							}
+						}
 						announce_connection_state
 							(false);
 						/*TODO: notify error handler*/
@@ -383,6 +420,16 @@ static void cellular_controller_keep_alive(void *dev)
 				} else {
 					ret = check_ip();
 					if (ret != 0){
+						if (!keep_modem_awake) {
+							int ret = stop_tcp();
+							if (ret == 0) {
+								struct modem_state
+									*modem_inavtive =
+									new_modem_state();
+								modem_inavtive->mode
+									= SLEEP;
+							}
+						}
 						announce_connection_state
 							(false);
 						/*TODO: notify error handler*/
@@ -401,7 +448,6 @@ void announce_connection_state(bool state){
 	ev->state = state;
 	EVENT_SUBMIT(ev);
 	if (state == false){
-		if (!keep_modem_awake) stop_tcp();
 		modem_is_ready = false;
 		connected = false;
 	}

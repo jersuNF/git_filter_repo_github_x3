@@ -12,7 +12,6 @@
 #include "ble_data_event.h"
 #include "ble_cmd_event.h"
 #include "nofence_service.h"
-#include "lte_proto_event.h"
 #include "pwr_event.h"
 #include "env_sensor_event.h"
 
@@ -117,7 +116,7 @@ K_MSGQ_DEFINE(ble_data_msgq, sizeof(struct ble_data_event),
 	      CONFIG_MSGQ_BLE_DATA_SIZE, 4);
 K_MSGQ_DEFINE(ble_cmd_msgq, sizeof(struct ble_cmd_event),
 	      CONFIG_MSGQ_BLE_CMD_SIZE, 4);
-K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct lte_proto_event),
+K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct messaging_proto_out_event),
 	      CONFIG_MSGQ_LTE_PROTO_SIZE, 4);
 
 #define NUM_MSGQ_EVENTS 4
@@ -693,7 +692,6 @@ EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
 EVENT_SUBSCRIBE(MODULE, ble_cmd_event);
 EVENT_SUBSCRIBE(MODULE, ble_data_event);
 
-EVENT_SUBSCRIBE(MODULE, lte_proto_event);
 EVENT_SUBSCRIBE(MODULE, cellular_ack_event);
 EVENT_SUBSCRIBE(MODULE, cellular_proto_in_event);
 EVENT_SUBSCRIBE(MODULE, update_collar_mode);
@@ -809,15 +807,15 @@ static void process_lte_proto_event(void)
 	 * 	buf++;
 	 * }
 	 */
-
+	struct messaging_ack_event *ack = new_messaging_ack_event();
+	EVENT_SUBMIT(ack);
 	if (err) {
 		char *e_msg = "Error decoding protobuf message";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
-	struct messaging_ack_event *ack = new_messaging_ack_event();
-	EVENT_SUBMIT(ack);
+
 	/* process poll response */
 	if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
 		LOG_INF("Process poll reponse");

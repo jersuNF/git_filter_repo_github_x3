@@ -12,7 +12,7 @@
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define MY_PRIORITY CONFIG_RECV_THREAD_PRIORITY
 #define SOCKET_POLL_INTERVAL 0.25
-#define SOCK_RECV_TIMEOUT 15
+#define SOCK_RECV_TIMEOUT 10
 #define MODULE cellular_controller
 #define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_SEC
 
@@ -225,8 +225,9 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 	if (is_messaging_ack_event(eh)) {
 		k_sem_give(&messaging_ack);
 		LOG_WRN("ACK received!\n");
-		return true;
-	} else if (is_messaging_stop_connection_event(eh)) {
+		return false;
+	}
+	if (is_messaging_stop_connection_event(eh)) {
 		if (!keep_modem_awake && !sending_in_progress) {
 			int ret = stop_tcp();
 			if (ret == 0) {
@@ -238,8 +239,9 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			}
 			connected = false;
 		}
-		return true;
-	} else if (is_messaging_host_address_event(eh)) {
+		return false;
+	}
+	if (is_messaging_host_address_event(eh)) {
 		int ret = eep_read_host_port(&server_address_tmp[0], EEP_HOST_PORT_BUF_SIZE-1);
 		if (ret != 0){
 			LOG_ERR("Failed to read host address from eeprom!\n");
@@ -271,7 +273,8 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			}
 		}
 		return false;
-	}else if (is_messaging_proto_out_event(eh)) {
+	}
+	if (is_messaging_proto_out_event(eh)) {
 		sending_in_progress = true;
 		if (ready_for_new_msg) {
 			ready_for_new_msg = false;
@@ -301,14 +304,18 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			}
 		}
 		return false;
-	} else if (is_check_connection(eh)) {
+	}
+	if (is_check_connection(eh)) {
 		k_sem_give(&connection_state_sem);
 		return false;
-	} else if (is_free_message_mem_event(eh)) {
+	}
+	if (is_free_message_mem_event(eh)) {
 		k_free(CharMsgOut);
 		ready_for_new_msg = true;
 		sending_in_progress = false;
-	} else if (is_dfu_status_event(eh)) {
+		return false;
+	}
+	if (is_dfu_status_event(eh)) {
 		struct dfu_status_event *fw_upgrade_event =
 			cast_dfu_status_event(eh);
 		if (fw_upgrade_event->dfu_status == DFU_STATUS_IN_PROGRESS) {
@@ -316,6 +323,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		} else {
 			keep_modem_awake = false;
 		}
+		return false;
 	}
 	return false;
 }
@@ -450,6 +458,13 @@ void announce_connection_state(bool state){
 	if (state == false){
 		modem_is_ready = false;
 		connected = false;
+	}
+	if (state == true) {
+		struct modem_state
+			*modem_inavtive =
+			new_modem_state();
+		modem_inavtive->mode
+			= POWER_ON;
 	}
 	struct gsm_info this_session_info;
 	int ret = get_gsm_info(&this_session_info);

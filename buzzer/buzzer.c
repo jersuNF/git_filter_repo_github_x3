@@ -480,6 +480,8 @@ void play()
 	case SND_OFF: {
 		err = set_pwm_to_idle();
 		if (err) {
+			/* Release external clock usage. See XF-181 */
+			pwr_module_use_extclk(REQ_SOUND_CONTROLLER, false);
 			return;
 		}
 		break;

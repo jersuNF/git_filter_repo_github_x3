@@ -9,6 +9,7 @@
 #include <device.h>
 #include <drivers/pwm.h>
 #include "melodies.h"
+#include "pwr_module.h"
 
 #include "error_event.h"
 
@@ -462,6 +463,10 @@ void play()
 	/* Set to false indicating we're ready to wait for true signal again. */
 	//atomic_set(&stop_sound_signal, false);
 
+	/* Force external clock usage, to avoid frequency changes in case of
+	 * concurrent BLE activity. See XF-181 */
+	pwr_module_use_extclk(REQ_SOUND_CONTROLLER, true);
+
 	enum sound_event_type type = atomic_get(&current_type_signal);
 
 	if (type != SND_OFF && type != SND_WARN) {
@@ -528,6 +533,9 @@ void play()
 		break;
 	}
 	}
+
+	/* Release external clock usage. See XF-181 */
+	pwr_module_use_extclk(REQ_SOUND_CONTROLLER, false);
 
 	struct sound_status_event *ev_idle = new_sound_status_event();
 	ev_idle->status = SND_STATUS_IDLE;

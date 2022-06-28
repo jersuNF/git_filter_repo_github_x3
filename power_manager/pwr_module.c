@@ -20,8 +20,13 @@
 #include "watchdog_event.h"
 #include "messaging_module_events.h"
 
+#if CONFIG_CLOCK_CONTROL_NRF
 #include <drivers/clock_control.h>
 #include <drivers/clock_control/nrf_clock_control.h>
+
+#define CLOCK_NODE DT_INST(0, nordic_nrf_clock)
+static const struct device *clock0;
+#endif
 
 #if CONFIG_ADC_NRFX_SAADC
 #include "charging.h"
@@ -30,9 +35,6 @@
 #include <logging/log.h>
 
 LOG_MODULE_REGISTER(MODULE, 4);
-
-#define CLOCK_NODE DT_INST(0, nordic_nrf_clock)
-static const struct device *clock0;
 
 static uint32_t extclk_request_flags = 0;
 
@@ -274,6 +276,7 @@ static int pwr_module_extclk_enable(bool enable)
 {
 	int ret = 0;
 
+#if CONFIG_CLOCK_CONTROL_NRF
 	const char *clock_label = DT_LABEL(CLOCK_NODE);
 	clock0 = device_get_binding(clock_label);
 	if (enable) {
@@ -281,6 +284,7 @@ static int pwr_module_extclk_enable(bool enable)
 	} else {
 		ret = clock_control_off(clock0, CLOCK_CONTROL_NRF_SUBSYS_HF);
 	}
+#endif
 
 	return ret;
 }

@@ -48,6 +48,8 @@
 #define SECONDS_IN_THREE_DAYS 259200
 #define TWO_DAYS_SEC SEC_DAY * 2
 
+#define CACHE_READY_TIMEOUT_SEC 5
+
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
 
 #define EMPTY_FENCE_CRC 0xFFFF
@@ -63,17 +65,30 @@ atomic_t cached_temp = ATOMIC_INIT(0);
 atomic_t cached_press = ATOMIC_INIT(0);
 atomic_t cached_hum = ATOMIC_INIT(0);
 
+K_SEM_DEFINE(cache_ready_sem, 0, 1);
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
 K_SEM_DEFINE(send_out_ack, 0, 1);
 K_SEM_DEFINE(connection_ready, 0, 1);
 
-collar_state_struct_t current_state = {
-	.collar_mode = Mode_Mode_UNKNOWN,
-	.collar_status = CollarStatus_CollarStatus_UNKNOWN,
-	.fence_status = FenceStatus_NotStarted
-};
-
+collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
+
+typedef enum {
+	COLLAR_MODE,
+	COLLAR_STATUS,
+	FENCE_STATUS,
+	FENCE_VERSION,
+	FLASH_ERASE_COUNT,
+	ZAP_COUNT,
+	GNSS_STRUCT,
+	CACHED_READY_END_OF_LIST
+} cached_and_ready_enum;
+
+/* Used to check if we've cached what is requried before we perform the 
+ * INITIAL, FIRST poll request to server.
+ */
+static int cached_and_ready_reg[CACHED_READY_END_OF_LIST];
+
 static int rat, mnc, rssi, min_rssi, max_rssi;
 
 static uint32_t new_fence_in_progress;
@@ -326,14 +341,25 @@ void modem_poll_work_fn()
 	LOG_INF("Starting periodic poll work and building poll request.");
 	NofenceMessage new_poll_msg;
 
-	if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
-		build_poll_request(&new_poll_msg);
-		k_sem_give(&cache_lock_sem);
-		encode_and_send_message(&new_poll_msg);
+	/* Only process the poll request if cache is ready. */
+	if (k_sem_take(&cache_ready_sem, K_SECONDS(CACHE_READY_TIMEOUT_SEC)) ==
+	    0) {
+		k_sem_give(&cache_ready_sem);
+		/* Semaphore for data protection, @todo use mutex in future. */
+		if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
+			build_poll_request(&new_poll_msg);
+			k_sem_give(&cache_lock_sem);
+			encode_and_send_message(&new_poll_msg);
+		} else {
+			LOG_ERR("Cached state semaphore hanged, retrying in 1 second.");
+			k_work_reschedule_for_queue(&send_q, &modem_poll_work,
+						    K_SECONDS(1));
+			return;
+		}
 	} else {
-		LOG_ERR("Cached state semaphore hanged, retrying in 1 second.");
+		LOG_ERR("Timed out. Cached data not ready yet, retrying in 5 seconds.");
 		k_work_reschedule_for_queue(&send_q, &modem_poll_work,
-					    K_SECONDS(1));
+					    K_SECONDS(5));
 		return;
 	}
 }
@@ -446,6 +472,21 @@ void data_request_work_fn()
 		new_request_env_sensor_event();
 	EVENT_SUBMIT(ev_env);
 }
+
+static void update_cache_reg(cached_and_ready_enum index)
+{
+	LOG_INF("HERE! %i", index);
+	cached_and_ready_reg[index] = 1;
+	for (int i = 0; i < CACHED_READY_END_OF_LIST; i++) {
+		if (cached_and_ready_reg[i] == 0) {
+			return;
+		}
+	}
+	LOG_INF("Given!");
+	/* All values are 1, give semaphore. */
+	k_sem_give(&cache_ready_sem);
+}
+
 /**
  * @brief Main event handler function. 
  * 
@@ -472,6 +513,7 @@ static bool event_handler(const struct event_header *eh)
 				k_sem_give(&cache_lock_sem);
 			}
 		}
+		update_cache_reg(GNSS_STRUCT);
 		return false;
 	}
 	if (is_ble_ctrl_event(eh)) {
@@ -507,21 +549,26 @@ static bool event_handler(const struct event_header *eh)
 	if (is_update_collar_mode(eh)) {
 		struct update_collar_mode *ev = cast_update_collar_mode(eh);
 		current_state.collar_mode = ev->collar_mode;
+		update_cache_reg(COLLAR_MODE);
 		return false;
 	}
 	if (is_update_collar_status(eh)) {
 		struct update_collar_status *ev = cast_update_collar_status(eh);
 		current_state.collar_status = ev->collar_status;
+		update_cache_reg(COLLAR_STATUS);
 		return false;
 	}
 	if (is_update_fence_status(eh)) {
 		struct update_fence_status *ev = cast_update_fence_status(eh);
 		current_state.fence_status = ev->fence_status;
+		update_cache_reg(FENCE_STATUS);
 		return false;
 	}
 	if (is_update_fence_version(eh)) {
 		struct update_fence_version *ev = cast_update_fence_version(eh);
 		current_state.fence_version = ev->fence_version;
+
+		update_cache_reg(FENCE_VERSION);
 
 		/* Notify server as soon as the new fence is activated. */
 		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
@@ -533,6 +580,7 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_update_flash_erase(eh)) {
 		current_state.flash_erase_count++;
+		update_cache_reg(FLASH_ERASE_COUNT);
 		return false;
 	}
 	if (is_update_zap_count(eh)) {
@@ -544,6 +592,7 @@ static bool event_handler(const struct event_header *eh)
 		if (err < 0) {
 			LOG_ERR("Error reschedule zap work: %d", err);
 		}
+		update_cache_reg(ZAP_COUNT);
 		return false;
 	}
 	if (is_cellular_ack_event(eh)) {

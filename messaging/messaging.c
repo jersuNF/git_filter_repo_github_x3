@@ -475,14 +475,12 @@ void data_request_work_fn()
 
 static void update_cache_reg(cached_and_ready_enum index)
 {
-	LOG_INF("HERE! %i", index);
 	cached_and_ready_reg[index] = 1;
 	for (int i = 0; i < CACHED_READY_END_OF_LIST; i++) {
 		if (cached_and_ready_reg[i] == 0) {
 			return;
 		}
 	}
-	LOG_INF("Given!");
 	/* All values are 1, give semaphore. */
 	k_sem_give(&cache_ready_sem);
 }

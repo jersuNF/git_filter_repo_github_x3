@@ -127,6 +127,8 @@ void receive_tcp(struct data *sock_data)
 						}
 						connected = false;
 						socket_idle_count = 0;
+					} else {
+						k_yield();
 					}
 				}
 			} else {
@@ -320,6 +322,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			cast_dfu_status_event(eh);
 		if (fw_upgrade_event->dfu_status == DFU_STATUS_IN_PROGRESS) {
 			keep_modem_awake = true;
+			stop_rssi();
 		} else {
 			keep_modem_awake = false;
 		}

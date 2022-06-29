@@ -117,6 +117,11 @@ static inline int update_pasture_from_stg(void)
 		struct update_fence_version *ver = new_update_fence_version();
 		ver->fence_version = pasture->m.ul_fence_def_version;
 		EVENT_SUBMIT(ver);
+	} else {
+		char *e_msg = "Pasture was not been cached correctly.";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_AMC, -ENODATA, e_msg, strlen(e_msg));
+		return -ENODATA;
 	}
 
 	k_sem_give(&fence_data_sem);

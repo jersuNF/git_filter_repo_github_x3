@@ -45,7 +45,7 @@ static uint8_t pain_cnt_def_free = _PAIN_CNT_DEF_ESCAPED;
  *  eeprom on init.
  */
 static Mode current_mode = Mode_Mode_UNKNOWN;
-static FenceStatus current_fence_status = FenceStatus_FenceStatus_UNKNOWN;
+static FenceStatus current_fence_status = FenceStatus_NotStarted;
 static CollarStatus current_collar_status = CollarStatus_CollarStatus_UNKNOWN;
 static gnss_mode_t current_gnss_mode = GNSSMODE_NOMODE;
 

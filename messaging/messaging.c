@@ -67,7 +67,12 @@ K_SEM_DEFINE(cache_lock_sem, 1, 1);
 K_SEM_DEFINE(send_out_ack, 0, 1);
 K_SEM_DEFINE(connection_ready, 0, 1);
 
-collar_state_struct_t current_state;
+collar_state_struct_t current_state = {
+	.collar_mode = Mode_Mode_UNKNOWN,
+	.collar_status = CollarStatus_CollarStatus_UNKNOWN,
+	.fence_status = FenceStatus_NotStarted
+};
+
 gnss_last_fix_struct_t cached_fix;
 static int rat, mnc, rssi, min_rssi, max_rssi;
 
@@ -638,8 +643,8 @@ static bool event_handler(const struct event_header *eh)
 		rssi = ev->gsm_info.rssi;
 		min_rssi = ev->gsm_info.min_rssi;
 		max_rssi = ev->gsm_info.max_rssi;
-		LOG_WRN("RSSI, rat: %d, %d, %d, %d", rssi, min_rssi,
-			max_rssi,  rat);
+		LOG_WRN("RSSI, rat: %d, %d, %d, %d", rssi, min_rssi, max_rssi,
+			rat);
 		return false;
 	}
 
@@ -933,7 +938,7 @@ void build_poll_request(NofenceMessage *poll_req)
 
 	_GSM_INFO p_gsm_info;
 	p_gsm_info.ucRAT = (uint8_t)rat;
-	sprintf(p_gsm_info.xMMC_MNC,"%d", mnc);
+	sprintf(p_gsm_info.xMMC_MNC, "%d", mnc);
 
 	poll_req->m.poll_message_req.xGsmInfo = p_gsm_info;
 	poll_req->m.poll_message_req.has_xGsmInfo = true;

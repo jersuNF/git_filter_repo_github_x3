@@ -249,6 +249,16 @@ int log_and_fetch_battery_voltage(void)
 	return batt_mV;
 }
 
+int fetch_battery_percent(void)
+{
+	int batt_mV = battery_sample_averaged();
+	if (batt_mV < 0) {
+		LOG_ERR("Failed to read battery voltage: %d", batt_mV);
+		return -ENOENT;
+	}
+	return battery_level_soc(batt_mV, levels);
+}
+
 /**
  * @brief Main event handler function. 
  * 

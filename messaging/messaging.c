@@ -498,11 +498,17 @@ static bool event_handler(const struct event_header *eh)
 		/** @todo Check if uint32_t to time_t typecast works. */
 		time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
 		struct tm *tm_time = gmtime(&gm_time);
-		/* Update date_time library which storage uses for ANO data. */
-		date_time_set(tm_time);
+
+		if (tm_time->tm_year < 2015) {
+			LOG_DBG("Invalid gnss packet.");
+			return false;
+		}
 
 		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
-			/* TODO, review pshustad, might block the event manager for 500 ms ? */
+			/* Update date_time library which storage uses for ANO data. */
+			date_time_set(tm_time);
+
+			/* TODO, review pshustad, might block the event manager for 50 ms ? */
 			if (k_sem_take(&cache_lock_sem, K_MSEC(50)) == 0) {
 				cached_fix = ev->gnss_data.lastfix;
 				k_sem_give(&cache_lock_sem);

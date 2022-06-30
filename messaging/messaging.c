@@ -495,18 +495,20 @@ static bool event_handler(const struct event_header *eh)
 	if (is_gnss_data(eh)) {
 		struct gnss_data *ev = cast_gnss_data(eh);
 		cached_gnss_mode = (gnss_mode_t)ev->gnss_data.lastfix.mode;
-		time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
-		struct tm *tm_time = gmtime(&gm_time);
 
 		/* Update that we received GNSS data regardless of validity. */
 		update_cache_reg(GNSS_STRUCT);
 
-		if (tm_time->tm_year < 2015) {
-			LOG_DBG("Invalid gnss packet.");
-			return false;
-		}
-
 		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
+			time_t gm_time =
+				(time_t)ev->gnss_data.lastfix.unix_timestamp;
+			struct tm *tm_time = gmtime(&gm_time);
+
+			if (tm_time->tm_year < 2015) {
+				LOG_DBG("Invalid gnss packet.");
+				return false;
+			}
+
 			/* Update date_time library which storage uses for ANO data. */
 			date_time_set(tm_time);
 

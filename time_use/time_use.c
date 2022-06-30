@@ -271,6 +271,11 @@ void collect_stats(void)
 			if (histogram.animal_behave.has_usStepCounter) {
 				histogram.animal_behave.usStepCounter = steps;
 				LOG_INF("Steps: %d", histogram.animal_behave.usStepCounter);
+			} else { /*send zero steps as agreed with the backend
+ * team.*/
+				histogram.animal_behave.has_usStepCounter =
+					true;
+				histogram.animal_behave.usStepCounter = 0;
 			}
 
 			//*****************Histogram to predict Current profile of the collar********************

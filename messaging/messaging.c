@@ -78,7 +78,7 @@ typedef enum {
 	COLLAR_STATUS,
 	FENCE_STATUS,
 	FENCE_VERSION,
-	FLASH_ERASE_COUNT,
+	/** @todo Not written to eeprom, should it? -> FLASH_ERASE_COUNT,*/
 	ZAP_COUNT,
 	GNSS_STRUCT,
 	CACHED_READY_END_OF_LIST
@@ -344,22 +344,19 @@ void modem_poll_work_fn()
 	/* Only process the poll request if cache is ready. */
 	if (k_sem_take(&cache_ready_sem, K_SECONDS(CACHE_READY_TIMEOUT_SEC)) ==
 	    0) {
-		k_sem_give(&cache_ready_sem);
-		/* Semaphore for data protection, @todo use mutex in future. */
-		if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
-			build_poll_request(&new_poll_msg);
-			k_sem_give(&cache_lock_sem);
-			encode_and_send_message(&new_poll_msg);
-		} else {
-			LOG_ERR("Cached state semaphore hanged, retrying in 1 second.");
-			k_work_reschedule_for_queue(&send_q, &modem_poll_work,
-						    K_SECONDS(1));
-			return;
-		}
+		LOG_WRN("Timed out. Cached data not ready yet. Just sending the data that we have..");
+	}
+	k_sem_give(&cache_ready_sem);
+
+	/* Semaphore for data protection, @todo use mutex in future. */
+	if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
+		build_poll_request(&new_poll_msg);
+		k_sem_give(&cache_lock_sem);
+		encode_and_send_message(&new_poll_msg);
 	} else {
-		LOG_ERR("Timed out. Cached data not ready yet, retrying in 5 seconds.");
+		LOG_ERR("Cached state semaphore hanged, retrying in 1 second.");
 		k_work_reschedule_for_queue(&send_q, &modem_poll_work,
-					    K_SECONDS(5));
+					    K_SECONDS(1));
 		return;
 	}
 }
@@ -578,7 +575,10 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_update_flash_erase(eh)) {
 		current_state.flash_erase_count++;
-		update_cache_reg(FLASH_ERASE_COUNT);
+		/** @todo Not written to @eeprom. Should it? And also be added to
+		 * update cache reg??
+		 */
+		/*update_cache_reg(FLASH_ERASE_COUNT);*/
 		return false;
 	}
 	if (is_update_zap_count(eh)) {

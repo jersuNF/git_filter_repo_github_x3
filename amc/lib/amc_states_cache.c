@@ -244,6 +244,23 @@ void init_states_and_variables(void)
 
 	LOG_INF("Cached AMC variables : ZAP_TOTAL %i, WARN_TOTAL %i, ZAP_DAY %i",
 		total_zap_cnt, total_warn_cnt, zap_count_day);
+
+	/* Notify server about different states. */
+	struct update_zap_count *ev_zap = new_update_zap_count();
+	ev_zap->count = total_zap_cnt;
+	EVENT_SUBMIT(ev_zap);
+
+	struct update_fence_status *ev_fstatus = new_update_fence_status();
+	ev_fstatus->fence_status = current_fence_status;
+	EVENT_SUBMIT(ev_fstatus);
+
+	struct update_collar_status *ev_cmode = new_update_collar_status();
+	ev_cmode->collar_status = current_collar_status;
+	EVENT_SUBMIT(ev_cmode);
+
+	struct update_collar_mode *ev_cstatus = new_update_collar_mode();
+	ev_cstatus->collar_mode = current_mode;
+	EVENT_SUBMIT(ev_cstatus);
 }
 
 Mode get_mode(void)

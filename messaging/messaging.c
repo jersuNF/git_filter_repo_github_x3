@@ -342,7 +342,7 @@ void modem_poll_work_fn()
 	NofenceMessage new_poll_msg;
 
 	/* Only process the poll request if cache is ready. */
-	if (k_sem_take(&cache_ready_sem, K_SECONDS(CACHE_READY_TIMEOUT_SEC)) ==
+	if (k_sem_take(&cache_ready_sem, K_SECONDS(CACHE_READY_TIMEOUT_SEC)) !=
 	    0) {
 		LOG_WRN("Timed out. Cached data not ready yet. Just sending the data that we have..");
 	}
@@ -495,9 +495,11 @@ static bool event_handler(const struct event_header *eh)
 	if (is_gnss_data(eh)) {
 		struct gnss_data *ev = cast_gnss_data(eh);
 		cached_gnss_mode = (gnss_mode_t)ev->gnss_data.lastfix.mode;
-		/** @todo Check if uint32_t to time_t typecast works. */
 		time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
 		struct tm *tm_time = gmtime(&gm_time);
+
+		/* Update that we received GNSS data regardless of validity. */
+		update_cache_reg(GNSS_STRUCT);
 
 		if (tm_time->tm_year < 2015) {
 			LOG_DBG("Invalid gnss packet.");
@@ -514,7 +516,6 @@ static bool event_handler(const struct event_header *eh)
 				k_sem_give(&cache_lock_sem);
 			}
 		}
-		update_cache_reg(GNSS_STRUCT);
 		return false;
 	}
 	if (is_ble_ctrl_event(eh)) {

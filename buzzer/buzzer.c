@@ -229,7 +229,7 @@ void play_welcome(void)
 		return;
 	}
 
-	int steps = 750/WELCOME_SPEED_MULTIPLE_HACK;
+	int steps = 750 / WELCOME_SPEED_MULTIPLE_HACK;
 	err = play_sweep(1000, 4000, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
@@ -248,7 +248,7 @@ void play_welcome(void)
 		return;
 	}
 
-	steps = 1650/WELCOME_SPEED_MULTIPLE_HACK;
+	steps = 1650 / WELCOME_SPEED_MULTIPLE_HACK;
 	err = play_sweep(700, 4000, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
@@ -261,14 +261,14 @@ void play_welcome(void)
 		return;
 	}
 
-	steps = 2500/WELCOME_SPEED_MULTIPLE_HACK;
+	steps = 2500 / WELCOME_SPEED_MULTIPLE_HACK;
 	err = play_sweep(4000, 1500, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
 		return;
 	}
 
-	steps = 450/WELCOME_SPEED_MULTIPLE_HACK;
+	steps = 450 / WELCOME_SPEED_MULTIPLE_HACK;
 	err = play_sweep(1500, 600, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {

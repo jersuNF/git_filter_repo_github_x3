@@ -26,7 +26,7 @@
 #define MODULE pwr_module
 #include <logging/log.h>
 
-LOG_MODULE_REGISTER(MODULE, CONFIG_PWR_MODULE_LOG_LEVEL);
+LOG_MODULE_REGISTER(MODULE, 4);
 
 /** Variable to keep track of current power state */
 static int current_state = PWR_NORMAL;
@@ -147,7 +147,6 @@ static void charging_poll_work_fn()
 			     strlen(msg));
 		return;
 	}
-	LOG_INF("Solar charging current: %d mA", charging_current_avg);
 	struct pwr_status_event *event = new_pwr_status_event();
 	event->pwr_state = PWR_CHARGING;
 	event->charging_ma = charging_current_avg;
@@ -244,7 +243,7 @@ int log_and_fetch_battery_voltage(void)
 	event->param.battery = batt_soc;
 	EVENT_SUBMIT(event);
 
-	LOG_DBG("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
+	LOG_WRN("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
 		batt_soc);
 
 	return batt_mV;

@@ -12,7 +12,6 @@
 #include "ble_data_event.h"
 #include "ble_cmd_event.h"
 #include "nofence_service.h"
-#include "lte_proto_event.h"
 #include "pwr_event.h"
 #include "env_sensor_event.h"
 
@@ -36,6 +35,8 @@
 
 #include "storage.h"
 
+#include "movement_events.h"
+
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
@@ -56,7 +57,6 @@ static uint8_t cached_fences_counter = 0;
 /** @todo This should be fetched from EEPROM */
 static gnss_mode_t cached_gnss_mode = GNSSMODE_NOMODE;
 
-uint32_t time_from_server;
 atomic_t cached_batt = ATOMIC_INIT(0);
 atomic_t cached_chrg = ATOMIC_INIT(0);
 atomic_t cached_temp = ATOMIC_INIT(0);
@@ -69,6 +69,7 @@ K_SEM_DEFINE(connection_ready, 0, 1);
 
 collar_state_struct_t current_state;
 gnss_last_fix_struct_t cached_fix;
+static int rat, mnc, rssi, min_rssi, max_rssi;
 
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
@@ -102,7 +103,6 @@ static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
 
 static bool m_transfer_boot_params = true;
 bool m_confirm_acc_limits, m_confirm_ble_key;
-bool use_server_time;
 
 K_MUTEX_DEFINE(send_binary_mutex);
 
@@ -116,7 +116,7 @@ K_MSGQ_DEFINE(ble_data_msgq, sizeof(struct ble_data_event),
 	      CONFIG_MSGQ_BLE_DATA_SIZE, 4);
 K_MSGQ_DEFINE(ble_cmd_msgq, sizeof(struct ble_cmd_event),
 	      CONFIG_MSGQ_BLE_CMD_SIZE, 4);
-K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct lte_proto_event),
+K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct messaging_proto_out_event),
 	      CONFIG_MSGQ_LTE_PROTO_SIZE, 4);
 
 #define NUM_MSGQ_EVENTS 4
@@ -186,7 +186,9 @@ static void build_log_message()
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	seq_1.m.seq_msg.has_usChargeMah = true;
 	seq_1.m.seq_msg.usChargeMah = (uint16_t)atomic_get(&cached_chrg);
-	//seq_1.m.seq_msg.xGprsRssi = cached_rssi; // not implemented
+	seq_1.m.seq_msg.has_xGprsRssi = true;
+	seq_1.m.seq_msg.xGprsRssi.ucMaxRSSI = (uint8_t)max_rssi;
+	seq_1.m.seq_msg.xGprsRssi.ucMinRSSI = (uint8_t)min_rssi;
 	seq_1.m.seq_msg.has_xHistogramCurrentProfile = true;
 	seq_1.m.seq_msg.has_xHistogramZone = true;
 	seq_1.m.seq_msg.has_xHistogramAnimalBehave = true;
@@ -316,12 +318,13 @@ void modem_poll_work_fn()
 		&send_q, &modem_poll_work,
 		K_MINUTES(atomic_get(&poll_period_minutes)));
 	/* Add logic for the periodic protobuf modem poller. */
+	LOG_INF("Starting periodic poll work and building poll request.");
 	NofenceMessage new_poll_msg;
 
 	if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
 		build_poll_request(&new_poll_msg);
-		encode_and_send_message(&new_poll_msg);
 		k_sem_give(&cache_lock_sem);
+		encode_and_send_message(&new_poll_msg);
 	} else {
 		LOG_ERR("Cached state semaphore hanged, retrying in 1 second.");
 		k_work_reschedule_for_queue(&send_q, &modem_poll_work,
@@ -329,8 +332,6 @@ void modem_poll_work_fn()
 		return;
 	}
 }
-
-static int32_t sec_since_gnss_time = 0;
 
 static void zap_message_work_fn()
 {
@@ -451,80 +452,44 @@ void data_request_work_fn()
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_gnss_data(eh)) {
-		/* Check when we received server time last. */
-		int32_t server_time =
-			(int32_t)atomic_get(&server_timestamp_sec);
-		int32_t delta_server_time =
-			(int32_t)(k_uptime_get_32() / 1000) - server_time;
-
-		/* If we already have server time, just return. */
-		if (delta_server_time <= TWO_DAYS_SEC && server_time != 0) {
-			return false;
-		}
-
-		/* Check if we can use GNSS data based on the pvt_valid bits
-		 * and timestamp since correction. Doesn't need to be
-		 * atomic, since event handler thead is the only one
-		 * accessing it.
-		 */
 		struct gnss_data *ev = cast_gnss_data(eh);
-
-		/* TODO, pshustad, review, might block the EventManager for 200 ms ? */
-		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
-			if (k_sem_take(&cache_lock_sem, K_MSEC(200)) == 0) {
-				cached_fix = ev->gnss_data.lastfix;
-				k_sem_give(&cache_lock_sem);
-			}
-		}
-		if (!(ev->gnss_data.latest.pvt_valid & (1 << 0)) ||
-		    !(ev->gnss_data.latest.pvt_valid & (1 << 1))) {
-			return false;
-		}
-
-		if ((int32_t)(k_uptime_get_32() / 1000) - sec_since_gnss_time <
-		    SEC_HOUR) {
-			return false;
-		}
-
+		cached_gnss_mode = (gnss_mode_t)ev->gnss_data.lastfix.mode;
 		/** @todo Check if uint32_t to time_t typecast works. */
 		time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
 		struct tm *tm_time = gmtime(&gm_time);
 		/* Update date_time library which storage uses for ANO data. */
-		if (!date_time_set(tm_time)) {
-			LOG_ERR("Could not set date time from GNSS data");
-			return false;
-		} else {
-			LOG_INF("Now using GNSS unix timestamp instead: %s",
-				asctime(tm_time));
+		date_time_set(tm_time);
+
+		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
+			/* TODO, review pshustad, might block the event manager for 500 ms ? */
+			if (k_sem_take(&cache_lock_sem, K_MSEC(50)) == 0) {
+				cached_fix = ev->gnss_data.lastfix;
+				k_sem_give(&cache_lock_sem);
+			}
 		}
-
-		sec_since_gnss_time = (int32_t)(k_uptime_get_32() / 1000);
-
-		cached_gnss_mode = (gnss_mode_t)ev->gnss_data.lastfix.mode;
 		return false;
 	}
-
 	if (is_ble_ctrl_event(eh)) {
 		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
 		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
 			/* Message queue is full: purge old data & try again */
 			k_msgq_purge(&ble_ctrl_msgq);
 		}
-		return false;
+		return true;
 	}
 	if (is_ble_cmd_event(eh)) {
 		struct ble_cmd_event *ev = cast_ble_cmd_event(eh);
 		while (k_msgq_put(&ble_cmd_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&ble_cmd_msgq);
 		}
-		return false;
+		return true;
 	}
 	if (is_ble_data_event(eh)) {
 		struct ble_data_event *ev = cast_ble_data_event(eh);
 		while (k_msgq_put(&ble_data_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&ble_data_msgq);
 		}
-		return false;
+		return true;
 	}
 	if (is_cellular_proto_in_event(eh)) {
 		struct cellular_proto_in_event *ev =
@@ -532,7 +497,7 @@ static bool event_handler(const struct event_header *eh)
 		while (k_msgq_put(&lte_proto_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&lte_proto_msgq);
 		}
-		return false;
+		return true;
 	}
 	if (is_update_collar_mode(eh)) {
 		struct update_collar_mode *ev = cast_update_collar_mode(eh);
@@ -580,17 +545,6 @@ static bool event_handler(const struct event_header *eh)
 		k_sem_give(&send_out_ack);
 		return false;
 	}
-	if (is_gnss_data(eh)) {
-		struct gnss_data *ev = cast_gnss_data(eh);
-		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
-			/* TODO, review pshustad, might block the event manager for 500 ms ? */
-			if (k_sem_take(&cache_lock_sem, K_MSEC(500)) == 0) {
-				cached_fix = ev->gnss_data.lastfix;
-				k_sem_give(&cache_lock_sem);
-			}
-		}
-		return false;
-	}
 
 	if (is_animal_escape_event(eh)) {
 		int err = k_work_reschedule_for_queue(
@@ -629,9 +583,7 @@ static bool event_handler(const struct event_header *eh)
 			/* We want battery voltage in deci volt */
 			atomic_set(&cached_batt,
 				   (uint16_t)(ev->battery_mv / 10));
-			LOG_DBG("Battery event: %u mV", ev->battery_mv);
 		} else if (ev->pwr_state == PWR_CHARGING) {
-			LOG_DBG("Charge event: %u mA", ev->charging_ma);
 			atomic_set(&cached_chrg, ev->charging_ma);
 		}
 		return false;
@@ -650,12 +602,12 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_env_sensor_event(eh)) {
 		struct env_sensor_event *ev = cast_env_sensor_event(eh);
-		LOG_DBG("Event Temp: %.2f, humid %.2f, press %.2f", ev->temp,
+		LOG_DBG("Event Temp: %.2f, humid %.3f, press %.3f", ev->temp,
 			ev->humidity, ev->press);
-		/* Update shaddow register */
-		atomic_set(&cached_press, (uint32_t)ev->press);
-		atomic_set(&cached_hum, (uint32_t)ev->humidity);
-		atomic_set(&cached_temp, (uint32_t)ev->temp);
+		/* Update shaddow register. Multiply with scaling factor */
+		atomic_set(&cached_press, (uint32_t)(ev->press * 1000));
+		atomic_set(&cached_hum, (uint32_t)(ev->humidity * 1000));
+		atomic_set(&cached_temp, (uint32_t)(ev->temp * 100));
 		return false;
 	}
 	if (is_warn_correction_start_event(eh)) {
@@ -676,6 +628,18 @@ static bool event_handler(const struct event_header *eh)
 			LOG_ERR("Error reschedule warning correction start work: %d",
 				err);
 		}
+		return false;
+	}
+	if (is_gsm_info_event(eh)) {
+		LOG_WRN("GSM info received!");
+		struct gsm_info_event *ev = cast_gsm_info_event(eh);
+		rat = ev->gsm_info.rat;
+		mnc = ev->gsm_info.mnc;
+		rssi = ev->gsm_info.rssi;
+		min_rssi = ev->gsm_info.min_rssi;
+		max_rssi = ev->gsm_info.max_rssi;
+		LOG_WRN("RSSI, rat: %d, %d, %d, %d", rssi, min_rssi,
+			max_rssi,  rat);
 		return false;
 	}
 
@@ -728,7 +692,6 @@ EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
 EVENT_SUBSCRIBE(MODULE, ble_cmd_event);
 EVENT_SUBSCRIBE(MODULE, ble_data_event);
 
-EVENT_SUBSCRIBE(MODULE, lte_proto_event);
 EVENT_SUBSCRIBE(MODULE, cellular_ack_event);
 EVENT_SUBSCRIBE(MODULE, cellular_proto_in_event);
 EVENT_SUBSCRIBE(MODULE, update_collar_mode);
@@ -747,6 +710,7 @@ EVENT_SUBSCRIBE(MODULE, gnss_data);
 EVENT_SUBSCRIBE(MODULE, send_poll_request_now);
 EVENT_SUBSCRIBE(MODULE, warn_correction_start_event);
 EVENT_SUBSCRIBE(MODULE, warn_correction_end_event);
+EVENT_SUBSCRIBE(MODULE, gsm_info_event);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -843,15 +807,15 @@ static void process_lte_proto_event(void)
 	 * 	buf++;
 	 * }
 	 */
-
+	struct messaging_ack_event *ack = new_messaging_ack_event();
+	EVENT_SUBMIT(ack);
 	if (err) {
 		char *e_msg = "Error decoding protobuf message";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
-	struct messaging_ack_event *ack = new_messaging_ack_event();
-	EVENT_SUBMIT(ack);
+
 	/* process poll response */
 	if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
 		LOG_INF("Process poll reponse");
@@ -966,13 +930,13 @@ void build_poll_request(NofenceMessage *poll_req)
 		(uint16_t)atomic_get(&cached_batt);
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
-	
-	/** @todo get gsm info from modem driver */
-#if 0
-	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
-	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
-	poll_req->m.poll_message_req.has_xGsmInfo = false;
-#endif
+
+	_GSM_INFO p_gsm_info;
+	p_gsm_info.ucRAT = (uint8_t)rat;
+	sprintf(p_gsm_info.xMMC_MNC,"%d", mnc);
+
+	poll_req->m.poll_message_req.xGsmInfo = p_gsm_info;
+	poll_req->m.poll_message_req.has_xGsmInfo = true;
 
 	if (current_state.flash_erase_count) {
 		// m_flash_erase_count is reset when we receive a poll reply
@@ -981,18 +945,43 @@ void build_poll_request(NofenceMessage *poll_req)
 			current_state.flash_erase_count;
 	}
 	if (m_confirm_acc_limits) {
-		/** @todo Add EEPROM storage read for movement */
-#if 0
-		poll_req.m.poll_message_req.has_usAccSigmaSleepLimit = true;
-		poll_req.m.poll_message_req.usAccSigmaSleepLimit =
-			EEPROM_GetAccSigmaSleepLimit();
-		poll_req.m.poll_message_req.has_usAccSigmaNoActivityLimit = true;
-		poll_req.m.poll_message_req.usAccSigmaNoActivityLimit =
-			EEPROM_GetAccSigmaNoActivityLimit();
-		poll_req.m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
-		poll_req.m.poll_message_req.usOffAnimalTimeLimitSec =
-			EEPROM_GetOffAnimalTimeLimitSec();
-#endif
+		/** @warning Assumes all the activity values are given with the
+		 *  m_confirm_acc_limits flag set in poll response from server.
+		 */
+		poll_req->m.poll_message_req.has_usAccSigmaSleepLimit = true;
+		poll_req->m.poll_message_req.has_usAccSigmaNoActivityLimit =
+			true;
+		poll_req->m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
+
+		int err = eep_uint16_read(
+			EEP_ACC_SIGMA_SLEEP_LIMIT,
+			&poll_req->m.poll_message_req.usAccSigmaSleepLimit);
+		if (err) {
+			char *e_msg =
+				"Failed to read EEP_ACC_SIGMA_SLEEP_LIMIT";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
+
+		err = eep_uint16_read(
+			EEP_ACC_SIGMA_NOACTIVITY_LIMIT,
+			&poll_req->m.poll_message_req.usAccSigmaNoActivityLimit);
+		if (err) {
+			char *e_msg =
+				"Failed to read EEP_ACC_SIGMA_NOACTIVITY_LIMIT";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
+
+		err = eep_uint16_read(
+			EEP_OFF_ANIMAL_TIME_LIMIT_SEC,
+			&poll_req->m.poll_message_req.usOffAnimalTimeLimitSec);
+		if (err) {
+			char *e_msg =
+				"Failed to read EEP_OFF_ANIMAL_TIME_LIMIT_SEC";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
 	}
 	if (m_confirm_ble_key) {
 		poll_req->m.poll_message_req.has_rgubcBleKey = true;
@@ -1031,31 +1020,31 @@ void build_poll_request(NofenceMessage *poll_req)
 		uint8_t pcb_rf_version = 0;
 		eep_uint8_read(EEP_HW_VERSION, &pcb_rf_version);
 		poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
-							pcb_rf_version;
-		
+			pcb_rf_version;
+
 		uint16_t pcb_product_type = 0;
 		eep_uint16_read(EEP_PRODUCT_TYPE, &pcb_product_type);
 		poll_req->m.poll_message_req.versionInfoHW.usPCB_Product_Type =
-							pcb_product_type;
+			pcb_product_type;
 
 		poll_req->m.poll_message_req.has_versionInfoBOM = true;
-		
+
 		uint8_t bom_mec_rev = 0;
 		eep_uint8_read(EEP_BOM_MEC_REV, &bom_mec_rev);
 		poll_req->m.poll_message_req.versionInfoBOM.ucBom_mec_rev =
-							bom_mec_rev;
+			bom_mec_rev;
 		uint8_t bom_pcb_rev = 0;
 		eep_uint8_read(EEP_BOM_PCB_REV, &bom_pcb_rev);
 		poll_req->m.poll_message_req.versionInfoBOM.ucBom_pcb_rev =
-							bom_pcb_rev;
+			bom_pcb_rev;
 		uint8_t ems_provider = 0;
 		eep_uint8_read(EEP_EMS_PROVIDER, &ems_provider);
 		poll_req->m.poll_message_req.versionInfoBOM.ucEms_provider =
-							ems_provider;
+			ems_provider;
 		uint8_t product_record_rev = 0;
 		eep_uint8_read(EEP_PRODUCT_RECORD_REV, &product_record_rev);
-		poll_req->m.poll_message_req.versionInfoBOM.ucProduct_record_rev =
-							product_record_rev;
+		poll_req->m.poll_message_req.versionInfoBOM
+			.ucProduct_record_rev = product_record_rev;
 
 		/** @todo Add information of SIM card */
 #if 0
@@ -1176,12 +1165,13 @@ void proto_InitHeader(NofenceMessage *msg)
 	msg->header.ulId = serial_id;
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
-	if (use_server_time) {
-		/* FIXME pshustad, the time_from_server is stale, this is a bug. It should be fed to the time system */
-
-		msg->header.ulUnixTimestamp = time_from_server;
+	int64_t curr_time = 0;
+	if (!date_time_now(&curr_time)) {
+		/* Convert to seconds since 1.1.1970 */
+		msg->header.ulUnixTimestamp = (uint32_t)(curr_time / 1000);
 	} else {
-		msg->header.ulUnixTimestamp = cached_fix.unix_timestamp;
+		/** @todo: Add uptime instead? */
+		msg->header.ulUnixTimestamp = 0;
 	}
 }
 
@@ -1217,7 +1207,7 @@ int send_binary_message(uint8_t *data, size_t len)
 
 		int err = k_sem_take(&send_out_ack,
 				     K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC));
-		if (err) {
+		if (err != 0) {
 			char *e_msg = "Timed out waiting for cellular ack";
 			nf_app_error(ERR_MESSAGING, -ETIMEDOUT, e_msg,
 				     strlen(e_msg));
@@ -1281,10 +1271,7 @@ void process_poll_response(NofenceMessage *proto)
 		/* TODO: publish enable ANO event to GPS controller */
 	}
 	if (pResp->has_bUseServerTime && pResp->bUseServerTime) {
-		LOG_INF("Server time will be used.");
-		time_from_server = proto->header.ulUnixTimestamp;
-		/* FIXME, pshustad see XF-174 */
-		use_server_time = true;
+		LOG_INF("Set date and time from server");
 		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
 		struct tm *tm_time = gmtime(&gm_time);
 		/* Update date_time library which storage uses for ANO data. */
@@ -1312,18 +1299,60 @@ void process_poll_response(NofenceMessage *proto)
 		LOG_INF("Poll period of %d minutes will be used.",
 			atomic_get(&poll_period_minutes));
 	}
+	m_confirm_acc_limits = false;
 	if (pResp->has_usAccSigmaSleepLimit) {
-		/* TODO: submit pResp->usAccSigmaSleepLimit to AMC module.
-		 * AMC will store it in eeprom or external flash. */
+		m_confirm_acc_limits = true;
+		int err = eep_uint16_write(EEP_ACC_SIGMA_SLEEP_LIMIT,
+					   pResp->usAccSigmaSleepLimit);
+		if (err) {
+			char *e_msg = "Error updating sleep sigma to eeprom";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
+
+		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
+		sigma_ev->type = SLEEP_SIGMA;
+		sigma_ev->param.sleep_sigma_value = pResp->usAccSigmaSleepLimit;
+		EVENT_SUBMIT(sigma_ev);
 	}
 	if (pResp->has_usAccSigmaNoActivityLimit) {
-		/* TODO: submit pResp->usAccSigmaNoActivityLimit to AMC
-		 * module. */
+		m_confirm_acc_limits = true;
+		int err = eep_uint16_write(EEP_ACC_SIGMA_NOACTIVITY_LIMIT,
+					   pResp->usAccSigmaNoActivityLimit);
+		if (err) {
+			char *e_msg =
+				"Error updating no activity sigma to eeprom";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
+
+		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
+		sigma_ev->type = NO_ACTIVITY_SIGMA;
+		sigma_ev->param.no_activity_sigma =
+			pResp->usAccSigmaNoActivityLimit;
+		EVENT_SUBMIT(sigma_ev);
 	}
 	if (pResp->has_usOffAnimalTimeLimitSec) {
-		/* TODO: submit pResp->usOffAnimalTimeLimitSec to AMC. */
+		m_confirm_acc_limits = true;
+		int err = eep_uint16_write(EEP_OFF_ANIMAL_TIME_LIMIT_SEC,
+					   pResp->usOffAnimalTimeLimitSec);
+		if (err) {
+			char *e_msg =
+				"Error updating off animal sigma to eeprom";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		}
+
+		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
+		sigma_ev->type = OFF_ANIMAL_SIGMA;
+		sigma_ev->param.off_animal_value =
+			pResp->usOffAnimalTimeLimitSec;
+		EVENT_SUBMIT(sigma_ev);
 	}
+
+	m_confirm_ble_key = false;
 	if (pResp->has_rgubcBleKey) {
+		m_confirm_ble_key = true;
 		LOG_INF("Received a ble_sec_key of size %d",
 			pResp->rgubcBleKey.size);
 		uint8_t current_ble_sec_key[EEP_BLE_SEC_KEY_LEN];
@@ -1348,9 +1377,7 @@ void process_poll_response(NofenceMessage *proto)
 	}
 	if (pResp->ulFenceDefVersion != current_state.fence_version &&
 	    new_fence_in_progress != pResp->ulFenceDefVersion) {
-		/* TODO: Download new fence and submit pResp->ulFenceDefVersion
-		 * to AMC */
-		//request frame 0
+		/* Request frame 0. */
 		first_frame = true;
 		LOG_INF("Requesting frame 0 for fence version %i.",
 			pResp->ulFenceDefVersion);
@@ -1513,9 +1540,6 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 	uint32_t age = ano_date_to_unixtime_midday(
 		temp->mga_ano.year, temp->mga_ano.month, temp->mga_ano.day);
 
-	LOG_INF("Relative age of received ANO frame = %d, %d", age,
-		time_from_server);
-
 	/* Write to storage controller's ANO WRITE partition. */
 	int err = stg_write_ano_data((uint8_t *)&anoResp->rgucBuf,
 				     anoResp->rgucBuf.size);
@@ -1525,8 +1549,14 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	}
-
-	if (age > time_from_server + SECONDS_IN_THREE_DAYS) {
+	int64_t current_time_ms = 0;
+	err = date_time_now(&current_time_ms);
+	if (err) {
+		char *e_msg = "Error fetching date time";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+	}
+	if (age > (current_time_ms / 1000) + SECONDS_IN_THREE_DAYS) {
 		return DOWNLOAD_COMPLETE;
 	}
 	return rec_ano_frames;

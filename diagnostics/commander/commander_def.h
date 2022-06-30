@@ -61,6 +61,7 @@ typedef enum {
 typedef enum {
 	PING = 0x55,
 	REPORT = 0x5E,
+	LOG = 0x70,
 	TEST = 0x7E,
 	REBOOT = 0xEB,
 } system_cmd_t;

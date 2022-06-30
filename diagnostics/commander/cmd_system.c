@@ -1,5 +1,6 @@
 #include "cmd_system.h"
 #include "selftest.h"
+#include "log_backend_diag.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -14,6 +15,23 @@ int commander_system_handler(enum diagnostics_interface interface,
 		case PING:
 		{
 			commander_send_resp(interface, SYSTEM, cmd, DATA, data, size);
+			break;
+		}
+		case LOG:
+		{
+			if (size < 1) {
+				resp = NOT_ENOUGH;
+				commander_send_resp(interface, SYSTEM, cmd, resp, NULL, 0);
+				err = -EINVAL;
+			} else {
+				if (data[0]) {
+					log_backend_diag_enable(interface);
+				} else {
+					log_backend_diag_disable();
+				}
+				resp = ACK;
+				commander_send_resp(interface, SYSTEM, cmd, resp, NULL, 0);
+			}
 			break;
 		}
 		case TEST:

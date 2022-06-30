@@ -20,13 +20,32 @@
 #include "watchdog_event.h"
 #include "messaging_module_events.h"
 
+#if CONFIG_CLOCK_CONTROL_NRF
+#include <drivers/clock_control.h>
+#include <drivers/clock_control/nrf_clock_control.h>
+
+#define CLOCK_NODE DT_INST(0, nordic_nrf_clock)
+static const struct device *clock0;
+#endif
+
 #if CONFIG_ADC_NRFX_SAADC
 #include "charging.h"
 #endif
 #define MODULE pwr_module
 #include <logging/log.h>
 
-LOG_MODULE_REGISTER(MODULE, CONFIG_PWR_MODULE_LOG_LEVEL);
+LOG_MODULE_REGISTER(MODULE, 4);
+
+static uint32_t extclk_request_flags = 0;
+
+/**
+ * @brief Enable/disable external clock for HFCLK.
+ * 
+ * @param[in] enable Set to true to enable external clock. 
+ * 
+ * @return 0 on success. Otherwise a negative error code.
+ */
+static int pwr_module_extclk_enable(bool enable);
 
 /** Variable to keep track of current power state */
 static int current_state = PWR_NORMAL;
@@ -147,7 +166,6 @@ static void charging_poll_work_fn()
 			     strlen(msg));
 		return;
 	}
-	LOG_INF("Solar charging current: %d mA", charging_current_avg);
 	struct pwr_status_event *event = new_pwr_status_event();
 	event->pwr_state = PWR_CHARGING;
 	event->charging_ma = charging_current_avg;
@@ -226,6 +244,10 @@ int pwr_module_init(void)
 	/* Initialize the reboot function */
 	k_work_init_delayable(&power_reboot, reboot_work_fn);
 
+	/* External clock default is off */
+	pwr_module_extclk_enable(false);
+	extclk_request_flags = 0;
+
 	return 0;
 }
 
@@ -244,10 +266,38 @@ int log_and_fetch_battery_voltage(void)
 	event->param.battery = batt_soc;
 	EVENT_SUBMIT(event);
 
-	LOG_DBG("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
+	LOG_WRN("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
 		batt_soc);
 
 	return batt_mV;
+}
+
+static int pwr_module_extclk_enable(bool enable)
+{
+	int ret = 0;
+
+#if CONFIG_CLOCK_CONTROL_NRF
+	const char *clock_label = DT_LABEL(CLOCK_NODE);
+	clock0 = device_get_binding(clock_label);
+	if (enable) {
+		ret = clock_control_on(clock0, CLOCK_CONTROL_NRF_SUBSYS_HF);
+	} else {
+		ret = clock_control_off(clock0, CLOCK_CONTROL_NRF_SUBSYS_HF);
+	}
+#endif
+
+	return ret;
+}
+
+int pwr_module_use_extclk(enum pwr_requester_module req, bool use_extclk)
+{
+	if (use_extclk) {
+		extclk_request_flags |= (1<<req);
+	} else {
+		extclk_request_flags &= ~(1<<req);
+	}
+
+	return pwr_module_extclk_enable(extclk_request_flags != 0);
 }
 
 /**

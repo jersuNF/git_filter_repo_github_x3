@@ -49,7 +49,7 @@ if POWER_MANAGER
 
         config CHARGING_POLLER_WORK_SEC
         int "Seconds between modem poll"
-        default 60
+        default 1
 
         config CHARGING_THRESHOLD_START
         int "Threshold to start charging, defined in mV"

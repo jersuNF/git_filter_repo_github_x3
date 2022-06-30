@@ -8,6 +8,8 @@
 #include <logging/log.h>
 #include <drivers/sensor.h>
 
+#include "nf_settings.h"
+
 #include "nf_fifo.h"
 #include "trigonometry.h"
 #define STEPS_TRIGGER 5
@@ -19,9 +21,9 @@ static const struct device *sensor;
 #define ACC_FIFO_ELEMENTS 32
 
 /** @todo Add to make configurable from messaging.c event. Also eeprom settings? */
-static uint32_t off_animal_time_limit_sec = OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT;
-static uint32_t acc_sigma_sleep_limit = ACC_SIGMA_SLEEP_LIMIT_DEFAULT;
-static uint32_t acc_sigma_noactivity_limit = ACC_SIGMA_NOACTIVITY_LIMIT_DEFAULT;
+static uint16_t off_animal_time_limit_sec = OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT;
+static uint16_t acc_sigma_sleep_limit = ACC_SIGMA_SLEEP_LIMIT_DEFAULT;
+static uint16_t acc_sigma_noactivity_limit = ACC_SIGMA_NOACTIVITY_LIMIT_DEFAULT;
 
 static int16_t acc_fifo_x[ACC_FIFO_ELEMENTS];
 static int16_t acc_fifo_y[ACC_FIFO_ELEMENTS];
@@ -402,6 +404,24 @@ int init_movement_controller(void)
 	k_timer_start(&movement_timeout_timer,
 		      K_SECONDS(CONFIG_MOVEMENT_TIMEOUT_SEC), K_NO_WAIT);
 
+	err = eep_uint16_read(EEP_ACC_SIGMA_SLEEP_LIMIT,
+			      &acc_sigma_sleep_limit);
+	if (err) {
+		return err;
+	}
+
+	err = eep_uint16_read(EEP_ACC_SIGMA_NOACTIVITY_LIMIT,
+			      &acc_sigma_noactivity_limit);
+	if (err) {
+		return err;
+	}
+
+	err = eep_uint16_read(EEP_OFF_ANIMAL_TIME_LIMIT_SEC,
+			      &off_animal_time_limit_sec);
+	if (err) {
+		return err;
+	}
+
 	return 0;
 }
 
@@ -425,6 +445,29 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	if (is_acc_sigma_event(eh)) {
+		struct acc_sigma_event *ev = cast_acc_sigma_event(eh);
+		switch (ev->type) {
+		case SLEEP_SIGMA: {
+			acc_sigma_sleep_limit = ev->param.sleep_sigma_value;
+			break;
+		}
+		case NO_ACTIVITY_SIGMA: {
+			acc_sigma_noactivity_limit =
+				ev->param.no_activity_sigma;
+			break;
+		}
+		case OFF_ANIMAL_SIGMA: {
+			off_animal_time_limit_sec = ev->param.off_animal_value;
+			break;
+		}
+		default: {
+			break;
+		}
+		}
+
+		return false;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -433,3 +476,4 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(move_controller, event_handler);
 EVENT_SUBSCRIBE(move_controller, movement_set_mode_event);
+EVENT_SUBSCRIBE(move_controller, acc_sigma_event);

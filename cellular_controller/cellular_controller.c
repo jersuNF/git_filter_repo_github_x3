@@ -221,7 +221,7 @@ int listen_tcp(void)
 static bool cellular_controller_event_handler(const struct event_header *eh)
 {
 	static bool ready_for_new_msg = true;
-	uint8_t *CharMsgOut = NULL;
+	static uint8_t *CharMsgOut = NULL;
 	if (is_messaging_ack_event(eh)) {
 		k_sem_give(&messaging_ack);
 		LOG_WRN("ACK received!\n");

@@ -17,7 +17,6 @@
 #define GNSS_DATA_TIMEOUT (GNSS_1SEC * 25)
 
 K_SEM_DEFINE(new_data_sem, 0, 1);
-K_SEM_DEFINE(cached_fix_sem, 1, 1);
 
 #define MODULE gnss_controller
 LOG_MODULE_REGISTER(MODULE, CONFIG_GNSS_CONTROLLER_LOG_LEVEL);
@@ -35,7 +34,6 @@ static uint16_t current_rate;
 static gnss_t gnss_data_buffer;
 gnss_mode_t current_mode = GNSSMODE_NOMODE;
 
-gnss_t cached_gnss_data;
 
 const struct device *gnss_dev = NULL;
 uint8_t gnss_reset_count;
@@ -171,12 +169,6 @@ static _Noreturn void publish_gnss_data(void *ctx)
 				gnss_data_buffer.latest.lat, gnss_data_buffer.latest.pvt_flags, gnss_data_buffer.latest.h_acc_dm,
 				gnss_data_buffer.latest.num_sv);
 			EVENT_SUBMIT(new_data);
-			if (k_sem_take(&cached_fix_sem, K_MSEC(100)) == 0) {
-				cached_gnss_data = gnss_data_buffer;
-				k_sem_give(&cached_fix_sem);
-			} else { /* TODO: take action if needed. */
-				LOG_WRN("Failed to update cached GNSS fix!\n");
-			}
 		} else {
 			gnss_timed_out();
 		}

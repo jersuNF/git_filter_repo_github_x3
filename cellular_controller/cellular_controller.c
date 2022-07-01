@@ -97,6 +97,7 @@ void receive_tcp(struct data *sock_data)
 					char *e_msg = "Missed messaging ack!";
 					nf_app_error(ERR_MESSAGING, -EINPROGRESS, e_msg, strlen
 						(e_msg));
+					k_free(pMsgIn);
 				} else {
 					pMsgIn = (uint8_t *)k_malloc(received);
 					memcpy(pMsgIn, buf, received);

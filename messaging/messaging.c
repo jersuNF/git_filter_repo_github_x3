@@ -42,7 +42,8 @@
 #include "sound_event.h"
 #include "nf_settings.h"
 #include "histogram_events.h"
-
+#include <sys/sys_heap.h>
+extern struct k_heap _system_heap;
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
 #define SECONDS_IN_THREE_DAYS 259200
@@ -334,6 +335,7 @@ void log_data_periodic_fn()
  */
 void modem_poll_work_fn()
 {
+	sys_heap_print_info(&_system_heap.heap, true);
 	k_work_reschedule_for_queue(
 		&send_q, &modem_poll_work,
 		K_MINUTES(atomic_get(&poll_period_minutes)));

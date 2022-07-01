@@ -12,7 +12,7 @@
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define MY_PRIORITY CONFIG_RECV_THREAD_PRIORITY
 #define SOCKET_POLL_INTERVAL 0.25
-#define SOCK_RECV_TIMEOUT 10
+#define SOCK_RECV_TIMEOUT 15
 #define MODULE cellular_controller
 #define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_SEC
 
@@ -75,12 +75,12 @@ K_THREAD_DEFINE(listen_recv_tid, RCV_THREAD_STACK, listen_sock_poll, NULL, NULL,
 		NULL, MY_PRIORITY, 0, 0);
 
 static APP_BMEM bool connected;
-
+static uint8_t *pMsgIn = NULL;
 void receive_tcp(struct data *sock_data)
 {
 	int received;
 	char *buf = NULL;
-	uint8_t *pMsgIn = NULL;
+
 	static float socket_idle_count;
 	while (1) {
 		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
@@ -89,26 +89,23 @@ void receive_tcp(struct data *sock_data)
 			if (received > 0) {
 				socket_idle_count = 0;
 #if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
-				LOG_WRN("received %d bytes!\n", received);
+				LOG_WRN("received %d bytes!", received);
 #endif
-				LOG_WRN("will take semaphore!\n");
+				LOG_WRN("will take semaphore!");
 				if (k_sem_take(&messaging_ack, K_SECONDS
 					       (MESSAGING_ACK_TIMEOUT)) != 0) {
 					char *e_msg = "Missed messaging ack!";
 					nf_app_error(ERR_MESSAGING, -EINPROGRESS, e_msg, strlen
 						(e_msg));
+					k_free(pMsgIn);
 				} else {
-					if (pMsgIn != NULL) {
-						k_free(pMsgIn);
-						pMsgIn = NULL;
-					}
 					pMsgIn = (uint8_t *)k_malloc(received);
 					memcpy(pMsgIn, buf, received);
 					struct cellular_proto_in_event *msgIn =
 						new_cellular_proto_in_event();
 					msgIn->buf = pMsgIn;
 					msgIn->len = received;
-					LOG_INF("Submitting msgIn event!\n");
+					LOG_INF("Submitting msgIn event!");
 					EVENT_SUBMIT(msgIn);
 				}
 			} else if (received == 0) {
@@ -124,6 +121,7 @@ void receive_tcp(struct data *sock_data)
 								new_modem_state();
 							modem_inavtive->mode
 								= SLEEP;
+							EVENT_SUBMIT(modem_inavtive);
 						}
 						connected = false;
 						socket_idle_count = 0;
@@ -143,6 +141,7 @@ void receive_tcp(struct data *sock_data)
 							new_modem_state();
 						modem_inavtive->mode
 							= SLEEP;
+						EVENT_SUBMIT(modem_inavtive);
 					}
 					connected = false;
 					socket_idle_count = 0;
@@ -219,12 +218,12 @@ int listen_tcp(void)
 	}
 	return ret;
 }
-
+static uint8_t *CharMsgOut = NULL;
 static bool cellular_controller_event_handler(const struct event_header *eh)
 {
 	static bool ready_for_new_msg = true;
-	uint8_t *CharMsgOut = NULL;
 	if (is_messaging_ack_event(eh)) {
+		k_free(pMsgIn);
 		k_sem_give(&messaging_ack);
 		LOG_WRN("ACK received!\n");
 		return false;
@@ -464,10 +463,11 @@ void announce_connection_state(bool state){
 	}
 	if (state == true) {
 		struct modem_state
-			*modem_inavtive =
+			*modem_active =
 			new_modem_state();
-		modem_inavtive->mode
+		modem_active->mode
 			= POWER_ON;
+		EVENT_SUBMIT(modem_active);
 	}
 	struct gsm_info this_session_info;
 	int ret = get_gsm_info(&this_session_info);

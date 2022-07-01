@@ -188,6 +188,9 @@ void process_acc_data(raw_acc_data_t *acc)
 			cur_activity = ACTIVITY_HIGH;
 		} /* running. */
 	}
+	struct activity_level *animal_activity = new_activity_level();
+	animal_activity->level = cur_activity;
+	EVENT_SUBMIT(animal_activity);
 
 	/** @todo Use total steps? */
 	total_steps += stepcount;

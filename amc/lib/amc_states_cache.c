@@ -45,7 +45,7 @@ static uint8_t pain_cnt_def_free = _PAIN_CNT_DEF_ESCAPED;
  *  eeprom on init.
  */
 static Mode current_mode = Mode_Mode_UNKNOWN;
-static FenceStatus current_fence_status = FenceStatus_FenceStatus_UNKNOWN;
+static FenceStatus current_fence_status = FenceStatus_NotStarted;
 static CollarStatus current_collar_status = CollarStatus_CollarStatus_UNKNOWN;
 static gnss_mode_t current_gnss_mode = GNSSMODE_NOMODE;
 
@@ -218,32 +218,34 @@ void init_states_and_variables(void)
 	}
 	current_mode = (Mode)status_code;
 
+	/** @todo should remove EEP_FENCE_STATUS/EEP_COLLAR_STATUS FROM EEPROM. */
+
 	if (current_mode == Mode_Teach) {
 		enter_teach_mode();
 	}
-
-	/* Fence status. */
-	err = eep_uint8_read(EEP_FENCE_STATUS, &status_code);
-
-	if (err) {
-		LOG_ERR("Could not read fence status %i", err);
-		status_code = FenceStatus_FenceStatus_UNKNOWN;
-	}
-	current_fence_status = (FenceStatus)status_code;
-
-	/* Collar status. */
-	err = eep_uint8_read(EEP_COLLAR_STATUS, &status_code);
-	if (err) {
-		LOG_ERR("Could not read collar status %i", err);
-		status_code = CollarStatus_CollarStatus_UNKNOWN;
-	}
-	current_collar_status = (CollarStatus)status_code;
 
 	LOG_INF("Cached AMC states: Collarmode %i, collarstatus %i, fencestatus %i",
 		current_mode, current_fence_status, current_collar_status);
 
 	LOG_INF("Cached AMC variables : ZAP_TOTAL %i, WARN_TOTAL %i, ZAP_DAY %i",
 		total_zap_cnt, total_warn_cnt, zap_count_day);
+
+	/* Notify server about different states. */
+	struct update_zap_count *ev_zap = new_update_zap_count();
+	ev_zap->count = total_zap_cnt;
+	EVENT_SUBMIT(ev_zap);
+
+	struct update_fence_status *ev_fstatus = new_update_fence_status();
+	ev_fstatus->fence_status = current_fence_status;
+	EVENT_SUBMIT(ev_fstatus);
+
+	struct update_collar_status *ev_cmode = new_update_collar_status();
+	ev_cmode->collar_status = current_collar_status;
+	EVENT_SUBMIT(ev_cmode);
+
+	struct update_collar_mode *ev_cstatus = new_update_collar_mode();
+	ev_cstatus->collar_mode = current_mode;
+	EVENT_SUBMIT(ev_cstatus);
 }
 
 Mode get_mode(void)

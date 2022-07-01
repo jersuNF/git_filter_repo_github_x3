@@ -300,6 +300,16 @@ int pwr_module_use_extclk(enum pwr_requester_module req, bool use_extclk)
 	return pwr_module_extclk_enable(extclk_request_flags != 0);
 }
 
+int fetch_battery_percent(void)
+{
+	int batt_mV = battery_sample_averaged();
+	if (batt_mV < 0) {
+		LOG_ERR("Failed to read battery voltage: %d", batt_mV);
+		return -ENOENT;
+	}
+	return battery_level_soc(batt_mV, levels);
+}
+
 /**
  * @brief Main event handler function. 
  * 

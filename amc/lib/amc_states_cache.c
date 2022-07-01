@@ -218,26 +218,11 @@ void init_states_and_variables(void)
 	}
 	current_mode = (Mode)status_code;
 
+	/** @todo should remove EEP_FENCE_STATUS/EEP_COLLAR_STATUS FROM EEPROM. */
+
 	if (current_mode == Mode_Teach) {
 		enter_teach_mode();
 	}
-
-	/* Fence status. */
-	err = eep_uint8_read(EEP_FENCE_STATUS, &status_code);
-
-	if (err) {
-		LOG_ERR("Could not read fence status %i", err);
-		status_code = FenceStatus_FenceStatus_UNKNOWN;
-	}
-	current_fence_status = (FenceStatus)status_code;
-
-	/* Collar status. */
-	err = eep_uint8_read(EEP_COLLAR_STATUS, &status_code);
-	if (err) {
-		LOG_ERR("Could not read collar status %i", err);
-		status_code = CollarStatus_CollarStatus_UNKNOWN;
-	}
-	current_collar_status = (CollarStatus)status_code;
 
 	LOG_INF("Cached AMC states: Collarmode %i, collarstatus %i, fencestatus %i",
 		current_mode, current_fence_status, current_collar_status);

@@ -98,6 +98,7 @@ void receive_tcp(struct data *sock_data)
 					nf_app_error(ERR_MESSAGING, -EINPROGRESS, e_msg, strlen
 						(e_msg));
 					k_free(pMsgIn);
+					pMsgIn = NULL;
 				} else {
 					pMsgIn = (uint8_t *)k_malloc(received);
 					memcpy(pMsgIn, buf, received);
@@ -224,6 +225,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 	static bool ready_for_new_msg = true;
 	if (is_messaging_ack_event(eh)) {
 		k_free(pMsgIn);
+		pMsgIn = NULL;
 		k_sem_give(&messaging_ack);
 		LOG_WRN("ACK received!\n");
 		return false;
@@ -237,6 +239,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 					new_modem_state();
 				modem_inavtive->mode
 					= SLEEP;
+				EVENT_SUBMIT(modem_inavtive);
 			}
 			connected = false;
 		}
@@ -421,6 +424,7 @@ static void cellular_controller_keep_alive(void *dev)
 									new_modem_state();
 								modem_inavtive->mode
 									= SLEEP;
+								EVENT_SUBMIT(modem_inavtive);
 							}
 						}
 						announce_connection_state

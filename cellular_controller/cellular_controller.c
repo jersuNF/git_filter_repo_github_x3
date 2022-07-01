@@ -89,9 +89,9 @@ void receive_tcp(struct data *sock_data)
 			if (received > 0) {
 				socket_idle_count = 0;
 #if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
-				LOG_WRN("received %d bytes!\n", received);
+				LOG_WRN("received %d bytes!", received);
 #endif
-				LOG_WRN("will take semaphore!\n");
+				LOG_WRN("will take semaphore!");
 				if (k_sem_take(&messaging_ack, K_SECONDS
 					       (MESSAGING_ACK_TIMEOUT)) != 0) {
 					char *e_msg = "Missed messaging ack!";
@@ -105,7 +105,7 @@ void receive_tcp(struct data *sock_data)
 						new_cellular_proto_in_event();
 					msgIn->buf = pMsgIn;
 					msgIn->len = received;
-					LOG_INF("Submitting msgIn event!\n");
+					LOG_INF("Submitting msgIn event!");
 					EVENT_SUBMIT(msgIn);
 				}
 			} else if (received == 0) {

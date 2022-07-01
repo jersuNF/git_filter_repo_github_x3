@@ -93,6 +93,19 @@ static inline int update_pasture_from_stg(void)
 		return err;
 	}
 
+	/* Success setting the pasture. set to teach mode if not keepmode active. */
+	uint8_t keep_mode;
+	err = eep_uint8_read(EEP_KEEP_MODE, &keep_mode);
+	if (err) {
+		/* We always expect the header to be the first frame. */
+		char *e_msg = "Error reading keep mode from eeprom.";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
+	}
+	if (!keep_mode) {
+		force_teach_mode();
+	}
+
 	/* Take pasture sem, since we need to access the version to send
 	 * to messaging module.
 	 */
@@ -123,6 +136,14 @@ static inline int update_pasture_from_stg(void)
 		nf_app_error(ERR_AMC, -ENODATA, e_msg, strlen(e_msg));
 		return -ENODATA;
 	}
+
+	/* New pasture installed, force a new gnss fix. */
+	restart_force_gnss_to_fix();
+
+	/* Submit event that we have now began to use the new fence. */
+	struct update_fence_version *ver = new_update_fence_version();
+	ver->fence_version = pasture->m.ul_fence_def_version;
+	EVENT_SUBMIT(ver);
 
 	k_sem_give(&fence_data_sem);
 	return 0;

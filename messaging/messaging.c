@@ -1517,6 +1517,18 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 			pasture_temp.m.has_keep_mode = true;
 			pasture_temp.m.keep_mode =
 				fenceResp->m.xHeader.bKeepMode;
+
+			/* Write to EEPROM. */
+			err = eep_uint8_write(EEP_KEEP_MODE,
+					      fenceResp->m.xHeader.bKeepMode);
+			if (err) {
+				/* We always expect the header to be the first frame. */
+				char *e_msg =
+					"Error writing keep mode to eeprom.";
+				LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+				nf_app_error(ERR_MESSAGING, err, e_msg,
+					     strlen(e_msg));
+			}
 		}
 
 		if (fenceResp->has_usFenceCRC) {

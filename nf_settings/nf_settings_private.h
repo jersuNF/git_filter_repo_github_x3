@@ -89,6 +89,9 @@ __packed struct eemem {
 
 	/** Product type; 1=Sheep/goat, 2=Cattle. */
 	uint16_t eep_product_type;
+
+	/** If we should keep teach mode or not on pasture update. */
+	uint8_t eep_keep_mode;
 };
 
 #endif /* X3_FW_NF_SETTINGS_PRIVATE_H */

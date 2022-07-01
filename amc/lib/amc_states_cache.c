@@ -205,6 +205,12 @@ static void enter_teach_mode()
 	teach_mode_saved_zap_cnt = (uint8_t)zap_cnt;
 }
 
+void force_teach_mode()
+{
+	current_mode = Mode_Teach;
+	enter_teach_mode();
+}
+
 void init_states_and_variables(void)
 {
 	cache_eeprom_variables();

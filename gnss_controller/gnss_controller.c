@@ -159,7 +159,7 @@ power consumption crude test - end */
 
 static _Noreturn void publish_gnss_data(void *ctx)
 {
-	static int64_t last_time_stamp = -1;
+	static uint64_t last_time_stamp = 0;
 	while (true) {
 		if (k_sem_take(&new_data_sem, K_SECONDS(5)) == 0
 		    && gnss_data_buffer.lastfix.unix_timestamp >=

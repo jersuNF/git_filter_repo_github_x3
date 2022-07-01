@@ -41,6 +41,7 @@ uint8_t gnss_reset_count;
 K_THREAD_STACK_DEFINE(pub_gnss_stack, STACK_SIZE);
 struct k_thread pub_gnss_thread;
 bool pub_gnss_started = false;
+bool initialized = false;
 
 /** @brief Sends a timeout event from the GNSS controller */
 static void gnss_controller_send_timeout_event(void)
@@ -173,9 +174,10 @@ static _Noreturn void publish_gnss_data(void *ctx)
 			EVENT_SUBMIT(new_data);
 			last_time_stamp = (int64_t)gnss_data_buffer.lastfix
 						   .unix_timestamp;
+			initialized = true;
 		} else {
 			last_time_stamp = 0;
-			gnss_timed_out();
+			if (initialized) gnss_timed_out();
 		}
 		if (gnss_data_buffer.lastfix.msss >= MS_IN_49_DAYS) {
 			gnss_reset_count = 10;

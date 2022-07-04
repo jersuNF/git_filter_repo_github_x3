@@ -51,7 +51,7 @@ static void gnss_controller_send_timeout_event(void)
 	struct gnss_data *new_data = new_gnss_data();
 	new_data->gnss_data = gnss_no_fix;
 	new_data->timed_out = true;
-	printk("setting time out to true!\n");
+	LOG_DBG("setting time out to true!\n");
 	EVENT_SUBMIT(new_data);
 }
 
@@ -100,11 +100,11 @@ int gnss_controller_init(void)
 {
 	gnss_reset_count = 0;
 
-	printk("Initializing gnss controller!\n");
+	LOG_DBG("Initializing gnss controller!\n");
 	gnss_dev = DEVICE_DT_GET(DT_ALIAS(gnss));
 	if (gnss_dev == NULL) {
 		char *msg = "Couldn't get instance of the GNSS device!";
-		printk("%s", msg);
+		LOG_ERR("%s", msg);
 		nf_app_error(ERR_GNSS_CONTROLLER, -1, msg, sizeof(*msg));
 		return -1;
 	}

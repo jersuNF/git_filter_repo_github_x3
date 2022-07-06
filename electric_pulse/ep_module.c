@@ -6,32 +6,32 @@
 #include <device.h>
 #include <devicetree.h>
 #include <drivers/gpio.h>
+#include <drivers/pwm.h>
+#include <logging/log.h>
 
 #include "ep_module.h"
 #include "ep_event.h"
 #include "error_event.h"
 #include "sound_event.h"
+#include "nf_settings.h"
 
 #define MODULE ep_module
-#include <logging/log.h>
 LOG_MODULE_REGISTER(MODULE, CONFIG_EP_MODULE_LOG_LEVEL);
-
-/* TODO: fetch this config value from EEPROM. Store it here for now */
-#define CATTLE 0
 
 #define PIN_HIGH 1
 #define PIN_LOW 0
 
-/* Match config values from HW_N. Must be fine tuned for new hw. */
-/* Times are given in uS */
-#define EP_DURATION_CATTLE 1000000
-#define EP_DURATION_SHEEP 500000
-#define EP_ON_TIME 2
-#define EP_OFF_TIME 5
-#define EP_FREQ (EP_ON_TIME + EP_OFF_TIME + 3)
+#define PRODUCT_TYPE_SHEEP 1
+#define PRODUCT_TYPE_CATTLE 2
 
-/* Safety timer. Given in mS */
-#define MINIMUM_TIME_BETWEEN_BURST 5000
+/* Electric pulse PWM configuration NB! Must be fine tuned for new HW */
+#define EP_DURATION_CATTLE_US 1000000
+#define EP_DURATION_SHEEP_US 500000
+#define EP_ON_TIME_US 2
+#define EP_OFF_TIME_US 5
+
+/* Safety timer */
+#define MINIMUM_TIME_BETWEEN_PULSES_MS 5000
 
 /* Board with no supported hw, use LED as indicator */
 #if DT_NODE_HAS_STATUS(DT_ALIAS(led0), okay)
@@ -52,76 +52,103 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_EP_MODULE_LOG_LEVEL);
 #endif
 
 const struct device *ep_ctrl_dev;
+const struct device *ep_ctrl_pwm_dev;
 const struct device *ep_detect_dev;
-static int64_t last_pulse_given = 0;
-volatile bool trigger_ready = false;
+static uint16_t g_product_type = 0;
+static int64_t g_last_pulse_time = 0;
+volatile bool g_trigger_ready = false;
 
 int ep_module_init(void)
 {
-	int err;
-	ep_ctrl_dev = device_get_binding(EP_CTRL_LABEL);
-	if (ep_ctrl_dev == NULL) {
-		LOG_ERR("Error get device %s", log_strdup(EP_CTRL_LABEL));
-		return -ENODEV;
-	}
-	/* Configure pin with flags */
-	err = gpio_pin_configure(ep_ctrl_dev, EP_CTRL_PIN,
-				 GPIO_OUTPUT_ACTIVE | EP_CTRL_FLAGS);
-	/* Set pin state to low */
-	err = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_LOW);
+	int ret;
+	do {
+		ep_ctrl_dev = device_get_binding(EP_CTRL_LABEL);
+		if (ep_ctrl_dev == NULL) {
+			LOG_WRN("Error get device %s", log_strdup(EP_CTRL_LABEL));
+			ret = -ENODEV;
+			break;
+		}
+		ret = gpio_pin_configure(ep_ctrl_dev, EP_CTRL_PIN, (GPIO_OUTPUT_ACTIVE | 
+			EP_CTRL_FLAGS | GPIO_DS_ALT_HIGH  | GPIO_DS_ALT_LOW));
+		if (ret != 0) {
+			LOG_WRN("Failed to configure EP control pin");
+			break;
+		}
+		ret = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_LOW);
+		if (ret != 0) {
+			LOG_WRN("Failed to set initial value of EP control pin");
+			break;
+		}
 
-/* EP Detect pin is not in use. Set to disconnected */
-#if DT_NODE_HAS_STATUS(DT_ALIAS(ep_detect), okay)
-	ep_detect_dev = device_get_binding(EP_DETECT_LABEL);
-	if (ep_detect_dev == NULL) {
-		LOG_ERR("Error get device %s", log_strdup(EP_DETECT_LABEL));
-		return -ENODEV;
-	}
-	err = gpio_pin_configure(ep_detect_dev, EP_DETECT_PIN,
-				 GPIO_DISCONNECTED);
-#endif
-	if (err < 0) {
-		LOG_ERR("Error initializing EP module");
-		return err;
-	}
-	return 0;
+		ep_ctrl_pwm_dev = device_get_binding("PWM_1");
+		if (ep_ctrl_pwm_dev == NULL) {
+			LOG_WRN("Failed to get EP PWM(1) device");
+			ret = -ENODEV;
+			break;
+		}
+
+		ret = eep_uint16_read(EEP_PRODUCT_TYPE, &g_product_type);
+		if (ret != 0) {
+			LOG_WRN("Failed to get product type, defaults to sheep/goat");
+			g_product_type = PRODUCT_TYPE_SHEEP;
+		}
+		return 0;
+	}while(0);
+	LOG_ERR("Failed to initializing EP module!");
+	return ret;
 }
 
 static int ep_module_release(void)
 {
-	int err;
-	uint32_t i;
-	/* In uS for sheep */
-	uint32_t EP_duration = (uint32_t)(EP_DURATION_SHEEP / EP_FREQ);
-	if (CATTLE) {
-		/* In uS for Cattle */
-		EP_duration = (uint32_t)(EP_DURATION_CATTLE / EP_FREQ);
-	}
-
-	if (!device_is_ready(ep_ctrl_dev)) {
-		/* Not ready, do not use */
-		LOG_ERR("EP not ready or proper initialized");
+	if (!device_is_ready(ep_ctrl_pwm_dev)) {
+		LOG_WRN("Electic pulse PWM device not ready!");
 		return -ENODEV;
 	}
-	/* Safety guard */
+	if (!device_is_ready(ep_ctrl_dev)) {
+		LOG_WRN("Electic pulse GPIO device not ready!");
+		return -ENODEV;
+	}
+
 	int64_t current_time = k_uptime_get();
-	int64_t elapsed_time = current_time - last_pulse_given;
-	if (elapsed_time < MINIMUM_TIME_BETWEEN_BURST) {
+	int64_t elapsed_time = current_time - g_last_pulse_time;
+	if (elapsed_time < MINIMUM_TIME_BETWEEN_PULSES_MS) {
 		LOG_WRN("Time between EP is shorter than allowed");
 		return -EACCES;
 	}
-	LOG_INF("Zapping now as all conditions are met!");
-	for (i = 0; i < EP_duration; i++) {
-		err = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_HIGH);
-		k_busy_wait(EP_ON_TIME);
-		err = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_LOW);
-		k_busy_wait(EP_OFF_TIME);
+
+	uint32_t ep_duration_us = (uint32_t)EP_DURATION_SHEEP_US;
+	if (g_product_type == PRODUCT_TYPE_CATTLE) {
+		ep_duration_us = (uint32_t)EP_DURATION_CATTLE_US;
 	}
-	/* Update timer */
-	last_pulse_given = current_time;
-	/* Done giving electic pulse. Set pin LOW */
-	err = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_LOW);
-	return err;
+
+	LOG_INF("Triggering electric pulse now (Period[us]:%d, Pulse width[us]:%d, Duration[us]:%d)", 
+			(EP_ON_TIME_US + EP_OFF_TIME_US), 
+			EP_ON_TIME_US, 
+			ep_duration_us);
+
+
+	int ret;
+	ret = pwm_pin_set_usec(ep_ctrl_pwm_dev, EP_CTRL_PIN, 
+							(EP_ON_TIME_US + EP_OFF_TIME_US), EP_ON_TIME_US, 0);
+	if (ret != 0) {
+		LOG_WRN("Unable to set electic pulse PWM signal!");
+	}
+	else {
+		k_busy_wait(ep_duration_us);
+	}
+		
+	ret = pwm_pin_set_usec(ep_ctrl_pwm_dev, EP_CTRL_PIN, 0, 0, 0);
+	if (ret != 0) { 
+		LOG_WRN("Unable to disable electic pulse PWM signal!"); 
+	}
+
+	ret = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_LOW);
+	if (ret != 0) {
+		LOG_WRN("Unable to disable electic pulse GPIO signal!");
+	}
+
+	g_last_pulse_time = current_time;
+	return ret;
 }
 
 /** 
@@ -134,52 +161,44 @@ static bool event_handler(const struct event_header *eh)
 {
 	/* Received ep status event */
 	if (is_ep_status_event(eh)) {
-		const struct ep_status_event *event = cast_ep_status_event(eh);
 		int err;
+		const struct ep_status_event *event = cast_ep_status_event(eh);
 		switch (event->ep_status) {
-		case EP_RELEASE:
-			if (trigger_ready) {
-				err = ep_module_release();
-				if (err < 0) {
-					char *e_msg = "Error in ep release";
-					LOG_ERR("%s (%d)", log_strdup(e_msg),
-						err);
-					nf_app_error(ERR_EP_MODULE, err, e_msg,
-						     strlen(e_msg));
+			case EP_RELEASE: {
+				if (g_trigger_ready) {
+					err = ep_module_release();
+					if (err < 0) {
+						char *e_msg = "Error in ep release";
+						LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+						nf_app_error(ERR_EP_MODULE, err, e_msg, strlen(e_msg));
+					}
+				} else {
+					char *e_msg = "Tried to give EP outside sound max event";
+					LOG_ERR("%s (%d)", log_strdup(e_msg), -EACCES);
+					nf_app_error(ERR_EP_MODULE, -EACCES, e_msg, strlen(e_msg));
 				}
-			} else {
-				char *e_msg =
-					"Tried to give EP outside sound max event";
-				LOG_ERR("%s (%d)", log_strdup(e_msg), -EACCES);
-				nf_app_error(ERR_EP_MODULE, -EACCES, e_msg,
-					     strlen(e_msg));
+				break;
 			}
-			break;
-		default:
-			/* Unhandled control message */
-			__ASSERT_NO_MSG(false);
-			break;
+			default: {
+				/* Unhandled control message */
+				__ASSERT_NO_MSG(false);
+				break;
+			}
 		}
-
 		return false;
 	}
-
 	if (is_sound_status_event(eh)) {
 		/* Open up window for zapping since we recieved that
-		 * the sound controller is playing MAX warn freq.
-		 */
-		const struct sound_status_event *event =
-			cast_sound_status_event(eh);
+		 * the sound controller is playing MAX warn freq. */
+		const struct sound_status_event *event = cast_sound_status_event(eh);
 		if (event->status == SND_STATUS_PLAYING_MAX) {
-			trigger_ready = true;
+			g_trigger_ready = true;
 		} else {
-			trigger_ready = false;
+			g_trigger_ready = false;
 		}
 		return false;
 	}
-
 	__ASSERT_NO_MSG(false);
-
 	return false;
 }
 

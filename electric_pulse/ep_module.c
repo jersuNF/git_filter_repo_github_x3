@@ -24,7 +24,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_EP_MODULE_LOG_LEVEL);
 #define PRODUCT_TYPE_SHEEP 1
 #define PRODUCT_TYPE_CATTLE 2
 
-/* Electric pulse PWM configuration NB! Must be fine tuned for new HW */
+/* Electric pulse PWM configuration, NB! Must be fine tuned for new HW */
 #define EP_DURATION_CATTLE_US 1000000
 #define EP_DURATION_SHEEP_US 500000
 #define EP_ON_TIME_US 2
@@ -49,6 +49,12 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_EP_MODULE_LOG_LEVEL);
 #define EP_DETECT_LABEL DT_GPIO_LABEL(EP_DETECT_NODE, gpios)
 #define EP_DETECT_PIN DT_GPIO_PIN(EP_DETECT_NODE, gpios)
 #define EP_DETECT_FLAGS DT_GPIO_FLAGS(EP_DETECT_NODE, gpios)
+#endif
+
+#if DT_NODE_HAS_STATUS(DT_ALIAS(pwm_ep), okay)
+#define PWM_EP_NODE DT_ALIAS(pwm_ep)
+#define PWM_EP_LABEL DT_GPIO_LABEL(PWM_EP_NODE, pwms)
+#define PWM_EP_CHANNEL DT_PWMS_CHANNEL(DT_ALIAS(pwm_ep))
 #endif
 
 const struct device *ep_ctrl_dev;
@@ -80,16 +86,20 @@ int ep_module_init(void)
 			break;
 		}
 
-		ep_ctrl_pwm_dev = device_get_binding("PWM_1");
+		ep_ctrl_pwm_dev = device_get_binding(PWM_EP_LABEL);
 		if (ep_ctrl_pwm_dev == NULL) {
-			LOG_WRN("Failed to get EP PWM(1) device");
+			LOG_WRN("Failed to get EP PWM device");
 			ret = -ENODEV;
 			break;
 		}
 
 		ret = eep_uint16_read(EEP_PRODUCT_TYPE, &g_product_type);
 		if (ret != 0) {
-			LOG_WRN("Failed to get product type, defaults to sheep/goat");
+			LOG_WRN("Failed to read product type from EEPROM");
+			break;
+		}
+		if ((g_product_type != PRODUCT_TYPE_SHEEP) && (g_product_type != PRODUCT_TYPE_CATTLE)) {
+			LOG_WRN("Unknown product type, EP module set to sheep configuration");
 			g_product_type = PRODUCT_TYPE_SHEEP;
 		}
 		return 0;
@@ -128,7 +138,8 @@ static int ep_module_release(void)
 
 
 	int ret;
-	ret = pwm_pin_set_usec(ep_ctrl_pwm_dev, EP_CTRL_PIN, 
+	/* Turn ON electric pulse signal (PWM) */
+	ret = pwm_pin_set_usec(ep_ctrl_pwm_dev, PWM_EP_CHANNEL, 
 							(EP_ON_TIME_US + EP_OFF_TIME_US), EP_ON_TIME_US, 0);
 	if (ret != 0) {
 		LOG_WRN("Unable to set electic pulse PWM signal!");
@@ -137,11 +148,11 @@ static int ep_module_release(void)
 		k_busy_wait(ep_duration_us);
 	}
 		
-	ret = pwm_pin_set_usec(ep_ctrl_pwm_dev, EP_CTRL_PIN, 0, 0, 0);
+	/* Turn OFF electric pulse signal (PWM) */
+	ret = pwm_pin_set_usec(ep_ctrl_pwm_dev, PWM_EP_CHANNEL, 0, 0, 0);
 	if (ret != 0) { 
 		LOG_WRN("Unable to disable electic pulse PWM signal!"); 
 	}
-
 	ret = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_LOW);
 	if (ret != 0) {
 		LOG_WRN("Unable to disable electic pulse GPIO signal!");

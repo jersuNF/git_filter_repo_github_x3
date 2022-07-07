@@ -92,37 +92,49 @@ static inline int update_pasture_from_stg(void)
 		nf_app_fatal(ERR_AMC, err, err_msg, strlen(err_msg));
 		return err;
 	}
-	return 0;
-}
 
-void handle_new_fence_fn(struct k_work *item)
-{
-	/* Update AMC cache. */
-	int cache_ret = update_pasture_from_stg();
+	/* Success setting the pasture. set to teach mode if not keepmode active. */
+	uint8_t keep_mode;
+	err = eep_uint8_read(EEP_KEEP_MODE, &keep_mode);
+	if (err) {
+		/* We always expect the header to be the first frame. */
+		char *e_msg = "Error reading keep mode from eeprom.";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
+	}
+	if (!keep_mode) {
+		force_teach_mode();
+	}
 
 	/* Take pasture sem, since we need to access the version to send
 	 * to messaging module.
 	 */
-	int err = k_sem_take(&fence_data_sem,
-			     K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
+	err = k_sem_take(&fence_data_sem,
+			 K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
 		char *e_msg =
 			"Error taking pasture semaphore for version check.";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
-		return;
+		return err;
 	}
 
+	/* Verify it has been cached correctly. */
 	pasture_t *pasture = NULL;
 	get_pasture_cache(&pasture);
 
-	if (cache_ret) {
-		pasture->m.ul_fence_def_version = 0;
-		char *e_msg =
-			"Error caching new pasture from storage controller.";
+	if (pasture != NULL) {
+		/* New pasture installed, force a new gnss fix. */
+		restart_force_gnss_to_fix();
+
+		struct update_fence_version *ver = new_update_fence_version();
+		ver->fence_version = pasture->m.ul_fence_def_version;
+		EVENT_SUBMIT(ver);
+	} else {
+		char *e_msg = "Pasture was not been cached correctly.";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_AMC, cache_ret, e_msg, strlen(e_msg));
-		return;
+		nf_app_error(ERR_AMC, -ENODATA, e_msg, strlen(e_msg));
+		return -ENODATA;
 	}
 
 	/* New pasture installed, force a new gnss fix. */
@@ -134,6 +146,12 @@ void handle_new_fence_fn(struct k_work *item)
 	EVENT_SUBMIT(ver);
 
 	k_sem_give(&fence_data_sem);
+	return 0;
+}
+
+void handle_new_fence_fn(struct k_work *item)
+{
+	update_pasture_from_stg();
 }
 
 /**

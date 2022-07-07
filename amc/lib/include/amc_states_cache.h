@@ -59,6 +59,11 @@ void init_states_and_variables(void);
  */
 Mode calc_mode(void);
 
+/** @brief Forces to teach mode again. This is done if pasture
+ *         has been updated for instance without keepmode.
+ */
+void force_teach_mode();
+
 /** @brief Just returns current mode on RAM.
  * 
  * @returns Status that we're currently in.

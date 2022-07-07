@@ -66,7 +66,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
 				 WARN_MAX_DURATION :
 				 *value;
-		LOG_INF("Set EEP_WARN_MAX_DURATION to %i", *value);
+		LOG_INF("Read EEP_WARN_MAX_DURATION %i", *value);
 		break;
 	}
 	case EEP_WARN_MIN_DURATION: {
@@ -79,7 +79,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
 				 WARN_MIN_DURATION :
 				 *value;
-		LOG_INF("Set EEP_WARN_MIN_DURATION to %i", *value);
+		LOG_INF("Read EEP_WARN_MIN_DURATION %i", *value);
 		break;
 	}
 	case EEP_PAIN_CNT_DEF_ESCAPED: {
@@ -92,7 +92,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
 				 PAIN_CNT_DEF_ESCAPED :
 				 *value;
-		LOG_INF("Set EEP_PAIN_CNT_DEF_ESCAPED to %i", *value);
+		LOG_INF("Read EEP_PAIN_CNT_DEF_ESCAPED %i", *value);
 		break;
 	}
 	case EEP_FENCE_STATUS: {
@@ -105,7 +105,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
 				 FenceStatus_FenceStatus_UNKNOWN :
 				 *value;
-		LOG_INF("Set EEP_FENCE_STATUS to %i", *value);
+		LOG_INF("Read EEP_FENCE_STATUS %i", *value);
 		break;
 	}
 	case EEP_COLLAR_MODE: {
@@ -118,7 +118,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
 				 Mode_Mode_UNKNOWN :
 				 *value;
-		LOG_INF("Set EEP_COLLAR_MODE to %i", *value);
+		LOG_INF("Read EEP_COLLAR_MODE %i", *value);
 		break;
 	}
 	case EEP_COLLAR_STATUS: {
@@ -131,7 +131,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
 				 CollarStatus_CollarStatus_UNKNOWN :
 				 *value;
-		LOG_INF("Set EEP_COLLAR_STATUS to %i", *value);
+		LOG_INF("Read EEP_COLLAR_STATUS %i", *value);
 		break;
 	}
 	case EEP_TEACH_MODE_FINISHED: {
@@ -142,7 +142,17 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
 		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? 0 : *value;
-		LOG_INF("Set teach mode finished to %i", *value);
+		LOG_INF("Read teach mode finished %i", *value);
+		break;
+	}
+	case EEP_KEEP_MODE: {
+		offset = offsetof(struct eemem, eep_keep_mode);
+		/* Check for default values, i.e value read is 0xFF,
+		 * set to defualt 0, not finished. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? 0 : *value;
+		LOG_INF("Read keep mode %i", *value);
 		break;
 	}
 	case EEP_EMS_PROVIDER: {
@@ -259,6 +269,10 @@ int eep_uint8_write(eep_uint8_enum_t field, uint8_t value)
 	}
 	case EEP_HW_VERSION: {
 		offset = offsetof(struct eemem, eep_hw_version);
+		break;
+	}
+	case EEP_KEEP_MODE: {
+		offset = offsetof(struct eemem, eep_keep_mode);
 		break;
 	}
 	default: {

@@ -27,8 +27,8 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_EP_MODULE_LOG_LEVEL);
 /* Electric pulse PWM configuration, NB! Must be fine tuned for new HW */
 #define EP_DURATION_CATTLE_US 1000000
 #define EP_DURATION_SHEEP_US 500000
-#define EP_ON_TIME_US 2
-#define EP_OFF_TIME_US 5
+#define EP_ON_TIME_US 3
+#define EP_OFF_TIME_US 8
 
 /* Safety timer */
 #define MINIMUM_TIME_BETWEEN_PULSES_MS 5000

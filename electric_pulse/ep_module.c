@@ -146,6 +146,7 @@ static int ep_module_release(void)
 	}
 	else {
 		k_busy_wait(ep_duration_us);
+		g_last_pulse_time = current_time;
 	}
 		
 	/* Turn OFF electric pulse signal (PWM) */
@@ -158,7 +159,6 @@ static int ep_module_release(void)
 		LOG_WRN("Unable to disable electic pulse GPIO signal!");
 	}
 
-	g_last_pulse_time = current_time;
 	return ret;
 }
 

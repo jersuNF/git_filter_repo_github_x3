@@ -270,7 +270,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 	}
 	else if (is_messaging_proto_out_event(eh)) {
 		sending_in_progress = true;
-		if (ready_for_new_msg) {
+		if (ready_for_new_msg && connected) {
 			ready_for_new_msg = false;
 			struct messaging_proto_out_event *event =
 				cast_messaging_proto_out_event(eh);

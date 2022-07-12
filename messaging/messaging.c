@@ -1072,7 +1072,8 @@ void build_poll_request(NofenceMessage *poll_req)
 		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion =
 			NF_X25_VERSION_NUMBER;
 		poll_req->m.poll_message_req.has_xSimCardId= true;
-		memcpy(poll_req->m.poll_message_req.xSimCardId, ccid, sizeof(poll_req->m.poll_message_req.xSimCardId));
+		memcpy(poll_req->m.poll_message_req.xSimCardId, ccid, sizeof
+								      (poll_req->m.poll_message_req.xSimCardId)-1);
 		/* TODO pshustad, clean up and re-enable the commented code below */
 		//		uint16_t xbootVersion;
 		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {

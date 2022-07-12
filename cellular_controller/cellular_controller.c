@@ -14,7 +14,7 @@
 #define SOCKET_POLL_INTERVAL 0.25
 #define SOCK_RECV_TIMEOUT 15
 #define MODULE cellular_controller
-#define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_SEC
+#define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_MSEC
 
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
@@ -56,14 +56,6 @@ APP_DMEM struct configs conf = {
 	},
 };
 
-void submit_error(int8_t cause, int8_t err_code)
-{
-	struct cellular_error_event *err = new_cellular_error_event();
-	err->cause = cause;
-	err->err_code = err_code;
-	EVENT_SUBMIT(err);
-}
-
 void receive_tcp(struct data *);
 K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK, receive_tcp, &conf.ipv4, NULL, NULL,
 		MY_PRIORITY, 0, 0);
@@ -92,14 +84,8 @@ void receive_tcp(struct data *sock_data)
 				LOG_WRN("received %d bytes!", received);
 #endif
 				LOG_WRN("will take semaphore!");
-				if (k_sem_take(&messaging_ack, K_SECONDS
-					       (MESSAGING_ACK_TIMEOUT)) != 0) {
-					char *e_msg = "Missed messaging ack!";
-					nf_app_error(ERR_MESSAGING, -EINPROGRESS, e_msg, strlen
-						(e_msg));
-					k_free(pMsgIn);
-					pMsgIn = NULL;
-				} else {
+				if (k_sem_take(&messaging_ack,
+					       K_MSEC(MESSAGING_ACK_TIMEOUT)) == 0) {
 					pMsgIn = (uint8_t *)k_malloc(received);
 					memcpy(pMsgIn, buf, received);
 					struct cellular_proto_in_event *msgIn =
@@ -108,10 +94,16 @@ void receive_tcp(struct data *sock_data)
 					msgIn->len = received;
 					LOG_INF("Submitting msgIn event!");
 					EVENT_SUBMIT(msgIn);
+				} else {
+					char *err_msg = "Missed messaging ack!";
+					nf_app_error(ERR_MESSAGING,
+						     -ETIMEDOUT, err_msg,
+						     strlen
+						(err_msg));
 				}
 			} else if (received == 0) {
 				socket_idle_count += SOCKET_POLL_INTERVAL;
-				if (socket_idle_count > SOCK_RECV_TIMEOUT){
+				if (socket_idle_count > SOCK_RECV_TIMEOUT) {
 					LOG_WRN("Socket receive timed out!");
 					if (!keep_modem_awake &&
 					    !sending_in_progress) {
@@ -126,8 +118,6 @@ void receive_tcp(struct data *sock_data)
 						}
 						connected = false;
 						socket_idle_count = 0;
-					} else {
-						k_yield();
 					}
 				}
 			} else {
@@ -300,10 +290,12 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 
 			int err = send_tcp_q(CharMsgOut, MsgOutLen);
 			if (err != 0) {
-				char *e_msg = "Couldn't push message to queue!";
-				nf_app_error(ERR_MESSAGING, -EAGAIN, e_msg,
-					     strlen(e_msg));
+				char *sendq_err = "Couldn't push message to "
+					       "queue!";
+				nf_app_error(ERR_MESSAGING, -EAGAIN, sendq_err,
+					     strlen(sendq_err));
 				k_free(CharMsgOut);
+				CharMsgOut = NULL;
 				return false;
 			}
 		}

@@ -23,9 +23,9 @@ if CELLULAR_CONTROLLER
 	module-str = CELLULAR
 	source "subsys/logging/Kconfig.template.log_config"
 
-	config MESSAGING_ACK_TIMEOUT_SEC
+	config MESSAGING_ACK_TIMEOUT_MSEC
 	    int "Timeout when waiting for ack from messaging"
-        default 1
+        default 200
 
 
 	config RECV_BUF_MAX

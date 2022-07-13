@@ -290,8 +290,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 
 			int err = send_tcp_q(CharMsgOut, MsgOutLen);
 			if (err != 0) {
-				char *sendq_err = "Couldn't push message to "
-					       "queue!";
+				char *sendq_err = "Couldn't push message to queue!";
 				nf_app_error(ERR_MESSAGING, -EAGAIN, sendq_err,
 					     strlen(sendq_err));
 				k_free(CharMsgOut);

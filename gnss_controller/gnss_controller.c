@@ -281,7 +281,6 @@ EVENT_SUBSCRIBE(MODULE, gnss_set_mode_event);
  */
 static void gnss_timed_out(void)
 {
-	initialized = false;
 	LOG_DBG("resets %d", gnss_reset_count);
 
 	if (gnss_reset_count < 1) {

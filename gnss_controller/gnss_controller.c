@@ -41,7 +41,7 @@ uint8_t gnss_reset_count;
 K_THREAD_STACK_DEFINE(pub_gnss_stack, STACK_SIZE);
 struct k_thread pub_gnss_thread;
 bool pub_gnss_started = false;
-bool initialized = false;
+static bool initialized = false;
 
 /** @brief Sends a timeout event from the GNSS controller */
 static void gnss_controller_send_timeout_event(void)
@@ -281,6 +281,7 @@ EVENT_SUBSCRIBE(MODULE, gnss_set_mode_event);
  */
 static void gnss_timed_out(void)
 {
+	initialized = false;
 	LOG_DBG("resets %d", gnss_reset_count);
 
 	if (gnss_reset_count < 1) {

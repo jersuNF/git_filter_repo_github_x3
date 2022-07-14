@@ -41,6 +41,7 @@ uint8_t gnss_reset_count;
 K_THREAD_STACK_DEFINE(pub_gnss_stack, STACK_SIZE);
 struct k_thread pub_gnss_thread;
 bool pub_gnss_started = false;
+bool initialized = false;
 
 /** @brief Sends a timeout event from the GNSS controller */
 static void gnss_controller_send_timeout_event(void)
@@ -51,7 +52,7 @@ static void gnss_controller_send_timeout_event(void)
 	struct gnss_data *new_data = new_gnss_data();
 	new_data->gnss_data = gnss_no_fix;
 	new_data->timed_out = true;
-	LOG_DBG("setting time out to true!\n");
+
 	EVENT_SUBMIT(new_data);
 }
 
@@ -100,11 +101,11 @@ int gnss_controller_init(void)
 {
 	gnss_reset_count = 0;
 
-	LOG_DBG("Initializing gnss controller!\n");
+	printk("Initializing gnss controller!\n");
 	gnss_dev = DEVICE_DT_GET(DT_ALIAS(gnss));
 	if (gnss_dev == NULL) {
 		char *msg = "Couldn't get instance of the GNSS device!";
-		LOG_ERR("%s", msg);
+		printk("%s", msg);
 		nf_app_error(ERR_GNSS_CONTROLLER, -1, msg, sizeof(*msg));
 		return -1;
 	}
@@ -160,30 +161,23 @@ static _Noreturn void publish_gnss_data(void *ctx)
 {
 	static uint64_t last_time_stamp = 0;
 	while (true) {
-		if (k_sem_take(&new_data_sem, K_SECONDS(5)) == 0) {
+		if (k_sem_take(&new_data_sem, K_SECONDS(5)) == 0
+		    && gnss_data_buffer.lastfix.unix_timestamp >=
+			       last_time_stamp) {
 			gnss_clear_reset_count();
 			struct gnss_data *new_data = new_gnss_data();
 			new_data->gnss_data = gnss_data_buffer;
 			new_data->timed_out = false;
-			LOG_INF("  GNSS data: %d, %d, %d, %d, %d",
-				gnss_data_buffer.latest.lon,
-				gnss_data_buffer.latest.lat,
-				gnss_data_buffer.latest.pvt_flags,
-				gnss_data_buffer.latest.h_acc_dm,
+			LOG_INF("  GNSS data: %d, %d, %d, %d, %d", gnss_data_buffer.latest.lon,
+				gnss_data_buffer.latest.lat, gnss_data_buffer.latest.pvt_flags, gnss_data_buffer.latest.h_acc_dm,
 				gnss_data_buffer.latest.num_sv);
 			EVENT_SUBMIT(new_data);
-			if (gnss_data_buffer.lastfix.unix_timestamp <=
-				    last_time_stamp && last_time_stamp != 0) {
-				LOG_DBG("OLD DATA!\n");
-				last_time_stamp = 0;
-				gnss_timed_out();
-			} else {
-				last_time_stamp =
-					gnss_data_buffer.lastfix.unix_timestamp;
-			}
+			last_time_stamp = (int64_t)gnss_data_buffer.lastfix
+						   .unix_timestamp;
+			initialized = true;
 		} else {
 			last_time_stamp = 0;
-			gnss_timed_out();
+			if (initialized) gnss_timed_out();
 		}
 		if (gnss_data_buffer.lastfix.msss >= MS_IN_49_DAYS) {
 			gnss_reset_count = 10;
@@ -301,6 +295,7 @@ static void gnss_timed_out(void)
 	}
 
 	if (gnss_reset_count >= 3) {
+		LOG_DBG("OLD FIX ERROR!\n");
 		char *msg = "GNSS fix extremely old!";
 		nf_app_error(ERR_GNSS_CONTROLLER, -ETIMEDOUT, msg,
 			     sizeof(*msg));

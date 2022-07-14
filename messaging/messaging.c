@@ -935,6 +935,9 @@ int messaging_module_init(void)
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return err;
 	}
+	struct check_connection *ev = new_check_connection();
+	EVENT_SUBMIT(ev); /*startup the modem to get the gsm_info ready
+ * before the first poll request.*/
 
 	k_work_queue_init(&send_q);
 	k_work_queue_start(&send_q, messaging_send_thread,
@@ -1252,18 +1255,18 @@ void proto_InitHeader(NofenceMessage *msg)
  */
 int send_binary_message(uint8_t *data, size_t len)
 {
-	struct check_connection *ev = new_check_connection();
-	EVENT_SUBMIT(ev);
-	int ret = k_sem_take(&connection_ready, K_MINUTES(2));
-	if (ret != 0) {
-		char *e_msg = "Connection not ready, can't send message now!";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
-		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
-		return -ETIMEDOUT;
-	}
 	/* We can only send 1 message at a time, use mutex. */
 	if (k_mutex_lock(&send_binary_mutex,
 			 K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC * 2)) == 0) {
+		struct check_connection *ev = new_check_connection();
+		EVENT_SUBMIT(ev);
+		int ret = k_sem_take(&connection_ready, K_MINUTES(2));
+		if (ret != 0) {
+			char *e_msg = "Connection not ready, can't send message now!";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
+			nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
+			return -ETIMEDOUT;
+		}
 		uint16_t byteswap_size = BYTESWAP16(len - 2);
 		memcpy(&data[0], &byteswap_size, 2);
 

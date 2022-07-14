@@ -118,6 +118,8 @@ void receive_tcp(struct data *sock_data)
 						}
 						connected = false;
 						socket_idle_count = 0;
+					} else {
+						k_yield();
 					}
 				}
 			} else {
@@ -468,6 +470,14 @@ void announce_connection_state(bool state){
 		modem_is_ready = false;
 		connected = false;
 	}
+	if (state == true) {
+		struct modem_state
+			*modem_active =
+			new_modem_state();
+		modem_active->mode
+			= POWER_ON;
+		EVENT_SUBMIT(modem_active);
+	}
 	publish_gsm_info();
 }
 
@@ -490,7 +500,7 @@ int8_t cellular_controller_init(void)
 
 	/* Start connection keep-alive thread */
 	modem_is_ready = false;
-	k_sem_init(&connection_state_sem, 1, 1);
+	k_sem_init(&connection_state_sem, 0, 1);
 	k_thread_create(&keep_alive_thread, keep_alive_stack,
 			K_KERNEL_STACK_SIZEOF(keep_alive_stack),
 			(k_thread_entry_t)cellular_controller_keep_alive,

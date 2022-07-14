@@ -24,7 +24,7 @@ if CELLULAR_CONTROLLER
 	source "subsys/logging/Kconfig.template.log_config"
 
 	config MESSAGING_ACK_TIMEOUT_MSEC
-	    int "Timeout when waiting for ack from messaging"
+	    int "Timeout when waiting for ack from messaging (milliseconds)"
         default 200
 
 

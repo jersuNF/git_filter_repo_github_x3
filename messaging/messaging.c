@@ -56,6 +56,8 @@ extern struct k_heap _system_heap;
 #define EMPTY_FENCE_CRC 0xFFFF
 static pasture_t pasture_temp;
 static uint8_t cached_fences_counter = 0;
+static uint16_t cached_msss = 0;
+static uint16_t cached_ttff = 0;
 
 /** @todo This should be fetched from EEPROM */
 static gnss_mode_t cached_gnss_mode = GNSSMODE_NOMODE;
@@ -71,8 +73,8 @@ K_SEM_DEFINE(cache_lock_sem, 1, 1);
 K_SEM_DEFINE(send_out_ack, 0, 1);
 K_SEM_DEFINE(connection_ready, 0, 1);
 
-collar_state_struct_t current_state;
-gnss_last_fix_struct_t cached_fix;
+static collar_state_struct_t current_state;
+static gnss_last_fix_struct_t cached_fix;
 
 typedef enum {
 	COLLAR_MODE,
@@ -99,7 +101,7 @@ static bool first_frame, first_ano_frame;
 /* Time since the server updated the date time in seconds. */
 static atomic_t server_timestamp_sec = ATOMIC_INIT(0);
 
-uint32_t serial_id = 0;
+static uint32_t serial_id = 0;
 
 void build_poll_request(NofenceMessage *);
 int8_t request_fframe(uint32_t, uint8_t);
@@ -123,7 +125,7 @@ bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *);
 static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
 
 static bool m_transfer_boot_params = true;
-bool m_confirm_acc_limits, m_confirm_ble_key;
+static bool m_confirm_acc_limits, m_confirm_ble_key;
 
 K_MUTEX_DEFINE(send_binary_mutex);
 
@@ -509,6 +511,9 @@ static bool event_handler(const struct event_header *eh)
 			/* TODO, review pshustad, might block the event manager for 50 ms ? */
 			if (k_sem_take(&cache_lock_sem, K_MSEC(50)) == 0) {
 				cached_fix = ev->gnss_data.lastfix;
+				cached_ttff = (uint16_t)(ev->gnss_data.latest
+							 .ttff/1000);
+				cached_msss = (uint16_t)(ev->gnss_data.latest.msss/1000);
 				k_sem_give(&cache_lock_sem);
 			}
 			if (tm_time->tm_year < 2015) {
@@ -1058,8 +1063,12 @@ void build_poll_request(NofenceMessage *poll_req)
 		}
 	}
 	/* TODO pshustad, fill GNSSS parameters for MIA M10 */
-	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec = false;
-	poll_req->m.poll_message_req.has_usGnssTTFFSec = false;
+	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec = true;
+	poll_req->m.poll_message_req.usGnssOnFixAgeSec =
+		cached_msss - cached_fix.msss;
+
+	poll_req->m.poll_message_req.has_usGnssTTFFSec = true;
+	poll_req->m.poll_message_req.usGnssTTFFSec = cached_ttff;
 
 	if (m_transfer_boot_params) {
 		poll_req->m.poll_message_req.has_versionInfo = true;

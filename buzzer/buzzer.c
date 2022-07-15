@@ -12,6 +12,7 @@
 #include "pwr_module.h"
 
 #include "error_event.h"
+#include <drivers/gpio.h>
 
 #define MODULE buzzer
 LOG_MODULE_REGISTER(MODULE, CONFIG_BUZZER_LOG_LEVEL);
@@ -23,7 +24,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BUZZER_LOG_LEVEL);
 #endif
 
 static const struct device *buzzer_pwm;
-
+static const struct device *buzzer_pin_dev;
 /* Variable used to play sweep sounds, taken from old code. */
 #define SWEEP_TIME_PER_STEP_USEC 30
 
@@ -550,6 +551,13 @@ void play()
 int buzzer_module_init(void)
 {
 	uint64_t cycles;
+	buzzer_pin_dev = device_get_binding("GPIO_0");
+	int ret = gpio_pin_configure(buzzer_pin_dev, 14,
+				     (GPIO_ACTIVE_HIGH |
+				      GPIO_DS_ALT_HIGH  |
+				      GPIO_DS_ALT_LOW));
+
+	gpio_pin_set(buzzer_pin_dev, 14, 0);
 	buzzer_pwm = device_get_binding(PWM_BUZZER_LABEL);
 	if (!buzzer_pwm) {
 		LOG_ERR("Cannot find buzzer PWM device! %s",

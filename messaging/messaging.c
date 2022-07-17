@@ -1076,7 +1076,7 @@ void build_poll_request(NofenceMessage *poll_req)
 	/* TODO pshustad, fill GNSSS parameters for MIA M10 */
 	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec = true;
 	poll_req->m.poll_message_req.usGnssOnFixAgeSec =
-		cached_msss - cached_fix.msss;
+		cached_msss - (uint16_t)(cached_fix.msss/1000);
 
 	poll_req->m.poll_message_req.has_usGnssTTFFSec = true;
 	poll_req->m.poll_message_req.usGnssTTFFSec = cached_ttff;

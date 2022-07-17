@@ -732,6 +732,10 @@ bool validate_pasture()
 	pasture_value_16 = pasture_temp.m.us_k_lat;
 	crc = nf_crc16_uint16(pasture_value_16, &crc);
 
+	if (pasture_temp.m.ul_total_fences == 0) { /*Ignore CRC for No pasture.*/
+		return crc == pasture_temp.m.us_pasture_crc;
+	}
+
 	for (uint8_t i = 0; i < pasture_temp.m.ul_total_fences; i++) {
 		fence_t *target_fence = &pasture_temp.fences[i];
 		for (uint8_t j = 0; j < target_fence->m.n_points; j++) {
@@ -1577,10 +1581,13 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 		}
 
 		if (pasture_temp.m.ul_total_fences == 0) {
-			char *e_msg = "Error, pasture cached is empty.";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), -EIO);
-			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
-			return 0;
+			/* No pasture*/
+			err = stg_write_pasture_data((uint8_t *)&pasture_temp,
+						     sizeof(pasture_temp));
+			if (err) {
+				return err;
+			}
+			return DOWNLOAD_COMPLETE;
 		}
 
 		if (!validate_pasture()) {

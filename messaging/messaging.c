@@ -49,7 +49,7 @@ extern struct k_heap _system_heap;
 #define SECONDS_IN_THREE_DAYS 259200
 #define TWO_DAYS_SEC SEC_DAY * 2
 
-#define CACHE_READY_TIMEOUT_SEC 60
+#define CACHE_READY_TIMEOUT_SEC 5
 
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
 
@@ -84,7 +84,6 @@ typedef enum {
 	/** @todo Not written to eeprom, should it? -> FLASH_ERASE_COUNT,*/
 	ZAP_COUNT,
 	GNSS_STRUCT,
-	GSM_INFO,
 	CACHED_READY_END_OF_LIST
 } cached_and_ready_enum;
 
@@ -94,7 +93,6 @@ typedef enum {
 static int cached_and_ready_reg[CACHED_READY_END_OF_LIST];
 
 static int rat, mnc, rssi, min_rssi, max_rssi;
-static uint8_t ccid[20];
 
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
@@ -706,10 +704,8 @@ static bool event_handler(const struct event_header *eh)
 		rssi = ev->gsm_info.rssi;
 		min_rssi = ev->gsm_info.min_rssi;
 		max_rssi = ev->gsm_info.max_rssi;
-		memcpy(ccid, ev->gsm_info.ccid, sizeof(ccid));
-		LOG_WRN("RSSI, rat: %d, %d, %d, %d, %s", rssi, min_rssi,
-			max_rssi,  rat, ccid);
-		update_cache_reg(GSM_INFO);
+		LOG_WRN("RSSI, rat: %d, %d, %d, %d", rssi, min_rssi, max_rssi,
+			rat);
 		return false;
 	}
 
@@ -944,9 +940,6 @@ int messaging_module_init(void)
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return err;
 	}
-	struct check_connection *ev = new_check_connection();
-	EVENT_SUBMIT(ev); /*startup the modem to get the gsm_info ready
- * before the first poll request.*/
 
 	k_work_queue_init(&send_q);
 	k_work_queue_start(&send_q, messaging_send_thread,
@@ -1007,7 +1000,7 @@ void build_poll_request(NofenceMessage *poll_req)
 		(uint16_t)atomic_get(&cached_batt);
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
-	poll_req->m.poll_message_req.has_xGsmInfo = true;
+
 	_GSM_INFO p_gsm_info;
 	p_gsm_info.ucRAT = (uint8_t)rat;
 	sprintf(p_gsm_info.xMMC_MNC, "%d", mnc);
@@ -1087,9 +1080,6 @@ void build_poll_request(NofenceMessage *poll_req)
 			.has_ulApplicationVersion = true;
 		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion =
 			NF_X25_VERSION_NUMBER;
-		poll_req->m.poll_message_req.has_xSimCardId= true;
-		memcpy(poll_req->m.poll_message_req.xSimCardId, ccid, sizeof
-								      (poll_req->m.poll_message_req.xSimCardId)-1);
 		/* TODO pshustad, clean up and re-enable the commented code below */
 		//		uint16_t xbootVersion;
 		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
@@ -1268,18 +1258,18 @@ void proto_InitHeader(NofenceMessage *msg)
  */
 int send_binary_message(uint8_t *data, size_t len)
 {
+	struct check_connection *ev = new_check_connection();
+	EVENT_SUBMIT(ev);
+	int ret = k_sem_take(&connection_ready, K_MINUTES(2));
+	if (ret != 0) {
+		char *e_msg = "Connection not ready, can't send message now!";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
+		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
+		return -ETIMEDOUT;
+	}
 	/* We can only send 1 message at a time, use mutex. */
 	if (k_mutex_lock(&send_binary_mutex,
 			 K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC * 2)) == 0) {
-		struct check_connection *ev = new_check_connection();
-		EVENT_SUBMIT(ev);
-		int ret = k_sem_take(&connection_ready, K_MINUTES(2));
-		if (ret != 0) {
-			char *e_msg = "Connection not ready, can't send message now!";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
-			nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
-			return -ETIMEDOUT;
-		}
 		uint16_t byteswap_size = BYTESWAP16(len - 2);
 		memcpy(&data[0], &byteswap_size, 2);
 

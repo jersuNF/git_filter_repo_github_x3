@@ -289,7 +289,7 @@ void play_short_200(void)
 
 void play_short_100(void)
 {
-	play_hz(100, 100 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+	play_hz(1000, 100 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
 }
 
 void play_solar_test(void)

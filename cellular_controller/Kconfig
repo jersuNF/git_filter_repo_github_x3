@@ -25,7 +25,7 @@ if CELLULAR_CONTROLLER
 
 	config MESSAGING_ACK_TIMEOUT_MSEC
 	    int "Timeout when waiting for ack from messaging (milliseconds)"
-        default 200
+        default 1200
 
 
 	config RECV_BUF_MAX

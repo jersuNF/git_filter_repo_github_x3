@@ -462,6 +462,7 @@ static void cellular_controller_keep_alive(void *dev)
 }
 
 void announce_connection_state(bool state){
+	k_sem_reset(&connection_state_sem);
 	struct connection_state_event *ev
 		= new_connection_state_event();
 	ev->state = state;

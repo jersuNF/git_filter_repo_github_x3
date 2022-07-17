@@ -500,8 +500,7 @@ CollarStatus calc_collar_status(void)
 			new_collar_status = CollarStatus_Sleep;
 			LOG_INF("Normal->Sleep");
 		} else if (mov_state == STATE_INACTIVE) {
-			char *msg = "Went directly to inactive in normal";
-			nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
+			LOG_WRN("Went directly to inactive in normal");
 		}
 		break;
 	case CollarStatus_Sleep:

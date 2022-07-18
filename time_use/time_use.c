@@ -114,7 +114,7 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_step_counter_event(eh)) {
 		struct step_counter_event *ev = cast_step_counter_event(eh);
-		steps = ev->steps - steps;
+		steps = ev->steps;
 		return false;
 	}
 	if (is_gnss_data(eh)) {

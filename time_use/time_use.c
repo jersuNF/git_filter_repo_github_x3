@@ -269,11 +269,10 @@ void collect_stats(void)
 			//******************Add Stepcounter value*************************
 			histogram.animal_behave.has_usStepCounter =
 				true;
-			histogram.animal_behave.usStepCounter = 0;
-			if (steps_old != steps) {
-				histogram.animal_behave.usStepCounter = steps;
-				steps_old = steps;
-			}
+			histogram.animal_behave.usStepCounter = steps
+								- steps_old;
+			steps_old = steps;
+
 			//*****************Histogram to predict Current profile of the collar********************
 
 			if (cur_collar_status == CollarStatus_Sleep ||

@@ -269,7 +269,7 @@ void collect_stats(void)
 			//******************Add Stepcounter value*************************
 			histogram.animal_behave.has_usStepCounter =
 				true;
-			histogram.animal_behave.usStepCounter = steps
+			histogram.animal_behave.usStepCounter += steps
 								- steps_old;
 			steps_old = steps;
 
@@ -400,6 +400,8 @@ void collect_stats(void)
 			m_u16_speedmax = 0;
 			m_u32_speedmean = 0;
 			m_ui16_hs_samples = 0;
+			steps = 0;
+			steps_old = 0;
 		}
 		k_sleep(K_MSEC(150));
 	}

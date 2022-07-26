@@ -12,7 +12,7 @@
 
 #include "nf_fifo.h"
 #include "trigonometry.h"
-#define STEPS_TRIGGER 5
+#define STEPS_TRIGGER 1
 
 LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 
@@ -76,17 +76,19 @@ uint8_t acc_count_steps(int32_t gravity)
 
 	/* Compute gravity and animal component. */
 	for (i = 0; i < ACC_FIFO_ELEMENTS; i++) {
-		acceleration[i] = -(acc_fifo_z[i] - gravity);
+		acceleration[i] = -(acc_fifo_y[i] - gravity);
 	}
 
 	/* Count the number of steps in the FIFO-queue. */
 	for (i = 0; i < ACC_FIFO_ELEMENTS; i++) {
 		if (acceleration[i] < 0 && step_flag == false) {
 			step_flag = true;
+			acc_fifo_y[i] = gravity;
 		}
 		if (acceleration[i] > STEP_THRESHOLD && step_flag == true) {
 			step_flag = false;
 			step_counter++;
+			acc_fifo_y[i] = gravity;
 		}
 	}
 	return step_counter;
@@ -136,13 +138,12 @@ void process_acc_data(raw_acc_data_t *acc)
 	uint32_t acc_norm_sum = 0;
 
 	for (i = 0; i < ACC_FIFO_ELEMENTS; i++) {
-		uint32_t acc_tot = ((uint32_t)acc_fifo_x[i] * acc_fifo_x[i]) +
-				   ((uint32_t)acc_fifo_y[i] * acc_fifo_y[i]) +
-				   ((uint32_t)acc_fifo_z[i] * acc_fifo_z[i]);
+		uint32_t acc_tot = (uint32_t)(acc_fifo_x[i] * acc_fifo_x[i]) +
+				   (uint32_t)(acc_fifo_y[i] * acc_fifo_y[i]) +
+				   (uint32_t)(acc_fifo_z[i] * acc_fifo_z[i]);
 		acc_norm[i] = g_u32_SquareRootRounded(acc_tot);
 		acc_norm_sum += acc_norm[i];
-
-		gravity += acc_fifo_z[i] / ACC_FIFO_ELEMENTS;
+		gravity += acc_fifo_y[i] / ACC_FIFO_ELEMENTS;
 	}
 
 	uint32_t acc_norm_mean = acc_norm_sum / ACC_FIFO_ELEMENTS;
@@ -152,9 +153,8 @@ void process_acc_data(raw_acc_data_t *acc)
 	uint32_t acc_std_final = 0;
 	for (i = 0; i < ACC_FIFO_ELEMENTS; i++) {
 		int32_t x = (acc_norm[i] - acc_norm_mean);
-		acc_std += (x * x);
+		acc_std += (uint32_t)(x * x)/ACC_FIFO_ELEMENTS;;
 	}
-	acc_std /= ACC_FIFO_ELEMENTS;
 	acc_std = g_u32_SquareRootRounded(acc_std);
 
 	/* Exponential moving average with alpha = 2/(N+1). */
@@ -230,7 +230,8 @@ void process_acc_data(raw_acc_data_t *acc)
 
 	if (cur_activity == ACTIVITY_NO) {
 		uint32_t inactive_for_sec =
-			k_uptime_get_32() - first_inactive_timestamp;
+			(uint32_t)((k_uptime_get_32() -
+				    first_inactive_timestamp)/1000);
 		if (inactive_for_sec >= off_animal_time_limit_sec) {
 			is_active = false;
 		}

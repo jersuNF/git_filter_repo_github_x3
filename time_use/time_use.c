@@ -57,7 +57,7 @@ static FenceStatus cur_fence_status;
 static bool in_beacon_or_sleep, save_and_reset;
 static movement_state_t cur_mv_state;
 static acc_activity_t cur_activity_level = ACTIVITY_NO;
-static uint32_t steps = 0, steps_old = 0;
+static uint16_t steps = 0, steps_old = 0;
 int16_t m_i16_way_pnt[2], fresh_pos[2];
 static gnss_mode_t cur_gnss_pwr_m = GNSSMODE_NOMODE;
 static modem_pwr_mode cur_modem_pwr_m = POWER_ON;
@@ -114,7 +114,7 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_step_counter_event(eh)) {
 		struct step_counter_event *ev = cast_step_counter_event(eh);
-		steps = ev->steps;
+		steps = (uint16_t)ev->steps;
 		return false;
 	}
 	if (is_gnss_data(eh)) {
@@ -269,7 +269,9 @@ void collect_stats(void)
 			histogram.animal_behave.usStepCounter += (steps
 								- steps_old);
 			LOG_WRN("STEPS: %d", histogram.animal_behave.usStepCounter);
-			steps_old = steps;
+//			steps_old = steps;
+//			if (steps == UINT16_MAX) steps_old = 0;
+			steps_old = (steps==UINT16_MAX) ? 0:steps;
 
 			//*****************Histogram to predict Current profile of the collar********************
 

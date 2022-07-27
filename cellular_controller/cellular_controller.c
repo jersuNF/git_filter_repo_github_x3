@@ -169,6 +169,8 @@ int start_tcp(void)
 		LOG_ERR("Failed to get ip address!");
 		char *e_msg = "Failed to get ip address!";
 		nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
+		connected = false;
+		modem_is_ready = false;
 		return ret;
 	}
 	struct sockaddr_in addr4;
@@ -430,8 +432,8 @@ static void cellular_controller_keep_alive(void *dev)
 						if (!keep_modem_awake) {
 							int ret = stop_tcp();
 							if (ret == 0) {
-								connected =
-									false;
+								connected = false;
+								modem_is_ready = false;
 							}
 						}
 					}

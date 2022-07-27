@@ -194,10 +194,19 @@ void process_acc_data(raw_acc_data_t *acc)
 
 	/** @todo Use total steps? */
 	total_steps += stepcount;
+
 	if (stepcount >= STEPS_TRIGGER) {
-		struct step_counter_event *steps = new_step_counter_event();
-		steps->steps = total_steps;
-		EVENT_SUBMIT(steps);
+		if (total_steps >= UINT16_MAX) {
+			total_steps = UINT16_MAX;
+			struct step_counter_event *steps = new_step_counter_event();
+			steps->steps = total_steps;
+			EVENT_SUBMIT(steps);
+			reset_total_steps();
+		} else {
+			struct step_counter_event *steps = new_step_counter_event();
+			steps->steps = total_steps;
+			EVENT_SUBMIT(steps);
+		}
 	}
 
 	/* Gradually increase or decrease of activity level. 

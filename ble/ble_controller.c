@@ -552,13 +552,15 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 		LOG_DBG("Nofence beacon detected");
 		const uint32_t now = k_uptime_get_32();
 		err = beacon_process_event(now, addr, rssi, &adv_data);
-		if (err != -EIO) {
-			/* Beacon found. Reset 60 seconds scan_stop countdown */
-			beacon_scanner_timer = k_uptime_get();
-		} else {
+		if (err == -EPERM) {
 			char *e_msg = "Process of beacon state event error";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_BEACON, err, e_msg, strlen(e_msg));
+		} else if (err == -EIO) {
+			LOG_WRN("Beacon detected is out of valid range. Will ignore this.");
+		} else {
+			/* Beacon found. Reset 60 seconds scan_stop countdown */
+			beacon_scanner_timer = k_uptime_get();
 		}
 	}
 
@@ -608,6 +610,11 @@ static void scan_start(void)
 
 		/* Start beacon scanner countdown */
 		beacon_scanner_timer = k_uptime_get();
+
+		/* Initialize beacon status to not found */
+		struct ble_beacon_event *event = new_ble_beacon_event();
+		event->status = BEACON_STATUS_NOT_FOUND;
+		EVENT_SUBMIT(event);
 	}
 }
 
@@ -620,6 +627,9 @@ static void scan_stop(void)
 		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 	} else {
 		LOG_INF("Stop scanning for Beacons");
+		struct ble_beacon_event *event = new_ble_beacon_event();
+		event->status = BEACON_STATUS_OFF;
+		EVENT_SUBMIT(event);
 	}
 }
 

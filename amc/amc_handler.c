@@ -76,6 +76,8 @@ atomic_t current_beacon_status = ATOMIC_INIT(BEACON_STATUS_OUT_OF_RANGE);
 
 static uint32_t maybe_out_of_fence_timestamp = 0;
 
+static bool m_fence_update_pending = false;
+
 /**
  * @brief Updates the current pasture from storage (if a valid fence).
  * 
@@ -152,6 +154,8 @@ static inline int update_pasture_from_stg(void)
 		char *e_msg = "Error reading keep mode from eeprom.";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
+
+		keep_mode = 0; //For teach mode if unable to read keepmode.
 	}
 	if (!keep_mode) {
 		force_teach_mode();
@@ -161,42 +165,65 @@ static inline int update_pasture_from_stg(void)
 	 * messaging module. */
 	err = k_sem_take(&fence_data_sem, 
 				K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
-	if (err) {
-		char *e_msg = "Error taking pasture semaphore for version check.";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
-		return err;
-	}
+	do {
+		if (err) {
+			char *e_msg = "Error taking pasture semaphore for version check.";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
+			break;
+		}
 
-	/* Verify it has been cached correctly. */
-	pasture_t *pasture = NULL;
-	get_pasture_cache(&pasture);
-	if (pasture == NULL) {		
-		char *e_msg = "Pasture was not been cached correctly.";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_AMC, -ENODATA, e_msg, strlen(e_msg));
-		return -ENODATA;
-	}
+		/* Verify it has been cached correctly. */
+		pasture_t *pasture = NULL;
+		get_pasture_cache(&pasture);
+		if (pasture == NULL) {		
+			char *e_msg = "Pasture was not been cached correctly.";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_AMC, -ENODATA, e_msg, strlen(e_msg));
+			err = -ENODATA;
+			break;
+		}
 
-	/* New pasture installed, force a new gnss fix. */
-	restart_force_gnss_to_fix();
+		if ((err == 0) && fnc_valid_fence() && fnc_valid_def()) {
+			/* New pasture installed, force a new gnss fix. */
+			restart_force_gnss_to_fix();
 
-	/* Submit event that we have now began to use the new fence. */
-	struct update_fence_version *ver = new_update_fence_version();
-	ver->fence_version = pasture->m.ul_fence_def_version;
-	EVENT_SUBMIT(ver);
+			/* Submit event that we have now began to use the new fence. */
+			struct update_fence_version *ver = new_update_fence_version();
+			ver->fence_version = pasture->m.ul_fence_def_version;
+			EVENT_SUBMIT(ver);
 
+			/* Update fence status */
+			force_fence_status(FenceStatus_NotStarted);
+
+			// /* Set fence status to NotStarted to notify AMC libs. */
+			// struct update_fence_status *status = new_update_fence_status();
+			// status->fence_status = FenceStatus_NotStarted;
+			// EVENT_SUBMIT(status);
+		}
+	}while(0);
 	k_sem_give(&fence_data_sem);
-	return 0;
+	return err;
 }
 
 void handle_new_fence_fn(struct k_work *item)
 {
-	update_pasture_from_stg();
+	m_fence_update_pending = true;
+
+	int err = update_pasture_from_stg();
+	if (err != 0) {
+		LOG_WRN("Fence update request denied, error:%d", err);
+	}
+	k_work_submit_to_queue(&amc_work_q, &handle_states_work);
+	return;
 }
 
 void handle_states_fn()
 {
+	if (m_fence_update_pending) {
+		m_fence_update_pending = false;
+	}
+
 	/* Fetch cached gnss data. */
 	gnss_t *gnss = NULL;
 	int err = get_gnss_cache(&gnss);
@@ -260,6 +287,11 @@ void handle_corrections_fn()
 
 void handle_gnss_data_fn(struct k_work *item)
 {
+	if (m_fence_update_pending) {
+		LOG_WRN("AMC GNSS data not processed due to pending fence update");
+		goto cleanup;
+	}
+
 	/* Take fence semaphore since we're going to use the cached area. */
 	int err = k_sem_take(&fence_data_sem, 
 				K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
@@ -372,9 +404,9 @@ void handle_gnss_data_fn(struct k_work *item)
 							FIFO_AVG_DISTANCE_ELEMENTS);
 			}
 		}
-		LOG_INF("  mean_dist: %d, dist_change: %d, dist_inc_count: %d, 
-					acc_delta: %d, height_delta: %d", mean_dist, dist_change, 
-					dist_inc_count, acc_delta, height_delta);
+		LOG_INF("  mean_dist: %d, dist_change: %d, dist_inc_count: %d, acc_delta: %d, height_delta: %d", 
+					mean_dist, dist_change, dist_inc_count, acc_delta, 
+					height_delta);
 
 		int16_t dist_incr_slope_lim = 0;
 		uint8_t dist_incr_count = 0;
@@ -426,6 +458,7 @@ int amc_module_init(void)
 	k_work_queue_start(&amc_work_q, amc_calculation_thread_area,
 			   K_THREAD_STACK_SIZEOF(amc_calculation_thread_area),
 			   CONFIG_AMC_CALCULATION_PRIORITY, NULL);
+
 	k_work_init(&handle_new_gnss_work, handle_gnss_data_fn);
 	k_work_init(&handle_new_fence_work, handle_new_fence_fn);
 	k_work_init(&handle_corrections_work, handle_corrections_fn);
@@ -447,7 +480,7 @@ static bool event_handler(const struct event_header *eh)
 {
 	if (is_new_fence_available(eh)) {
 		k_work_submit_to_queue(&amc_work_q, &handle_new_fence_work);
-		k_work_submit_to_queue(&amc_work_q, &handle_states_work);
+		// k_work_submit_to_queue(&amc_work_q, &handle_states_work);
 		return false;
 	}
 	if (is_gnss_data(eh)) {

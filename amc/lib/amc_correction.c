@@ -111,7 +111,7 @@ static void buzzer_update_fn()
 
 		if (zap_eval_doing) {
 			uint32_t delta_zap_eval = k_uptime_get_32() - zap_timestamp;
-			if (delta_zap_eval >= ZAP_EVALUATION_TIME) {
+			if (delta_zap_eval >= ZAP_EVALUATION_TIME_MS) {
 				zap_eval_doing = false;
 			}
 		}
@@ -131,7 +131,7 @@ static void buzzer_update_fn()
 				EVENT_SUBMIT(freq_ev);
 
 				/** @note It will zap immediately once we reach WARN_FREQ_MAX, 
-				 * and wait 200ms (ZAP_EVALUATION_TIME) until next zap up to 3 
+				 * and wait 200ms (ZAP_EVALUATION_TIME_MS) until next zap up to 3 
 				 * times untill it is considered "escaped."
 			 	 */
 				if (queueZap) {
@@ -149,17 +149,18 @@ static void buzzer_update_fn()
 						increment_zap_count();
 						LOG_INF("AMC notified EP to zap!");
 
-						struct amc_zapped_now_event *ev = 
-									new_amc_zapped_now_event();
-						ev->has_fence_dist = true;
-						ev->fence_dist = atomic_get(&last_mean_dist);
-						EVENT_SUBMIT(ev);
+						// Does not seem to be handled anywhere
+						// struct amc_zapped_now_event *ev = 
+						// 			new_amc_zapped_now_event();
+						// ev->has_fence_dist = true;
+						// ev->fence_dist = atomic_get(&last_mean_dist);
+						// EVENT_SUBMIT(ev);
 
 						/* We need to reschedule this function after 
-						 * ZAP_EVALUATION_TIME, to be able to zap again based on 
+						 * ZAP_EVALUATION_TIME_MS, to be able to zap again based on 
 						 * this variable, not buzzer update rate. */
 						k_work_reschedule(&update_buzzer_work, 
-									K_MSEC(ZAP_EVALUATION_TIME));
+									K_MSEC(ZAP_EVALUATION_TIME_MS));
 					}
 				}
 				if (freq >= WARN_FREQ_MAX && atomic_get(&sound_max_atomic)) {

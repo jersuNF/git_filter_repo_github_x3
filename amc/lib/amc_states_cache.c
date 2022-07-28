@@ -136,21 +136,18 @@ void reset_zap_count_day()
 void cache_eeprom_variables(void)
 {
 	int err = eep_uint16_read(EEP_ZAP_CNT_TOT, &total_zap_cnt);
-
 	if (err) {
 		LOG_ERR("Could not read zap count total %i", err);
 		return;
 	}
 
 	err = eep_uint32_read(EEP_WARN_CNT_TOT, &total_warn_cnt);
-
 	if (err) {
 		LOG_ERR("Could not read warn count total %i", err);
 		return;
 	}
 
 	err = eep_uint16_read(EEP_ZAP_CNT_DAY, &zap_count_day);
-
 	if (err) {
 		LOG_ERR("Could not read zap count day %i", err);
 		return;
@@ -166,7 +163,6 @@ void increment_warn_count(void)
 	  * Write everytime total_warn_cnt % n == true? 
 	  */
 	int err = eep_uint32_write(EEP_WARN_CNT_TOT, total_warn_cnt);
-
 	if (err) {
 		LOG_ERR("Could not write warn count total %i", err);
 		return;
@@ -181,21 +177,18 @@ static void enter_teach_mode()
 	uint16_t zap_cnt = 0;
 
 	err = eep_uint32_read(EEP_WARN_CNT_TOT, &warn_cnt);
-
 	if (err) {
 		LOG_ERR("Could not read warn count total %i", err);
 		return;
 	}
 
 	err = eep_uint16_read(EEP_ZAP_CNT_TOT, &zap_cnt);
-
 	if (err) {
 		LOG_ERR("Could not read zap count total %i", err);
 		return;
 	}
 
 	err = eep_uint8_read(EEP_TEACH_MODE_FINISHED, &teach_mode_finished);
-
 	if (err) {
 		LOG_ERR("Could not read teach mode finished %i", err);
 		return;
@@ -360,96 +353,103 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 			      enum beacon_status_type beacon_status)
 {
 	FenceStatus new_fence_status = current_fence_status;
-
 	uint32_t maybe_out_of_fence_delta =
-		((k_uptime_get_32() - maybe_out_of_fence) / MSEC_PER_SEC);
+				((k_uptime_get_32() - maybe_out_of_fence) / MSEC_PER_SEC);
 
 	switch (current_fence_status) {
-	case FenceStatus_FenceStatus_UNKNOWN:
-		if (beacon_status == BEACON_STATUS_REGION_NEAR) {
-			new_fence_status = FenceStatus_BeaconContact;
-			LOG_INF("Unknown->BeaconContact");
-		} else if (fnc_valid_def()) {
-			new_fence_status = FenceStatus_NotStarted;
-			LOG_INF("Unknown->NotStarted");
-		}
-		break;
-	case FenceStatus_NotStarted:
-		if (beacon_status == BEACON_STATUS_REGION_NEAR) {
-			new_fence_status = FenceStatus_BeaconContact;
-			LOG_INF("NotStarted->BeaconContact");
-		} else if (is_inside_fence_relaxed()) {
-			new_fence_status = FenceStatus_FenceStatus_Normal;
-			LOG_INF("NotStarted->Normal");
-		}
-		break;
-	case FenceStatus_FenceStatus_Normal:
-		if (beacon_status == BEACON_STATUS_REGION_NEAR) {
-			new_fence_status = FenceStatus_BeaconContactNormal;
-			LOG_INF("Normal->BeaconContactNormal");
-		} else if (maybe_out_of_fence_delta > OUT_OF_FENCE_TIME) {
-			/** Old @todo ? UBX_Poll(UBXID_MON_HW);
-			 * v3.21-7: Poll hardware info (fex. jamming). 
-			 */
-			new_fence_status = FenceStatus_MaybeOutOfFence;
-			LOG_INF("Normal->MaybeOutsideFence");
-		} else if (zap_pain_cnt >= pain_cnt_def_free) {
-			new_fence_status = FenceStatus_Escaped;
-			LOG_INF("Normal->Escaped");
-		}
-		break;
-	case FenceStatus_MaybeOutOfFence:
-		if (beacon_status == BEACON_STATUS_REGION_NEAR) {
-			new_fence_status = FenceStatus_BeaconContact;
-			LOG_INF("MaybeOutside->BeaconContact");
-		} else if (zap_pain_cnt >= pain_cnt_def_free) {
-			new_fence_status = FenceStatus_Escaped;
-			LOG_INF("MaybeOutside->Escaped");
-		} else if (maybe_out_of_fence_delta < OUT_OF_FENCE_TIME) {
-			new_fence_status = FenceStatus_FenceStatus_Normal;
-			LOG_INF("MaybeOutside->Normal");
-		}
-		break;
-	case FenceStatus_Escaped:
-		if (beacon_status == BEACON_STATUS_REGION_NEAR) {
-			new_fence_status = FenceStatus_BeaconContact;
-			LOG_INF("Escaped->BeaconContact");
-		} else if (is_inside_fence_relaxed()) {
-			new_fence_status = FenceStatus_FenceStatus_Normal;
-			LOG_INF("Escaped->Normal");
-		}
-		break;
-
-	case FenceStatus_BeaconContact:
-		if (beacon_status != BEACON_STATUS_REGION_NEAR) {
-			if (fnc_valid_fence()) {
+		case FenceStatus_FenceStatus_UNKNOWN: {
+			if (beacon_status == BEACON_STATUS_REGION_NEAR) {
+				new_fence_status = FenceStatus_BeaconContact;
+				LOG_INF("Unknown->BeaconContact");
+			} else if (fnc_valid_def()) {
 				new_fence_status = FenceStatus_NotStarted;
-				LOG_INF("BeaconContact->NotStarted");
-			} else {
-				new_fence_status =
-					FenceStatus_FenceStatus_UNKNOWN;
-				LOG_INF("BeaconContact->Unknown");
+				LOG_INF("Unknown->NotStarted");
 			}
+			break;
 		}
-		break;
-	case FenceStatus_BeaconContactNormal:
-		if (beacon_status != BEACON_STATUS_REGION_NEAR) {
-			new_fence_status = FenceStatus_FenceStatus_Normal;
-			LOG_INF("BeaconContactNormal->Normal");
+		case FenceStatus_NotStarted: {
+			if (beacon_status == BEACON_STATUS_REGION_NEAR) {
+				new_fence_status = FenceStatus_BeaconContact;
+				LOG_INF("NotStarted->BeaconContact");
+			} else if (is_inside_fence_relaxed()) {
+				new_fence_status = FenceStatus_FenceStatus_Normal;
+				LOG_INF("NotStarted->Normal");
+			}
+			break;
 		}
-		break;
-	case FenceStatus_FenceStatus_Invalid:
-		LOG_INF("Invalid fence status.");
-		break;
-	case FenceStatus_TurnedOffByBLE:
-		LOG_INF("Fence turned of by BLE.");
-		break;
-	default:
-		new_fence_status = FenceStatus_FenceStatus_UNKNOWN;
-		LOG_INF("?->Unknown");
-		char *msg = "Unknown fence status received.";
-		nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
-		break;
+		case FenceStatus_FenceStatus_Normal: {
+			if (beacon_status == BEACON_STATUS_REGION_NEAR) {
+				new_fence_status = FenceStatus_BeaconContactNormal;
+				LOG_INF("Normal->BeaconContactNormal");
+			} else if (maybe_out_of_fence_delta > OUT_OF_FENCE_TIME) {
+				/** Old @todo ? UBX_Poll(UBXID_MON_HW);
+				 * v3.21-7: Poll hardware info (fex. jamming). 
+				 */
+				new_fence_status = FenceStatus_MaybeOutOfFence;
+				LOG_INF("Normal->MaybeOutsideFence");
+			} else if (zap_pain_cnt >= pain_cnt_def_free) {
+				new_fence_status = FenceStatus_Escaped;
+				LOG_INF("Normal->Escaped");
+			}
+			break;
+		}
+		case FenceStatus_MaybeOutOfFence: {
+			if (beacon_status == BEACON_STATUS_REGION_NEAR) {
+				new_fence_status = FenceStatus_BeaconContact;
+				LOG_INF("MaybeOutside->BeaconContact");
+			} else if (zap_pain_cnt >= pain_cnt_def_free) {
+				new_fence_status = FenceStatus_Escaped;
+				LOG_INF("MaybeOutside->Escaped");
+			} else if (maybe_out_of_fence_delta < OUT_OF_FENCE_TIME) {
+				new_fence_status = FenceStatus_FenceStatus_Normal;
+				LOG_INF("MaybeOutside->Normal");
+			}
+			break;
+		}
+		case FenceStatus_Escaped: {
+			if (beacon_status == BEACON_STATUS_REGION_NEAR) {
+				new_fence_status = FenceStatus_BeaconContact;
+				LOG_INF("Escaped->BeaconContact");
+			} else if (is_inside_fence_relaxed()) {
+				new_fence_status = FenceStatus_FenceStatus_Normal;
+				LOG_INF("Escaped->Normal");
+			}
+			break;
+		}
+		case FenceStatus_BeaconContact: {
+			if (beacon_status != BEACON_STATUS_REGION_NEAR) {
+				if (fnc_valid_fence()) {
+					new_fence_status = FenceStatus_NotStarted;
+					LOG_INF("BeaconContact->NotStarted");
+				} else {
+					new_fence_status = FenceStatus_FenceStatus_UNKNOWN;
+					LOG_INF("BeaconContact->Unknown");
+				}
+			}
+			break;
+		}
+		case FenceStatus_BeaconContactNormal: {
+			if (beacon_status != BEACON_STATUS_REGION_NEAR) {
+				new_fence_status = FenceStatus_FenceStatus_Normal;
+				LOG_INF("BeaconContactNormal->Normal");
+			}
+			break;
+		}
+		case FenceStatus_FenceStatus_Invalid: {
+			LOG_INF("Invalid fence status.");
+			break;
+		}
+		case FenceStatus_TurnedOffByBLE: {
+			LOG_INF("Fence turned of by BLE.");
+			break;
+		}
+		default: {
+			new_fence_status = FenceStatus_FenceStatus_UNKNOWN;
+			LOG_INF("?->Unknown");
+			char *msg = "Unknown fence status received.";
+			nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
+			break;
+		}
 	}
 
 	/* If new status, write to EEPROM. */
@@ -457,26 +457,55 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 		current_fence_status = new_fence_status;
 		int err = eep_uint8_write(EEP_FENCE_STATUS,
 					  (uint8_t)current_fence_status);
-
 		if (err) {
 			LOG_ERR("Could not write to fence status %i ", err);
 		}
 
 		/* Notify server about fence status change. */
-		struct update_fence_status *fence_ev =
-			new_update_fence_status();
+		struct update_fence_status *fence_ev = new_update_fence_status();
 		fence_ev->fence_status = current_fence_status;
 		EVENT_SUBMIT(fence_ev);
 
 		/* Notify server if animal escaped. */
 		if (current_fence_status == FenceStatus_Escaped) {
-			struct animal_escape_event *ev =
-				new_animal_escape_event();
+			struct animal_escape_event *ev = new_animal_escape_event();
 			EVENT_SUBMIT(ev);
 		}
 	}
-
 	return new_fence_status;
+}
+
+int force_fence_status(FenceStatus new_fence_status)
+{
+	/* Currently only fence status "Unknown" and "NotStarted" can be forced */
+	if (new_fence_status != FenceStatus_FenceStatus_UNKNOWN && 
+		new_fence_status != FenceStatus_NotStarted) {
+		return -EACCES;
+	}
+
+	if (new_fence_status != current_fence_status) {
+		if ((new_fence_status == FenceStatus_NotStarted) && 
+			(fnc_valid_def() != true)) {
+			LOG_WRN("Unable to force fence status");
+			return -EACCES;
+		}
+
+		/* Write new fence status to eeprom */
+		int err = eep_uint8_write(EEP_FENCE_STATUS, (uint8_t)new_fence_status);
+		if (err) {
+			LOG_WRN("Unable to write fence status to eeprom, error:%d", err);
+			return -EACCES;
+		}
+
+		/* Update current fence status */
+		current_fence_status = new_fence_status;
+
+		/* Notify server about fence status change. */
+		struct update_fence_status *event = new_update_fence_status();
+		event->fence_status = current_fence_status;
+		EVENT_SUBMIT(event);
+	}
+	return 0;
 }
 
 CollarStatus calc_collar_status(void)

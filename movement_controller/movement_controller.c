@@ -12,7 +12,7 @@
 
 #include "nf_fifo.h"
 #include "trigonometry.h"
-#define STEPS_TRIGGER 1
+#define STEPS_TRIGGER 5
 
 LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 
@@ -153,8 +153,9 @@ void process_acc_data(raw_acc_data_t *acc)
 	uint32_t acc_std_final = 0;
 	for (i = 0; i < ACC_FIFO_ELEMENTS; i++) {
 		int32_t x = (acc_norm[i] - acc_norm_mean);
-		acc_std += (uint32_t)(x * x)/ACC_FIFO_ELEMENTS;;
+		acc_std += (uint32_t)(x * x);
 	}
+	acc_std /= ACC_FIFO_ELEMENTS;
 	acc_std = g_u32_SquareRootRounded(acc_std);
 
 	/* Exponential moving average with alpha = 2/(N+1). */
@@ -247,7 +248,7 @@ void process_acc_data(raw_acc_data_t *acc)
 	}
 
 	/* Update current activity level. */
-	last_activity = cur_activity;
+	last_activity = (acc_activity_t)cur_activity;
 
 	/* Determine the movement state. */
 	movement_state_t m_state = STATE_SLEEP;

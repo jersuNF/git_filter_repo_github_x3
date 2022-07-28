@@ -45,6 +45,9 @@ K_SEM_DEFINE(listen_sem, 0, 1); /* this semaphore will be given by the modem
  * driver when receiving the UUSOLI urc code. Socket 0 is the listening
  * socket by design, however the 'socket' number returned in the UUSOLI =
  * number of currently opened sockets + 1 */
+
+K_SEM_DEFINE(close_main_socket_sem, 0, 1);
+
 static bool modem_is_ready = false;
 static bool keep_modem_awake = false;
 static bool sending_in_progress = false;
@@ -104,9 +107,9 @@ void receive_tcp(struct data *sock_data)
 				socket_idle_count += SOCKET_POLL_INTERVAL;
 				if (socket_idle_count > SOCK_RECV_TIMEOUT) {
 					LOG_WRN("Socket receive timed out!");
-					k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
 					if (!keep_modem_awake &&
 					    !sending_in_progress) {
+						k_sem_take(&close_main_socket_sem, K_MINUTES(1));
 						int ret = stop_tcp();
 						if (ret == 0) {
 							struct modem_state
@@ -308,6 +311,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		k_free(CharMsgOut);
 		CharMsgOut = NULL;
 		sending_in_progress = false;
+		k_sem_give(&close_main_socket_sem);
 		return false;
 	}
 	else if (is_dfu_status_event(eh)) {

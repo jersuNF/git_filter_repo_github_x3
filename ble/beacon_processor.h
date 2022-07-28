@@ -17,7 +17,7 @@ struct beacon_connection_info {
 };
 
 struct beacon_info {
-	uint8_t num_conn;
+	uint8_t num_measurements;
 	uint8_t conn_history_peeker;
 	bt_addr_le_t mac_address;
 	uint8_t calculated_dist;

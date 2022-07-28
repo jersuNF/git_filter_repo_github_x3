@@ -132,8 +132,8 @@ static inline void add_to_beacon_history(struct beacon_connection_info *info,
 	if (beacon->conn_history_peeker >= CONFIG_BEACON_MAX_MEASUREMENTS) {
 		beacon->conn_history_peeker = 0;
 	}
-	if (beacon->num_conn < CONFIG_BEACON_MAX_MEASUREMENTS) {
-		beacon->num_conn++;
+	if (beacon->num_measurements < CONFIG_BEACON_MAX_MEASUREMENTS) {
+		beacon->num_measurements++;
 	}
 }
 
@@ -148,8 +148,7 @@ static int set_new_shortest_dist(struct beacon_info *beacon)
 	/* Initialize to largest possible distance */
 	uint8_t shortest_dist = UINT8_MAX;
 	uint8_t entries = 0;
-
-	for (uint8_t i = 0; i < beacon->num_conn; i++) {
+	for (uint8_t i = 0; i < beacon->num_measurements; i++) {
 		struct beacon_connection_info *info = &beacon->history[i];
 		if (k_uptime_get_32() - info->time_diff <
 		    CONFIG_BEACON_MAX_MEASUREMENT_AGE * MSEC_PER_SEC) {
@@ -182,7 +181,7 @@ static int set_new_avg_dist(struct beacon_info *beacon)
 	uint32_t avg = 0;
 	uint8_t entries = 0;
 
-	for (uint8_t i = 0; i < beacon->num_conn; i++) {
+	for (uint8_t i = 0; i < beacon->num_measurements; i++) {
 		struct beacon_connection_info *info = &beacon->history[i];
 		if (k_uptime_get_32() - info->time_diff <
 		    CONFIG_BEACON_MAX_MEASUREMENT_AGE * MSEC_PER_SEC) {
@@ -229,18 +228,20 @@ static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist,
 		 * readings 
 		 */
 		err = set_new_shortest_dist(c_info);
-		if (err) {
-			LOG_WRN("Age of all measurements are larger than 10 seconds");
-			return err;
+		if (err == -ENODATA) {
+			LOG_WRN("Age of all measurements from beacon_%u are larger than 10 seconds",
+				i);
+			continue;
 		}
 #else
 		/* Update the average on the beacons, based on 
 		 * time since recorded distance. 
 		 */
 		err = set_new_avg_dist(c_info);
-		if (err) {
-			LOG_WRN("Age of all measurements are larger than 10 seconds");
-			return err;
+		if (err == -ENODATA) {
+			LOG_WRN("Age of all measurements from beacon_%u are larger than 10 seconds",
+				i);
+			continue;
 		}
 #endif
 		if (c_info->calculated_dist < *dist) {
@@ -317,7 +318,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 	if (target_beacon == -1) {
 		/* Populate 1 new history entry. */
 		beacon.calculated_dist = UINT8_MAX;
-		beacon.num_conn = 0;
+		beacon.num_measurements = 0;
 		beacon.conn_history_peeker = 0;
 		add_to_beacon_history(&info, &beacon);
 		add_to_beacon_list(&beacons, &beacon);
@@ -348,18 +349,21 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		struct ble_beacon_event *event = new_ble_beacon_event();
 		cross_type = CROSS_UNDEFINED;
 		event->status = BEACON_STATUS_NOT_FOUND;
+		LOG_DBG("1: Status: BEACON_STATUS_NOT_FOUND, Type: CROSS_UNDEFINED");
 		EVENT_SUBMIT(event);
 
 	} else if (shortest_dist > CONFIG_BEACON_HIGH_LIMIT) {
 		struct ble_beacon_event *event = new_ble_beacon_event();
 		cross_type = CROSS_UNDEFINED;
 		event->status = BEACON_STATUS_REGION_FAR;
+		LOG_DBG("2: Status: BEACON_STATUS_REGION_FAR, Type: CROSS_UNDEFINED");
 		EVENT_SUBMIT(event);
 
 	} else if (shortest_dist <= CONFIG_BEACON_LOW_LIMIT) {
 		struct ble_beacon_event *event = new_ble_beacon_event();
 		cross_type = CROSS_UNDEFINED;
 		event->status = BEACON_STATUS_REGION_NEAR;
+		LOG_DBG("3: Status: BEACON_STATUS_REGION_NEAR, Type: CROSS_UNDEFINED");
 		EVENT_SUBMIT(event);
 
 	} else if (last_calculated_distance <= CONFIG_BEACON_LOW_LIMIT &&
@@ -367,6 +371,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		struct ble_beacon_event *event = new_ble_beacon_event();
 		cross_type = CROSS_LOW_FROM_BELOW;
 		event->status = BEACON_STATUS_REGION_NEAR;
+		LOG_DBG("4: Status: BEACON_STATUS_REGION_NEAR, Type: CROSS_LOW_FROM_BELOW");
 		EVENT_SUBMIT(event);
 
 	} else if (last_calculated_distance > CONFIG_BEACON_HIGH_LIMIT &&
@@ -374,17 +379,20 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		struct ble_beacon_event *event = new_ble_beacon_event();
 		cross_type = CROSS_HIGH_FROM_ABOVE;
 		event->status = BEACON_STATUS_REGION_FAR;
+		LOG_DBG("5: Status: BEACON_STATUS_REGION_FAR, Type: CROSS_HIGH_FROM_ABOVE");
 		EVENT_SUBMIT(event);
 
 	} else {
 		if (cross_type == CROSS_LOW_FROM_BELOW) {
 			struct ble_beacon_event *event = new_ble_beacon_event();
 			event->status = BEACON_STATUS_REGION_NEAR;
+			LOG_DBG("6: Status: BEACON_STATUS_REGION_NEAR, Type: CROSS_LOW_FROM_BELOW");
 			EVENT_SUBMIT(event);
 
 		} else if (cross_type == CROSS_HIGH_FROM_ABOVE) {
 			struct ble_beacon_event *event = new_ble_beacon_event();
 			event->status = BEACON_STATUS_REGION_FAR;
+			LOG_DBG("7: Status: BEACON_STATUS_REGION_FAR, Type: CROSS_HIGH_FROM_ABOVE");
 			EVENT_SUBMIT(event);
 
 		} else {

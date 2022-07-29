@@ -41,7 +41,7 @@ void init_beacon_list(void);
  * @param[in] addr Pointer to beacon bt_addr_le_t address
  * @param[in] scanner_rssi_measured RSSI value measured
  * @param[in] p_adv_data Pointer to beacon advertise data
- * @return shortest distance, or -EIO if measurement is out of range.
+ * @return shortest distance, -EIO if measurement is out of range or -EPERM if process failed.
  */
 int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 			 int8_t scanner_rssi_measured, adv_data_t *p_adv_data);

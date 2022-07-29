@@ -287,11 +287,8 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 	double m = calculate_accuracy(beacon_adv_rssi, scanner_rssi_measured);
 
 	if (m > CONFIG_BEACON_DISTANCE_MAX || m > BEACON_DISTANCE_INFINITY) {
+		/* A beacon is seen, but out of desired range. Do not add to list */
 		last_calculated_distance = UINT8_MAX;
-		/* Beacon is found but out of desired range */
-		struct ble_beacon_event *event_err = new_ble_beacon_event();
-		event_err->status = BEACON_STATUS_OUT_OF_RANGE;
-		EVENT_SUBMIT(event_err);
 		return -EIO;
 	}
 
@@ -400,7 +397,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 			LOG_ERR("Unecspected state, last calculated: %u, shortest: %d",
 				last_calculated_distance, shortest_dist);
 			last_calculated_distance = shortest_dist;
-			return -EIO;
+			return -EPERM;
 		}
 	}
 	last_calculated_distance = shortest_dist;

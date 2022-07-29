@@ -421,7 +421,8 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 		break;
 
 	case FenceStatus_BeaconContact:
-		if (beacon_status != BEACON_STATUS_REGION_NEAR) {
+		if (beacon_status != BEACON_STATUS_REGION_NEAR &&
+		    beacon_status != BEACON_STATUS_REGION_FAR) {
 			if (fnc_valid_fence()) {
 				new_fence_status = FenceStatus_NotStarted;
 				LOG_INF("BeaconContact->NotStarted");
@@ -433,7 +434,8 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 		}
 		break;
 	case FenceStatus_BeaconContactNormal:
-		if (beacon_status != BEACON_STATUS_REGION_NEAR) {
+		if (beacon_status != BEACON_STATUS_REGION_NEAR &&
+		    beacon_status != BEACON_STATUS_REGION_FAR) {
 			new_fence_status = FenceStatus_FenceStatus_Normal;
 			LOG_INF("BeaconContactNormal->Normal");
 		}

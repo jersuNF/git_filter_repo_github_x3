@@ -9,8 +9,10 @@
 #include <device.h>
 #include <drivers/pwm.h>
 #include "melodies.h"
+#include "pwr_module.h"
 
 #include "error_event.h"
+#include <drivers/gpio.h>
 
 #define MODULE buzzer
 LOG_MODULE_REGISTER(MODULE, CONFIG_BUZZER_LOG_LEVEL);
@@ -18,11 +20,11 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BUZZER_LOG_LEVEL);
 #if DT_NODE_HAS_STATUS(DT_ALIAS(pwm_buzzer), okay)
 #define PWM_BUZZER_NODE DT_ALIAS(pwm_buzzer)
 #define PWM_BUZZER_LABEL DT_GPIO_LABEL(PWM_BUZZER_NODE, pwms)
-#define PWM_CHANNEL DT_PWMS_CHANNEL(DT_ALIAS(pwm_buzzer))
+#define BUZZER_PWM_CHANNEL DT_PWMS_CHANNEL(DT_ALIAS(pwm_buzzer))
 #endif
 
 static const struct device *buzzer_pwm;
-
+static const struct device *buzzer_pin_dev;
 /* Variable used to play sweep sounds, taken from old code. */
 #define SWEEP_TIME_PER_STEP_USEC 30
 
@@ -41,7 +43,7 @@ K_TIMER_DEFINE(warn_zone_timeout_timer, warn_zone_timeout_handler, NULL);
 /** @todo Check power consumption for this PWM set. */
 int set_pwm_to_idle(void)
 {
-	int err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, 0, 0, 0);
+	int err = pwm_pin_set_usec(buzzer_pwm, BUZZER_PWM_CHANNEL, 0, 0, 0);
 	if (err) {
 		LOG_ERR("pwm off fails %i", err);
 		return err;
@@ -91,7 +93,8 @@ int play_from_ms(const uint32_t period, const uint32_t sustain,
 
 	uint32_t pulse = get_pulse_width(period, volume);
 
-	err = pwm_pin_set_usec(buzzer_pwm, PWM_CHANNEL, period, pulse, 0);
+	err = pwm_pin_set_usec(buzzer_pwm, BUZZER_PWM_CHANNEL, period, pulse,
+			       0);
 	if (err) {
 		LOG_ERR("Error %d: failed to set pulse width", err);
 		return err;
@@ -228,7 +231,7 @@ void play_welcome(void)
 		return;
 	}
 
-	int steps = 750/WELCOME_SPEED_MULTIPLE_HACK;
+	int steps = 750 / WELCOME_SPEED_MULTIPLE_HACK;
 	err = play_sweep(1000, 4000, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
@@ -247,7 +250,7 @@ void play_welcome(void)
 		return;
 	}
 
-	steps = 1650/WELCOME_SPEED_MULTIPLE_HACK;
+	steps = 1650 / WELCOME_SPEED_MULTIPLE_HACK;
 	err = play_sweep(700, 4000, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
@@ -260,14 +263,14 @@ void play_welcome(void)
 		return;
 	}
 
-	steps = 2500/WELCOME_SPEED_MULTIPLE_HACK;
+	steps = 2500 / WELCOME_SPEED_MULTIPLE_HACK;
 	err = play_sweep(4000, 1500, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
 		return;
 	}
 
-	steps = 450/WELCOME_SPEED_MULTIPLE_HACK;
+	steps = 450 / WELCOME_SPEED_MULTIPLE_HACK;
 	err = play_sweep(1500, 600, SWEEP_TIME_PER_STEP_USEC * steps, steps);
 
 	if (err) {
@@ -288,7 +291,7 @@ void play_short_200(void)
 
 void play_short_100(void)
 {
-	play_hz(100, 100 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+	play_hz(1000, 100 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
 }
 
 void play_solar_test(void)
@@ -462,6 +465,10 @@ void play()
 	/* Set to false indicating we're ready to wait for true signal again. */
 	//atomic_set(&stop_sound_signal, false);
 
+	/* Force external clock usage, to avoid frequency changes in case of
+	 * concurrent BLE activity. See XF-181 */
+	pwr_module_use_extclk(REQ_SOUND_CONTROLLER, true);
+
 	enum sound_event_type type = atomic_get(&current_type_signal);
 
 	if (type != SND_OFF && type != SND_WARN) {
@@ -475,6 +482,8 @@ void play()
 	case SND_OFF: {
 		err = set_pwm_to_idle();
 		if (err) {
+			/* Release external clock usage. See XF-181 */
+			pwr_module_use_extclk(REQ_SOUND_CONTROLLER, false);
 			return;
 		}
 		break;
@@ -529,6 +538,9 @@ void play()
 	}
 	}
 
+	/* Release external clock usage. See XF-181 */
+	pwr_module_use_extclk(REQ_SOUND_CONTROLLER, false);
+
 	struct sound_status_event *ev_idle = new_sound_status_event();
 	ev_idle->status = SND_STATUS_IDLE;
 	EVENT_SUBMIT(ev_idle);
@@ -540,6 +552,16 @@ void play()
 int buzzer_module_init(void)
 {
 	uint64_t cycles;
+	buzzer_pin_dev = device_get_binding("GPIO_0");
+	int ret = gpio_pin_configure(buzzer_pin_dev, BUZZER_PWM_CHANNEL,
+				     (GPIO_ACTIVE_HIGH |
+				      GPIO_DS_ALT_HIGH  |
+				      GPIO_DS_ALT_LOW));
+	if (ret != 0) {
+		LOG_ERR("Failed to set GPIO parameters for the buzzer channel"
+			".");
+	}
+	gpio_pin_set(buzzer_pin_dev, BUZZER_PWM_CHANNEL, 0);
 	buzzer_pwm = device_get_binding(PWM_BUZZER_LABEL);
 	if (!buzzer_pwm) {
 		LOG_ERR("Cannot find buzzer PWM device! %s",
@@ -547,7 +569,7 @@ int buzzer_module_init(void)
 		return -ENODEV;
 	}
 
-	int err = pwm_get_cycles_per_sec(buzzer_pwm, PWM_CHANNEL, &cycles);
+	int err = pwm_get_cycles_per_sec(buzzer_pwm, BUZZER_PWM_CHANNEL, &cycles);
 	if (err) {
 		LOG_ERR("Error getting clock cycles for PWM %d", err);
 		return err;

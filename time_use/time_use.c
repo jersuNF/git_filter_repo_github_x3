@@ -57,7 +57,7 @@ static FenceStatus cur_fence_status;
 static bool in_beacon_or_sleep, save_and_reset;
 static movement_state_t cur_mv_state;
 static acc_activity_t cur_activity_level = ACTIVITY_NO;
-static uint32_t steps, steps_old;
+static uint32_t steps = 0, steps_old = 0;
 int16_t m_i16_way_pnt[2], fresh_pos[2];
 static gnss_mode_t cur_gnss_pwr_m = GNSSMODE_NOMODE;
 static modem_pwr_mode cur_modem_pwr_m = POWER_ON;
@@ -204,11 +204,12 @@ EVENT_SUBSCRIBE(MODULE, save_histogram);
 void collect_stats(void)
 {
 	static int64_t elapsed_time_ms = 0;
-	static int64_t uptime = 0;
+	static int64_t uptime, elapsed_seconds = 0;
 	while (true) {
 		elapsed_time_ms += k_uptime_delta(&uptime);
 		if (elapsed_time_ms >= CONFIG_TIME_USE_RESOLUTION_MS &&
 		    !save_and_reset) {
+			elapsed_seconds = elapsed_time_ms / MSEC_PER_SEC;
 			if (cur_activity_level == ACTIVITY_LOW) {
 				cur_animal_state = RESTING;
 			} //Grazing
@@ -223,16 +224,14 @@ void collect_stats(void)
 			case RESTING:
 				histogram.animal_behave.has_usRestingTime =
 					true;
-				histogram.animal_behave.usRestingTime =
-					histogram.animal_behave.usRestingTime +
-					(elapsed_time_ms / MSEC_PER_SEC);
+				histogram.animal_behave.usRestingTime +=
+					elapsed_seconds;
 				break;
 			case WALKING:
 				histogram.animal_behave.has_usWalkingTime =
 					true;
-				histogram.animal_behave.usWalkingTime =
-					histogram.animal_behave.usWalkingTime +
-					(elapsed_time_ms / MSEC_PER_SEC);
+				histogram.animal_behave.usWalkingTime +=
+					elapsed_seconds;
 				histogram.animal_behave.has_usWalkingDist =
 					true;
 				histogram.animal_behave.usWalkingDist +=
@@ -242,9 +241,8 @@ void collect_stats(void)
 			case RUNNING:
 				histogram.animal_behave.has_usRunningTime =
 					true;
-				histogram.animal_behave.usRunningTime =
-					histogram.animal_behave.usRunningTime +
-					(elapsed_time_ms / MSEC_PER_SEC);
+				histogram.animal_behave.usRunningTime +=
+					elapsed_seconds;
 				histogram.animal_behave.has_usRunningDist =
 					true;
 				histogram.animal_behave.usRunningDist +=
@@ -254,16 +252,14 @@ void collect_stats(void)
 			case GRAZING:
 				histogram.animal_behave.has_usGrazingTime =
 					true;
-				histogram.animal_behave.usGrazingTime =
-					histogram.animal_behave.usGrazingTime +
-					(elapsed_time_ms / MSEC_PER_SEC);
+				histogram.animal_behave.usGrazingTime +=
+					elapsed_seconds;
 				break;
 			case UNKNOWN:
 				histogram.animal_behave.has_usUnknownTime =
 					true;
-				histogram.animal_behave.usUnknownTime =
-					histogram.animal_behave.usUnknownTime +
-					(elapsed_time_ms / MSEC_PER_SEC);
+				histogram.animal_behave.usUnknownTime +=
+					elapsed_seconds;
 				break;
 			}
 
@@ -271,27 +267,25 @@ void collect_stats(void)
 			m_i16_way_pnt[1] = fresh_pos[1];
 
 			//******************Add Stepcounter value*************************
-			uint16_t stepdiff = (uint16_t)(steps - steps_old);
-			histogram.animal_behave.has_usStepCounter = true;
-			histogram.animal_behave.usStepCounter += stepdiff;
+			histogram.animal_behave.has_usStepCounter =
+				true;
+			histogram.animal_behave.usStepCounter += steps
+								- steps_old;
 			steps_old = steps;
 
 			//*****************Histogram to predict Current profile of the collar********************
 
 			if (cur_collar_status == CollarStatus_Sleep ||
 			    cur_collar_status == CollarStatus_OffAnimal) {
-				histogram.current_profile.usCC_Sleep =
-					histogram.current_profile.usCC_Sleep +
-					(elapsed_time_ms / MSEC_PER_SEC);
+				histogram.current_profile.usCC_Sleep +=
+					elapsed_seconds;
 			} //"Ultra" Low power
 			else if (cur_fence_status ==
 					 FenceStatus_BeaconContact ||
 				 cur_fence_status ==
 					 FenceStatus_BeaconContactNormal) {
-				histogram.current_profile.usCC_BeaconZone =
-					histogram.current_profile
-						.usCC_BeaconZone +
-					((elapsed_time_ms / MSEC_PER_SEC));
+				histogram.current_profile.usCC_BeaconZone +=
+					elapsed_seconds;
 			} //"Ultra" Low power
 			/*TODO: fix when GNSS modes are available. */
 			//			else if(cur_gnss_pwr_m == POWER_OPTIMIZED_TRACKING){
@@ -309,26 +303,22 @@ void collect_stats(void)
 			//			} //"Ultra" Low power
 
 			if (cur_modem_pwr_m == POWER_ON) {
-				histogram.current_profile.usCC_Modem_Active =
-					histogram.current_profile
-						.usCC_Modem_Active +
-					(elapsed_time_ms / MSEC_PER_SEC);
+				histogram.current_profile.usCC_Modem_Active +=
+					elapsed_seconds;
 			} //High power++
 
 			//*****************Histogram for different zone********************
 			if (cur_collar_status == CollarStatus_Sleep ||
 			    cur_collar_status == CollarStatus_OffAnimal) {
-				histogram.in_zone.usInSleepTime =
-					histogram.in_zone.usInSleepTime +
-					(elapsed_time_ms / MSEC_PER_SEC);
+				histogram.in_zone.usInSleepTime +=
+					elapsed_seconds;
 				in_beacon_or_sleep = true;
 			}
 			if (cur_fence_status == FenceStatus_BeaconContact ||
 			    cur_fence_status ==
 				    FenceStatus_BeaconContactNormal) {
-				histogram.in_zone.usBeaconZoneTime =
-					histogram.in_zone.usBeaconZoneTime +
-					(elapsed_time_ms / MSEC_PER_SEC);
+				histogram.in_zone.usBeaconZoneTime +=
+					elapsed_seconds;
 				in_beacon_or_sleep = true;
 			}
 
@@ -336,26 +326,17 @@ void collect_stats(void)
 				//Time use in the different zones
 				if (cur_zone == WARN_ZONE ||
 				    cur_zone == PREWARN_ZONE) {
-					histogram.in_zone.usMAXZoneTime =
-						histogram.in_zone.usMAXZoneTime +
-						(elapsed_time_ms /
-						 MSEC_PER_SEC);
+					histogram.in_zone.usMAXZoneTime +=
+						elapsed_seconds;
 				} else if (cur_zone == CAUTION_ZONE) {
-					histogram.in_zone.usCAUTIONZoneTime =
-						histogram.in_zone
-							.usCAUTIONZoneTime +
-						(elapsed_time_ms /
-						 MSEC_PER_SEC);
+					histogram.in_zone.usCAUTIONZoneTime +=
+						elapsed_seconds;
 				} else if (cur_zone == PSM_ZONE) {
-					histogram.in_zone.usPSMZoneTime =
-						histogram.in_zone.usPSMZoneTime +
-						(elapsed_time_ms /
-						 MSEC_PER_SEC);
+					histogram.in_zone.usPSMZoneTime +=
+						elapsed_seconds;
 				} else if (cur_zone == NO_ZONE) {
-					histogram.in_zone.usNOZoneTime =
-						histogram.in_zone.usNOZoneTime +
-						(elapsed_time_ms /
-						 MSEC_PER_SEC);
+					histogram.in_zone.usNOZoneTime +=
+						elapsed_seconds;
 				}
 			}
 
@@ -419,6 +400,8 @@ void collect_stats(void)
 			m_u16_speedmax = 0;
 			m_u32_speedmean = 0;
 			m_ui16_hs_samples = 0;
+			steps = 0;
+			steps_old = 0;
 		}
 		k_sleep(K_MSEC(150));
 	}

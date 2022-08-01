@@ -12,7 +12,6 @@
 #include "ble_data_event.h"
 #include "ble_cmd_event.h"
 #include "nofence_service.h"
-#include "lte_proto_event.h"
 #include "pwr_event.h"
 #include "env_sensor_event.h"
 
@@ -43,18 +42,23 @@
 #include "sound_event.h"
 #include "nf_settings.h"
 #include "histogram_events.h"
-#include "amc_states_cache.h"
 
+#include <sys/sys_heap.h>
+extern struct k_heap _system_heap;
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
 #define SECONDS_IN_THREE_DAYS 259200
 #define TWO_DAYS_SEC SEC_DAY * 2
+
+#define CACHE_READY_TIMEOUT_SEC 60
 
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
 
 #define EMPTY_FENCE_CRC 0xFFFF
 static pasture_t pasture_temp;
 static uint8_t cached_fences_counter = 0;
+static uint16_t cached_msss = 0;
+static uint16_t cached_ttff = 0;
 
 /** @todo This should be fetched from EEPROM */
 static gnss_mode_t cached_gnss_mode = GNSSMODE_NOMODE;
@@ -67,20 +71,33 @@ atomic_t cached_hum = ATOMIC_INIT(0);
 atomic_t cached_has_fence_dist = ATOMIC_INIT(0);
 atomic_t cached_fence_dist = ATOMIC_INIT(0);
 
+K_SEM_DEFINE(cache_ready_sem, 0, 1);
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
 K_SEM_DEFINE(send_out_ack, 0, 1);
 K_SEM_DEFINE(connection_ready, 0, 1);
 
-collar_state_struct_t current_state = {
-	.collar_mode = Mode_Mode_UNKNOWN,
-	.fence_status = FenceStatus_FenceStatus_UNKNOWN,
-	.collar_status = CollarStatus_CollarStatus_UNKNOWN,
-	.fence_version = 0,
-	.flash_erase_count = 0,
-	.zap_count = 0,
-};
+static collar_state_struct_t current_state;
+static gnss_last_fix_struct_t cached_fix;
 
-gnss_last_fix_struct_t cached_fix;
+typedef enum {
+	COLLAR_MODE,
+	COLLAR_STATUS,
+	FENCE_STATUS,
+	FENCE_VERSION,
+	/** @todo Not written to eeprom, should it? -> FLASH_ERASE_COUNT,*/
+	ZAP_COUNT,
+	GNSS_STRUCT,
+	GSM_INFO,
+	CACHED_READY_END_OF_LIST
+} cached_and_ready_enum;
+
+/* Used to check if we've cached what is requried before we perform the 
+ * INITIAL, FIRST poll request to server.
+ */
+static int cached_and_ready_reg[CACHED_READY_END_OF_LIST];
+
+static int rat, mnc, rssi, min_rssi, max_rssi;
+static uint8_t ccid[20];
 
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
@@ -89,7 +106,7 @@ static bool first_frame, first_ano_frame;
 /* Time since the server updated the date time in seconds. */
 static atomic_t server_timestamp_sec = ATOMIC_INIT(0);
 
-uint32_t serial_id = 0;
+static uint32_t serial_id = 0;
 
 void build_poll_request(NofenceMessage *);
 int8_t request_fframe(uint32_t, uint8_t);
@@ -114,7 +131,7 @@ bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *);
 static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
 
 static bool m_transfer_boot_params = true;
-bool m_confirm_acc_limits, m_confirm_ble_key;
+static bool m_confirm_acc_limits, m_confirm_ble_key;
 
 K_MUTEX_DEFINE(send_binary_mutex);
 
@@ -128,7 +145,7 @@ K_MSGQ_DEFINE(ble_data_msgq, sizeof(struct ble_data_event),
 	      CONFIG_MSGQ_BLE_DATA_SIZE, 4);
 K_MSGQ_DEFINE(ble_cmd_msgq, sizeof(struct ble_cmd_event),
 	      CONFIG_MSGQ_BLE_CMD_SIZE, 4);
-K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct lte_proto_event),
+K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct messaging_proto_out_event),
 	      CONFIG_MSGQ_LTE_PROTO_SIZE, 4);
 
 #define NUM_MSGQ_EVENTS 4
@@ -192,7 +209,9 @@ static void build_log_message()
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	seq_1.m.seq_msg.has_usChargeMah = true;
 	seq_1.m.seq_msg.usChargeMah = (uint16_t)atomic_get(&cached_chrg);
-	//seq_1.m.seq_msg.xGprsRssi = cached_rssi; // not implemented
+	seq_1.m.seq_msg.has_xGprsRssi = true;
+	seq_1.m.seq_msg.xGprsRssi.ucMaxRSSI = (uint8_t)max_rssi;
+	seq_1.m.seq_msg.xGprsRssi.ucMinRSSI = (uint8_t)min_rssi;
 	seq_1.m.seq_msg.has_xHistogramCurrentProfile = true;
 	seq_1.m.seq_msg.has_xHistogramZone = true;
 	seq_1.m.seq_msg.has_xHistogramAnimalBehave = true;
@@ -293,6 +312,7 @@ void log_data_periodic_fn()
  */
 void modem_poll_work_fn()
 {
+	//	sys_heap_print_info(&_system_heap.heap, true);
 	k_work_reschedule_for_queue(
 		&send_q, &modem_poll_work,
 		K_MINUTES(atomic_get(&poll_period_minutes)));
@@ -300,18 +320,24 @@ void modem_poll_work_fn()
 	LOG_INF("Starting periodic poll work and building poll request.");
 	NofenceMessage new_poll_msg;
 
+	/* Only process the poll request if cache is ready. */
+	if (k_sem_take(&cache_ready_sem, K_SECONDS(CACHE_READY_TIMEOUT_SEC)) !=
+	    0) {
+		LOG_WRN("Timed out. Cached data not ready yet. Just sending the data that we have..");
+	}
+	k_sem_give(&cache_ready_sem);
+
+	/* Semaphore for data protection, @todo use mutex in future. */
 	if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
 		build_poll_request(&new_poll_msg);
-		encode_and_send_message(&new_poll_msg);
 		k_sem_give(&cache_lock_sem);
+		encode_and_send_message(&new_poll_msg);
 	} else {
 		LOG_ERR("Cached state semaphore hanged, retrying in 1 second.");
 		k_work_reschedule_for_queue(&send_q, &modem_poll_work,
 					    K_SECONDS(1));
 	}
 }
-
-static int32_t sec_since_gnss_time = 0;
 
 static void zap_message_work_fn()
 {
@@ -446,6 +472,19 @@ void data_request_work_fn()
 		new_request_env_sensor_event();
 	EVENT_SUBMIT(ev_env);
 }
+
+static void update_cache_reg(cached_and_ready_enum index)
+{
+	cached_and_ready_reg[index] = 1;
+	for (int i = 0; i < CACHED_READY_END_OF_LIST; i++) {
+		if (cached_and_ready_reg[i] == 0) {
+			return;
+		}
+	}
+	/* All values are 1, give semaphore. */
+	k_sem_give(&cache_ready_sem);
+}
+
 /**
  * @brief Main event handler function. 
  * 
@@ -457,80 +496,56 @@ void data_request_work_fn()
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_gnss_data(eh)) {
-		/* Check when we received server time last. */
-		int32_t server_time =
-			(int32_t)atomic_get(&server_timestamp_sec);
-		int32_t delta_server_time =
-			(int32_t)(k_uptime_get_32() / 1000) - server_time;
-
-		/* If we already have server time, just return. */
-		if (delta_server_time <= TWO_DAYS_SEC && server_time != 0) {
-			return false;
-		}
-
-		/* Check if we can use GNSS data based on the pvt_valid bits
-		 * and timestamp since correction. Doesn't need to be
-		 * atomic, since event handler thead is the only one
-		 * accessing it.
-		 */
 		struct gnss_data *ev = cast_gnss_data(eh);
+		cached_gnss_mode = (gnss_mode_t)ev->gnss_data.lastfix.mode;
 
-		/* TODO, pshustad, review, might block the EventManager for 200 ms ? */
+		/* Update that we received GNSS data regardless of validity. */
+		update_cache_reg(GNSS_STRUCT);
+
 		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
-			if (k_sem_take(&cache_lock_sem, K_MSEC(200)) == 0) {
-				LOG_INF("Update last GNSS fix");
+			time_t gm_time =
+				(time_t)ev->gnss_data.lastfix.unix_timestamp;
+			struct tm *tm_time = gmtime(&gm_time);
+
+			/* TODO, review pshustad, might block the event manager for 50 ms ? */
+			if (k_sem_take(&cache_lock_sem, K_MSEC(50)) == 0) {
 				cached_fix = ev->gnss_data.lastfix;
+				cached_ttff = (uint16_t)(
+					ev->gnss_data.latest.ttff / 1000);
+				cached_msss = (uint16_t)(
+					ev->gnss_data.latest.msss / 1000);
 				k_sem_give(&cache_lock_sem);
 			}
+			if (tm_time->tm_year < 2015) {
+				LOG_DBG("Invalid gnss packet.");
+				return false;
+			}
+			/* Update date_time library which storage uses for ANO data. */
+			date_time_set(tm_time);
 		}
-		if (!(ev->gnss_data.latest.pvt_valid & (1 << 0)) ||
-		    !(ev->gnss_data.latest.pvt_valid & (1 << 1))) {
-			return false;
-		}
-
-		if ((int32_t)(k_uptime_get_32() / 1000) - sec_since_gnss_time <
-		    SEC_HOUR) {
-			return false;
-		}
-
-		/** @todo Check if uint32_t to time_t typecast works. */
-		time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
-		struct tm *tm_time = gmtime(&gm_time);
-		/* Update date_time library which storage uses for ANO data. */
-		if (!date_time_set(tm_time)) {
-			LOG_ERR("Could not set date time from GNSS data");
-		} else {
-			LOG_INF("Now using GNSS unix timestamp instead: %s",
-				asctime(tm_time));
-		}
-
-		sec_since_gnss_time = (int32_t)(k_uptime_get_32() / 1000);
-
-		cached_gnss_mode = (gnss_mode_t)ev->gnss_data.lastfix.mode;
 		return false;
 	}
-
 	if (is_ble_ctrl_event(eh)) {
 		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
 		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
 			/* Message queue is full: purge old data & try again */
 			k_msgq_purge(&ble_ctrl_msgq);
 		}
-		return false;
+		return true;
 	}
 	if (is_ble_cmd_event(eh)) {
 		struct ble_cmd_event *ev = cast_ble_cmd_event(eh);
 		while (k_msgq_put(&ble_cmd_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&ble_cmd_msgq);
 		}
-		return false;
+		return true;
 	}
 	if (is_ble_data_event(eh)) {
 		struct ble_data_event *ev = cast_ble_data_event(eh);
 		while (k_msgq_put(&ble_data_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&ble_data_msgq);
 		}
-		return false;
+		return true;
 	}
 	if (is_cellular_proto_in_event(eh)) {
 		struct cellular_proto_in_event *ev =
@@ -538,27 +553,32 @@ static bool event_handler(const struct event_header *eh)
 		while (k_msgq_put(&lte_proto_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&lte_proto_msgq);
 		}
-		return false;
+		return true;
 	}
 	if (is_update_collar_mode(eh)) {
 		struct update_collar_mode *ev = cast_update_collar_mode(eh);
 		current_state.collar_mode = ev->collar_mode;
+		update_cache_reg(COLLAR_MODE);
 		return false;
 	}
 	if (is_update_collar_status(eh)) {
 		struct update_collar_status *ev = cast_update_collar_status(eh);
 		LOG_INF("Update collar status %d", ev->collar_status);
 		current_state.collar_status = ev->collar_status;
+		update_cache_reg(COLLAR_STATUS);
 		return false;
 	}
 	if (is_update_fence_status(eh)) {
 		struct update_fence_status *ev = cast_update_fence_status(eh);
 		current_state.fence_status = ev->fence_status;
+		update_cache_reg(FENCE_STATUS);
 		return false;
 	}
 	if (is_update_fence_version(eh)) {
 		struct update_fence_version *ev = cast_update_fence_version(eh);
 		current_state.fence_version = ev->fence_version;
+
+		update_cache_reg(FENCE_VERSION);
 
 		/* Notify server as soon as the new fence is activated. */
 		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
@@ -570,6 +590,10 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_update_flash_erase(eh)) {
 		current_state.flash_erase_count++;
+		/** @todo Not written to @eeprom. Should it? And also be added to
+		 * update cache reg??
+		 */
+		/*update_cache_reg(FLASH_ERASE_COUNT);*/
 		return false;
 	}
 	if (is_update_zap_count(eh)) {
@@ -580,21 +604,11 @@ static bool event_handler(const struct event_header *eh)
 		if (err < 0) {
 			LOG_ERR("Error reschedule zap work: %d", err);
 		}
+		update_cache_reg(ZAP_COUNT);
 		return false;
 	}
 	if (is_cellular_ack_event(eh)) {
 		k_sem_give(&send_out_ack);
-		return false;
-	}
-	if (is_gnss_data(eh)) {
-		struct gnss_data *ev = cast_gnss_data(eh);
-		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
-			/* TODO, review pshustad, might block the event manager for 500 ms ? */
-			if (k_sem_take(&cache_lock_sem, K_MSEC(500)) == 0) {
-				cached_fix = ev->gnss_data.lastfix;
-				k_sem_give(&cache_lock_sem);
-			}
-		}
 		return false;
 	}
 
@@ -695,6 +709,20 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	if (is_gsm_info_event(eh)) {
+		LOG_WRN("GSM info received!");
+		struct gsm_info_event *ev = cast_gsm_info_event(eh);
+		rat = ev->gsm_info.rat;
+		mnc = ev->gsm_info.mnc;
+		rssi = ev->gsm_info.rssi;
+		min_rssi = ev->gsm_info.min_rssi;
+		max_rssi = ev->gsm_info.max_rssi;
+		memcpy(ccid, ev->gsm_info.ccid, sizeof(ccid));
+		LOG_WRN("RSSI, rat: %d, %d, %d, %d, %s", rssi, min_rssi,
+			max_rssi, rat, ccid);
+		update_cache_reg(GSM_INFO);
+		return false;
+	}
 
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
@@ -724,6 +752,11 @@ bool validate_pasture()
 	pasture_value_16 = pasture_temp.m.us_k_lat;
 	crc = nf_crc16_uint16(pasture_value_16, &crc);
 
+	if (pasture_temp.m.ul_total_fences ==
+	    0) { /*Ignore CRC for No pasture.*/
+		return crc == pasture_temp.m.us_pasture_crc;
+	}
+
 	for (uint8_t i = 0; i < pasture_temp.m.ul_total_fences; i++) {
 		fence_t *target_fence = &pasture_temp.fences[i];
 		for (uint8_t j = 0; j < target_fence->m.n_points; j++) {
@@ -745,7 +778,6 @@ EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
 EVENT_SUBSCRIBE(MODULE, ble_cmd_event);
 EVENT_SUBSCRIBE(MODULE, ble_data_event);
 
-EVENT_SUBSCRIBE(MODULE, lte_proto_event);
 EVENT_SUBSCRIBE(MODULE, cellular_ack_event);
 EVENT_SUBSCRIBE(MODULE, cellular_proto_in_event);
 EVENT_SUBSCRIBE(MODULE, update_collar_mode);
@@ -764,6 +796,7 @@ EVENT_SUBSCRIBE(MODULE, gnss_data);
 EVENT_SUBSCRIBE(MODULE, send_poll_request_now);
 EVENT_SUBSCRIBE(MODULE, warn_correction_start_event);
 EVENT_SUBSCRIBE(MODULE, warn_correction_end_event);
+EVENT_SUBSCRIBE(MODULE, gsm_info_event);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -860,15 +893,15 @@ static void process_lte_proto_event(void)
 	 * 	buf++;
 	 * }
 	 */
-
+	struct messaging_ack_event *ack = new_messaging_ack_event();
+	EVENT_SUBMIT(ack);
 	if (err) {
 		char *e_msg = "Error decoding protobuf message";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
-	struct messaging_ack_event *ack = new_messaging_ack_event();
-	EVENT_SUBMIT(ack);
+
 	/* process poll response */
 	if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
 		LOG_INF("Process poll reponse");
@@ -923,10 +956,9 @@ int messaging_module_init(void)
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return err;
 	}
-	current_state.collar_mode = get_mode(),
-	current_state.fence_status = get_fence_status(),
-	current_state.collar_status = get_collar_status(),
-	current_state.zap_count = get_total_zap_count(),
+	struct check_connection *ev = new_check_connection();
+	/*Startup the modem to get the gsm_info ready before the first poll request.*/
+	EVENT_SUBMIT(ev);
 
 	k_work_queue_init(&send_q);
 	k_work_queue_start(&send_q, messaging_send_thread,
@@ -987,13 +1019,13 @@ void build_poll_request(NofenceMessage *poll_req)
 		(uint16_t)atomic_get(&cached_batt);
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
+	poll_req->m.poll_message_req.has_xGsmInfo = true;
+	_GSM_INFO p_gsm_info;
+	p_gsm_info.ucRAT = (uint8_t)rat;
+	sprintf(p_gsm_info.xMMC_MNC, "%d", mnc);
 
-	/** @todo get gsm info from modem driver */
-#if 0
-	const _GSM_INFO *p_gsm_info = bgs_get_gsm_info();
-	poll_req.m.poll_message_req.xGsmInfo = *p_gsm_info;
-	poll_req->m.poll_message_req.has_xGsmInfo = false;
-#endif
+	poll_req->m.poll_message_req.xGsmInfo = p_gsm_info;
+	poll_req->m.poll_message_req.has_xGsmInfo = true;
 
 	if (current_state.flash_erase_count) {
 		// m_flash_erase_count is reset when we receive a poll reply
@@ -1054,8 +1086,12 @@ void build_poll_request(NofenceMessage *poll_req)
 		}
 	}
 	/* TODO pshustad, fill GNSSS parameters for MIA M10 */
-	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec = false;
-	poll_req->m.poll_message_req.has_usGnssTTFFSec = false;
+	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec = true;
+	poll_req->m.poll_message_req.usGnssOnFixAgeSec =
+		cached_msss - (uint16_t)(cached_fix.msss / 1000);
+
+	poll_req->m.poll_message_req.has_usGnssTTFFSec = true;
+	poll_req->m.poll_message_req.usGnssTTFFSec = cached_ttff;
 
 	if (m_transfer_boot_params) {
 		poll_req->m.poll_message_req.has_versionInfo = true;
@@ -1063,6 +1099,9 @@ void build_poll_request(NofenceMessage *poll_req)
 			.has_ulApplicationVersion = true;
 		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion =
 			NF_X25_VERSION_NUMBER;
+		poll_req->m.poll_message_req.has_xSimCardId = true;
+		memcpy(poll_req->m.poll_message_req.xSimCardId, ccid,
+		       sizeof(poll_req->m.poll_message_req.xSimCardId) - 1);
 		/* TODO pshustad, clean up and re-enable the commented code below */
 		//		uint16_t xbootVersion;
 		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
@@ -1241,18 +1280,19 @@ void proto_InitHeader(NofenceMessage *msg)
  */
 int send_binary_message(uint8_t *data, size_t len)
 {
-	struct check_connection *ev = new_check_connection();
-	EVENT_SUBMIT(ev);
-	int ret = k_sem_take(&connection_ready, K_MINUTES(2));
-	if (ret != 0) {
-		char *e_msg = "Connection not ready, can't send message now!";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
-		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
-		return -ETIMEDOUT;
-	}
 	/* We can only send 1 message at a time, use mutex. */
 	if (k_mutex_lock(&send_binary_mutex,
 			 K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC * 2)) == 0) {
+		struct check_connection *ev = new_check_connection();
+		EVENT_SUBMIT(ev);
+		int ret = k_sem_take(&connection_ready, K_MINUTES(2));
+		if (ret != 0) {
+			char *e_msg =
+				"Connection not ready, can't send message now!";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
+			nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
+			return -ETIMEDOUT;
+		}
 		uint16_t byteswap_size = BYTESWAP16(len - 2);
 		memcpy(&data[0], &byteswap_size, 2);
 
@@ -1543,6 +1583,18 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 			pasture_temp.m.has_keep_mode = true;
 			pasture_temp.m.keep_mode =
 				fenceResp->m.xHeader.bKeepMode;
+
+			/* Write to EEPROM. */
+			err = eep_uint8_write(EEP_KEEP_MODE,
+					      fenceResp->m.xHeader.bKeepMode);
+			if (err) {
+				/* We always expect the header to be the first frame. */
+				char *e_msg =
+					"Error writing keep mode to eeprom.";
+				LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+				nf_app_error(ERR_MESSAGING, err, e_msg,
+					     strlen(e_msg));
+			}
 		}
 
 		if (fenceResp->has_usFenceCRC) {
@@ -1591,10 +1643,13 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 		}
 
 		if (pasture_temp.m.ul_total_fences == 0) {
-			char *e_msg = "Error, pasture cached is empty.";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), -EIO);
-			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
-			return 0;
+			/* No pasture*/
+			err = stg_write_pasture_data((uint8_t *)&pasture_temp,
+						     sizeof(pasture_temp));
+			if (err) {
+				return err;
+			}
+			return DOWNLOAD_COMPLETE;
 		}
 
 		if (!validate_pasture()) {

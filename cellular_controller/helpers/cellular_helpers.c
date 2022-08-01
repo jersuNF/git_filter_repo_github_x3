@@ -186,6 +186,9 @@ int socket_receive(struct data *data, char **msg)
 
 int reset_modem(void)
 {
+	for (int i=0; i<=6; i++) {
+		(void)close(i);
+	}
 	return modem_nf_reset();
 }
 
@@ -207,7 +210,7 @@ int get_ip(char** collar_ip)
  * will close the latest TCP socket with id greater than zero, as zero is
  * reserved for the listening socket. */
 /* TODO: enhance robustness. */
-void stop_tcp(void)
+int stop_tcp(void)
 {
 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
 		if (conf.ipv6.tcp.sock > 0) {
@@ -228,6 +231,7 @@ void stop_tcp(void)
 		LOG_ERR("Failed to switch modem to power saving!");
 		/*TODO: notify error handler and take action.*/
 	}
+	return ret;
 }
 
 int send_tcp(char *msg, size_t len)
@@ -282,10 +286,6 @@ void send_tcp_fn(void)
 				k_msgq_get(&msgq, &msg_in_q, K_FOREVER);
 				int ret = send_tcp(msg_in_q.msg, msg_in_q.len);
 				if (ret != msg_in_q.len){
-					struct cellular_error_event *err = new_cellular_error_event();
-					err->cause = SOCKET_SEND;
-					err->err_code = -ETIMEDOUT;
-					EVENT_SUBMIT(err);
 					LOG_WRN("Failed to send TCP message!");
 				}
 				struct free_message_mem_event *ev =

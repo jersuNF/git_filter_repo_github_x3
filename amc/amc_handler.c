@@ -210,9 +210,13 @@ static inline int update_pasture_from_stg(void)
 		ver->fence_version = pasture->m.ul_fence_def_version;
 		EVENT_SUBMIT(ver);
 
+		LOG_INF("Pasture change:FenceVersion=%d,FenceStatus=%d", 
+					pasture->m.ul_fence_def_version, get_fence_status());
+
 		k_sem_give(&fence_data_sem);
 		return 0;
 	}while(0);
+	LOG_WRN("Failed to update pasture!");
 	/* Update fence status to unknown in case of failure */
 	force_fence_status(FenceStatus_FenceStatus_UNKNOWN);
 	k_sem_give(&fence_data_sem);
@@ -254,10 +258,6 @@ void handle_states_fn()
 	Mode amc_mode = calc_mode();
 	FenceStatus fence_status = get_fence_status();
 
-	LOG_INF("  AMC mode is: %d", amc_mode);
-	LOG_INF("  AMC zone is: %d", cur_zone);
-	LOG_INF("  Fence status is: %d", fence_status);
-
 	if (cur_zone != WARN_ZONE || buzzer_state ||
 	    fence_status == FenceStatus_NotStarted ||
 	    fence_status == FenceStatus_Escaped) {
@@ -274,6 +274,10 @@ void handle_states_fn()
 	CollarStatus new_collar_status = calc_collar_status();
 
 	set_sensor_modes(amc_mode, new_fence_status, new_collar_status, cur_zone);
+
+	LOG_DBG("AMC states:CollarMode=%d,CollarStatus=%d,Zone=%d,FenceStatus=%d",
+				get_mode(), calc_collar_status(), zone_get(), 
+				get_fence_status());
 }
 
 void handle_corrections_fn()
@@ -298,7 +302,7 @@ void handle_corrections_fn()
 void handle_gnss_data_fn(struct k_work *item)
 {
 	if (m_fence_update_pending) {
-		LOG_WRN("AMC GNSS data not processed due to pending fence update");
+		LOG_DBG("AMC GNSS data not processed due to pending fence update");
 		goto cleanup;
 	}
 
@@ -326,8 +330,8 @@ void handle_gnss_data_fn(struct k_work *item)
 		goto cleanup;
 	}
 
-	LOG_INF("\n\n--== START ==--");
-	LOG_INF("  GNSS data: %d, %d, %d, %d, %d", gnss->latest.lon, 
+	LOG_DBG("\n\n--== START ==--");
+	LOG_DBG("  GNSS data: %d, %d, %d, %d, %d", gnss->latest.lon, 
 				gnss->latest.lat, gnss->latest.pvt_flags, gnss->latest.h_acc_dm,
 				gnss->latest.num_sv);
 
@@ -450,7 +454,7 @@ cleanup:
 	/* Calculation finished, give semaphore so we can swap memory region
 	 * on next GNSS request. Also notifying we're not using fence data area. */
 	k_sem_give(&fence_data_sem);
-	LOG_INF("--== END ==--\n\n");
+	LOG_DBG("--== END ==--\n\n");
 }
 
 int gnss_timeout_reset_fifo()

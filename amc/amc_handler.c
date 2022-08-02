@@ -135,7 +135,8 @@ static bool event_handler(const struct event_header *eh);
 
 static inline int update_pasture_from_stg(void)
 {
-	int err = stg_read_pasture_data(set_pasture_cache);
+	int err;
+	err = stg_read_pasture_data(set_pasture_cache);
 	if (err == -ENODATA) {
 		char *err_msg = "No pasture found on external flash.";
 		nf_app_warning(ERR_AMC, err, err_msg, strlen(err_msg));
@@ -150,15 +151,11 @@ static inline int update_pasture_from_stg(void)
 	uint8_t keep_mode;
 	err = eep_uint8_read(EEP_KEEP_MODE, &keep_mode);
 	if (err) {
-		/* We always expect the header to be the first frame. */
 		char *e_msg = "Error reading keep mode from eeprom.";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
+		nf_app_warning(ERR_AMC, err, e_msg, strlen(e_msg));
 
-		keep_mode = 0; //For teach mode if unable to read keepmode.
-	}
-	if (!keep_mode) {
-		force_teach_mode();
+		keep_mode = 0; //Defaults to 0 in case of read failure
 	}
 
 	/* Take pasture sem, since we need to access the version to send to 
@@ -183,25 +180,41 @@ static inline int update_pasture_from_stg(void)
 			err = -ENODATA;
 			break;
 		}
-
-		if ((err == 0) && fnc_valid_fence() && fnc_valid_def()) {
-			/* New pasture installed, force a new gnss fix. */
-			restart_force_gnss_to_fix();
-
-			/* Submit event that we have now began to use the new fence. */
-			struct update_fence_version *ver = new_update_fence_version();
-			ver->fence_version = pasture->m.ul_fence_def_version;
-			EVENT_SUBMIT(ver);
-
-			/* Update fence status */
-			force_fence_status(FenceStatus_NotStarted);
-
-			// /* Set fence status to NotStarted to notify AMC libs. */
-			// struct update_fence_status *status = new_update_fence_status();
-			// status->fence_status = FenceStatus_NotStarted;
-			// EVENT_SUBMIT(status);
+		if ((fnc_valid_fence() != true) || (fnc_valid_def() != true)) {
+			char *e_msg = "Pasture was not valid def and/or fence.";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_AMC, -ENODATA, e_msg, strlen(e_msg));
+			err = -ENODATA;
+			break;
 		}
+
+		/* New pasture installed, set teach mode. */
+		if (!keep_mode) {
+			force_teach_mode();
+		}
+
+		/* New pasture installed, force a new gnss fix. */
+		restart_force_gnss_to_fix();
+
+		/* Update fence status, this also notify listeners */
+		err = force_fence_status(FenceStatus_NotStarted);
+		if (err) {
+			char *e_msg = "Error when forcing fence status after update";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
+			break;
+		}
+
+		/* Submit event that we have now began to use the new fence. */
+		struct update_fence_version *ver = new_update_fence_version();
+		ver->fence_version = pasture->m.ul_fence_def_version;
+		EVENT_SUBMIT(ver);
+
+		k_sem_give(&fence_data_sem);
+		return 0;
 	}while(0);
+	/* Update fence status to unknown in case of failure */
+	force_fence_status(FenceStatus_FenceStatus_UNKNOWN);
 	k_sem_give(&fence_data_sem);
 	return err;
 }
@@ -215,15 +228,12 @@ void handle_new_fence_fn(struct k_work *item)
 		LOG_WRN("Fence update request denied, error:%d", err);
 	}
 	k_work_submit_to_queue(&amc_work_q, &handle_states_work);
+	m_fence_update_pending = false;
 	return;
 }
 
 void handle_states_fn()
 {
-	if (m_fence_update_pending) {
-		m_fence_update_pending = false;
-	}
-
 	/* Fetch cached gnss data. */
 	gnss_t *gnss = NULL;
 	int err = get_gnss_cache(&gnss);
@@ -480,7 +490,6 @@ static bool event_handler(const struct event_header *eh)
 {
 	if (is_new_fence_available(eh)) {
 		k_work_submit_to_queue(&amc_work_q, &handle_new_fence_work);
-		// k_work_submit_to_queue(&amc_work_q, &handle_states_work);
 		return false;
 	}
 	if (is_gnss_data(eh)) {

@@ -228,7 +228,14 @@ static void correction_start(int16_t mean_dist)
 			 * big since it is default to 0. */
 			time_since_gnss_correction = k_uptime_get();
 
+<<<<<<< HEAD
 			struct animal_warning_event *ev = new_animal_warning_event();
+=======
+			struct animal_warning_event *ev =
+				new_animal_warning_event();
+			ev->fence_dist = atomic_get(&last_mean_dist);
+			ev->has_fence_dist = true;
+>>>>>>> main
 			EVENT_SUBMIT(ev);
 
 			increment_warn_count();

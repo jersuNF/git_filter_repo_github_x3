@@ -67,6 +67,8 @@ atomic_t cached_chrg = ATOMIC_INIT(0);
 atomic_t cached_temp = ATOMIC_INIT(0);
 atomic_t cached_press = ATOMIC_INIT(0);
 atomic_t cached_hum = ATOMIC_INIT(0);
+atomic_t cached_has_fence_dist = ATOMIC_INIT(0);
+atomic_t cached_fence_dist = ATOMIC_INIT(0);
 
 K_SEM_DEFINE(cache_ready_sem, 0, 1);
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
@@ -117,6 +119,7 @@ uint8_t process_fence_msg(FenceDefinitionResponse *);
 uint8_t process_ano_msg(UbxAnoReply *);
 
 int encode_and_send_message(NofenceMessage *);
+int encode_and_store_message(NofenceMessage *);
 int send_binary_message(uint8_t *, size_t);
 
 void messaging_thread_fn(void);
@@ -171,7 +174,7 @@ struct k_work_delayable process_warning_correction_start_work;
 struct k_work_delayable process_warning_correction_end_work;
 
 atomic_t poll_period_minutes = ATOMIC_INIT(5);
-atomic_t log_period_minutes = ATOMIC_INIT(30);
+atomic_t log_period_minutes = ATOMIC_INIT(5);
 
 K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE,
 		messaging_thread_fn, NULL, NULL, NULL,
@@ -195,18 +198,12 @@ static void build_log_message()
 		return;
 	}
 
-	/* Fill in NofenceMessage struct */
+	/* Fill in sequence message 1 */
 	NofenceMessage seq_1;
-	NofenceMessage seq_2;
-	/** @todo also include gprs_stat msg
-	NofenceMessage grps;
-	proto_InitHeader(&grps);
-	gprs.m.gprs_stat_msg.has_xGprsErrorDetails = true;
-	gprs.m.gprs_stat_msg.xGprsErrorDetails = ...
-	*/
 	proto_InitHeader(&seq_1); /* fill up message header. */
-	proto_InitHeader(&seq_2); /* fill up message header. */
-
+	seq_1.which_m = (uint16_t)NofenceMessage_seq_msg_tag;
+	seq_1.m.seq_msg.has_xGprsRssi = false;
+	seq_1.m.seq_msg.has_xPOS_QC_MMM = false;
 	seq_1.m.seq_msg.has_usBatteryVoltage = true;
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	seq_1.m.seq_msg.has_usChargeMah = true;
@@ -223,15 +220,24 @@ static void build_log_message()
 	       &histogram.current_profile, sizeof(histogram.current_profile));
 	memcpy(&seq_1.m.seq_msg.xHistogramZone, &histogram.in_zone,
 	       sizeof(histogram.in_zone));
-	seq_1.which_m = (uint16_t)NofenceMessage_seq_msg_tag;
 
+	err = encode_and_store_message(&seq_1);
+	if (err) {
+		LOG_ERR("Failed to encode and save sequence message 1: %d",
+			err);
+		return;
+	}
+
+	/* Fill in sequence message 2 */
+	NofenceMessage seq_2;
+	proto_InitHeader(&seq_2); /* fill up message header. */
+	seq_2.which_m = (uint16_t)NofenceMessage_seq_msg_2_tag;
 	seq_2.m.seq_msg_2.has_bme280 = true;
 	seq_2.m.seq_msg_2.bme280.ulPressure =
 		(uint32_t)atomic_get(&cached_press);
 	seq_2.m.seq_msg_2.bme280.ulTemperature =
 		(uint32_t)atomic_get(&cached_temp);
 	seq_2.m.seq_msg_2.bme280.ulHumidity = (uint32_t)atomic_get(&cached_hum);
-	seq_2.which_m = (uint16_t)NofenceMessage_seq_msg_2_tag;
 	seq_2.m.seq_msg_2.has_xBatteryQc = true;
 	seq_2.m.seq_msg_2.xBatteryQc.usVbattMax =
 		histogram.qc_battery.usVbattMax;
@@ -239,50 +245,15 @@ static void build_log_message()
 		histogram.qc_battery.usVbattMin;
 	seq_2.m.seq_msg_2.xBatteryQc.usTemperature =
 		(uint16_t)atomic_get(&cached_temp);
+	seq_2.m.seq_msg_2.has_xGnssModeCounts = false;
 
-	LOG_DBG("Max_voltage: %u, min voltage: %u, temp: %u",
-		seq_2.m.seq_msg_2.xBatteryQc.usVbattMax,
-		seq_2.m.seq_msg_2.xBatteryQc.usVbattMin,
-		seq_2.m.seq_msg_2.xBatteryQc.usTemperature);
-
-	uint8_t header_size = 2;
-	uint8_t encoded_msg_seq_1[NofenceMessage_size + header_size];
-	uint8_t encoded_msg_seq_2[NofenceMessage_size + header_size];
-
-	memset(encoded_msg_seq_1, 0, sizeof(encoded_msg_seq_1));
-	memset(encoded_msg_seq_2, 0, sizeof(encoded_msg_seq_2));
-
-	size_t encoded_seq_1_size = 0;
-
-	size_t encoded_seq_2_size = 0;
-
-	/* Encode the seq_1 struct created. */
-	err = collar_protocol_encode(&seq_1, &encoded_msg_seq_1[2],
-				     NofenceMessage_size, &encoded_seq_1_size);
+	err = encode_and_store_message(&seq_2);
 	if (err) {
-		LOG_ERR("Error encoding nofence message seq 1 (%i)", err);
+		LOG_ERR("Failed to encode and save sequence message 2: %d",
+			err);
 		return;
 	}
-
-	/* Store the length of the message in the two first bytes */
-	encoded_msg_seq_1[0] = (uint8_t)encoded_seq_1_size;
-	encoded_msg_seq_1[1] = (uint8_t)(encoded_seq_1_size >> 8);
-
-	/* Encode the seq_2 struct created. */
-	err = collar_protocol_encode(&seq_2, &encoded_msg_seq_2[2],
-				     NofenceMessage_size, &encoded_seq_2_size);
-	if (err) {
-		LOG_ERR("Error encoding nofence message seq 2 (%i)", err);
-		return;
-	}
-
-	/* Store the length of the message in the two first bytes */
-	encoded_msg_seq_2[0] = (uint8_t)encoded_seq_2_size;
-	encoded_msg_seq_2[1] = (uint8_t)(encoded_seq_2_size >> 8);
-
-	/* Store the encoded message to external flash ring buffer */
-	stg_write_log_data(encoded_msg_seq_1, encoded_seq_1_size + header_size);
-	stg_write_log_data(encoded_msg_seq_2, encoded_seq_2_size + header_size);
+	LOG_INF("Store seq_1 and seq_2 to flash");
 }
 
 int read_log_data_cb(uint8_t *data, size_t len)
@@ -328,8 +299,9 @@ void log_data_periodic_fn()
 		err = stg_clear_partition(STG_PARTITION_LOG);
 		if (err) {
 			LOG_ERR("Error clearing FCB storage for LOG %i", err);
+		} else {
+			LOG_INF("Emptied LOG partition data as we have read everything.");
 		}
-		LOG_INF("Emptied LOG partition data as we have read everything.");
 	}
 }
 
@@ -339,7 +311,7 @@ void log_data_periodic_fn()
  */
 void modem_poll_work_fn()
 {
-//	sys_heap_print_info(&_system_heap.heap, true);
+	//	sys_heap_print_info(&_system_heap.heap, true);
 	k_work_reschedule_for_queue(
 		&send_q, &modem_poll_work,
 		K_MINUTES(atomic_get(&poll_period_minutes)));
@@ -363,7 +335,6 @@ void modem_poll_work_fn()
 		LOG_ERR("Cached state semaphore hanged, retrying in 1 second.");
 		k_work_reschedule_for_queue(&send_q, &modem_poll_work,
 					    K_SECONDS(1));
-		return;
 	}
 }
 
@@ -372,15 +343,24 @@ static void zap_message_work_fn()
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m = (uint16_t)NofenceMessage_client_zap_message_tag;
-	/* TODO, pshustad must provide fenceDist */
-	msg.m.client_zap_message.has_sFenceDist = false;
+	msg.m.client_zap_message.has_sFenceDist =
+		(bool)atomic_get(&cached_has_fence_dist);
+	msg.m.client_zap_message.sFenceDist =
+		(uint16_t)atomic_get(&cached_fence_dist);
+
 	proto_get_last_known_date_pos(&cached_fix,
 				      &msg.m.client_zap_message.xDatePos);
+	msg.m.client_zap_message.ucReaction = 0;
+	msg.m.client_zap_message.usReactionDuration = 0;
 
-	int ret = encode_and_send_message(&msg);
+	int ret = encode_and_store_message(&msg);
 	if (ret) {
 		LOG_ERR("Failed to encode zap status msg: %d", ret);
+	} else {
+		LOG_INF("Store zap message to flash");
 	}
+	/* Send data stored in external flash immediately */
+	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 }
 
 static void animal_escaped_work_fn()
@@ -397,10 +377,14 @@ static void animal_escaped_work_fn()
 	msg.m.status_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	msg.m.status_msg.has_ucGpsMode = true;
 	msg.m.status_msg.ucGpsMode = (uint8_t)cached_gnss_mode;
-	int ret = encode_and_send_message(&msg);
+	int ret = encode_and_store_message(&msg);
 	if (ret) {
 		LOG_ERR("Failed to encode escaped status msg: %d", ret);
+	} else {
+		LOG_INF("Store escaped message to flash");
 	}
+	/* Send data stored in external flash immediately */
+	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 }
 
 static void warning_work_fn()
@@ -408,48 +392,63 @@ static void warning_work_fn()
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m = (uint16_t)NofenceMessage_client_warning_message_tag;
-	/* TODO, pshustad must provide fenceDist */
-	msg.m.client_warning_message.has_sFenceDist = false;
+	msg.m.client_warning_message.has_sFenceDist =
+		atomic_get(&cached_has_fence_dist);
+	msg.m.client_warning_message.sFenceDist =
+		atomic_get(&cached_fence_dist);
+
 	proto_get_last_known_date_pos(&cached_fix,
 				      &msg.m.client_zap_message.xDatePos);
 
-	int ret = encode_and_send_message(&msg);
+	int ret = encode_and_store_message(&msg);
 	if (ret) {
 		LOG_ERR("Failed to encode warning msg: %d", ret);
+	} else {
+		LOG_INF("Store warning message to flash");
 	}
 }
 
-static void warning_start_work_fn()
+static void correction_start_work_fn()
 {
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m =
 		(uint16_t)NofenceMessage_client_correction_start_message_tag;
-	/* TODO, pshustad must provide fenceDist */
-	msg.m.client_correction_start_message.has_sFenceDist = false;
+	msg.m.client_correction_start_message.has_sFenceDist =
+		atomic_get(&cached_has_fence_dist);
+	msg.m.client_correction_start_message.sFenceDist =
+		atomic_get(&cached_fence_dist);
+
 	proto_get_last_known_date_pos(
 		&cached_fix, &msg.m.client_correction_start_message.xDatePos);
 
-	int ret = encode_and_send_message(&msg);
+	int ret = encode_and_store_message(&msg);
 	if (ret) {
 		LOG_ERR("Failed to encode warning start msg: %d", ret);
+	} else {
+		LOG_INF("Store correction start message to flash");
 	}
 }
 
-static void warning_end_work_fn()
+static void correction_end_work_fn()
 {
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m =
 		(uint16_t)NofenceMessage_client_correction_end_message_tag;
-	/* TODO, pshustad must provide fenceDist */
-	msg.m.client_correction_end_message.has_sFenceDist = false;
+	msg.m.client_correction_end_message.has_sFenceDist =
+		atomic_get(&cached_has_fence_dist);
+	msg.m.client_correction_end_message.sFenceDist =
+		atomic_get(&cached_fence_dist);
+
 	proto_get_last_known_date_pos(
 		&cached_fix, &msg.m.client_correction_end_message.xDatePos);
 
-	int ret = encode_and_send_message(&msg);
+	int ret = encode_and_store_message(&msg);
 	if (ret) {
 		LOG_ERR("Failed to encode warning start msg: %d", ret);
+	} else {
+		LOG_INF("Store correction end message to flash");
 	}
 }
 /**
@@ -513,9 +512,10 @@ static bool event_handler(const struct event_header *eh)
 			/* TODO, review pshustad, might block the event manager for 50 ms ? */
 			if (k_sem_take(&cache_lock_sem, K_MSEC(50)) == 0) {
 				cached_fix = ev->gnss_data.lastfix;
-				cached_ttff = (uint16_t)(ev->gnss_data.latest
-							 .ttff/1000);
-				cached_msss = (uint16_t)(ev->gnss_data.latest.msss/1000);
+				cached_ttff = (uint16_t)(
+					ev->gnss_data.latest.ttff / 1000);
+				cached_msss = (uint16_t)(
+					ev->gnss_data.latest.msss / 1000);
 				k_sem_give(&cache_lock_sem);
 			}
 			if (tm_time->tm_year < 2015) {
@@ -636,6 +636,10 @@ static bool event_handler(const struct event_header *eh)
 	}
 
 	if (is_animal_warning_event(eh)) {
+		struct animal_warning_event *ev = cast_animal_warning_event(eh);
+		atomic_set(&cached_has_fence_dist, ev->has_fence_dist);
+		atomic_set(&cached_fence_dist, ev->fence_dist);
+
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_warning_work, K_NO_WAIT);
 		if (err < 0) {
@@ -679,6 +683,11 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_warn_correction_start_event(eh)) {
+		struct warn_correction_start_event *ev =
+			cast_warn_correction_start_event(eh);
+		atomic_set(&cached_has_fence_dist, ev->has_fence_dist);
+		atomic_set(&cached_fence_dist, ev->fence_dist);
+
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_warning_correction_start_work,
 			K_NO_WAIT);
@@ -689,6 +698,11 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_warn_correction_end_event(eh)) {
+		struct warn_correction_end_event *ev =
+			cast_warn_correction_end_event(eh);
+		atomic_set(&cached_has_fence_dist, ev->has_fence_dist);
+		atomic_set(&cached_fence_dist, ev->fence_dist);
+
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_warning_correction_end_work,
 			K_NO_WAIT);
@@ -708,7 +722,7 @@ static bool event_handler(const struct event_header *eh)
 		max_rssi = ev->gsm_info.max_rssi;
 		memcpy(ccid, ev->gsm_info.ccid, sizeof(ccid));
 		LOG_WRN("RSSI, rat: %d, %d, %d, %d, %s", rssi, min_rssi,
-			max_rssi,  rat, ccid);
+			max_rssi, rat, ccid);
 		update_cache_reg(GSM_INFO);
 		return false;
 	}
@@ -741,7 +755,8 @@ bool validate_pasture()
 	pasture_value_16 = pasture_temp.m.us_k_lat;
 	crc = nf_crc16_uint16(pasture_value_16, &crc);
 
-	if (pasture_temp.m.ul_total_fences == 0) { /*Ignore CRC for No pasture.*/
+	if (pasture_temp.m.ul_total_fences ==
+	    0) { /*Ignore CRC for No pasture.*/
 		return crc == pasture_temp.m.us_pasture_crc;
 	}
 
@@ -960,9 +975,9 @@ int messaging_module_init(void)
 	k_work_init_delayable(&process_zap_work, zap_message_work_fn);
 	k_work_init_delayable(&process_warning_work, warning_work_fn);
 	k_work_init_delayable(&process_warning_correction_start_work,
-			      warning_start_work_fn);
+			      correction_start_work_fn);
 	k_work_init_delayable(&process_warning_correction_end_work,
-			      warning_end_work_fn);
+			      correction_end_work_fn);
 
 	memset(&pasture_temp, 0, sizeof(pasture_t));
 	cached_fences_counter = 0;
@@ -1076,7 +1091,7 @@ void build_poll_request(NofenceMessage *poll_req)
 	/* TODO pshustad, fill GNSSS parameters for MIA M10 */
 	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec = true;
 	poll_req->m.poll_message_req.usGnssOnFixAgeSec =
-		cached_msss - (uint16_t)(cached_fix.msss/1000);
+		cached_msss - (uint16_t)(cached_fix.msss / 1000);
 
 	poll_req->m.poll_message_req.has_usGnssTTFFSec = true;
 	poll_req->m.poll_message_req.usGnssTTFFSec = cached_ttff;
@@ -1087,9 +1102,9 @@ void build_poll_request(NofenceMessage *poll_req)
 			.has_ulApplicationVersion = true;
 		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion =
 			NF_X25_VERSION_NUMBER;
-		poll_req->m.poll_message_req.has_xSimCardId= true;
-		memcpy(poll_req->m.poll_message_req.xSimCardId, ccid, sizeof
-								      (poll_req->m.poll_message_req.xSimCardId)-1);
+		poll_req->m.poll_message_req.has_xSimCardId = true;
+		memcpy(poll_req->m.poll_message_req.xSimCardId, ccid,
+		       sizeof(poll_req->m.poll_message_req.xSimCardId) - 1);
 		/* TODO pshustad, clean up and re-enable the commented code below */
 		//		uint16_t xbootVersion;
 		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
@@ -1275,7 +1290,8 @@ int send_binary_message(uint8_t *data, size_t len)
 		EVENT_SUBMIT(ev);
 		int ret = k_sem_take(&connection_ready, K_MINUTES(2));
 		if (ret != 0) {
-			char *e_msg = "Connection not ready, can't send message now!";
+			char *e_msg =
+				"Connection not ready, can't send message now!";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
 			nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 			return -ETIMEDOUT;
@@ -1311,6 +1327,7 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 	uint8_t encoded_msg[NofenceMessage_size + 2];
 	memset(encoded_msg, 0, sizeof(encoded_msg));
 	size_t encoded_size = 0;
+	size_t header_size = 2;
 
 	LOG_INF("Start message encoding, size: %d, version: %u",
 		sizeof(msg_proto), msg_proto->header.ulVersion);
@@ -1322,7 +1339,36 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return ret;
 	}
-	return send_binary_message(encoded_msg, encoded_size + 2);
+	/* Store the length of the message in the two first bytes */
+	encoded_msg[0] = (uint8_t)encoded_size;
+	encoded_msg[1] = (uint8_t)(encoded_size >> 8);
+
+	return send_binary_message(encoded_msg, encoded_size + header_size);
+}
+
+int encode_and_store_message(NofenceMessage *msg_proto)
+{
+	uint8_t encoded_msg[NofenceMessage_size + 2];
+	memset(encoded_msg, 0, sizeof(encoded_msg));
+	size_t encoded_size = 0;
+	size_t header_size = 2;
+
+	LOG_INF("Start message encoding, size: %d, version: %u",
+		sizeof(msg_proto), msg_proto->header.ulVersion);
+	int ret = collar_protocol_encode(msg_proto, &encoded_msg[2],
+					 NofenceMessage_size, &encoded_size);
+	if (ret) {
+		char *e_msg = "Error encoding nofence message";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
+		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
+		return ret;
+	}
+
+	/* Store the length of the message in the two first bytes */
+	encoded_msg[0] = (uint8_t)encoded_size;
+	encoded_msg[1] = (uint8_t)(encoded_size >> 8);
+
+	return stg_write_log_data(encoded_msg, encoded_size + header_size);
 }
 
 void process_poll_response(NofenceMessage *proto)

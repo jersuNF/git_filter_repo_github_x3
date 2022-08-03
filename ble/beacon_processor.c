@@ -148,8 +148,10 @@ static int set_new_shortest_dist(struct beacon_info *beacon)
 	/* Initialize to largest possible distance */
 	uint8_t shortest_dist = UINT8_MAX;
 	uint8_t entries = 0;
+	printk("[ ");
 	for (uint8_t i = 0; i < beacon->num_measurements; i++) {
 		struct beacon_connection_info *info = &beacon->history[i];
+		printk("%d ", info->beacon_dist);
 		if (k_uptime_get_32() - info->time_diff <
 		    CONFIG_BEACON_MAX_MEASUREMENT_AGE * MSEC_PER_SEC) {
 			if (info->beacon_dist < 1) {
@@ -161,6 +163,7 @@ static int set_new_shortest_dist(struct beacon_info *beacon)
 			entries++;
 		}
 	}
+	printk("]\n");
 
 	if (entries == 0) {
 		return -ENODATA;
@@ -221,6 +224,7 @@ static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist,
 		/* After new connection entry has been added, 
 		 * we have a new average. 
 		 */
+		printk("Beacon %d: ", i);
 		struct beacon_info *c_info = &list->beacon_array[i];
 
 #ifdef CONFIG_BEACON_SHORTEST_DISTANCE
@@ -267,11 +271,12 @@ static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist,
  */
 static double calculate_accuracy(int8_t tx_power, int8_t rssi)
 {
-	if (rssi == 0) {
+	if (rssi == 0 || tx_power == 0) {
 		LOG_WRN("Cannot detirmine RSSI value");
 		return DBL_MAX;
 	}
 	double ratio = rssi / (double)tx_power;
+	// https://www.researchgate.net/publication/278021046_Measuring_a_Distance_between_Things_with_Improved_Accuracy
 	if (ratio < 1.0) {
 		return pow(ratio, 10.0);
 	} else {

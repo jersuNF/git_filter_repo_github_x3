@@ -174,7 +174,7 @@ struct k_work_delayable process_warning_correction_start_work;
 struct k_work_delayable process_warning_correction_end_work;
 
 atomic_t poll_period_minutes = ATOMIC_INIT(5);
-atomic_t log_period_minutes = ATOMIC_INIT(5);
+atomic_t log_period_minutes = ATOMIC_INIT(30);
 
 K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE,
 		messaging_thread_fn, NULL, NULL, NULL,

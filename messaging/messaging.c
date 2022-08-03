@@ -1080,7 +1080,7 @@ void build_poll_request(NofenceMessage *poll_req)
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 	}
-	if (m_confirm_ble_key) {
+	if (m_confirm_ble_key || m_transfer_boot_params) {
 		poll_req->m.poll_message_req.has_rgubcBleKey = true;
 		poll_req->m.poll_message_req.rgubcBleKey.size =
 			EEP_BLE_SEC_KEY_LEN;

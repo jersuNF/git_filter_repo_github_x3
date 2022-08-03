@@ -118,6 +118,8 @@ void receive_tcp(struct data *sock_data)
 							modem_inavtive->mode
 								= SLEEP;
 							EVENT_SUBMIT(modem_inavtive);
+						} else {
+							modem_is_ready = false;
 						}
 						connected = false;
 						socket_idle_count = 0;
@@ -136,11 +138,12 @@ void receive_tcp(struct data *sock_data)
 						modem_inavtive->mode
 							= SLEEP;
 						EVENT_SUBMIT(modem_inavtive);
+					} else {
+						modem_is_ready = false;
 					}
 					connected = false;
 					socket_idle_count = 0;
 				}
-
 			}
 		}
 		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
@@ -234,8 +237,11 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 				modem_inavtive->mode
 					= SLEEP;
 				EVENT_SUBMIT(modem_inavtive);
+			} else {
+				modem_is_ready = false;
 			}
 			connected = false;
+			socket_idle_count = 0;
 		}
 		return false;
 	}
@@ -425,9 +431,18 @@ static void cellular_controller_keep_alive(void *dev)
 					} else {
 						if (!keep_modem_awake) {
 							int ret = stop_tcp();
-							if (ret != 0) {
-								LOG_ERR("stop_tcp failed!");
+							if (ret == 0) {
+								struct modem_state
+									*modem_inavtive =
+									new_modem_state();
+								modem_inavtive->mode
+									= SLEEP;
+								EVENT_SUBMIT(modem_inavtive);
+							} else {
+								modem_is_ready = false;
 							}
+							connected = false;
+							socket_idle_count = 0;
 						}
 					}
 				} else {
@@ -436,9 +451,17 @@ static void cellular_controller_keep_alive(void *dev)
 						if (!keep_modem_awake) {
 							int ret = stop_tcp();
 							if (ret == 0) {
-								connected = false;
+								struct modem_state
+									*modem_inavtive =
+									new_modem_state();
+								modem_inavtive->mode
+									= SLEEP;
+								EVENT_SUBMIT(modem_inavtive);
+							} else {
 								modem_is_ready = false;
 							}
+							connected = false;
+							socket_idle_count = 0;
 						}
 					}
 				}
@@ -463,13 +486,6 @@ void announce_connection_state(bool state){
 		modem_active->mode
 			= POWER_ON;
 		EVENT_SUBMIT(modem_active);
-	} else {
-		struct modem_state
-			*modem_inactive =
-			new_modem_state();
-		modem_inactive->mode
-			= SLEEP;
-		EVENT_SUBMIT(modem_inactive);
 	}
 	publish_gsm_info();
 }

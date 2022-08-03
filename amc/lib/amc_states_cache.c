@@ -490,9 +490,10 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 
 int force_fence_status(FenceStatus new_fence_status)
 {
-	/* Currently only fence status "Unknown" and "NotStarted" can be forced */
-	if (new_fence_status != FenceStatus_FenceStatus_UNKNOWN && 
-		new_fence_status != FenceStatus_NotStarted) {
+	/* Only fence status "Unknown", "NotStarted" and "Invalid" can be forced */
+	if ((new_fence_status != FenceStatus_FenceStatus_UNKNOWN) && 
+		(new_fence_status != FenceStatus_NotStarted) &&
+		(new_fence_status != FenceStatus_FenceStatus_Invalid)) {
 		return -EACCES;
 	}
 
@@ -513,7 +514,7 @@ int force_fence_status(FenceStatus new_fence_status)
 		/* Update current fence status */
 		current_fence_status = new_fence_status;
 
-		/* Notify server about fence status change. */
+		/* Notify listeners about fence status change. */
 		struct update_fence_status *event = new_update_fence_status();
 		event->fence_status = current_fence_status;
 		EVENT_SUBMIT(event);

@@ -218,7 +218,7 @@ static inline int update_pasture_from_stg(void)
 	}while(0);
 	LOG_WRN("Failed to update pasture!");
 	/* Update fence status to unknown in case of failure */
-	force_fence_status(FenceStatus_FenceStatus_UNKNOWN);
+	force_fence_status(FenceStatus_FenceStatus_Invalid);
 	k_sem_give(&fence_data_sem);
 	return err;
 }

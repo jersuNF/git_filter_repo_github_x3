@@ -260,11 +260,6 @@ void init_states_and_variables(void)
 	EVENT_SUBMIT(ev_cstatus);
 }
 
-uint16_t get_total_zap_count(void)
-{
-	return total_zap_cnt;
-}
-
 Mode get_mode(void)
 {
 	return current_mode;

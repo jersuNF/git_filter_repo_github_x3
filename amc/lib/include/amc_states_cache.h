@@ -160,10 +160,4 @@ void update_movement_state(movement_state_t state);
  */
 void restart_force_gnss_to_fix(void);
 
-/** @brief Get the total zap count
- * 
- * @returns total zap count
- */
-uint16_t get_total_zap_count(void);
-
 #endif /* _AMC_STATES_CACHE_H_ */

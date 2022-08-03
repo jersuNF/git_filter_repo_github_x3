@@ -230,8 +230,6 @@ static void correction_start(int16_t mean_dist)
 
 			struct animal_warning_event *ev =
 				new_animal_warning_event();
-			ev->fence_dist = atomic_get(&last_mean_dist);
-			ev->has_fence_dist = true;
 			EVENT_SUBMIT(ev);
 
 			increment_warn_count();

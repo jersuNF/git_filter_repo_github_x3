@@ -144,6 +144,9 @@ static inline int update_pasture_from_stg(void)
 	} else if (err) {
 		char *err_msg = "Couldn't update pasture cache in AMC.";
 		nf_app_fatal(ERR_AMC, err, err_msg, strlen(err_msg));
+
+		/* Set pasture/fence to invalid */
+		force_fence_status(FenceStatus_FenceStatus_Invalid);
 		return err;
 	}
 
@@ -175,13 +178,6 @@ static inline int update_pasture_from_stg(void)
 		get_pasture_cache(&pasture);
 		if (pasture == NULL) {		
 			char *e_msg = "Pasture was not been cached correctly.";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_AMC, -ENODATA, e_msg, strlen(e_msg));
-			err = -ENODATA;
-			break;
-		}
-		if ((fnc_valid_fence() != true) || (fnc_valid_def() != true)) {
-			char *e_msg = "Pasture was not valid def and/or fence.";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_AMC, -ENODATA, e_msg, strlen(e_msg));
 			err = -ENODATA;

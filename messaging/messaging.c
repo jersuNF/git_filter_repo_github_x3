@@ -201,7 +201,6 @@ static void build_log_message()
 	NofenceMessage seq_1;
 	proto_InitHeader(&seq_1); /* fill up message header. */
 	seq_1.which_m = (uint16_t)NofenceMessage_seq_msg_tag;
-	seq_1.m.seq_msg.has_xGprsRssi = false;
 	seq_1.m.seq_msg.has_xPOS_QC_MMM = false;
 	seq_1.m.seq_msg.has_usBatteryVoltage = true;
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);

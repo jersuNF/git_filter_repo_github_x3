@@ -185,6 +185,8 @@ static void periodic_beacon_scanner_work_fn()
 		struct ble_ctrl_event *event = new_ble_ctrl_event();
 		event->cmd = BLE_CTRL_SCAN_START;
 		EVENT_SUBMIT(event);
+		/* Save ON-timestamp */
+		beacon_scanner_timer = k_uptime_get();
 	}
 }
 #endif
@@ -558,19 +560,16 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 			nf_app_error(ERR_BEACON, err, e_msg, strlen(e_msg));
 		} else if (err == -EIO) {
 			LOG_WRN("Beacon detected is out of valid range. Will ignore this.");
-		} else {
-			/* Beacon found. Reset 60 seconds scan_stop countdown */
-			beacon_scanner_timer = k_uptime_get();
+			/* Beacon is not found */
+			struct ble_beacon_event *bc_event =
+				new_ble_beacon_event();
+			bc_event->status = BEACON_STATUS_NOT_FOUND;
+			EVENT_SUBMIT(bc_event);
 		}
 	}
 
 	int64_t delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
 	if (delta_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
-		/* Beacon is not found */
-		struct ble_beacon_event *bc_event = new_ble_beacon_event();
-		bc_event->status = BEACON_STATUS_NOT_FOUND;
-		EVENT_SUBMIT(bc_event);
-
 		/* Stop beacon scanner. Check if scan is active */
 		if (atomic_get(&atomic_bt_scan_active) == true) {
 			struct ble_ctrl_event *ctrl_event =

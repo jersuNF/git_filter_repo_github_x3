@@ -339,7 +339,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		shortest_dist = UINT8_MAX;
 	} else {
 		char mac_best[MAC_CHARBUF_SIZE];
-		LOG_DBG("Calculated new shortest distance %u m from Beacon_%u: %s",
+		LOG_INF("Calculated new shortest distance %u m from Beacon_%u: %s",
 			shortest_dist, beacon_index,
 			log_strdup(
 				mac2string(mac_best, sizeof(mac_best),

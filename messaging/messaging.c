@@ -67,7 +67,6 @@ atomic_t cached_chrg = ATOMIC_INIT(0);
 atomic_t cached_temp = ATOMIC_INIT(0);
 atomic_t cached_press = ATOMIC_INIT(0);
 atomic_t cached_hum = ATOMIC_INIT(0);
-atomic_t cached_has_fence_dist = ATOMIC_INIT(0);
 atomic_t cached_fence_dist = ATOMIC_INIT(0);
 
 K_SEM_DEFINE(cache_ready_sem, 0, 1);
@@ -343,8 +342,7 @@ static void zap_message_work_fn()
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m = (uint16_t)NofenceMessage_client_zap_message_tag;
-	msg.m.client_zap_message.has_sFenceDist =
-		(bool)atomic_get(&cached_has_fence_dist);
+	msg.m.client_zap_message.has_sFenceDist = true;
 	msg.m.client_zap_message.sFenceDist =
 		(uint16_t)atomic_get(&cached_fence_dist);
 
@@ -392,8 +390,7 @@ static void warning_work_fn()
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m = (uint16_t)NofenceMessage_client_warning_message_tag;
-	msg.m.client_warning_message.has_sFenceDist =
-		atomic_get(&cached_has_fence_dist);
+	msg.m.client_warning_message.has_sFenceDist = true;
 	msg.m.client_warning_message.sFenceDist =
 		atomic_get(&cached_fence_dist);
 
@@ -414,8 +411,7 @@ static void correction_start_work_fn()
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m =
 		(uint16_t)NofenceMessage_client_correction_start_message_tag;
-	msg.m.client_correction_start_message.has_sFenceDist =
-		atomic_get(&cached_has_fence_dist);
+	msg.m.client_correction_start_message.has_sFenceDist = true;
 	msg.m.client_correction_start_message.sFenceDist =
 		atomic_get(&cached_fence_dist);
 
@@ -436,8 +432,7 @@ static void correction_end_work_fn()
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m =
 		(uint16_t)NofenceMessage_client_correction_end_message_tag;
-	msg.m.client_correction_end_message.has_sFenceDist =
-		atomic_get(&cached_has_fence_dist);
+	msg.m.client_correction_end_message.has_sFenceDist = true;
 	msg.m.client_correction_end_message.sFenceDist =
 		atomic_get(&cached_fence_dist);
 
@@ -637,7 +632,6 @@ static bool event_handler(const struct event_header *eh)
 
 	if (is_animal_warning_event(eh)) {
 		struct animal_warning_event *ev = cast_animal_warning_event(eh);
-		atomic_set(&cached_has_fence_dist, ev->has_fence_dist);
 		atomic_set(&cached_fence_dist, ev->fence_dist);
 
 		int err = k_work_reschedule_for_queue(
@@ -685,7 +679,6 @@ static bool event_handler(const struct event_header *eh)
 	if (is_warn_correction_start_event(eh)) {
 		struct warn_correction_start_event *ev =
 			cast_warn_correction_start_event(eh);
-		atomic_set(&cached_has_fence_dist, ev->has_fence_dist);
 		atomic_set(&cached_fence_dist, ev->fence_dist);
 
 		int err = k_work_reschedule_for_queue(
@@ -700,7 +693,6 @@ static bool event_handler(const struct event_header *eh)
 	if (is_warn_correction_end_event(eh)) {
 		struct warn_correction_end_event *ev =
 			cast_warn_correction_end_event(eh);
-		atomic_set(&cached_has_fence_dist, ev->has_fence_dist);
 		atomic_set(&cached_fence_dist, ev->fence_dist);
 
 		int err = k_work_reschedule_for_queue(

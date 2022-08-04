@@ -179,21 +179,25 @@ static void enter_teach_mode()
 	err = eep_uint32_read(EEP_WARN_CNT_TOT, &warn_cnt);
 	if (err) {
 		LOG_ERR("Could not read warn count total %i", err);
-		return;
 	}
 
 	err = eep_uint16_read(EEP_ZAP_CNT_TOT, &zap_cnt);
 	if (err) {
 		LOG_ERR("Could not read zap count total %i", err);
-		return;
 	}
 
 	err = eep_uint8_read(EEP_TEACH_MODE_FINISHED, &teach_mode_finished);
 	if (err) {
 		LOG_ERR("Could not read teach mode finished %i", err);
-		return;
 	}
+	if (teach_mode_finished != 0) {
+		teach_mode_finished = 0;
 
+		err = eep_uint8_write(EEP_TEACH_MODE_FINISHED, &teach_mode_finished);
+		if (err) {
+			LOG_ERR("Could not write teach mode finished %i", err);
+		}
+	}
 	teach_mode_saved_warn_cnt = (uint16_t)warn_cnt;
 	teach_mode_saved_zap_cnt = (uint8_t)zap_cnt;
 }

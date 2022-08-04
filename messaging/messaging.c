@@ -200,7 +200,7 @@ static void build_log_message()
 	/* Fill in sequence message 1 */
 	NofenceMessage seq_1;
 	proto_InitHeader(&seq_1); /* fill up message header. */
-	seq_1.which_m = (uint16_t)NofenceMessage_seq_msg_tag;
+	seq_1.which_m = NofenceMessage_seq_msg_tag;
 	seq_1.m.seq_msg.has_xPOS_QC_MMM = false;
 	seq_1.m.seq_msg.has_usBatteryVoltage = true;
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
@@ -229,7 +229,7 @@ static void build_log_message()
 	/* Fill in sequence message 2 */
 	NofenceMessage seq_2;
 	proto_InitHeader(&seq_2); /* fill up message header. */
-	seq_2.which_m = (uint16_t)NofenceMessage_seq_msg_2_tag;
+	seq_2.which_m = NofenceMessage_seq_msg_2_tag;
 	seq_2.m.seq_msg_2.has_bme280 = true;
 	seq_2.m.seq_msg_2.bme280.ulPressure =
 		(uint32_t)atomic_get(&cached_press);
@@ -340,7 +340,7 @@ static void zap_message_work_fn()
 {
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
-	msg.which_m = (uint16_t)NofenceMessage_client_zap_message_tag;
+	msg.which_m = NofenceMessage_client_zap_message_tag;
 	msg.m.client_zap_message.has_sFenceDist = true;
 	msg.m.client_zap_message.sFenceDist =
 		(uint16_t)atomic_get(&cached_fence_dist);
@@ -364,7 +364,7 @@ static void animal_escaped_work_fn()
 {
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
-	msg.which_m = (uint16_t)NofenceMessage_status_msg_tag;
+	msg.which_m = NofenceMessage_status_msg_tag;
 	msg.m.status_msg.has_datePos = true;
 	proto_get_last_known_date_pos(&cached_fix, &msg.m.status_msg.datePos);
 	msg.m.status_msg.eMode = current_state.collar_mode;
@@ -388,11 +388,11 @@ static void warning_work_fn()
 {
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
-	msg.which_m = (uint16_t)NofenceMessage_client_warning_message_tag;
+	msg.which_m = NofenceMessage_client_warning_message_tag;
 	msg.m.client_warning_message.has_sFenceDist = true;
 	msg.m.client_warning_message.sFenceDist =
 		atomic_get(&cached_fence_dist);
-
+	
 	proto_get_last_known_date_pos(&cached_fix,
 				      &msg.m.client_zap_message.xDatePos);
 
@@ -408,8 +408,7 @@ static void correction_start_work_fn()
 {
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
-	msg.which_m =
-		(uint16_t)NofenceMessage_client_correction_start_message_tag;
+	msg.which_m = NofenceMessage_client_correction_start_message_tag;
 	msg.m.client_correction_start_message.has_sFenceDist = true;
 	msg.m.client_correction_start_message.sFenceDist =
 		atomic_get(&cached_fence_dist);
@@ -429,8 +428,7 @@ static void correction_end_work_fn()
 {
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
-	msg.which_m =
-		(uint16_t)NofenceMessage_client_correction_end_message_tag;
+	msg.which_m = NofenceMessage_client_correction_end_message_tag;
 	msg.m.client_correction_end_message.has_sFenceDist = true;
 	msg.m.client_correction_end_message.sFenceDist =
 		atomic_get(&cached_fence_dist);

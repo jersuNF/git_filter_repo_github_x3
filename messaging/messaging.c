@@ -337,7 +337,7 @@ void modem_poll_work_fn()
 	}
 }
 
-static void zap_message_work_fn()
+static void log_zap_message_work_fn()
 {
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
@@ -361,7 +361,7 @@ static void zap_message_work_fn()
 	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 }
 
-static void animal_escaped_work_fn()
+static void log_animal_escaped_work_fn()
 {
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
@@ -385,7 +385,7 @@ static void animal_escaped_work_fn()
 	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
 }
 
-static void warning_work_fn()
+static void log_warning_work_fn()
 {
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
@@ -407,7 +407,7 @@ static void warning_work_fn()
 	}
 }
 
-static void correction_start_work_fn()
+static void log_correction_start_work_fn()
 {
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
@@ -427,7 +427,7 @@ static void correction_start_work_fn()
 	}
 }
 
-static void correction_end_work_fn()
+static void log_correction_end_work_fn()
 {
 	NofenceMessage msg;
 	proto_InitHeader(&msg); /* fill up message header. */
@@ -695,7 +695,7 @@ static bool event_handler(const struct event_header *eh)
 			cast_warn_correction_pause_event(eh);
 		atomic_set(&cached_fence_dist, ev->fence_dist);
 		LOG_DBG("Warn correction pause event. Duraction: %d s",
-			ev->warn_duration)
+			ev->warn_duration);
 		atomic_set(&cached_warning_duration, ev->warn_duration);
 
 		return false;
@@ -974,13 +974,13 @@ int messaging_module_init(void)
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
 	k_work_init_delayable(&log_work, log_data_periodic_fn);
 	k_work_init_delayable(&data_request_work, data_request_work_fn);
-	k_work_init_delayable(&process_escape_work, animal_escaped_work_fn);
-	k_work_init_delayable(&process_zap_work, zap_message_work_fn);
-	k_work_init_delayable(&process_warning_work, warning_work_fn);
+	k_work_init_delayable(&process_escape_work, log_animal_escaped_work_fn);
+	k_work_init_delayable(&process_zap_work, log_zap_message_work_fn);
+	k_work_init_delayable(&process_warning_work, log_warning_work_fn);
 	k_work_init_delayable(&process_warning_correction_start_work,
-			      correction_start_work_fn);
+			      log_correction_start_work_fn);
 	k_work_init_delayable(&process_warning_correction_end_work,
-			      correction_end_work_fn);
+			      log_correction_end_work_fn);
 
 	memset(&pasture_temp, 0, sizeof(pasture_t));
 	cached_fences_counter = 0;

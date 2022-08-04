@@ -259,7 +259,7 @@ static void build_log_message()
 	LOG_INF("Store seq_1 and seq_2 to flash");
 }
 
-int read_log_data_cb(uint8_t *data, size_t len)
+int read_and_send_log_data_cb(uint8_t *data, size_t len)
 {
 	LOG_DBG("Send log message fetched from flash");
 	/* Fetch the lenght from the two first bytes */
@@ -287,7 +287,7 @@ void log_data_periodic_fn()
 	build_log_message();
 
 	/* Read and send out all the log data if any. */
-	int err = stg_read_log_data(read_log_data_cb, 0);
+	int err = stg_read_log_data(read_and_send_log_data_cb, 0);
 	if (err && err != -ENODATA) {
 		char *e_msg = "Error reading all log messages from storage";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);

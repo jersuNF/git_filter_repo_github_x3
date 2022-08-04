@@ -68,6 +68,7 @@ atomic_t cached_temp = ATOMIC_INIT(0);
 atomic_t cached_press = ATOMIC_INIT(0);
 atomic_t cached_hum = ATOMIC_INIT(0);
 atomic_t cached_fence_dist = ATOMIC_INIT(0);
+atomic_t cached_warning_duration = ATOMIC_INIT(0);
 
 K_SEM_DEFINE(cache_ready_sem, 0, 1);
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
@@ -392,7 +393,9 @@ static void warning_work_fn()
 	msg.m.client_warning_message.has_sFenceDist = true;
 	msg.m.client_warning_message.sFenceDist =
 		atomic_get(&cached_fence_dist);
-	
+	msg.m.client_warning_message.usDuration =
+		atomic_get(&cached_warning_duration);
+	;
 	proto_get_last_known_date_pos(&cached_fix,
 				      &msg.m.client_zap_message.xDatePos);
 
@@ -687,6 +690,16 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	if (is_warn_correction_pause_event(eh)) {
+		struct warn_correction_pause_event *ev =
+			cast_warn_correction_pause_event(eh);
+		atomic_set(&cached_fence_dist, ev->fence_dist);
+		LOG_DBG("Warn correction pause event. Duraction: %d s",
+			ev->warn_duration)
+		atomic_set(&cached_warning_duration, ev->warn_duration);
+
+		return false;
+	}
 	if (is_warn_correction_end_event(eh)) {
 		struct warn_correction_end_event *ev =
 			cast_warn_correction_end_event(eh);
@@ -787,6 +800,7 @@ EVENT_SUBSCRIBE(MODULE, env_sensor_event);
 EVENT_SUBSCRIBE(MODULE, gnss_data);
 EVENT_SUBSCRIBE(MODULE, send_poll_request_now);
 EVENT_SUBSCRIBE(MODULE, warn_correction_start_event);
+EVENT_SUBSCRIBE(MODULE, warn_correction_pause_event);
 EVENT_SUBSCRIBE(MODULE, warn_correction_end_event);
 EVENT_SUBSCRIBE(MODULE, gsm_info_event);
 

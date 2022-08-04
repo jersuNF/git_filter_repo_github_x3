@@ -594,9 +594,7 @@ static bool event_handler(const struct event_header *eh)
 		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
 						      K_NO_WAIT);
 		if (err < 0) {
-			char *e_msg = "Error reschedule modem poll work";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			LOG_ERR("Error reschedule modem poll work (%d)", err);
 		}
 		return false;
 	}
@@ -615,9 +613,7 @@ static bool event_handler(const struct event_header *eh)
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_zap_work, K_NO_WAIT);
 		if (err < 0) {
-			char *e_msg = "Error reschedule zap work";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			LOG_ERR("Error reschedule zap work (%d)", err);
 		}
 		update_cache_reg(ZAP_COUNT);
 		return false;
@@ -1015,6 +1011,7 @@ int messaging_module_init(void)
 	/** @todo Should add semaphore and only start these queues when
 	 *  we get connection to network with modem.
 	 */
+
 	err = k_work_schedule_for_queue(&send_q, &data_request_work, K_NO_WAIT);
 	if (err < 0) {
 		return err;
@@ -1319,10 +1316,8 @@ int send_binary_message(uint8_t *data, size_t len)
 		EVENT_SUBMIT(ev);
 		int ret = k_sem_take(&connection_ready, K_MINUTES(2));
 		if (ret != 0) {
-			char *e_msg =
-				"Connection not ready, can't send message now!";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
-			nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
+			LOG_WRN("Connection not ready, can't send message now! (%d)",
+				ret);
 			return -ETIMEDOUT;
 		}
 		uint16_t byteswap_size = BYTESWAP16(len - 2);
@@ -1337,9 +1332,7 @@ int send_binary_message(uint8_t *data, size_t len)
 		int err = k_sem_take(&send_out_ack,
 				     K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC));
 		if (err != 0) {
-			char *e_msg = "Timed out waiting for cellular ack";
-			nf_app_error(ERR_MESSAGING, -ETIMEDOUT, e_msg,
-				     strlen(e_msg));
+			LOG_ERR("Timed out waiting for cellular ack");
 			k_mutex_unlock(&send_binary_mutex);
 			return -ETIMEDOUT;
 		}

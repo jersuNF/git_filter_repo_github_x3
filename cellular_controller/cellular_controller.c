@@ -105,7 +105,8 @@ void receive_tcp(struct data *sock_data)
 				}
 			} else if (received == 0) {
 				socket_idle_count += SOCKET_POLL_INTERVAL;
-				if (socket_idle_count > SOCK_RECV_TIMEOUT) {
+				if (socket_idle_count > SOCK_RECV_TIMEOUT &&
+				    !keep_modem_awake) {
 					LOG_WRN("Socket receive timed out!");
 					if (!keep_modem_awake &&
 					    !sending_in_progress) {
@@ -446,9 +447,9 @@ static void cellular_controller_keep_alive(void *dev)
 						}
 					}
 				} else {
-					ret = check_ip();
-					if (ret != 0) {
-						if (!keep_modem_awake) {
+					if (!keep_modem_awake) {
+						ret = check_ip();
+						if (ret != 0) {
 							int ret = stop_tcp();
 							if (ret == 0) {
 								struct modem_state
@@ -465,8 +466,8 @@ static void cellular_controller_keep_alive(void *dev)
 						}
 					}
 				}
+				announce_connection_state(connected);
 			}
-			announce_connection_state(connected);
 		}
 	}
 }

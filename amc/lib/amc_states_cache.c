@@ -193,7 +193,7 @@ static void enter_teach_mode()
 	if (teach_mode_finished != 0) {
 		teach_mode_finished = 0;
 
-		err = eep_uint8_write(EEP_TEACH_MODE_FINISHED, &teach_mode_finished);
+		err = eep_uint8_write(EEP_TEACH_MODE_FINISHED, teach_mode_finished);
 		if (err) {
 			LOG_ERR("Could not write teach mode finished %i", err);
 		}
@@ -212,12 +212,12 @@ void force_teach_mode()
 			LOG_ERR("Could not write to collar mode %i ", err);
 		}
 
+		enter_teach_mode();
+
 		/* Notify server about mode change. */
 		struct update_collar_mode *mode_ev = new_update_collar_mode();
 		mode_ev->collar_mode = current_mode;
 		EVENT_SUBMIT(mode_ev);
-
-		enter_teach_mode();
 	}
 }
 

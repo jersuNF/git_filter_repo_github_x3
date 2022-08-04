@@ -194,7 +194,9 @@ static void build_log_message()
 	collar_histogram histogram;
 	int err = k_msgq_get(&histogram_msgq, &histogram, K_SECONDS(10));
 	if (err) {
-		LOG_ERR("Timeout on waiting for histogram %i", err);
+		char *e_msg = "Timeout on waiting for histogram";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
 
@@ -222,8 +224,9 @@ static void build_log_message()
 
 	err = encode_and_store_message(&seq_1);
 	if (err) {
-		LOG_ERR("Failed to encode and save sequence message 1: %d",
-			err);
+		char *e_msg = "Failed to encode and save sequence message 2";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
 
@@ -248,8 +251,9 @@ static void build_log_message()
 
 	err = encode_and_store_message(&seq_2);
 	if (err) {
-		LOG_ERR("Failed to encode and save sequence message 2: %d",
-			err);
+		char *e_msg = "Failed to encode and save sequence message 2";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
 	LOG_INF("Store seq_1 and seq_2 to flash");
@@ -285,8 +289,9 @@ void log_data_periodic_fn()
 	/* Read and send out all the log data if any. */
 	int err = stg_read_log_data(read_log_data_cb, 0);
 	if (err && err != -ENODATA) {
-		LOG_ERR("Error reading all sequence messages from storage %i",
-			err);
+		char *e_msg = "Error reading all log messages from storage";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	} else if (err == -ENODATA) {
 		LOG_INF("No log data available on flash for sending.");
 	}
@@ -351,9 +356,11 @@ static void log_zap_message_work_fn()
 	msg.m.client_zap_message.ucReaction = 0;
 	msg.m.client_zap_message.usReactionDuration = 0;
 
-	int ret = encode_and_store_message(&msg);
-	if (ret) {
-		LOG_ERR("Failed to encode zap status msg: %d", ret);
+	int err = encode_and_store_message(&msg);
+	if (err) {
+		char *e_msg = "Failed to encode zap status msg";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	} else {
 		LOG_INF("Store zap message to flash");
 	}
@@ -375,9 +382,11 @@ static void log_animal_escaped_work_fn()
 	msg.m.status_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	msg.m.status_msg.has_ucGpsMode = true;
 	msg.m.status_msg.ucGpsMode = (uint8_t)cached_gnss_mode;
-	int ret = encode_and_store_message(&msg);
-	if (ret) {
-		LOG_ERR("Failed to encode escaped status msg: %d", ret);
+	int err = encode_and_store_message(&msg);
+	if (err) {
+		char *e_msg = "Failed to encode escaped status msg";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	} else {
 		LOG_INF("Store escaped message to flash");
 	}
@@ -395,13 +404,14 @@ static void log_warning_work_fn()
 		atomic_get(&cached_fence_dist);
 	msg.m.client_warning_message.usDuration =
 		atomic_get(&cached_warning_duration);
-	;
 	proto_get_last_known_date_pos(&cached_fix,
 				      &msg.m.client_zap_message.xDatePos);
 
-	int ret = encode_and_store_message(&msg);
-	if (ret) {
-		LOG_ERR("Failed to encode warning msg: %d", ret);
+	int err = encode_and_store_message(&msg);
+	if (err) {
+		char *e_msg = "Failed to encode warning msg";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	} else {
 		LOG_INF("Store warning message to flash");
 	}
@@ -419,9 +429,11 @@ static void log_correction_start_work_fn()
 	proto_get_last_known_date_pos(
 		&cached_fix, &msg.m.client_correction_start_message.xDatePos);
 
-	int ret = encode_and_store_message(&msg);
-	if (ret) {
-		LOG_ERR("Failed to encode warning start msg: %d", ret);
+	int err = encode_and_store_message(&msg);
+	if (err) {
+		char *e_msg = "Failed to encode warning start msg";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	} else {
 		LOG_INF("Store correction start message to flash");
 	}
@@ -439,9 +451,11 @@ static void log_correction_end_work_fn()
 	proto_get_last_known_date_pos(
 		&cached_fix, &msg.m.client_correction_end_message.xDatePos);
 
-	int ret = encode_and_store_message(&msg);
-	if (ret) {
-		LOG_ERR("Failed to encode warning start msg: %d", ret);
+	int err = encode_and_store_message(&msg);
+	if (err) {
+		char *e_msg = "Failed to encode warning end msg";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	} else {
 		LOG_INF("Store correction end message to flash");
 	}
@@ -580,7 +594,9 @@ static bool event_handler(const struct event_header *eh)
 		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
 						      K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Error starting modem poll worker: %d", err);
+			char *e_msg = "Error reschedule modem poll work";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 		return false;
 	}
@@ -599,7 +615,9 @@ static bool event_handler(const struct event_header *eh)
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_zap_work, K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Error reschedule zap work: %d", err);
+			char *e_msg = "Error reschedule zap work";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 		update_cache_reg(ZAP_COUNT);
 		return false;
@@ -613,7 +631,9 @@ static bool event_handler(const struct event_header *eh)
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_escape_work, K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Error reschedule escape work %d", err);
+			char *e_msg = "Error reschedule escape work";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 		return false;
 	}
@@ -637,7 +657,9 @@ static bool event_handler(const struct event_header *eh)
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_warning_work, K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Error reschedule warning work: %d", err);
+			char *e_msg = "Error reschedule warning work";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 
 		return false;
@@ -685,8 +707,10 @@ static bool event_handler(const struct event_header *eh)
 			&send_q, &process_warning_correction_start_work,
 			K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Error reschedule warning correction start work: %d",
-				err);
+			char *e_msg =
+				"Error reschedule warning correction start work";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 		return false;
 	}
@@ -709,8 +733,10 @@ static bool event_handler(const struct event_header *eh)
 			&send_q, &process_warning_correction_end_work,
 			K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Error reschedule warning correction start work: %d",
-				err);
+			char *e_msg =
+				"Error reschedule warning correction end work";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 		return false;
 	}

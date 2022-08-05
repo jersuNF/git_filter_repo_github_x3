@@ -35,4 +35,10 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
  */
 uint8_t get_correction_status(void);
 
+/** @brief Gets the last saved distance to fence
+ * 
+ * @returns fence distance
+ */
+int16_t get_last_fence_dist(void);
+
 #endif /* _AMC_CORRECTION_H_ */

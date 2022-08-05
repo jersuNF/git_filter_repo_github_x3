@@ -36,7 +36,7 @@
 #include "storage.h"
 
 #include "movement_events.h"
-
+#include "amc_correction.h"
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
@@ -67,7 +67,6 @@ atomic_t cached_chrg = ATOMIC_INIT(0);
 atomic_t cached_temp = ATOMIC_INIT(0);
 atomic_t cached_press = ATOMIC_INIT(0);
 atomic_t cached_hum = ATOMIC_INIT(0);
-atomic_t cached_fence_dist = ATOMIC_INIT(0);
 atomic_t cached_warning_duration = ATOMIC_INIT(0);
 
 K_SEM_DEFINE(cache_ready_sem, 0, 1);
@@ -348,8 +347,7 @@ static void log_zap_message_work_fn()
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m = NofenceMessage_client_zap_message_tag;
 	msg.m.client_zap_message.has_sFenceDist = true;
-	msg.m.client_zap_message.sFenceDist =
-		(uint16_t)atomic_get(&cached_fence_dist);
+	msg.m.client_zap_message.sFenceDist = get_last_fence_dist();
 
 	proto_get_last_known_date_pos(&cached_fix,
 				      &msg.m.client_zap_message.xDatePos);
@@ -400,8 +398,7 @@ static void log_warning_work_fn()
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m = NofenceMessage_client_warning_message_tag;
 	msg.m.client_warning_message.has_sFenceDist = true;
-	msg.m.client_warning_message.sFenceDist =
-		atomic_get(&cached_fence_dist);
+	msg.m.client_warning_message.sFenceDist = get_last_fence_dist();
 	msg.m.client_warning_message.usDuration =
 		atomic_get(&cached_warning_duration);
 	proto_get_last_known_date_pos(&cached_fix,
@@ -424,7 +421,7 @@ static void log_correction_start_work_fn()
 	msg.which_m = NofenceMessage_client_correction_start_message_tag;
 	msg.m.client_correction_start_message.has_sFenceDist = true;
 	msg.m.client_correction_start_message.sFenceDist =
-		atomic_get(&cached_fence_dist);
+		get_last_fence_dist();
 
 	proto_get_last_known_date_pos(
 		&cached_fix, &msg.m.client_correction_start_message.xDatePos);
@@ -445,8 +442,7 @@ static void log_correction_end_work_fn()
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m = NofenceMessage_client_correction_end_message_tag;
 	msg.m.client_correction_end_message.has_sFenceDist = true;
-	msg.m.client_correction_end_message.sFenceDist =
-		atomic_get(&cached_fence_dist);
+	msg.m.client_correction_end_message.sFenceDist = get_last_fence_dist();
 
 	proto_get_last_known_date_pos(
 		&cached_fix, &msg.m.client_correction_end_message.xDatePos);
@@ -647,9 +643,6 @@ static bool event_handler(const struct event_header *eh)
 	}
 
 	if (is_animal_warning_event(eh)) {
-		struct animal_warning_event *ev = cast_animal_warning_event(eh);
-		atomic_set(&cached_fence_dist, ev->fence_dist);
-
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_warning_work, K_NO_WAIT);
 		if (err < 0) {
@@ -695,10 +688,6 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_warn_correction_start_event(eh)) {
-		struct warn_correction_start_event *ev =
-			cast_warn_correction_start_event(eh);
-		atomic_set(&cached_fence_dist, ev->fence_dist);
-
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_warning_correction_start_work,
 			K_NO_WAIT);
@@ -713,7 +702,6 @@ static bool event_handler(const struct event_header *eh)
 	if (is_warn_correction_pause_event(eh)) {
 		struct warn_correction_pause_event *ev =
 			cast_warn_correction_pause_event(eh);
-		atomic_set(&cached_fence_dist, ev->fence_dist);
 		LOG_DBG("Warn correction pause event. Duraction: %d s",
 			ev->warn_duration);
 		atomic_set(&cached_warning_duration, ev->warn_duration);
@@ -721,10 +709,6 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_warn_correction_end_event(eh)) {
-		struct warn_correction_end_event *ev =
-			cast_warn_correction_end_event(eh);
-		atomic_set(&cached_fence_dist, ev->fence_dist);
-
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_warning_correction_end_work,
 			K_NO_WAIT);

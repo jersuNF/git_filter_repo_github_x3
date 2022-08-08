@@ -861,15 +861,9 @@ void messaging_thread_fn()
 	while (true) {
 		int rc = k_poll(msgq_events, NUM_MSGQ_EVENTS, K_FOREVER);
 		if (rc == 0) {
-			// while (k_msgq_num_used_get(&ble_ctrl_msgq) > 0) {
-			// 	process_ble_ctrl_event();
-			// }
 			while (k_msgq_num_used_get(&ble_cmd_msgq) > 0) {
 				process_ble_cmd_event();
 			}
-			// while (k_msgq_num_used_get(&ble_data_msgq) > 0) {
-			// 	process_ble_data_event();
-			// }
 			while (k_msgq_num_used_get(&lte_proto_msgq) > 0) {
 				process_lte_proto_event();
 			}

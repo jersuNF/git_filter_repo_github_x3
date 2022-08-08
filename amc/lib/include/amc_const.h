@@ -174,11 +174,11 @@
 #define GNSS_HACC_UPPER_LIM_DM 35
 #endif
 
-#define ZAP_EVALUATION_TIME_MS 200
+#define ZAP_EVALUATION_TIME 200
 
-// #define ZAP_DURATION_0 300 /* 160. */
-// #define ZAP_DURATION_1 0 /* 250. */
-// #define ZAP_DURATION_2 300
+#define ZAP_DURATION_0 300 /* 160. */
+#define ZAP_DURATION_1 0 /* 250. */
+#define ZAP_DURATION_2 300
 
 /**
  * When warning ends (pauses) as a result of returning movement 

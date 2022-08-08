@@ -509,7 +509,6 @@ static void bt_ready(int err)
 static bool data_cb(struct bt_data *data, void *user_data)
 {
 	adv_data_t *adv_data = user_data;
-	memset(adv_data, 0, sizeof(adv_data_t));
 	struct net_buf_simple net_buf;
 	if (data->type == BT_DATA_MANUFACTURER_DATA) {
 		net_buf_simple_init_with_data(&net_buf, (void *)data->data,
@@ -523,6 +522,11 @@ static bool data_cb(struct bt_data *data, void *user_data)
 			adv_data->major = net_buf_simple_pull_be16(&net_buf);
 			adv_data->minor = net_buf_simple_pull_be16(&net_buf);
 			adv_data->rssi = net_buf_simple_pull_u8(&net_buf); //197
+
+			LOG_DBG("Nofence beacon Major: %u Minor: %u RSSI: %u MANUF_ID: %u Beacon type: %u",
+				adv_data->major, adv_data->minor,
+				adv_data->rssi, adv_data->manuf_id,
+				adv_data->beacon_dev_type);
 		} else {
 			memset(adv_data, 0, sizeof(*adv_data));
 		}
@@ -549,22 +553,19 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 	bt_data_parse(buf, data_cb, (void *)&adv_data);
 	if (adv_data.major == BEACON_MAJOR_ID &&
 	    adv_data.minor == BEACON_MINOR_ID) {
-		LOG_DBG("Nofence beacon detected");
 		const uint32_t now = k_uptime_get_32();
 		err = beacon_process_event(now, addr, rssi, &adv_data);
-		if (err == -EPERM) {
+		if (err != -EIO) {
+			/* Beacon found. Reset 60 seconds scan_stop countdown */
+			beacon_scanner_timer = k_uptime_get();
+		} else {
 			char *e_msg = "Process of beacon state event error";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_BEACON, err, e_msg, strlen(e_msg));
-		} else if (err == -EIO) {
-			LOG_WRN("Beacon detected is out of valid range. Will ignore this.");
-		} else {
-			/* Beacon found. Reset 60 seconds scan_stop countdown */
-			beacon_scanner_timer = k_uptime_get();
 		}
 	}
 
-	int64_t delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
+	int delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
 	if (delta_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
 		/* Beacon is not found */
 		struct ble_beacon_event *bc_event = new_ble_beacon_event();
@@ -585,7 +586,7 @@ static void scan_start(void)
 {
 	if (!atomic_get(&atomic_bt_ready)) {
 		/* Scan will start when bt is ready */
-		LOG_WRN("Scanning not ready to start");
+		LOG_INF("Scanning not ready to start");
 		return;
 	}
 
@@ -610,11 +611,6 @@ static void scan_start(void)
 
 		/* Start beacon scanner countdown */
 		beacon_scanner_timer = k_uptime_get();
-
-		/* Initialize beacon status to not found */
-		struct ble_beacon_event *event = new_ble_beacon_event();
-		event->status = BEACON_STATUS_NOT_FOUND;
-		EVENT_SUBMIT(event);
 	}
 }
 
@@ -627,9 +623,6 @@ static void scan_stop(void)
 		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 	} else {
 		LOG_INF("Stop scanning for Beacons");
-		struct ble_beacon_event *event = new_ble_beacon_event();
-		event->status = BEACON_STATUS_OFF;
-		EVENT_SUBMIT(event);
 	}
 }
 

@@ -36,7 +36,7 @@ static pasture_t pasture_cache;
 int get_pasture_cache(pasture_t **pasture)
 {
 	if (pasture_cache.m.ul_total_fences == 0) {
-		LOG_WRN("Switching to \'No pasture\'!");
+//		LOG_WRN("Switching to \'No pasture\'!");
 	}
 
 	*pasture = &pasture_cache;

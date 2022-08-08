@@ -186,7 +186,18 @@ int socket_receive(struct data *data, char **msg)
 
 int reset_modem(void)
 {
-	return modem_nf_reset();
+	(void)close(conf.ipv4.tcp.sock);
+	(void)close(conf_listen.ipv4.tcp.sock);
+	int ret = modem_nf_reset();
+	if (ret != 0) {
+		LOG_ERR("modem_nf_reset() returned %d", ret);
+		return ret;
+	}
+	ret = socket_listen(&conf_listen.ipv4);
+	if (ret != 0) {
+		LOG_ERR("socket_listen() returned %d", ret);
+	}
+	return ret;
 }
 
 /**

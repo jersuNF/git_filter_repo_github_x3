@@ -49,9 +49,17 @@ K_SEM_DEFINE(listen_sem, 0, 1); /* this semaphore will be given by the modem
 K_SEM_DEFINE(close_main_socket_sem, 0, 1);
 
 static bool modem_is_ready = false;
-static bool keep_modem_awake = false;
+static bool fota_in_progress = false;
 static bool sending_in_progress = false;
 APP_DMEM struct configs conf = {
+	.ipv4 = {
+		.proto = "IPv4",
+		.udp.sock = INVALID_SOCK,
+		.tcp.sock = INVALID_SOCK,
+	},
+};
+
+APP_DMEM struct configs conf_listen = {
 	.ipv4 = {
 		.proto = "IPv4",
 		.udp.sock = INVALID_SOCK,
@@ -106,9 +114,9 @@ void receive_tcp(struct data *sock_data)
 			} else if (received == 0) {
 				socket_idle_count += SOCKET_POLL_INTERVAL;
 				if (socket_idle_count > SOCK_RECV_TIMEOUT &&
-				    !keep_modem_awake) {
+				    !fota_in_progress) {
 					LOG_WRN("Socket receive timed out!");
-					if (!keep_modem_awake &&
+					if (!fota_in_progress &&
 					    !sending_in_progress) {
 						k_sem_take(&close_main_socket_sem, K_MINUTES(1));
 						int ret = stop_tcp();
@@ -120,7 +128,7 @@ void receive_tcp(struct data *sock_data)
 								= SLEEP;
 							EVENT_SUBMIT(modem_inavtive);
 						} else {
-							modem_is_ready = false;
+//							modem_is_ready = false;
 						}
 						connected = false;
 						socket_idle_count = 0;
@@ -130,7 +138,7 @@ void receive_tcp(struct data *sock_data)
 				char *e_msg = "Socket receive error!";
 				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
 					(e_msg));
-				if (!keep_modem_awake && !sending_in_progress) {
+				if (!fota_in_progress && !sending_in_progress) {
 					int ret = stop_tcp();
 					if (ret == 0) {
 						struct modem_state
@@ -139,9 +147,8 @@ void receive_tcp(struct data *sock_data)
 						modem_inavtive->mode
 							= SLEEP;
 						EVENT_SUBMIT(modem_inavtive);
-					} else {
-						modem_is_ready = false;
 					}
+//					modem_is_ready = false;
 					connected = false;
 					socket_idle_count = 0;
 				}
@@ -176,8 +183,6 @@ int start_tcp(void)
 		LOG_ERR("Failed to get ip address!");
 		char *e_msg = "Failed to get ip address!";
 		nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
-		connected = false;
-		modem_is_ready = false;
 		return ret;
 	}
 	struct sockaddr_in addr4;
@@ -209,7 +214,7 @@ int listen_tcp(void)
 		return ret;
 	}
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
-		ret = socket_listen(&conf.ipv4);
+		ret = socket_listen(&conf_listen.ipv4);
 		if (ret < 0) {
 			/*TODO: notify error handler*/
 			LOG_DBG("Failed to start listening socket!");
@@ -229,21 +234,9 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return false;
 	}
 	else if (is_messaging_stop_connection_event(eh)) {
-		if (!keep_modem_awake && !sending_in_progress) {
-			int ret = stop_tcp();
-			if (ret == 0) {
-				struct modem_state
-					*modem_inavtive =
-					new_modem_state();
-				modem_inavtive->mode
-					= SLEEP;
-				EVENT_SUBMIT(modem_inavtive);
-			} else {
-				modem_is_ready = false;
-			}
-			connected = false;
-			socket_idle_count = 0;
-		}
+//		modem_is_ready = false;
+		connected = false;
+		socket_idle_count = 0;
 		return false;
 	}
 	else if (is_messaging_host_address_event(eh)) {
@@ -281,6 +274,8 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 	}
 	else if (is_messaging_proto_out_event(eh)) {
 		if (connected) {
+			k_sem_reset(&close_main_socket_sem);
+			socket_idle_count = 0;
 			sending_in_progress = true;
 			struct messaging_proto_out_event *event =
 				cast_messaging_proto_out_event(eh);
@@ -325,10 +320,11 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		struct dfu_status_event *fw_upgrade_event =
 			cast_dfu_status_event(eh);
 		if (fw_upgrade_event->dfu_status == DFU_STATUS_IN_PROGRESS) {
-			keep_modem_awake = true;
+			fota_in_progress = true;
 			stop_rssi();
 		} else {
-			keep_modem_awake = false;
+			fota_in_progress = false;
+			connected = false;
 		}
 		return false;
 	}
@@ -410,19 +406,26 @@ static void cellular_controller_keep_alive(void *dev)
 	int ret;
 	while (true) {
 		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
+			socket_idle_count = 0;
 			if (!cellular_controller_is_ready()) {
 				ret = reset_modem();
+				/* reset flags to avoid hanging the
+				 * communication with the
+				 * server in case the http download client
+				 * fails ungracefully.*/
+				connected = false;
+				socket_idle_count = 0;
+				fota_in_progress = false;
 				if (ret == 0) {
 					publish_gsm_info();
 					ret = cellular_controller_connect(dev);
 					if (ret == 0) {
-						listen_tcp();
 						modem_is_ready = true;
 					}
 				}
 			}
 			if (cellular_controller_is_ready() &&
-			    !keep_modem_awake) {
+			    !fota_in_progress) {
 				if (!connected) { //check_ip
 					// takes place in start_tcp() in this
 					// case.
@@ -430,7 +433,7 @@ static void cellular_controller_keep_alive(void *dev)
 					if (ret >= 0) {
 						connected = true;
 					} else {
-						if (!keep_modem_awake) {
+						if (!fota_in_progress) {
 							int ret = stop_tcp();
 							if (ret == 0) {
 								struct modem_state
@@ -439,15 +442,14 @@ static void cellular_controller_keep_alive(void *dev)
 								modem_inavtive->mode
 									= SLEEP;
 								EVENT_SUBMIT(modem_inavtive);
-							} else {
-								modem_is_ready = false;
 							}
-							connected = false;
-							socket_idle_count = 0;
 						}
+						modem_is_ready = false;
+						connected = false;
+						socket_idle_count = 0;
 					}
 				} else {
-					if (!keep_modem_awake) {
+					if (!fota_in_progress) {
 						ret = check_ip();
 						if (ret != 0) {
 							int ret = stop_tcp();
@@ -458,16 +460,15 @@ static void cellular_controller_keep_alive(void *dev)
 								modem_inavtive->mode
 									= SLEEP;
 								EVENT_SUBMIT(modem_inavtive);
-							} else {
-								modem_is_ready = false;
 							}
+//							modem_is_ready = false;
 							connected = false;
 							socket_idle_count = 0;
 						}
 					}
 				}
-				announce_connection_state(connected);
 			}
+			announce_connection_state(connected);
 		}
 	}
 }

@@ -71,6 +71,7 @@ struct configs {
      * A structure for socket initialization
      */
 extern struct configs conf;
+extern struct configs conf_listen;
 
 int reset_modem(void);
 int get_ip(char **);

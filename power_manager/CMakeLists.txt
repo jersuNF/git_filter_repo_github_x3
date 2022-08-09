@@ -7,6 +7,7 @@ target_include_directories(app PRIVATE
 	./../../events/error_handler/
 	./../../events/watchdog/
 	./../../events/messaging/
+	./../../events/power_manager/
 	./battery/
   	./../../modules/nf_settings/include
 	./charging/

@@ -63,7 +63,7 @@ static struct k_work_delayable periodic_beacon_scanner_work;
 #endif
 static struct k_work_delayable disconnect_peer_work;
 
-static char bt_device_name[DEVICE_NAME_LEN + 1] = CONFIG_BT_DEVICE_NAME;
+static char bt_device_name[DEVICE_NAME_LEN + 1];
 
 // Shaddow register. Should be initialized with data from EEPROM or FLASH
 static uint16_t current_fw_ver = CONFIG_NOFENCE_FIRMWARE_NUMBER;
@@ -89,8 +89,8 @@ static struct bt_data ad[] = {
 
 static const struct bt_data sd[] = {
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_VAL),
-	BT_DATA(BT_DATA_NAME_COMPLETE, bt_device_name,
-		(sizeof(CONFIG_BT_DEVICE_NAME) - 1)),
+	BT_DATA(BT_DATA_NAME_COMPLETE, bt_device_name, DEVICE_NAME_LEN),
+
 };
 
 /**
@@ -494,10 +494,6 @@ static void bt_ready(int err)
 	atomic_set(&atomic_bt_ready, true);
 
 	atomic_set(&atomic_bt_adv_active, true);
-
-	if (atomic_get(&atomic_bt_adv_active)) {
-		adv_start();
-	}
 }
 
 /**
@@ -653,7 +649,7 @@ int ble_module_init()
 		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 	} else {
 		if (serial_id > 999999) {
-			strncpy(bt_device_name, "NF??????\0",
+			strncpy(bt_device_name, "NF??????",
 				DEVICE_NAME_LEN + 1);
 		} else {
 			char tmp[DEVICE_NAME_LEN + 1];
@@ -673,13 +669,24 @@ int ble_module_init()
 
 	nus_max_send_len = ATT_MIN_PAYLOAD;
 
-	/* Enable ble subsystem and start advertisement */
+	/* Enable ble subsystem */
 	err = bt_enable(bt_ready);
 	if (err) {
 		char *e_msg = "Failed to enable Bluetooth";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 		return err;
+	}
+	/* Set the ble device name in Generic Access Profile */
+	err = bt_set_name(bt_device_name);
+	if (err) {
+		LOG_WRN("Failed to set Bluetooth device name %d", err);
+		return err;
+	}
+
+	/* Start ble advertisement */
+	if (atomic_get(&atomic_bt_adv_active)) {
+		adv_start();
 	}
 
 	/* Callback to monitor connected/disconnected state */

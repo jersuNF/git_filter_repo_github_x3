@@ -92,6 +92,9 @@ __packed struct eemem {
 
 	/** If we should keep teach mode or not on pasture update. */
 	uint8_t eep_keep_mode;
+
+	/** Store reset reason */
+	uint8_t eep_reset_reason;
 };
 
 #endif /* X3_FW_NF_SETTINGS_PRIVATE_H */

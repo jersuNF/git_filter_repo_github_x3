@@ -61,6 +61,7 @@ static void fota_dl_handler(const struct fota_download_evt *evt)
 		EVENT_SUBMIT(event);
 
 		struct pwr_reboot_event *reboot_ev = new_pwr_reboot_event();
+		reboot_ev->reason = REBOOT_FOTA_RESET;
 		EVENT_SUBMIT(reboot_ev);
 		break;
 	}

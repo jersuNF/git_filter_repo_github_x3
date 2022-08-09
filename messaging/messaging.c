@@ -135,10 +135,6 @@ K_MUTEX_DEFINE(send_binary_mutex);
 LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
 
 /* 4 means 4-byte alignment. */
-K_MSGQ_DEFINE(ble_ctrl_msgq, sizeof(struct ble_ctrl_event),
-	      CONFIG_MSGQ_BLE_CTRL_SIZE, 4);
-K_MSGQ_DEFINE(ble_data_msgq, sizeof(struct ble_data_event),
-	      CONFIG_MSGQ_BLE_DATA_SIZE, 4);
 K_MSGQ_DEFINE(ble_cmd_msgq, sizeof(struct ble_cmd_event),
 	      CONFIG_MSGQ_BLE_CMD_SIZE, 4);
 K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct messaging_proto_out_event),
@@ -146,12 +142,6 @@ K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct messaging_proto_out_event),
 
 #define NUM_MSGQ_EVENTS 4
 struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
-					K_POLL_MODE_NOTIFY_ONLY, &ble_ctrl_msgq,
-					0),
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
-					K_POLL_MODE_NOTIFY_ONLY, &ble_data_msgq,
-					0),
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY, &ble_cmd_msgq,
 					0),
@@ -527,25 +517,10 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-	if (is_ble_ctrl_event(eh)) {
-		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
-		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
-			/* Message queue is full: purge old data & try again */
-			k_msgq_purge(&ble_ctrl_msgq);
-		}
-		return true;
-	}
 	if (is_ble_cmd_event(eh)) {
 		struct ble_cmd_event *ev = cast_ble_cmd_event(eh);
 		while (k_msgq_put(&ble_cmd_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&ble_cmd_msgq);
-		}
-		return true;
-	}
-	if (is_ble_data_event(eh)) {
-		struct ble_data_event *ev = cast_ble_data_event(eh);
-		while (k_msgq_put(&ble_data_msgq, ev, K_NO_WAIT) != 0) {
-			k_msgq_purge(&ble_data_msgq);
 		}
 		return true;
 	}
@@ -762,9 +737,7 @@ bool validate_pasture()
 EVENT_LISTENER(MODULE, event_handler);
 
 /* Bluetooth events. */
-EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
 EVENT_SUBSCRIBE(MODULE, ble_cmd_event);
-EVENT_SUBSCRIBE(MODULE, ble_data_event);
 
 EVENT_SUBSCRIBE(MODULE, cellular_ack_event);
 EVENT_SUBSCRIBE(MODULE, cellular_proto_in_event);
@@ -785,32 +758,6 @@ EVENT_SUBSCRIBE(MODULE, send_poll_request_now);
 EVENT_SUBSCRIBE(MODULE, warn_correction_start_event);
 EVENT_SUBSCRIBE(MODULE, warn_correction_end_event);
 EVENT_SUBSCRIBE(MODULE, gsm_info_event);
-
-static inline void process_ble_ctrl_event(void)
-{
-	struct ble_ctrl_event ev;
-
-	int err = k_msgq_get(&ble_ctrl_msgq, &ev, K_NO_WAIT);
-	if (err) {
-		char *e_msg = "Error getting ble_ctrl_event";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
-		return;
-	}
-}
-
-static inline void process_ble_data_event(void)
-{
-	struct ble_data_event ev;
-
-	int err = k_msgq_get(&ble_data_msgq, &ev, K_NO_WAIT);
-	if (err) {
-		char *e_msg = "Error getting ble_data_event";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
-		return;
-	}
-}
 
 static inline void process_ble_cmd_event(void)
 {
@@ -914,14 +861,8 @@ void messaging_thread_fn()
 	while (true) {
 		int rc = k_poll(msgq_events, NUM_MSGQ_EVENTS, K_FOREVER);
 		if (rc == 0) {
-			while (k_msgq_num_used_get(&ble_ctrl_msgq) > 0) {
-				process_ble_ctrl_event();
-			}
 			while (k_msgq_num_used_get(&ble_cmd_msgq) > 0) {
 				process_ble_cmd_event();
-			}
-			while (k_msgq_num_used_get(&ble_data_msgq) > 0) {
-				process_ble_data_event();
 			}
 			while (k_msgq_num_used_get(&lte_proto_msgq) > 0) {
 				process_lte_proto_event();

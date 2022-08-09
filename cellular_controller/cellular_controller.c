@@ -113,44 +113,29 @@ void receive_tcp(struct data *sock_data)
 				}
 			} else if (received == 0) {
 				socket_idle_count += SOCKET_POLL_INTERVAL;
-				if (socket_idle_count > SOCK_RECV_TIMEOUT &&
-				    !fota_in_progress) {
+				if (socket_idle_count > SOCK_RECV_TIMEOUT) {
 					LOG_WRN("Socket receive timed out!");
-					if (!fota_in_progress &&
-					    !sending_in_progress) {
+					if (!sending_in_progress) {
 						k_sem_take(&close_main_socket_sem, K_MINUTES(1));
-						int ret = stop_tcp();
-						if (ret == 0) {
-							struct modem_state
-								*modem_inavtive =
-								new_modem_state();
-							modem_inavtive->mode
-								= SLEEP;
-							EVENT_SUBMIT(modem_inavtive);
-						} else {
-//							modem_is_ready = false;
-						}
-						connected = false;
+						int ret = stop_tcp(fota_in_progress);
 						socket_idle_count = 0;
+						connected = false;
+						if (ret != 0) {
+							modem_is_ready = false;
+						}
 					}
 				}
 			} else {
 				char *e_msg = "Socket receive error!";
 				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
 					(e_msg));
-				if (!fota_in_progress && !sending_in_progress) {
-					int ret = stop_tcp();
-					if (ret == 0) {
-						struct modem_state
-							*modem_inavtive =
-							new_modem_state();
-						modem_inavtive->mode
-							= SLEEP;
-						EVENT_SUBMIT(modem_inavtive);
-					}
-//					modem_is_ready = false;
+				if (!sending_in_progress) {
+					int ret = stop_tcp(fota_in_progress);
 					connected = false;
 					socket_idle_count = 0;
+					if (ret != 0) {
+						modem_is_ready = false;
+					}
 				}
 			}
 		}
@@ -234,7 +219,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return false;
 	}
 	else if (is_messaging_stop_connection_event(eh)) {
-//		modem_is_ready = false;
+		modem_is_ready = false;
 		connected = false;
 		socket_idle_count = 0;
 		return false;
@@ -408,7 +393,6 @@ static void cellular_controller_keep_alive(void *dev)
 		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
 			socket_idle_count = 0;
 			if (!cellular_controller_is_ready()) {
-				ret = reset_modem();
 				/* reset flags to avoid hanging the
 				 * communication with the
 				 * server in case the http download client
@@ -416,6 +400,7 @@ static void cellular_controller_keep_alive(void *dev)
 				connected = false;
 				socket_idle_count = 0;
 				fota_in_progress = false;
+				ret = reset_modem();
 				if (ret == 0) {
 					publish_gsm_info();
 					ret = cellular_controller_connect(dev);
@@ -424,8 +409,7 @@ static void cellular_controller_keep_alive(void *dev)
 					}
 				}
 			}
-			if (cellular_controller_is_ready() &&
-			    !fota_in_progress) {
+			if (cellular_controller_is_ready()) {
 				if (!connected) { //check_ip
 					// takes place in start_tcp() in this
 					// case.
@@ -433,37 +417,21 @@ static void cellular_controller_keep_alive(void *dev)
 					if (ret >= 0) {
 						connected = true;
 					} else {
-						if (!fota_in_progress) {
-							int ret = stop_tcp();
-							if (ret == 0) {
-								struct modem_state
-									*modem_inavtive =
-									new_modem_state();
-								modem_inavtive->mode
-									= SLEEP;
-								EVENT_SUBMIT(modem_inavtive);
-							}
-						}
-						modem_is_ready = false;
+						int ret = stop_tcp(fota_in_progress);
 						connected = false;
 						socket_idle_count = 0;
+						if (ret != 0) {
+							modem_is_ready = false;
+						}
 					}
 				} else {
-					if (!fota_in_progress) {
-						ret = check_ip();
+					ret = check_ip();
+					if (ret != 0) {
+						int ret = stop_tcp(fota_in_progress);
+						connected = false;
+						socket_idle_count = 0;
 						if (ret != 0) {
-							int ret = stop_tcp();
-							if (ret == 0) {
-								struct modem_state
-									*modem_inavtive =
-									new_modem_state();
-								modem_inavtive->mode
-									= SLEEP;
-								EVENT_SUBMIT(modem_inavtive);
-							}
-//							modem_is_ready = false;
-							connected = false;
-							socket_idle_count = 0;
+							modem_is_ready = false;
 						}
 					}
 				}

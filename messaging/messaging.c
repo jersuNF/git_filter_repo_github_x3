@@ -297,6 +297,7 @@ int read_log_data_cb(uint8_t *data, size_t len)
 		LOG_ERR("Error sending binary message for log data %i", err);
 	}
 	k_free(new_data);
+	k_yield();
 	return err;
 }
 

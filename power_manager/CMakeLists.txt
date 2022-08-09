@@ -8,7 +8,6 @@ target_include_directories(app PRIVATE
 	./../../events/watchdog/
 	./../../events/messaging/
 	./battery/
-
   	./../../modules/nf_settings/include
 	./charging/
 )
@@ -21,11 +20,6 @@ target_sources(app PRIVATE
 		     ./../../events/watchdog/watchdog_event.c
 		     ./../../events/messaging/messaging_module_events.c
 )
-
-
-
-
-
 
 add_dependencies(${ZEPHYR_CURRENT_LIBRARY}
         		collar_protocol_headers

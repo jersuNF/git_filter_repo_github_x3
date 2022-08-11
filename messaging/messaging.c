@@ -128,7 +128,7 @@ static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
 
 static bool m_transfer_boot_params = true;
 static bool m_confirm_acc_limits, m_confirm_ble_key;
-
+static uint32_t fota_ver_in_progress;
 K_MUTEX_DEFINE(send_binary_mutex);
 
 #define MODULE messaging
@@ -734,6 +734,10 @@ static bool event_handler(const struct event_header *eh)
 		update_cache_reg(GSM_INFO);
 		return false;
 	}
+	if (is_cancel_fota_event(eh)) {
+		fota_ver_in_progress = 0;
+		return false;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -806,6 +810,8 @@ EVENT_SUBSCRIBE(MODULE, send_poll_request_now);
 EVENT_SUBSCRIBE(MODULE, warn_correction_start_event);
 EVENT_SUBSCRIBE(MODULE, warn_correction_end_event);
 EVENT_SUBSCRIBE(MODULE, gsm_info_event);
+
+EVENT_SUBSCRIBE(MODULE, cancel_fota_event);
 
 static inline void process_ble_ctrl_event(void)
 {
@@ -1512,7 +1518,10 @@ void process_poll_response(NofenceMessage *proto)
 void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 {
 	if (fw_ver_from_server->has_ulApplicationVersion &&
-	    fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER) {
+	    fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER
+	    && fw_ver_from_server->ulApplicationVersion !=
+		       fota_ver_in_progress) {
+		fota_ver_in_progress = fw_ver_from_server->ulApplicationVersion;
 		LOG_INF("Received new app version from server %i",
 			fw_ver_from_server->ulApplicationVersion);
 		struct start_fota_event *ev = new_start_fota_event();
@@ -1521,6 +1530,8 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 		EVENT_SUBMIT(ev);
 	} else {
 		LOG_INF("FW ver from server is same as current or not set");
+		struct cancel_fota_event *ev = new_cancel_fota_event();
+		EVENT_SUBMIT(ev);
 	}
 }
 

@@ -268,7 +268,7 @@ void collect_stats(void)
 				true;
 			histogram.animal_behave.usStepCounter += (steps
 								- steps_old);
-			LOG_WRN("STEPS: %d", histogram.animal_behave.usStepCounter);
+//			LOG_WRN("STEPS: %d", histogram.animal_behave.usStepCounter);
 //			steps_old = steps;
 //			if (steps == UINT16_MAX) steps_old = 0;
 			steps_old = (steps==UINT16_MAX) ? 0:steps;

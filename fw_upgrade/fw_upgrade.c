@@ -129,8 +129,23 @@ static bool event_handler(const struct event_header *eh)
 			status->dfu_error = 0;
 
 			EVENT_SUBMIT(status);
+		} else {
+			struct dfu_status_event *status =
+				new_dfu_status_event();
+			status->dfu_status = DFU_STATUS_IDLE;
+			status->dfu_error = 0;
 		}
+		return false;
 
+	} else if (is_cancel_fota_event(eh)) {
+		int ret = fota_download_cancel();
+		if (ret != 0) {
+			LOG_WRN("Failed to cancel FOTA request!");
+		}
+		struct dfu_status_event *status =
+			new_dfu_status_event();
+		status->dfu_status = DFU_STATUS_IDLE;
+		status->dfu_error = 0;
 		return false;
 	}
 	/* If event is unhandled, unsubscribe. */
@@ -141,3 +156,4 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, start_fota_event);
+EVENT_SUBSCRIBE(MODULE, cancel_fota_event);

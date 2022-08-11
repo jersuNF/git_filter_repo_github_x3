@@ -130,9 +130,9 @@ void receive_tcp(struct data *sock_data)
 				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
 					(e_msg));
 				if (!sending_in_progress) {
+					fota_in_progress = false;
 					int ret = stop_tcp(fota_in_progress);
 					connected = false;
-					socket_idle_count = 0;
 					if (ret != 0) {
 						modem_is_ready = false;
 					}
@@ -221,7 +221,6 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 	else if (is_messaging_stop_connection_event(eh)) {
 		modem_is_ready = false;
 		connected = false;
-		socket_idle_count = 0;
 		return false;
 	}
 	else if (is_messaging_host_address_event(eh)) {
@@ -310,6 +309,10 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		} else {
 			fota_in_progress = false;
 			connected = false;
+			struct cancel_fota_event *cancel_fota =
+				new_cancel_fota_event();
+			EVENT_SUBMIT(cancel_fota);
+			fota_in_progress = false;
 		}
 		return false;
 	}
@@ -398,8 +401,12 @@ static void cellular_controller_keep_alive(void *dev)
 				 * server in case the http download client
 				 * fails ungracefully.*/
 				connected = false;
-				socket_idle_count = 0;
-				fota_in_progress = false;
+				if (fota_in_progress) {
+					struct cancel_fota_event *cancel_fota =
+						new_cancel_fota_event();
+					EVENT_SUBMIT(cancel_fota);
+					fota_in_progress = false;
+				}
 				ret = reset_modem();
 				if (ret == 0) {
 					publish_gsm_info();
@@ -416,23 +423,18 @@ static void cellular_controller_keep_alive(void *dev)
 					ret = start_tcp();
 					if (ret >= 0) {
 						connected = true;
-					} else {
-						int ret = stop_tcp(fota_in_progress);
-						connected = false;
 						socket_idle_count = 0;
-						if (ret != 0) {
-							modem_is_ready = false;
-						}
+					} else {
+						modem_is_ready = false;
+						fota_in_progress = false;
+						stop_tcp(fota_in_progress);
 					}
 				} else {
 					ret = check_ip();
 					if (ret != 0) {
-						int ret = stop_tcp(fota_in_progress);
+						fota_in_progress = false;
+						stop_tcp(fota_in_progress);
 						connected = false;
-						socket_idle_count = 0;
-						if (ret != 0) {
-							modem_is_ready = false;
-						}
 					}
 				}
 			}

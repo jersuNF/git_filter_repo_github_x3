@@ -81,7 +81,7 @@ static char *mac2string(char *s, size_t len, const bt_addr_le_t *addr)
 static inline int get_beacon_index_by_mac(struct beacon_list *list,
 					  struct beacon_info *info)
 {
-	for (uint8_t i = 0; i < list->arr_size; i++) {
+	for (uint8_t i = 0; i < list->num_beacons; i++) {
 		if (is_equal_mac_addr(&list->beacon_array[i].mac_address,
 				      &info->mac_address)) {
 			return i;
@@ -94,26 +94,51 @@ static inline int get_beacon_index_by_mac(struct beacon_list *list,
  * @brief Function to add a beacon to the beacon list
  * @param[out] list Pointer to beacon_list
  * @param[in] src Pointer to beacon_info struct
+ * @param[in] m Measured distance to the beacon we want to add
  */
 static inline void add_to_beacon_list(struct beacon_list *list,
-				      struct beacon_info *src)
+				      struct beacon_info *src, uint8_t m)
 {
-	int ret = get_beacon_index_by_mac(list, src);
-	if (ret < 0) {
-		struct beacon_info *dst =
-			&list->beacon_array[list->beacon_peeker];
-		memcpy(dst, src, sizeof(struct beacon_info));
-
-		list->beacon_peeker++;
-		if (list->beacon_peeker >= CONFIG_BEACON_MAX_BROADCASTERS) {
-			list->beacon_peeker = 0;
-		}
-
-		if (list->arr_size < CONFIG_BEACON_MAX_BROADCASTERS) {
-			list->arr_size++;
+	int index = get_beacon_index_by_mac(list, src);
+	if (index < 0) {
+		/* Beacon not found. Check first if list is full */
+		if (list->num_beacons >= CONFIG_BEACON_MAX_BROADCASTERS) {
+			/* Beacon list is full. Remove beacon with worst measurement */
+			uint8_t worst_distance = 0;
+			for (int i = 0; i < CONFIG_BEACON_MAX_BROADCASTERS;
+			     i++) {
+				struct beacon_info *tmp =
+					&list->beacon_array[i];
+				if (tmp->calculated_dist > worst_distance) {
+					worst_distance = tmp->calculated_dist;
+					index = i;
+				}
+			}
+			if (m > worst_distance) {
+				/* Check if we try to add something worse than already added */
+				return;
+			}
+			char mac_rep[MAC_CHARBUF_SIZE];
+			char mac_new[MAC_CHARBUF_SIZE];
+			struct beacon_info *dst = &list->beacon_array[index];
+			LOG_DBG("Replace worst beacon %s with new beacon %s",
+				mac2string(mac_rep, sizeof(mac_rep),
+					   &dst->mac_address),
+				mac2string(mac_new, sizeof(mac_new),
+					   &src->mac_address));
+			memcpy(dst, src, sizeof(struct beacon_info));
+		} else {
+			/* Space available. Add beacon to list */
+			struct beacon_info *dst =
+				&list->beacon_array[list->num_beacons];
+			memcpy(dst, src, sizeof(struct beacon_info));
+			/* Increment to next available slot */
+			list->num_beacons++;
 		}
 	} else {
-		struct beacon_info *existing_beacon = &list->beacon_array[ret];
+		/* Beacon exist in the list */
+		struct beacon_info *existing_beacon =
+			&list->beacon_array[index];
 		memcpy(existing_beacon, src, sizeof(struct beacon_info));
 	}
 }
@@ -220,7 +245,7 @@ static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist,
 	int err;
 	*dist = UINT8_MAX;
 
-	for (uint8_t i = 0; i < list->arr_size; i++) {
+	for (uint8_t i = 0; i < list->num_beacons; i++) {
 		/* After new connection entry has been added, 
 		 * we have a new average. 
 		 */
@@ -323,7 +348,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		beacon.num_measurements = 0;
 		beacon.conn_history_peeker = 0;
 		add_to_beacon_history(&info, &beacon);
-		add_to_beacon_list(&beacons, &beacon);
+		add_to_beacon_list(&beacons, &beacon, m);
 	} else {
 		add_to_beacon_history(&info,
 				      &beacons.beacon_array[target_beacon]);
@@ -339,12 +364,11 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		shortest_dist = UINT8_MAX;
 	} else {
 		char mac_best[MAC_CHARBUF_SIZE];
-		LOG_INF("Calculated new shortest distance %u m from Beacon_%u: %s",
-			shortest_dist, beacon_index,
-			log_strdup(
-				mac2string(mac_best, sizeof(mac_best),
-					   &beacons.beacon_array[beacon_index]
-						    .mac_address)));
+		LOG_INF("Use shortest distance %u m from Beacon: %s",
+			shortest_dist,
+			mac2string(mac_best, sizeof(mac_best),
+				   &beacons.beacon_array[beacon_index]
+					    .mac_address));
 	}
 
 	if (shortest_dist == UINT8_MAX) {

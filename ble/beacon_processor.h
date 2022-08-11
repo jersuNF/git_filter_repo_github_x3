@@ -24,8 +24,7 @@ struct beacon_info {
 	struct beacon_connection_info history[CONFIG_BEACON_MAX_MEASUREMENTS];
 };
 struct beacon_list {
-	uint8_t beacon_peeker;
-	uint8_t arr_size;
+	uint8_t num_beacons;
 	struct beacon_info beacon_array[CONFIG_BEACON_MAX_BROADCASTERS];
 };
 

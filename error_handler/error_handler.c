@@ -32,6 +32,7 @@ static inline void process_fatal(enum error_sender_module sender, int code)
 
 	/* Reboot on fatal events */
 	struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
+	r_ev->reason = REBOOT_FATAL_ERR;
 	EVENT_SUBMIT(r_ev);
 }
 

@@ -23,6 +23,7 @@
 #include "ble_conn_event.h"
 #include "ble_controller.h"
 #include "msg_data_event.h"
+#include "messaging_module_events.h"
 
 #include "nf_version.h"
 #include "nf_settings.h"
@@ -38,6 +39,8 @@
 #else
 #error "Build with supported boardfile"
 #endif
+
+#define VALID_PASTURE true
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_CONTROLLER_LOG_LEVEL);
 
@@ -68,13 +71,13 @@ static char bt_device_name[DEVICE_NAME_LEN + 1] = CONFIG_BT_DEVICE_NAME;
 // Shaddow register. Should be initialized with data from EEPROM or FLASH
 static uint16_t current_fw_ver = CONFIG_NOFENCE_FIRMWARE_NUMBER;
 static uint32_t current_serial_number = CONFIG_NOFENCE_SERIAL_NUMBER;
-static uint8_t current_battery_level;
-static uint8_t current_error_flags;
-static uint8_t current_collar_mode;
-static uint8_t current_collar_status;
-static uint8_t current_fence_status;
-static uint8_t current_valid_pasture = 0x01;
-static uint16_t current_fence_def_ver = 161;
+static uint8_t current_battery_level = 0;
+static uint8_t current_error_flags = 0;
+static uint8_t current_collar_mode = 0;
+static uint8_t current_collar_status = 0;
+static uint8_t current_fence_status = 0;
+static uint8_t current_valid_pasture = 0;
+static uint16_t current_fence_def_ver = 0;
 static uint8_t current_hw_ver = CONFIG_NOFENCE_HARDWARE_NUMBER;
 static uint16_t atmega_ver = 0xFFFF; // NB: Not in use, needed for App to work.
 
@@ -785,21 +788,6 @@ static bool event_handler(const struct event_header *eh)
 		case BLE_CTRL_ERROR_FLAG_UPDATE:
 			error_flag_update(event->param.error_flags);
 			break;
-		case BLE_CTRL_COLLAR_MODE_UPDATE:
-			collar_mode_update(event->param.collar_mode);
-			break;
-		case BLE_CTRL_COLLAR_STATUS_UPDATE:
-			collar_status_update(event->param.collar_status);
-			break;
-		case BLE_CTRL_FENCE_STATUS_UPDATE:
-			fence_status_update(event->param.fence_status);
-			break;
-		case BLE_CTRL_PASTURE_UPDATE:
-			pasture_update(event->param.valid_pasture);
-			break;
-		case BLE_CTRL_FENCE_DEF_VER_UPDATE:
-			fence_def_ver_update(event->param.fence_def_ver);
-			break;
 		case BLE_CTRL_SCAN_START:
 			if (atomic_get(&atomic_bt_scan_active) == false) {
 				scan_start();
@@ -826,6 +814,31 @@ static bool event_handler(const struct event_header *eh)
 
 		return false;
 	}
+	if (is_update_collar_mode(eh)) {
+		struct update_collar_mode *evt = cast_update_collar_mode(eh);
+		collar_mode_update(evt->collar_mode);
+		return false;
+	}
+	if (is_update_collar_status(eh)) {
+		struct update_collar_status *evt = cast_update_collar_status(eh);
+		collar_status_update(evt->collar_status);
+		return false;
+	}
+	if (is_update_fence_status(eh)) {
+		struct update_fence_status *evt = cast_update_fence_status(eh);		
+		fence_status_update(evt->fence_status);
+		return false;
+	}
+	if (is_update_fence_version(eh)) {
+		struct update_fence_version *evt = cast_update_fence_version(eh);
+		fence_def_ver_update(evt->fence_version);
+		if ((evt->fence_version != 0) && (evt->total_fences != 0)) {
+			pasture_update(VALID_PASTURE);
+		} else {
+			pasture_update(!VALID_PASTURE);
+		}
+		return false;
+	}
 
 	/* Reveived module state event */
 	// TODO: This block could be reinitialized with a power manager module
@@ -849,4 +862,8 @@ static bool event_handler(const struct event_header *eh)
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
 EVENT_SUBSCRIBE(MODULE, msg_data_event);
+EVENT_SUBSCRIBE(MODULE, update_collar_mode);
+EVENT_SUBSCRIBE(MODULE, update_collar_status);
+EVENT_SUBSCRIBE(MODULE, update_fence_status);
+EVENT_SUBSCRIBE(MODULE, update_fence_version);
 EVENT_SUBSCRIBE_FINAL(MODULE, ble_data_event);

@@ -173,10 +173,10 @@ static int set_new_shortest_dist(struct beacon_info *beacon)
 	/* Initialize to largest possible distance */
 	uint8_t shortest_dist = UINT8_MAX;
 	uint8_t entries = 0;
-	printk("[ ");
+	//printk("[ "); /* Uncomment for debug */
 	for (uint8_t i = 0; i < beacon->num_measurements; i++) {
 		struct beacon_connection_info *info = &beacon->history[i];
-		printk("%d ", info->beacon_dist);
+		//printk("%d ", info->beacon_dist); /* Uncomment for debug */
 		if (k_uptime_get_32() - info->time_diff <
 		    CONFIG_BEACON_MAX_MEASUREMENT_AGE * MSEC_PER_SEC) {
 			if (info->beacon_dist < 1) {
@@ -188,7 +188,7 @@ static int set_new_shortest_dist(struct beacon_info *beacon)
 			entries++;
 		}
 	}
-	printk("]\n");
+	//printk("]\n"); /* Uncomment for debug */
 
 	if (entries == 0) {
 		return -ENODATA;
@@ -249,8 +249,10 @@ static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist,
 		/* After new connection entry has been added, 
 		 * we have a new average. 
 		 */
-		printk("Beacon %d: ", i);
 		struct beacon_info *c_info = &list->beacon_array[i];
+		char addr[MAC_CHARBUF_SIZE];
+		/* Uncomment for debug */
+		// printk("Beacon %s: ", mac2string(addr, sizeof(addr), &c_info->mac_address));
 
 #ifdef CONFIG_BEACON_SHORTEST_DISTANCE
 		/* Update the shortest distance across last 10 second
@@ -258,8 +260,9 @@ static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist,
 		 */
 		err = set_new_shortest_dist(c_info);
 		if (err == -ENODATA) {
-			LOG_WRN("Age of all measurements from beacon_%u are larger than 10 seconds",
-				i);
+			LOG_WRN("Age of all measurements from beacon %s are larger than 10 seconds",
+				mac2string(addr, sizeof(addr),
+					   &c_info->mac_address));
 			continue;
 		}
 #else
@@ -268,8 +271,9 @@ static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist,
 		 */
 		err = set_new_avg_dist(c_info);
 		if (err == -ENODATA) {
-			LOG_WRN("Age of all measurements from beacon_%u are larger than 10 seconds",
-				i);
+			LOG_WRN("Age of all measurements from beacon %s are larger than 10 seconds",
+				mac2string(addr, sizeof(addr),
+					   &c_info->mac_address));
 			continue;
 		}
 #endif
@@ -364,7 +368,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		shortest_dist = UINT8_MAX;
 	} else {
 		char mac_best[MAC_CHARBUF_SIZE];
-		LOG_INF("Use shortest distance %u m from Beacon: %s",
+		LOG_DBG("Use shortest distance %u m from Beacon: %s",
 			shortest_dist,
 			mac2string(mac_best, sizeof(mac_best),
 				   &beacons.beacon_array[beacon_index]

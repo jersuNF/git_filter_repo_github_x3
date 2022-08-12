@@ -22,6 +22,15 @@ enum pwr_requester_module {
 int pwr_module_init(void);
 
 /**
+ * @brief Returns the reboot reason for a soft reboot.
+ * NB! The reboot reason is reset when read.
+ * 
+ * @param[out] aReason Reason for soft reset.
+ * @return 0 on success, otherwise a negative error code.
+ */
+int pwr_module_reboot_reason(uint8_t *aReason);
+
+/**
  * @brief Log battery voltage and battery precentage once.
  * @return battery voltage in mV
  * @return -ENOENT if no device is found, or if battery is not initialized.

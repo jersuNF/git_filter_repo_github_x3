@@ -19,6 +19,7 @@
 #include "ble_ctrl_event.h"
 #include "watchdog_event.h"
 #include "messaging_module_events.h"
+#include "nf_settings.h"
 
 #if CONFIG_CLOCK_CONTROL_NRF
 #include <drivers/clock_control.h>
@@ -310,6 +311,19 @@ int fetch_battery_percent(void)
 	return battery_level_soc(batt_mV, levels);
 }
 
+int pwr_module_reboot_reason(uint8_t *aReason)
+{
+	int err;
+	err = eep_uint8_read(EEP_RESET_REASON, aReason);
+	if (err != 0) {
+		LOG_ERR("Unable to read reboot reason from eeprom");
+	}
+	if (eep_uint8_write(EEP_RESET_REASON, REBOOT_UNKNOWN) != 0) {
+		LOG_ERR("Unable to reset reboot reason in eeprom!");
+	}
+	return err;
+}
+
 /**
  * @brief Main event handler function. 
  * 
@@ -356,9 +370,20 @@ static bool event_handler(const struct event_header *eh)
 #endif
 	/* Received reboot event */
 	if (is_pwr_reboot_event(eh)) {
-		LOG_INF("Reboot event received!");
-		k_work_reschedule(&power_reboot,
-				  K_SECONDS(CONFIG_SHUTDOWN_TIMER_SEC));
+		struct pwr_reboot_event *evt = cast_pwr_reboot_event(eh);
+
+		int err;
+		if ((evt->reason >= 0) && (evt->reason < REBOOT_REASON_CNT)) {
+			err = eep_uint8_write(EEP_RESET_REASON, evt->reason);
+		} else {
+			err = eep_uint8_write(EEP_RESET_REASON, REBOOT_UNKNOWN);
+		}
+		if (err != 0) {
+			LOG_ERR("Unable to write reboot reason to eeprom, err:%d", err);
+		}
+		LOG_INF("Reboot event received, reason:%d", evt->reason);
+
+		k_work_reschedule(&power_reboot, K_SECONDS(CONFIG_SHUTDOWN_TIMER_SEC));
 		return false;
 	}
 	/* If event is unhandled, unsubscribe. */

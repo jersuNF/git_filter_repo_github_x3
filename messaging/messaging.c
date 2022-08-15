@@ -36,7 +36,6 @@
 #include "storage.h"
 
 #include "movement_events.h"
-//#include "amc_correction.h"
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
@@ -230,7 +229,7 @@ static void build_log_message()
 
 	err = encode_and_store_message(&seq_1);
 	if (err) {
-		char *e_msg = "Failed to encode and save sequence message 2";
+		char *e_msg = "Failed to encode and save sequence message 1";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
@@ -274,7 +273,9 @@ int read_and_send_log_data_cb(uint8_t *data, size_t len)
 	memcpy(new_data, &data[0], new_len);
 	int err = send_binary_message(new_data, new_len);
 	if (err) {
-		LOG_ERR("Error sending binary message for log data %i", err);
+		char *e_msg = "Error sending binary message for log data";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	}
 	k_free(new_data);
 	k_yield();
@@ -296,9 +297,7 @@ void log_data_periodic_fn()
 	/* Read and send out all the log data if any. */
 	int err = stg_read_log_data(read_and_send_log_data_cb, 0);
 	if (err && err != -ENODATA) {
-		char *e_msg = "Error reading all log messages from storage";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		LOG_ERR("stg_read_log_data error: %i", err);
 	} else if (err == -ENODATA) {
 		LOG_INF("No log data available on flash for sending.");
 	}
@@ -364,7 +363,7 @@ static void log_zap_message_work_fn()
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		char *e_msg = "Failed to encode zap status msg";
+		char *e_msg = "Failed to encode and save zap status msg";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	} else {
@@ -390,7 +389,7 @@ static void log_animal_escaped_work_fn()
 	msg.m.status_msg.ucGpsMode = (uint8_t)cached_gnss_mode;
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		char *e_msg = "Failed to encode escaped status msg";
+		char *e_msg = "Failed to encode and save escaped status msg";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	} else {
@@ -414,7 +413,7 @@ static void log_warning_work_fn()
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		char *e_msg = "Failed to encode warning msg";
+		char *e_msg = "Failed to encode and save warning msg";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	} else {
@@ -436,7 +435,7 @@ static void log_correction_start_work_fn()
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		char *e_msg = "Failed to encode warning start msg";
+		char *e_msg = "Failed to encode and save correction start msg";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	} else {
@@ -458,7 +457,7 @@ static void log_correction_end_work_fn()
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		char *e_msg = "Failed to encode warning end msg";
+		char *e_msg = "Failed to encode and save correction end msg";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	} else {

@@ -308,11 +308,6 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			stop_rssi();
 		} else {
 			fota_in_progress = false;
-			connected = false;
-			struct cancel_fota_event *cancel_fota =
-				new_cancel_fota_event();
-			EVENT_SUBMIT(cancel_fota);
-			fota_in_progress = false;
 		}
 		return false;
 	}
@@ -401,12 +396,7 @@ static void cellular_controller_keep_alive(void *dev)
 				 * server in case the http download client
 				 * fails ungracefully.*/
 				connected = false;
-				if (fota_in_progress) {
-					struct cancel_fota_event *cancel_fota =
-						new_cancel_fota_event();
-					EVENT_SUBMIT(cancel_fota);
-					fota_in_progress = false;
-				}
+				fota_in_progress = false;
 				ret = reset_modem();
 				if (ret == 0) {
 					publish_gsm_info();

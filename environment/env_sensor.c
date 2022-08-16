@@ -155,7 +155,8 @@ static inline void update_env_sensor_event_values(void)
 	if (err) {
 		return;
 	}
-
+	LOG_INF("Temperature: %.1f, Pressure: %.1f, Humidity: %.1f", temp_d,
+		press_d, humidity_d);
 	struct env_sensor_event *ev = new_env_sensor_event();
 	ev->temp = temp_d;
 	ev->press = press_d;

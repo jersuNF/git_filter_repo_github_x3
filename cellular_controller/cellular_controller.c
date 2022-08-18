@@ -105,11 +105,7 @@ void receive_tcp(struct data *sock_data)
 					LOG_INF("Submitting msgIn event!");
 					EVENT_SUBMIT(msgIn);
 				} else {
-					char *err_msg = "Missed messaging ack!";
-					nf_app_error(ERR_MESSAGING,
-						     -ETIMEDOUT, err_msg,
-						     strlen
-						(err_msg));
+					LOG_ERR("Missed messaging ack!");
 				}
 			} else if (received == 0) {
 				socket_idle_count += SOCKET_POLL_INTERVAL;
@@ -117,6 +113,12 @@ void receive_tcp(struct data *sock_data)
 					LOG_WRN("Socket receive timed out!");
 					if (!sending_in_progress) {
 						k_sem_take(&close_main_socket_sem, K_MINUTES(1));
+						/*fota_in_progress = false;
+						 * PSV does not interrupt
+						 * FOTA on 2G, consider
+						 * enabling it with 2G during
+						 * slow FOTA to save some
+						 * energy.*/
 						int ret = stop_tcp(fota_in_progress);
 						socket_idle_count = 0;
 						connected = false;
@@ -126,9 +128,7 @@ void receive_tcp(struct data *sock_data)
 					}
 				}
 			} else {
-				char *e_msg = "Socket receive error!";
-				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
-					(e_msg));
+				LOG_ERR("Socket receive error!");
 				if (!sending_in_progress) {
 					fota_in_progress = false;
 					int ret = stop_tcp(fota_in_progress);
@@ -163,15 +163,15 @@ int start_tcp(void)
 		modem_nf_reset();
 		return ret;
 	}
-	ret = check_ip();
-	if (ret != 0){
-		LOG_ERR("Failed to get ip address!");
-		char *e_msg = "Failed to get ip address!";
-		nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
-		return ret;
+	if (!fota_in_progress) {
+		ret = check_ip();
+		if (ret != 0){
+			LOG_ERR("Failed to get ip address!");
+			return ret;
+		}
 	}
-	struct sockaddr_in addr4;
 
+	struct sockaddr_in addr4;
 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
 		addr4.sin_family = AF_INET;
 		addr4.sin_port = htons(server_port);
@@ -180,9 +180,7 @@ int start_tcp(void)
 		ret = socket_connect(&conf.ipv4, (struct sockaddr *)&addr4,
 				     sizeof(addr4));
 		if (ret < 0) {
-			char *e_msg = "Socket connect error!";
-			nf_app_error(ERR_MESSAGING, -ECONNREFUSED, e_msg, strlen
-				(e_msg));
+			LOG_ERR("Socket connect error!");
 			return ret;
 		}
 	}
@@ -236,10 +234,8 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		ptr_port = strchr(server_address, ':') + 1;
 		server_port = atoi(ptr_port);
 		if (server_port <= 0) {
-			char *e_msg = "Failed to parse port number from new "
-				      "host address!";
-			nf_app_error(ERR_MESSAGING, -EILSEQ, e_msg,
-				     strlen(e_msg));
+			LOG_ERR("Failed to parse port number from new "
+				"host address!");
 			return false;
 		}
 		uint8_t ip_len;
@@ -279,9 +275,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 
 			int err = send_tcp_q(CharMsgOut, MsgOutLen);
 			if (err != 0) {
-				char *sendq_err = "Couldn't push message to queue!";
-				nf_app_error(ERR_MESSAGING, -EAGAIN, sendq_err,
-					     strlen(sendq_err));
+				LOG_ERR("Couldn't push message to queue!");
 				k_free(CharMsgOut);
 				CharMsgOut = NULL;
 				return false;
@@ -351,8 +345,6 @@ static int cellular_controller_connect(void *dev)
 		char *e_msg =
 			"Failed to start LTE connection. Check network interface!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
-		nf_app_error(ERR_CELLULAR_CONTROLLER, ret, e_msg,
-			     strlen(e_msg));
 		goto exit;
 	}
 
@@ -420,12 +412,15 @@ static void cellular_controller_keep_alive(void *dev)
 						stop_tcp(fota_in_progress);
 					}
 				} else {
-					ret = check_ip();
-					if (ret != 0) {
-						fota_in_progress = false;
-						stop_tcp(fota_in_progress);
-						connected = false;
+					if (!fota_in_progress) {
+						ret = check_ip();
+						if (ret != 0) {
+							fota_in_progress = false;
+							stop_tcp(fota_in_progress);
+							connected = false;
+						}
 					}
+
 				}
 			}
 			announce_connection_state(connected);
@@ -462,10 +457,7 @@ int8_t cellular_controller_init(void)
 	connected = false;
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {
-		char *e_msg = "GSM driver was not found!";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), -ENODEV);
-		nf_app_error(ERR_CELLULAR_CONTROLLER, -ENODEV, e_msg,
-			     strlen(e_msg));
+		LOG_ERR("GSM driver was not found!");
 		return -1;
 	}
 

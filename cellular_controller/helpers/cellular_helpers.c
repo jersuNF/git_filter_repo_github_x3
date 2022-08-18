@@ -121,7 +121,7 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 			return ret;
 		}
 	}
-	ret = connect(data->tcp.sock, addr, addrlen);
+	ret = connect(socket_id, addr, addrlen);
 	if (ret < 0) {
 		LOG_ERR("Cannot connect to TCP remote (%s): %d", data->proto,
 			errno);
@@ -239,11 +239,11 @@ int stop_tcp(const bool keep_modem_awake)
 		if (ret != 0) {
 			LOG_ERR("Failed to switch modem to power saving!");
 			/*TODO: notify error handler and take action.*/
+			return ret;
 		}
 		struct modem_state *modem_inavtive = new_modem_state();
 		modem_inavtive->mode = SLEEP;
 		EVENT_SUBMIT(modem_inavtive);
-		return ret;
 	}
 
 	return 0;

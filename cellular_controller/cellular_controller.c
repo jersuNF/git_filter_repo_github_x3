@@ -113,7 +113,8 @@ void receive_tcp(struct data *sock_data)
 				if (socket_idle_count > SOCK_RECV_TIMEOUT) {
 					LOG_WRN("Socket receive timed out!");
 					if (!sending_in_progress) {
-						k_sem_take(&close_main_socket_sem, K_MINUTES(1));
+						k_sem_take
+							(&close_main_socket_sem, K_FOREVER);
 						/*fota_in_progress = false;
 						 * PSV does not interrupt
 						 * FOTA on 2G, consider
@@ -272,11 +273,6 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 				struct cellular_ack_event *ack =
 					new_cellular_ack_event();
 				EVENT_SUBMIT(ack);
-			}
-			if (fota_in_progress) {
-				k_sem_reset(&fota_progress_update);
-				k_sem_take(&fota_progress_update,
-					   K_SECONDS(10));
 			}
 			int err = send_tcp_q(CharMsgOut, MsgOutLen);
 			if (err != 0) {
@@ -451,6 +447,7 @@ void announce_connection_state(bool state) {
 	ev->state = state;
 	EVENT_SUBMIT(ev);
 	if (state == true) {
+		k_sem_reset(&close_main_socket_sem);
 		socket_idle_count = 0;
 		sending_in_progress = true;
 		struct modem_state

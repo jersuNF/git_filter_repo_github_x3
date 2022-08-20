@@ -457,11 +457,6 @@ void announce_connection_state(bool state) {
 			= POWER_ON;
 		EVENT_SUBMIT(modem_active);
 	}
-	if (!cellular_controller_is_ready()) { //in case of an error reset the
-		// modem immediately TODO: use a counter to limit retries in
-		//  bad coverage
-		k_sem_give(&connection_state_sem);
-	}
 	publish_gsm_info();
 }
 

@@ -119,6 +119,7 @@ void process_acc_data(raw_acc_data_t *acc)
 		LOG_DBG("Cannot calculate since FIFO is not filled.");
 		return;
 	}
+	num_acc_fifo_samples = 0;
 
 	/* FIFO is filled, start algorithm. */
 	bool is_active = true;

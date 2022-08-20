@@ -566,13 +566,11 @@ int stg_read_ano_data(fcb_read_cb cb, bool last_valid_ano, uint16_t num_entries)
 
 int stg_read_pasture_data(fcb_read_cb cb)
 {
-	if (k_mutex_lock(&pasture_mutex,
-			 K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+	if (k_mutex_lock(&pasture_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
 	}
 
 	struct fcb *fcb = get_fcb(STG_PARTITION_PASTURE);
-
 	if (fcb_is_empty(fcb)) {
 		k_mutex_unlock(&pasture_mutex);
 		return -ENODATA;
@@ -580,7 +578,6 @@ int stg_read_pasture_data(fcb_read_cb cb)
 
 	struct fcb_entry entry;
 	int err = fcb_offset_last_n(fcb, 1, &entry);
-
 	if (err) {
 		k_mutex_unlock(&pasture_mutex);
 		return err;
@@ -597,9 +594,8 @@ int stg_read_pasture_data(fcb_read_cb cb)
 		return err;
 	}
 
-	cb(fence, fence_size);
+	err = cb(fence, fence_size);
 	k_free(fence);
-
 	k_mutex_unlock(&pasture_mutex);
 	return err;
 }

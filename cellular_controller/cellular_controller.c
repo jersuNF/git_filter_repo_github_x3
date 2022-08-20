@@ -19,10 +19,11 @@
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
 K_SEM_DEFINE(messaging_ack, 1, 1);
+K_SEM_DEFINE(fota_progress_update, 0, 1);
 
 K_THREAD_DEFINE(send_tcp_from_q, CONFIG_SEND_THREAD_STACK_SIZE,
 		send_tcp_fn, NULL, NULL, NULL,
-		CONFIG_SEND_THREAD_PRIORITY, 0, 0);
+		K_PRIO_COOP(CONFIG_SEND_THREAD_PRIORITY), 0, 0);
 
 char server_address[EEP_HOST_PORT_BUF_SIZE-1];
 char server_address_tmp[EEP_HOST_PORT_BUF_SIZE-1];
@@ -69,7 +70,7 @@ APP_DMEM struct configs conf_listen = {
 
 void receive_tcp(struct data *);
 K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK, receive_tcp, &conf.ipv4, NULL, NULL,
-		RCV_PRIORITY, 0, 0);
+		K_PRIO_COOP(RCV_PRIORITY), 0, 0);
 
 extern struct k_sem listen_sem;
 
@@ -272,7 +273,11 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 					new_cellular_ack_event();
 				EVENT_SUBMIT(ack);
 			}
-
+			if (fota_in_progress) {
+				k_sem_reset(&fota_progress_update);
+				k_sem_take(&fota_progress_update,
+					   K_SECONDS(10));
+			}
 			int err = send_tcp_q(CharMsgOut, MsgOutLen);
 			if (err != 0) {
 				LOG_ERR("Couldn't push message to queue!");
@@ -298,6 +303,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		struct dfu_status_event *fw_upgrade_event =
 			cast_dfu_status_event(eh);
 		if (fw_upgrade_event->dfu_status == DFU_STATUS_IN_PROGRESS) {
+			if (fota_in_progress) k_sem_give(&fota_progress_update);
 			fota_in_progress = true;
 			stop_rssi();
 		} else {
@@ -402,6 +408,17 @@ static void cellular_controller_keep_alive(void *dev)
 				if (!connected) { //check_ip
 					// takes place in start_tcp() in this
 					// case.
+					if (fota_in_progress) {
+						k_sem_reset
+							(&fota_progress_update);
+						if (k_sem_take
+							(&fota_progress_update,
+							   K_SECONDS(10)) !=
+						    0) {
+							LOG_WRN("FOTA prgress"
+								" missed!");
+						}
+					}
 					ret = start_tcp();
 					if (ret >= 0) {
 						connected = true;
@@ -415,7 +432,6 @@ static void cellular_controller_keep_alive(void *dev)
 					if (!fota_in_progress) {
 						ret = check_ip();
 						if (ret != 0) {
-							fota_in_progress = false;
 							stop_tcp(fota_in_progress);
 							connected = false;
 						}
@@ -428,7 +444,7 @@ static void cellular_controller_keep_alive(void *dev)
 	}
 }
 
-void announce_connection_state(bool state){
+void announce_connection_state(bool state) {
 	k_sem_reset(&connection_state_sem);
 	struct connection_state_event *ev
 		= new_connection_state_event();
@@ -443,6 +459,11 @@ void announce_connection_state(bool state){
 		modem_active->mode
 			= POWER_ON;
 		EVENT_SUBMIT(modem_active);
+	}
+	if (!cellular_controller_is_ready()) { //in case of an error reset the
+		// modem immediately TODO: use a counter to limit retries in
+		//  bad coverage
+		k_sem_give(&connection_state_sem);
 	}
 	publish_gsm_info();
 }

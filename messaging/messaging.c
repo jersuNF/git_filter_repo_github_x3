@@ -76,6 +76,8 @@ K_SEM_DEFINE(connection_ready, 0, 1);
 static collar_state_struct_t current_state;
 static gnss_last_fix_struct_t cached_fix;
 
+static bool fota_reset = true;
+
 typedef enum {
 	COLLAR_MODE,
 	COLLAR_STATUS,
@@ -135,10 +137,6 @@ static bool reboot_scheduled;
 LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
 
 /* 4 means 4-byte alignment. */
-K_MSGQ_DEFINE(ble_ctrl_msgq, sizeof(struct ble_ctrl_event),
-	      CONFIG_MSGQ_BLE_CTRL_SIZE, 4);
-K_MSGQ_DEFINE(ble_data_msgq, sizeof(struct ble_data_event),
-	      CONFIG_MSGQ_BLE_DATA_SIZE, 4);
 K_MSGQ_DEFINE(ble_cmd_msgq, sizeof(struct ble_cmd_event),
 	      CONFIG_MSGQ_BLE_CMD_SIZE, 4);
 K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct messaging_proto_out_event),
@@ -146,12 +144,6 @@ K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct messaging_proto_out_event),
 
 #define NUM_MSGQ_EVENTS 4
 struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
-					K_POLL_MODE_NOTIFY_ONLY, &ble_ctrl_msgq,
-					0),
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
-					K_POLL_MODE_NOTIFY_ONLY, &ble_data_msgq,
-					0),
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 					K_POLL_MODE_NOTIFY_ONLY, &ble_cmd_msgq,
 					0),
@@ -500,6 +492,7 @@ static bool event_handler(const struct event_header *eh)
 {
 	if (is_pwr_reboot_event(eh)) {
 		reboot_scheduled = true;
+		return false;
 
 	}
 	if (is_gnss_data(eh)) {
@@ -531,25 +524,10 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-	if (is_ble_ctrl_event(eh)) {
-		struct ble_ctrl_event *ev = cast_ble_ctrl_event(eh);
-		while (k_msgq_put(&ble_ctrl_msgq, ev, K_NO_WAIT) != 0) {
-			/* Message queue is full: purge old data & try again */
-			k_msgq_purge(&ble_ctrl_msgq);
-		}
-		return true;
-	}
 	if (is_ble_cmd_event(eh)) {
 		struct ble_cmd_event *ev = cast_ble_cmd_event(eh);
 		while (k_msgq_put(&ble_cmd_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&ble_cmd_msgq);
-		}
-		return true;
-	}
-	if (is_ble_data_event(eh)) {
-		struct ble_data_event *ev = cast_ble_data_event(eh);
-		while (k_msgq_put(&ble_data_msgq, ev, K_NO_WAIT) != 0) {
-			k_msgq_purge(&ble_data_msgq);
 		}
 		return true;
 	}
@@ -578,15 +556,6 @@ static bool event_handler(const struct event_header *eh)
 		struct update_collar_status *ev = cast_update_collar_status(eh);
 		current_state.collar_status = ev->collar_status;
 		update_cache_reg(COLLAR_STATUS);
-		/* notify_server */
-		/*
-		LOG_WRN("Schedule poll request: collar_status!");
-		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
-						      K_NO_WAIT);
-		if (err < 0) {
-			LOG_ERR("Error starting modem poll worker: %d", err);
-		}
-		 */
 		return false;
 	}
 	if (is_update_fence_status(eh)) {
@@ -738,6 +707,15 @@ static bool event_handler(const struct event_header *eh)
 		update_cache_reg(GSM_INFO);
 		return false;
 	}
+	if (is_dfu_status_event(eh)) {
+		struct dfu_status_event *fw_upgrade_event =
+			cast_dfu_status_event(eh);
+		if (fw_upgrade_event->dfu_status == DFU_STATUS_IDLE &&
+			fw_upgrade_event->dfu_error != 0) {
+			fota_reset = true;
+		}
+		return false;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -787,9 +765,7 @@ bool validate_pasture()
 EVENT_LISTENER(MODULE, event_handler);
 
 /* Bluetooth events. */
-EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
 EVENT_SUBSCRIBE(MODULE, ble_cmd_event);
-EVENT_SUBSCRIBE(MODULE, ble_data_event);
 
 EVENT_SUBSCRIBE(MODULE, cellular_ack_event);
 EVENT_SUBSCRIBE(MODULE, cellular_proto_in_event);
@@ -810,34 +786,7 @@ EVENT_SUBSCRIBE(MODULE, send_poll_request_now);
 EVENT_SUBSCRIBE(MODULE, warn_correction_start_event);
 EVENT_SUBSCRIBE(MODULE, warn_correction_end_event);
 EVENT_SUBSCRIBE(MODULE, gsm_info_event);
-
-EVENT_SUBSCRIBE(MODULE, pwr_reboot_event);
-
-static inline void process_ble_ctrl_event(void)
-{
-	struct ble_ctrl_event ev;
-
-	int err = k_msgq_get(&ble_ctrl_msgq, &ev, K_NO_WAIT);
-	if (err) {
-		char *e_msg = "Error getting ble_ctrl_event";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
-		return;
-	}
-}
-
-static inline void process_ble_data_event(void)
-{
-	struct ble_data_event ev;
-
-	int err = k_msgq_get(&ble_data_msgq, &ev, K_NO_WAIT);
-	if (err) {
-		char *e_msg = "Error getting ble_data_event";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
-		return;
-	}
-}
+EVENT_SUBSCRIBE(MODULE, dfu_status_event);
 
 static inline void process_ble_cmd_event(void)
 {
@@ -860,6 +809,7 @@ static inline void process_ble_cmd_event(void)
 	}
 	case CMD_REBOOT_AVR_MCU: {
 		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
+		r_ev->reason = REBOOT_BLE_RESET;
 		EVENT_SUBMIT(r_ev);
 		break;
 	}
@@ -941,14 +891,8 @@ void messaging_thread_fn()
 	while (true) {
 		int rc = k_poll(msgq_events, NUM_MSGQ_EVENTS, K_FOREVER);
 		if (rc == 0) {
-			while (k_msgq_num_used_get(&ble_ctrl_msgq) > 0) {
-				process_ble_ctrl_event();
-			}
 			while (k_msgq_num_used_get(&ble_cmd_msgq) > 0) {
 				process_ble_cmd_event();
-			}
-			while (k_msgq_num_used_get(&ble_data_msgq) > 0) {
-				process_ble_data_event();
 			}
 			while (k_msgq_num_used_get(&lte_proto_msgq) > 0) {
 				process_lte_proto_event();
@@ -1524,13 +1468,11 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 		if (!reboot_scheduled) {
 			struct start_fota_event *ev = new_start_fota_event();
 			ev->override_default_host = false;
+			ev->reset_download_client = fota_reset;
+			fota_reset = false;
 			ev->version = fw_ver_from_server->ulApplicationVersion;
 			EVENT_SUBMIT(ev);
 		}
-	} else {
-		LOG_INF("FW ver from server is same as current or not set");
-		struct cancel_fota_event *ev = new_cancel_fota_event();
-		EVENT_SUBMIT(ev);
 	}
 }
 

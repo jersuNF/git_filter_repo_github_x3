@@ -146,14 +146,13 @@ int socket_listen(struct data *data)
 			data->tcp.sock);
 	}
 
-	k_sleep(K_MSEC(50));
 	ret = listen(data->tcp.sock, 5);
 	if (ret < 0) {
 		LOG_ERR("Cannot start TCP listening socket (%s): %d",
 			data->proto, errno);
 		ret = -errno;
 	} else {
-		ret = data->tcp.sock;
+		ret = 0;
 	}
 	return ret;
 }
@@ -186,17 +185,15 @@ int socket_receive(struct data *data, char **msg)
 
 int reset_modem(void)
 {
-	(void)close(conf.ipv4.tcp.sock);
 	(void)close(conf_listen.ipv4.tcp.sock);
+	(void)close(conf.ipv4.tcp.sock);
 	int ret = modem_nf_reset();
 	if (ret != 0) {
-		LOG_ERR("modem_nf_reset() returned %d", ret);
+		LOG_WRN("modem_nf_reset() returned %d", ret);
 		return ret;
 	}
 	ret = socket_listen(&conf_listen.ipv4);
-	if (ret != 0) {
-		LOG_ERR("socket_listen() returned %d", ret);
-	}
+	LOG_WRN("socket_listen() returned %d", ret);
 	return ret;
 }
 

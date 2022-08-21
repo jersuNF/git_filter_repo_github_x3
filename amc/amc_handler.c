@@ -72,7 +72,7 @@ atomic_t buzzer_state = ATOMIC_INIT(false);
 atomic_t sound_max_atomic = ATOMIC_INIT(false);
 
 /* Beacon status used in calculating the fence status. */
-atomic_t current_beacon_status = ATOMIC_INIT(BEACON_STATUS_OUT_OF_RANGE);
+atomic_t current_beacon_status = ATOMIC_INIT(BEACON_STATUS_NOT_FOUND);
 
 static uint32_t maybe_out_of_fence_timestamp = 0;
 

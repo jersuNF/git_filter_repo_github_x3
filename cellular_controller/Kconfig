@@ -11,7 +11,7 @@ if CELLULAR_CONTROLLER
 	
 	config CELLULAR_KEEP_ALIVE_THREAD_PRIORITY
 		int "Priority of the connection keep-alive thread"
-		default 5
+		default 7
 		help
 		This priority is used by the Cellular Controller keep-alive thread.
 
@@ -38,7 +38,7 @@ if CELLULAR_CONTROLLER
 
 	config RECV_THREAD_PRIORITY
 	    int
-	    default 7
+	    default 14
 
 	config SEND_THREAD_STACK_SIZE
         int
@@ -46,6 +46,6 @@ if CELLULAR_CONTROLLER
 
     config SEND_THREAD_PRIORITY
         int
-        default 7
+        default 6
 
 endif

@@ -23,7 +23,7 @@ K_SEM_DEFINE(fota_progress_update, 0, 1);
 
 K_THREAD_DEFINE(send_tcp_from_q, CONFIG_SEND_THREAD_STACK_SIZE,
 		send_tcp_fn, NULL, NULL, NULL,
-		K_PRIO_COOP(CONFIG_SEND_THREAD_PRIORITY), 0, 0);
+		CONFIG_SEND_THREAD_PRIORITY, 0, 0);
 
 char server_address[EEP_HOST_PORT_BUF_SIZE-1];
 char server_address_tmp[EEP_HOST_PORT_BUF_SIZE-1];
@@ -70,7 +70,7 @@ APP_DMEM struct configs conf_listen = {
 
 void receive_tcp(struct data *);
 K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK, receive_tcp, &conf.ipv4, NULL, NULL,
-		K_PRIO_COOP(RCV_PRIORITY), 0, 0);
+		RCV_PRIORITY, 0, 0);
 
 extern struct k_sem listen_sem;
 
@@ -106,7 +106,11 @@ void receive_tcp(struct data *sock_data)
 					LOG_INF("Submitting msgIn event!");
 					EVENT_SUBMIT(msgIn);
 				} else {
-					LOG_ERR("Missed messaging ack!");
+					char *err_msg = "Missed messaging ack!";
+					nf_app_error(ERR_MESSAGING,
+						     -ETIMEDOUT, err_msg,
+						     strlen
+						(err_msg));
 				}
 			} else if (received == 0) {
 				socket_idle_count += SOCKET_POLL_INTERVAL;
@@ -130,9 +134,10 @@ void receive_tcp(struct data *sock_data)
 					}
 				}
 			} else {
-				LOG_ERR("Socket receive error!");
+				char *e_msg = "Socket receive error!";
+				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
+					(e_msg));
 				if (!sending_in_progress) {
-					fota_in_progress = false;
 					int ret = stop_tcp(fota_in_progress);
 					connected = false;
 					if (ret != 0) {
@@ -169,6 +174,9 @@ int start_tcp(void)
 		ret = check_ip();
 		if (ret != 0){
 			LOG_ERR("Failed to get ip address!");
+		char *e_msg = "Failed to get ip address!";
+		nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
+		return ret;
 			return ret;
 		}
 	}
@@ -182,7 +190,9 @@ int start_tcp(void)
 		ret = socket_connect(&conf.ipv4, (struct sockaddr *)&addr4,
 				     sizeof(addr4));
 		if (ret < 0) {
-			LOG_ERR("Socket connect error!");
+			char *e_msg = "Socket connect error!";
+			nf_app_error(ERR_MESSAGING, -ECONNREFUSED, e_msg, strlen
+				(e_msg));
 			return ret;
 		}
 	}
@@ -236,8 +246,10 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		ptr_port = strchr(server_address, ':') + 1;
 		server_port = atoi(ptr_port);
 		if (server_port <= 0) {
-			LOG_ERR("Failed to parse port number from new "
-				"host address!");
+			char *e_msg = "Failed to parse port number from new "
+				      "host address!";
+			nf_app_error(ERR_MESSAGING, -EILSEQ, e_msg,
+				     strlen(e_msg));
 			return false;
 		}
 		uint8_t ip_len;
@@ -276,7 +288,9 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			}
 			int err = send_tcp_q(CharMsgOut, MsgOutLen);
 			if (err != 0) {
-				LOG_ERR("Couldn't push message to queue!");
+				char *sendq_err = "Couldn't push message to queue!";
+				nf_app_error(ERR_MESSAGING, -EAGAIN, sendq_err,
+					     strlen(sendq_err));
 				k_free(CharMsgOut);
 				CharMsgOut = NULL;
 				return false;
@@ -347,6 +361,8 @@ static int cellular_controller_connect(void *dev)
 		char *e_msg =
 			"Failed to start LTE connection. Check network interface!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
+		nf_app_error(ERR_CELLULAR_CONTROLLER, ret, e_msg,
+			     strlen(e_msg));
 		goto exit;
 	}
 
@@ -470,7 +486,10 @@ int8_t cellular_controller_init(void)
 	connected = false;
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {
-		LOG_ERR("GSM driver was not found!");
+		char *e_msg = "GSM driver was not found!";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), -ENODEV);
+		nf_app_error(ERR_CELLULAR_CONTROLLER, -ENODEV, e_msg,
+			     strlen(e_msg));
 		return -1;
 	}
 

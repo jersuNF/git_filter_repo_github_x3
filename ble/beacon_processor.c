@@ -114,7 +114,7 @@ static inline void add_to_beacon_list(struct beacon_list *list,
 					index = i;
 				}
 			}
-			if (m > worst_distance) {
+			if (m > worst_distance || m == UINT8_MAX) {
 				/* Check if we try to add something worse than already added */
 				return;
 			}
@@ -173,6 +173,9 @@ static int set_new_shortest_dist(struct beacon_info *beacon)
 	/* Initialize to largest possible distance */
 	uint8_t shortest_dist = UINT8_MAX;
 	uint8_t entries = 0;
+	if (beacon->num_measurements != CONFIG_BEACON_MAX_MEASUREMENTS) {
+		return -ETIME;
+	}
 	for (uint8_t i = 0; i < beacon->num_measurements; i++) {
 		struct beacon_connection_info *info = &beacon->history[i];
 		printk("%d ", info->beacon_dist);
@@ -264,6 +267,8 @@ static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist,
 				mac2string(addr, sizeof(addr),
 					   &c_info->mac_address));
 			continue;
+		} else if (err == -ETIME) {
+			//handle later
 		}
 		if (c_info->calculated_dist < *dist) {
 			*dist = c_info->calculated_dist;
@@ -352,7 +357,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		beacon.num_measurements = 0;
 		beacon.conn_history_peeker = 0;
 		add_to_beacon_history(&info, &beacon);
-		add_to_beacon_list(&beacons, &beacon, m);
+		add_to_beacon_list(&beacons, &beacon, (uint8_t)m);
 	} else {
 		add_to_beacon_history(&info,
 				      &beacons.beacon_array[target_beacon]);
@@ -361,7 +366,12 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 	uint8_t shortest_dist;
 	uint8_t beacon_index = 0;
 	//	int err =
-	get_shortest_distance(&beacons, &shortest_dist, &beacon_index);
+	int err = get_shortest_distance(&beacons, &shortest_dist,
+					&beacon_index);
+	if (err == -ETIME || err == -ENODATA) {
+		last_calculated_distance = shortest_dist;
+		return -ENODATA;
+	}
 
 	//	if (err < 0) {
 	//		LOG_WRN("No data in array, err: %d", err);

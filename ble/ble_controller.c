@@ -533,6 +533,7 @@ static bool data_cb(struct bt_data *data, void *user_data)
 	}
 }
 
+bool beacon_found = false;
 /**
  * @brief Callback for reporting LE scan results.
  *
@@ -548,19 +549,19 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 	adv_data_t adv_data;
 	/* Extract major_id, minor_id, tx rssi and uuid */
 	bt_data_parse(buf, data_cb, (void *)&adv_data);
-	bool beacon_found = false;
 	if (adv_data.major == BEACON_MAJOR_ID &&
 	    adv_data.minor == BEACON_MINOR_ID) {
+		beacon_found = true;
 		LOG_DBG("Nofence beacon detected");
 		const uint32_t now = k_uptime_get_32();
 		err = beacon_process_event(now, addr, rssi, &adv_data);
 		if (err == -EIO) {
 			LOG_WRN("Beacon detected is out of valid range. Will ignore this.");
 			/* Beacon is not found */
-			struct ble_beacon_event *bc_event =
-				new_ble_beacon_event();
-			bc_event->status = BEACON_STATUS_NOT_FOUND;
-			EVENT_SUBMIT(bc_event);
+//			struct ble_beacon_event *bc_event =
+//				new_ble_beacon_event();
+//			bc_event->status = BEACON_STATUS_NOT_FOUND;
+//			EVENT_SUBMIT(bc_event);
 		} else if (err == -EPERM) {
 			char *e_msg = "Process of beacon state event error";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
@@ -588,6 +589,7 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 
 static void scan_start(void)
 {
+	beacon_found = false;
 	if (!atomic_get(&atomic_bt_ready)) {
 		/* Scan will start when bt is ready */
 		LOG_WRN("Scanning not ready to start");

@@ -558,10 +558,6 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 		if (shortest_distance == -EIO) {
 			LOG_WRN("Beacon detected is out of valid range. Will ignore this.");
 			/* Beacon is not found */
-//			struct ble_beacon_event *bc_event =
-//				new_ble_beacon_event();
-//			bc_event->status = BEACON_STATUS_NOT_FOUND;
-//			EVENT_SUBMIT(bc_event);
 		} else if (shortest_distance == -EPERM) {
 			char *e_msg = "Process of beacon state event error";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), shortest_distance);

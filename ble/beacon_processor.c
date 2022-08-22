@@ -177,9 +177,9 @@ static int set_new_shortest_dist(struct beacon_info *beacon)
 		struct beacon_connection_info *info = &beacon->history[i];
 		if (k_uptime_get_32() - info->time_diff <
 		    CONFIG_BEACON_MAX_MEASUREMENT_AGE * MSEC_PER_SEC) {
-			if (info->beacon_dist < 1) {
-				continue;
-			}
+//			if (info->beacon_dist < 1) {
+//				continue;
+//			}
 			if (info->beacon_dist < shortest_dist) {
 				shortest_dist = info->beacon_dist;
 			}
@@ -262,6 +262,10 @@ static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist,
 					   &c_info->mac_address));
 			continue;
 		}
+		if (c_info->calculated_dist < *dist) {
+			*dist = c_info->calculated_dist;
+			*beacon_index = i;
+		}
 #else
 		/* Update the average on the beacons, based on 
 		 * time since recorded distance. 
@@ -274,16 +278,12 @@ static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist,
 			continue;
 		}
 #endif
-		if (c_info->calculated_dist < *dist) {
-			*dist = c_info->calculated_dist;
-			*beacon_index = i;
-		}
 	}
 
-	if (*dist == UINT8_MAX) {
-		/* No elements in list, or age of all elements are larger than age limit */
-		return -ENODATA;
-	}
+//	if (*dist == UINT8_MAX) {
+//		/* No elements in list, or age of all elements are larger than age limit */
+//		return -ENODATA;
+//	}
 	return 0;
 }
 
@@ -357,20 +357,20 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 
 	uint8_t shortest_dist;
 	uint8_t beacon_index = 0;
-	int err =
+//	int err =
 		get_shortest_distance(&beacons, &shortest_dist, &beacon_index);
 
-	if (err < 0) {
-		LOG_WRN("No data in array, err: %d", err);
-		shortest_dist = UINT8_MAX;
-	} else {
+//	if (err < 0) {
+//		LOG_WRN("No data in array, err: %d", err);
+//		shortest_dist = UINT8_MAX;
+//	} else {
 		char mac_best[MAC_CHARBUF_SIZE];
 		LOG_DBG("Use shortest distance %u m from Beacon: %s",
 			shortest_dist,
 			mac2string(mac_best, sizeof(mac_best),
 				   &beacons.beacon_array[beacon_index]
 					    .mac_address));
-	}
+//	}
 
 	if (shortest_dist == UINT8_MAX) {
 		struct ble_beacon_event *event = new_ble_beacon_event();

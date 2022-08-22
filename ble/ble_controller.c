@@ -534,6 +534,7 @@ static bool data_cb(struct bt_data *data, void *user_data)
 }
 
 bool beacon_found = false;
+
 /**
  * @brief Callback for reporting LE scan results.
  *
@@ -545,33 +546,31 @@ bool beacon_found = false;
 static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 		    struct net_buf_simple *buf)
 {
-	uint8_t shortest_distance = UINT8_MAX;
+	int err;
 	adv_data_t adv_data;
 	/* Extract major_id, minor_id, tx rssi and uuid */
 	bt_data_parse(buf, data_cb, (void *)&adv_data);
 	if (adv_data.major == BEACON_MAJOR_ID &&
 	    adv_data.minor == BEACON_MINOR_ID) {
-		beacon_found = true;
 		LOG_DBG("Nofence beacon detected");
 		const uint32_t now = k_uptime_get_32();
-		shortest_distance = beacon_process_event(now, addr, rssi, &adv_data);
-		if (shortest_distance == -EIO) {
-			LOG_WRN("Beacon detected is out of valid range. Will ignore this.");
-			/* Beacon is not found */
-		} else if (shortest_distance == -EPERM) {
+		err = beacon_process_event(now, addr, rssi, &adv_data);
+		if (err == -EPERM) {
 			char *e_msg = "Process of beacon state event error";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), shortest_distance);
-			nf_app_error(ERR_BEACON, shortest_distance, e_msg, strlen(e_msg));
+			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+			nf_app_error(ERR_BEACON, err, e_msg, strlen(e_msg));
+		} else if (err == -EIO) {
+			/* Beacon is out of valid range */
+			LOG_WRN("Beacon detected is out of valid range. Will ignore this.");
+		} else {
+			/* Beacon is detected within valid range */
+			beacon_found = true;
 		}
 	}
 
 	int64_t delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
 	if (delta_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
 		/* Stop beacon scanner. Check if scan is active */
-		if (shortest_distance == UINT8_MAX) {
-			beacon_found = false;
-		}
-
 		if (atomic_get(&atomic_bt_scan_active) == true) {
 			struct ble_ctrl_event *ctrl_event =
 				new_ble_ctrl_event();
@@ -584,6 +583,7 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 static void scan_start(void)
 {
 	beacon_found = false;
+
 	if (!atomic_get(&atomic_bt_ready)) {
 		/* Scan will start when bt is ready */
 		LOG_WRN("Scanning not ready to start");
@@ -625,8 +625,7 @@ static void scan_stop(void)
 		LOG_INF("Stop scanning for Beacons");
 	}
 	if (!beacon_found) {
-		struct ble_beacon_event *bc_event =
-			new_ble_beacon_event();
+		struct ble_beacon_event *bc_event = new_ble_beacon_event();
 		bc_event->status = BEACON_STATUS_NOT_FOUND;
 		EVENT_SUBMIT(bc_event);
 	}
@@ -828,17 +827,19 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_update_collar_status(eh)) {
-		struct update_collar_status *evt = cast_update_collar_status(eh);
+		struct update_collar_status *evt =
+			cast_update_collar_status(eh);
 		collar_status_update(evt->collar_status);
 		return false;
 	}
 	if (is_update_fence_status(eh)) {
-		struct update_fence_status *evt = cast_update_fence_status(eh);		
+		struct update_fence_status *evt = cast_update_fence_status(eh);
 		fence_status_update(evt->fence_status);
 		return false;
 	}
 	if (is_update_fence_version(eh)) {
-		struct update_fence_version *evt = cast_update_fence_version(eh);
+		struct update_fence_version *evt =
+			cast_update_fence_version(eh);
 		fence_def_ver_update(evt->fence_version);
 		if ((evt->fence_version != 0) && (evt->total_fences != 0)) {
 			pasture_update(VALID_PASTURE);

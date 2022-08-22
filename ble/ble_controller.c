@@ -573,16 +573,17 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 	if (delta_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
 		/* Stop beacon scanner. Check if scan is active */
 		if (atomic_get(&atomic_bt_scan_active) == true) {
-			struct ble_ctrl_event *ctrl_event =
-				new_ble_ctrl_event();
-			ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
-			EVENT_SUBMIT(ctrl_event);
 			if (!beacon_found) {
 				struct ble_beacon_event *bc_event =
 					new_ble_beacon_event();
 				bc_event->status = BEACON_STATUS_NOT_FOUND;
 				EVENT_SUBMIT(bc_event);
 			}
+			
+			struct ble_ctrl_event *ctrl_event =
+				new_ble_ctrl_event();
+			ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
+			EVENT_SUBMIT(ctrl_event);
 		}
 	}
 }

@@ -175,10 +175,10 @@ static int set_new_shortest_dist(struct beacon_info *beacon)
 	/* Initialize to largest possible distance */
 	uint8_t shortest_dist = UINT8_MAX;
 	uint8_t entries = 0;
-	printk("[ "); /* Uncomment for debug */
+//	printk("[ "); /* Uncomment for debug */
 	for (uint8_t i = 0; i < beacon->num_measurements; i++) {
 		struct beacon_connection_info *info = &beacon->history[i];
-		printk("%d ", info->beacon_dist); /* Uncomment for debug */
+//		printk("%d ", info->beacon_dist); /* Uncomment for debug */
 		if (k_uptime_get_32() - info->time_diff <
 		    CONFIG_BEACON_MAX_MEASUREMENT_AGE * MSEC_PER_SEC) {
 			if (info->beacon_dist < 1) {
@@ -190,7 +190,7 @@ static int set_new_shortest_dist(struct beacon_info *beacon)
 			entries++;
 		}
 	}
-	printk("]\n"); /* Uncomment for debug */
+//	printk("]\n"); /* Uncomment for debug */
 
 	if (entries == 0) {
 		return -ENODATA;
@@ -254,8 +254,8 @@ static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist,
 		struct beacon_info *c_info = &list->beacon_array[i];
 		char addr[MAC_CHARBUF_SIZE];
 		/* Uncomment for debug */
-		printk("Beacon %s: ",
-		       mac2string(addr, sizeof(addr), &c_info->mac_address));
+//		printk("Beacon %s: ",
+//		       mac2string(addr, sizeof(addr), &c_info->mac_address));
 
 #ifdef CONFIG_BEACON_SHORTEST_DISTANCE
 		/* Update the shortest distance across last 10 second

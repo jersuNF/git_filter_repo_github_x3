@@ -23,7 +23,7 @@ K_SEM_DEFINE(fota_progress_update, 0, 1);
 
 K_THREAD_DEFINE(send_tcp_from_q, CONFIG_SEND_THREAD_STACK_SIZE,
 		send_tcp_fn, NULL, NULL, NULL,
-		CONFIG_SEND_THREAD_PRIORITY, 0, 0);
+		K_PRIO_COOP(CONFIG_SEND_THREAD_PRIORITY), 0, 0);
 
 char server_address[EEP_HOST_PORT_BUF_SIZE-1];
 char server_address_tmp[EEP_HOST_PORT_BUF_SIZE-1];
@@ -70,12 +70,12 @@ APP_DMEM struct configs conf_listen = {
 
 void receive_tcp(struct data *);
 K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK, receive_tcp, &conf.ipv4, NULL, NULL,
-		RCV_PRIORITY, 0, 0);
+		K_PRIO_COOP(RCV_PRIORITY), 0, 0);
 
 extern struct k_sem listen_sem;
 
 K_THREAD_DEFINE(listen_recv_tid, RCV_THREAD_STACK, listen_sock_poll, NULL, NULL,
-		NULL, RCV_PRIORITY, 0, 0);
+		NULL, K_PRIO_COOP(RCV_PRIORITY), 0, 0);
 
 static APP_BMEM bool connected;
 static uint8_t *pMsgIn = NULL;

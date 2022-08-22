@@ -38,7 +38,7 @@ if CELLULAR_CONTROLLER
 
 	config RECV_THREAD_PRIORITY
 	    int
-	    default 14
+	    default 7
 
 	config SEND_THREAD_STACK_SIZE
         int
@@ -46,6 +46,6 @@ if CELLULAR_CONTROLLER
 
     config SEND_THREAD_PRIORITY
         int
-        default 6
+        default 7
 
 endif

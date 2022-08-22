@@ -545,7 +545,7 @@ bool beacon_found = false;
 static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 		    struct net_buf_simple *buf)
 {
-	int err;
+	uint8_t shortest_distance = UINT8_MAX;
 	adv_data_t adv_data;
 	/* Extract major_id, minor_id, tx rssi and uuid */
 	bt_data_parse(buf, data_cb, (void *)&adv_data);
@@ -554,24 +554,28 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 		beacon_found = true;
 		LOG_DBG("Nofence beacon detected");
 		const uint32_t now = k_uptime_get_32();
-		err = beacon_process_event(now, addr, rssi, &adv_data);
-		if (err == -EIO) {
+		shortest_distance = beacon_process_event(now, addr, rssi, &adv_data);
+		if (shortest_distance == -EIO) {
 			LOG_WRN("Beacon detected is out of valid range. Will ignore this.");
 			/* Beacon is not found */
 //			struct ble_beacon_event *bc_event =
 //				new_ble_beacon_event();
 //			bc_event->status = BEACON_STATUS_NOT_FOUND;
 //			EVENT_SUBMIT(bc_event);
-		} else if (err == -EPERM) {
+		} else if (shortest_distance == -EPERM) {
 			char *e_msg = "Process of beacon state event error";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_BEACON, err, e_msg, strlen(e_msg));
+			LOG_ERR("%s (%d)", log_strdup(e_msg), shortest_distance);
+			nf_app_error(ERR_BEACON, shortest_distance, e_msg, strlen(e_msg));
 		}
 	}
 
 	int64_t delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
 	if (delta_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
 		/* Stop beacon scanner. Check if scan is active */
+		if (shortest_distance == UINT8_MAX) {
+			beacon_found = false;
+		}
+
 		if (atomic_get(&atomic_bt_scan_active) == true) {
 			struct ble_ctrl_event *ctrl_event =
 				new_ble_ctrl_event();

@@ -384,11 +384,11 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 	//	}
 
 	if (shortest_dist == UINT8_MAX) {
-		struct ble_beacon_event *event = new_ble_beacon_event();
-		cross_type = CROSS_UNDEFINED;
-		event->status = BEACON_STATUS_NOT_FOUND;
-		LOG_DBG("1: Status: BEACON_STATUS_NOT_FOUND, Type: CROSS_UNDEFINED");
-		EVENT_SUBMIT(event);
+//		struct ble_beacon_event *event = new_ble_beacon_event();
+//		cross_type = CROSS_UNDEFINED;
+//		event->status = BEACON_STATUS_NOT_FOUND;
+//		LOG_DBG("1: Status: BEACON_STATUS_NOT_FOUND, Type: CROSS_UNDEFINED");
+//		EVENT_SUBMIT(event);
 
 	} else if (shortest_dist > CONFIG_BEACON_HIGH_LIMIT) {
 		struct ble_beacon_event *event = new_ble_beacon_event();

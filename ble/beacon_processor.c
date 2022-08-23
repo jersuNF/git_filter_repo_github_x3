@@ -100,48 +100,40 @@ static inline void add_to_beacon_list(struct beacon_list *list,
 				      struct beacon_info *src, uint8_t m)
 {
 	int index = get_beacon_index_by_mac(list, src);
-	if (index < 0) {
-		/* Beacon not found. Check first if list is full */
-		if (list->num_beacons >= CONFIG_BEACON_MAX_BROADCASTERS) {
-			/* Beacon list is full. Remove beacon with worst measurement */
-			uint8_t worst_distance = 0;
-			for (int i = 0; i < CONFIG_BEACON_MAX_BROADCASTERS;
-			     i++) {
-				struct beacon_info *tmp =
-					&list->beacon_array[i];
-				if (tmp->calculated_dist > worst_distance) {
-					worst_distance = tmp->calculated_dist;
-					index = i;
-				}
+
+	/* Beacon not found. Check first if list is full */
+	if (list->num_beacons >= CONFIG_BEACON_MAX_BROADCASTERS) {
+		/* Beacon list is full. Remove beacon with worst measurement */
+		uint8_t worst_distance = 0;
+		for (int i = 0; i < CONFIG_BEACON_MAX_BROADCASTERS; i++) {
+			struct beacon_info *tmp = &list->beacon_array[i];
+			if (tmp->calculated_dist > worst_distance) {
+				worst_distance = tmp->calculated_dist;
+				index = i;
 			}
-			if (m > worst_distance || m == UINT8_MAX) {
-				/* Check if we try to add something worse than already added */
-				return;
-			}
-			char mac_rep[MAC_CHARBUF_SIZE];
-			char mac_new[MAC_CHARBUF_SIZE];
-			struct beacon_info *dst = &list->beacon_array[index];
-			LOG_DBG("Replace worst beacon %s with new beacon %s",
-				mac2string(mac_rep, sizeof(mac_rep),
-					   &dst->mac_address),
-				mac2string(mac_new, sizeof(mac_new),
-					   &src->mac_address));
-			memset(dst, 0, sizeof(struct beacon_info));
-			memcpy(dst, src, sizeof(struct beacon_info));
-		} else {
-			/* Space available. Add beacon to list */
-			struct beacon_info *dst =
-				&list->beacon_array[list->num_beacons];
-			memset(dst, 0, sizeof(struct beacon_info));
-			memcpy(dst, src, sizeof(struct beacon_info));
-			/* Increment to next available slot */
-			list->num_beacons++;
 		}
+		if (m > worst_distance || m == UINT8_MAX) {
+			/* Check if we try to add something worse than already added */
+			return;
+		}
+
+		char mac_rep[MAC_CHARBUF_SIZE];
+		char mac_new[MAC_CHARBUF_SIZE];
+		struct beacon_info *dst = &list->beacon_array[index];
+		LOG_DBG("Replace worst beacon %s with new beacon %s",
+			mac2string(mac_rep, sizeof(mac_rep), &dst->mac_address),
+			mac2string(mac_new, sizeof(mac_new),
+				   &src->mac_address));
+		memset(dst, 0, sizeof(struct beacon_info));
+		memcpy(dst, src, sizeof(struct beacon_info));
 	} else {
-		/* Beacon exist in the list */
-		struct beacon_info *existing_beacon =
-			&list->beacon_array[index];
-		memcpy(existing_beacon, src, sizeof(struct beacon_info));
+		/* Space available. Add beacon to list */
+		struct beacon_info *dst =
+			&list->beacon_array[list->num_beacons];
+		memset(dst, 0, sizeof(struct beacon_info));
+		memcpy(dst, src, sizeof(struct beacon_info));
+		/* Increment to next available slot */
+		list->num_beacons++;
 	}
 }
 /**
@@ -356,11 +348,12 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		beacon.conn_history_peeker = 0;
 		add_to_beacon_history(&info, &beacon);
 		add_to_beacon_list(&beacons, &beacon, (uint8_t)m);
+		return -EIO;
 	} else {
 		add_to_beacon_history(&info,
 				      &beacons.beacon_array[target_beacon]);
 	}
-	if (beacon.num_measurements < 4) {
+	if (beacons.beacon_array[target_beacon].num_measurements < 4) {
 		return -EIO;
 	}
 	uint8_t shortest_dist;

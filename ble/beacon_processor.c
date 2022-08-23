@@ -114,7 +114,7 @@ static inline void add_to_beacon_list(struct beacon_list *list,
 					index = i;
 				}
 			}
-			if (m > worst_distance) {
+			if (m > worst_distance || m == UINT8_MAX) {
 				/* Check if we try to add something worse than already added */
 				return;
 			}
@@ -360,7 +360,9 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		add_to_beacon_history(&info,
 				      &beacons.beacon_array[target_beacon]);
 	}
-
+	if (beacon.num_measurements < 4) {
+		return -EIO;
+	}
 	uint8_t shortest_dist;
 	uint8_t beacon_index = 0;
 	int err =

@@ -69,7 +69,7 @@ static struct k_work_delayable disconnect_peer_work;
 static char bt_device_name[DEVICE_NAME_LEN + 1];
 
 // Shaddow register. Should be initialized with data from EEPROM or FLASH
-static uint16_t current_fw_ver = CONFIG_NOFENCE_FIRMWARE_NUMBER;
+static uint16_t current_fw_ver =  NF_X25_VERSION_NUMBER;
 static uint32_t current_serial_number = CONFIG_NOFENCE_SERIAL_NUMBER;
 static uint8_t current_battery_level = 0;
 static uint8_t current_error_flags = 0;
@@ -560,8 +560,7 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_BEACON, err, e_msg, strlen(e_msg));
 		} else if (err == -EIO) {
-			/* Beacon is out of valid range */
-			LOG_WRN("Beacon detected is out of valid range. Will ignore this.");
+			/* Beacon is out of valid range or not enough readings*/
 		} else {
 			/* Beacon is detected within valid range */
 			beacon_found = true;

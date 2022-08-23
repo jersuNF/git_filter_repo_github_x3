@@ -183,14 +183,6 @@ static inline int update_pasture_from_stg(void)
 			err = -ENODATA;
 			break;
 		}
-/*		if ((fnc_valid_fence() != true) || (fnc_valid_def() != true)) {
-			char *e_msg = "Pasture was not valid def and/or fence.";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_AMC, -ENODATA, e_msg, strlen(e_msg));
-			err = -ENODATA;
-			break;
-		}
-*/
 
 		/* New pasture installed, set teach mode. */
 		if (!keep_mode) {
@@ -552,6 +544,12 @@ static bool event_handler(const struct event_header *eh)
 		update_movement_state(ev->state);
 		return false;
 	}
+	if (is_turn_off_fence_event(eh)) {
+		int err = force_fence_status(FenceStatus_TurnedOffByBLE);
+		if (err != 0) {
+			LOG_ERR("Turn off fence over BLE failed %d", err);
+		}
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 	return false;
@@ -563,3 +561,4 @@ EVENT_SUBSCRIBE(MODULE, new_fence_available);
 EVENT_SUBSCRIBE(MODULE, ble_beacon_event);
 EVENT_SUBSCRIBE(MODULE, sound_status_event);
 EVENT_SUBSCRIBE(MODULE, movement_out_event);
+EVENT_SUBSCRIBE(MODULE, turn_off_fence_event);

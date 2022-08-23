@@ -36,5 +36,5 @@ if MOVE_CONTROLLER
 
 	config ACC_MSGQ_SIZE
 	int "Size of number of acc data elements"
-	default 5
+	default 32
 endif

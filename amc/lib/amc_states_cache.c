@@ -497,7 +497,8 @@ int force_fence_status(FenceStatus new_fence_status)
 	/* Only fence status "Unknown", "NotStarted" and "Invalid" can be forced */
 	if ((new_fence_status != FenceStatus_FenceStatus_UNKNOWN) && 
 		(new_fence_status != FenceStatus_NotStarted) &&
-		(new_fence_status != FenceStatus_FenceStatus_Invalid)) {
+		(new_fence_status != FenceStatus_FenceStatus_Invalid) &&
+		(new_fence_status != FenceStatus_TurnedOffByBLE)) {
 		return -EACCES;
 	}
 

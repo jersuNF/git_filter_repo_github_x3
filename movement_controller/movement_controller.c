@@ -170,6 +170,7 @@ void process_acc_data(raw_acc_data_t *acc)
 			(acc_std_final * 2) /
 				(ACC_STD_EXP_MOVING_AVERAGE_N + 1);
 	}
+	acc_std_final = 16*acc_std_final;
 
 	/* Determine current activity level, the number below is based 
          * on 8 HW_F, HW_J collars placed outside on a flower-bed at 
@@ -196,6 +197,7 @@ void process_acc_data(raw_acc_data_t *acc)
 
 	/** @todo Use total steps? */
 	total_steps += stepcount;
+//	LOG_WRN("Total steps: %d", total_steps);
 
 	if (stepcount >= STEPS_TRIGGER) {
 		if (total_steps >= UINT16_MAX) {
@@ -261,7 +263,8 @@ void process_acc_data(raw_acc_data_t *acc)
 			m_state = STATE_NORMAL;
 		}
 	}
-
+//	LOG_WRN("acc_std_final=%d, acc_sigma_sleep_limit=%d",
+//		acc_std_final, acc_sigma_sleep_limit);
 	/* Submit activity mode and stepcount event if have a new state. */
 	if (prev_state != m_state) {
 		struct movement_out_event *event = new_movement_out_event();
@@ -271,6 +274,7 @@ void process_acc_data(raw_acc_data_t *acc)
 			total_steps, m_state, cur_activity, acc_std_final);
 		EVENT_SUBMIT(event);
 		prev_state = m_state;
+//		LOG_WRN("State: %d", m_state);
 	}
 
 	/* Reset the timer since we just consumed the data successfully. */

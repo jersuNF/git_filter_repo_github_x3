@@ -562,12 +562,16 @@ static bool event_handler(const struct event_header *eh)
 		struct update_fence_status *ev = cast_update_fence_status(eh);
 		current_state.fence_status = ev->fence_status;
 		update_cache_reg(FENCE_STATUS);
-		/* notify_server */
-		LOG_WRN("Schedule poll request: fence_status!");
-		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
-						      K_NO_WAIT);
-		if (err < 0) {
-			LOG_ERR("Error starting modem poll worker: %d", err);
+		if (ev->fence_status == FenceStatus_TurnedOffByBLE) {
+			return false;
+		} else {
+			/* notify_server */
+			LOG_WRN("Schedule poll request: fence_status!");
+			int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
+							      K_NO_WAIT);
+			if (err < 0) {
+				LOG_ERR("Error starting modem poll worker: %d", err);
+			}
 		}
 		return false;
 	}
@@ -805,6 +809,8 @@ static inline void process_ble_cmd_event(void)
 	switch (ble_command) {
 	case CMD_TURN_OFF_FENCE: {
 		/* Wait for final AMC integration. Should simply issue an event. */
+		struct turn_off_fence_event *ev = new_turn_off_fence_event();
+		EVENT_SUBMIT(ev);
 		break;
 	}
 	case CMD_REBOOT_AVR_MCU: {

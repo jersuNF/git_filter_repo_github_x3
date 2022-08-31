@@ -12,7 +12,7 @@
 
 #include "nf_fifo.h"
 #include "trigonometry.h"
-#define STEPS_TRIGGER 5
+#define STEPS_TRIGGER 1
 
 LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 
@@ -76,17 +76,19 @@ uint8_t acc_count_steps(int32_t gravity)
 
 	/* Compute gravity and animal component. */
 	for (i = 0; i < ACC_FIFO_ELEMENTS; i++) {
-		acceleration[i] = -(acc_fifo_z[i] - gravity);
+		acceleration[i] = -(acc_fifo_y[i] - gravity);
 	}
 
 	/* Count the number of steps in the FIFO-queue. */
 	for (i = 0; i < ACC_FIFO_ELEMENTS; i++) {
 		if (acceleration[i] < 0 && step_flag == false) {
 			step_flag = true;
+			acc_fifo_y[i] = gravity;
 		}
 		if (acceleration[i] > STEP_THRESHOLD && step_flag == true) {
 			step_flag = false;
 			step_counter++;
+			acc_fifo_y[i] = gravity;
 		}
 	}
 	return step_counter;
@@ -117,6 +119,7 @@ void process_acc_data(raw_acc_data_t *acc)
 		LOG_DBG("Cannot calculate since FIFO is not filled.");
 		return;
 	}
+	num_acc_fifo_samples = 0;
 
 	/* FIFO is filled, start algorithm. */
 	bool is_active = true;
@@ -136,13 +139,12 @@ void process_acc_data(raw_acc_data_t *acc)
 	uint32_t acc_norm_sum = 0;
 
 	for (i = 0; i < ACC_FIFO_ELEMENTS; i++) {
-		uint32_t acc_tot = ((uint32_t)acc_fifo_x[i] * acc_fifo_x[i]) +
-				   ((uint32_t)acc_fifo_y[i] * acc_fifo_y[i]) +
-				   ((uint32_t)acc_fifo_z[i] * acc_fifo_z[i]);
+		uint32_t acc_tot = (uint32_t)(acc_fifo_x[i] * acc_fifo_x[i]) +
+				   (uint32_t)(acc_fifo_y[i] * acc_fifo_y[i]) +
+				   (uint32_t)(acc_fifo_z[i] * acc_fifo_z[i]);
 		acc_norm[i] = g_u32_SquareRootRounded(acc_tot);
 		acc_norm_sum += acc_norm[i];
-
-		gravity += acc_fifo_z[i] / ACC_FIFO_ELEMENTS;
+		gravity += acc_fifo_y[i] / ACC_FIFO_ELEMENTS;
 	}
 
 	uint32_t acc_norm_mean = acc_norm_sum / ACC_FIFO_ELEMENTS;
@@ -152,7 +154,7 @@ void process_acc_data(raw_acc_data_t *acc)
 	uint32_t acc_std_final = 0;
 	for (i = 0; i < ACC_FIFO_ELEMENTS; i++) {
 		int32_t x = (acc_norm[i] - acc_norm_mean);
-		acc_std += (x * x);
+		acc_std += (uint32_t)(x * x);
 	}
 	acc_std /= ACC_FIFO_ELEMENTS;
 	acc_std = g_u32_SquareRootRounded(acc_std);
@@ -168,6 +170,7 @@ void process_acc_data(raw_acc_data_t *acc)
 			(acc_std_final * 2) /
 				(ACC_STD_EXP_MOVING_AVERAGE_N + 1);
 	}
+	acc_std_final = 16*acc_std_final;
 
 	/* Determine current activity level, the number below is based 
          * on 8 HW_F, HW_J collars placed outside on a flower-bed at 
@@ -194,10 +197,20 @@ void process_acc_data(raw_acc_data_t *acc)
 
 	/** @todo Use total steps? */
 	total_steps += stepcount;
+//	LOG_WRN("Total steps: %d", total_steps);
+
 	if (stepcount >= STEPS_TRIGGER) {
-		struct step_counter_event *steps = new_step_counter_event();
-		steps->steps = total_steps;
-		EVENT_SUBMIT(steps);
+		if (total_steps >= UINT16_MAX) {
+			total_steps = UINT16_MAX;
+			struct step_counter_event *steps = new_step_counter_event();
+			steps->steps = total_steps;
+			EVENT_SUBMIT(steps);
+			reset_total_steps();
+		} else {
+			struct step_counter_event *steps = new_step_counter_event();
+			steps->steps = total_steps;
+			EVENT_SUBMIT(steps);
+		}
 	}
 
 	/* Gradually increase or decrease of activity level. 
@@ -230,14 +243,15 @@ void process_acc_data(raw_acc_data_t *acc)
 
 	if (cur_activity == ACTIVITY_NO) {
 		uint32_t inactive_for_sec =
-			k_uptime_get_32() - first_inactive_timestamp;
+			(uint32_t)((k_uptime_get_32() -
+				    first_inactive_timestamp)/1000);
 		if (inactive_for_sec >= off_animal_time_limit_sec) {
 			is_active = false;
 		}
 	}
 
 	/* Update current activity level. */
-	last_activity = cur_activity;
+	last_activity = (acc_activity_t)cur_activity;
 
 	/* Determine the movement state. */
 	movement_state_t m_state = STATE_SLEEP;
@@ -249,7 +263,8 @@ void process_acc_data(raw_acc_data_t *acc)
 			m_state = STATE_NORMAL;
 		}
 	}
-
+//	LOG_WRN("acc_std_final=%d, acc_sigma_sleep_limit=%d",
+//		acc_std_final, acc_sigma_sleep_limit);
 	/* Submit activity mode and stepcount event if have a new state. */
 	if (prev_state != m_state) {
 		struct movement_out_event *event = new_movement_out_event();
@@ -259,6 +274,7 @@ void process_acc_data(raw_acc_data_t *acc)
 			total_steps, m_state, cur_activity, acc_std_final);
 		EVENT_SUBMIT(event);
 		prev_state = m_state;
+//		LOG_WRN("State: %d", m_state);
 	}
 
 	/* Reset the timer since we just consumed the data successfully. */

@@ -82,6 +82,16 @@ Mode get_mode(void);
 FenceStatus calc_fence_status(uint32_t maybe_out_of_fence_timestamp,
 			      enum beacon_status_type beacon_status);
 
+/**
+ * @brief Force a new fence status. This is only applicable for fence/pasture
+ * updates. Otherwise fence status is calculated (See "calc_fence_status").
+ * 
+ * @param new_fence_status A new fence status (See FenceStatus). Currently, only
+ * fence status "Unknown" and "NotStarted" is available.
+ * @return 0 if successfull, otherwise negative error code.
+ */
+int force_fence_status(FenceStatus new_fence_status);
+
 /** @brief Calculates and gives the new collarstatus.
  * 
  * @returns The new collar status calculated.

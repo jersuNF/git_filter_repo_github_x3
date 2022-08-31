@@ -37,7 +37,7 @@ if MESSAGING
 
 	config MESSAGING_SEND_THREAD_PRIORITY
 		int "Priority of the send to server queue thread"
-		default 1
+		default 10
 
 	config CC_ACK_TIMEOUT_SEC
 	    int "Timeout when waiting for ack from cellular controller"

@@ -86,7 +86,7 @@ static void buzzer_update_fn()
 			uint32_t delta_zap_eval =
 				k_uptime_get_32() - zap_timestamp;
 
-			if (delta_zap_eval >= ZAP_EVALUATION_TIME) {
+			if (delta_zap_eval >= ZAP_EVALUATION_TIME_MS) {
 				zap_eval_doing = false;
 			}
 		}
@@ -143,7 +143,8 @@ static void buzzer_update_fn()
 				 	 */
 						k_work_reschedule(
 							&update_buzzer_work,
-							K_MSEC(ZAP_EVALUATION_TIME));
+							K_MSEC
+							(ZAP_EVALUATION_TIME_MS));
 					}
 				}
 				if (freq >= WARN_FREQ_MAX &&

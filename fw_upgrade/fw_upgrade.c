@@ -33,10 +33,19 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_FW_UPGRADE_LOG_LEVEL);
 #error Unsupported boardfile for performing Nofence FOTA! (SG25/C25 only)
 #endif
 
+#define FOTA_RETRIES 2 /* to ensure modem is switched back to PSV in case of
+ * unhandled FOTA download errors */
+
 static void fota_dl_handler(const struct fota_download_evt *evt)
 {
 	/* Start by setting status event to idle, nothing in progress. */
 	switch (evt->id) {
+	case FOTA_DOWNLOAD_EVT_PROGRESS: {
+		struct dfu_status_event *event = new_dfu_status_event();
+		event->dfu_status = DFU_STATUS_IN_PROGRESS;
+		EVENT_SUBMIT(event);
+		break;
+	}
 	case FOTA_DOWNLOAD_EVT_ERROR: {
 		struct dfu_status_event *event = new_dfu_status_event();
 		LOG_ERR("Received error from fota_download %d", evt->cause);
@@ -47,7 +56,6 @@ static void fota_dl_handler(const struct fota_download_evt *evt)
 		event->dfu_error = evt->cause;
 		/* Submit event. */
 		EVENT_SUBMIT(event);
-
 		break;
 	}
 	case FOTA_DOWNLOAD_EVT_FINISHED: {
@@ -105,6 +113,7 @@ void mark_new_application_as_valid(void)
  */
 static bool event_handler(const struct event_header *eh)
 {
+	static uint32_t fota_requests;
 	if (is_start_fota_event(eh)) {
 		struct start_fota_event *ev = cast_start_fota_event(eh);
 
@@ -115,6 +124,8 @@ static bool event_handler(const struct event_header *eh)
 			memcpy(host_tmp, ev->host, CONFIG_FW_UPGRADE_HOST_LEN);
 			memcpy(path_tmp, ev->path, CONFIG_FW_UPGRADE_PATH_LEN);
 		} else {
+			memset(host_tmp, 0, CONFIG_FW_UPGRADE_HOST_LEN);
+			memset(path_tmp, 0, CONFIG_FW_UPGRADE_PATH_LEN);
 			memcpy(host_tmp, CACHE_HOST_NAME,
 			       sizeof(CACHE_HOST_NAME));
 			snprintf(path_tmp, CONFIG_FW_UPGRADE_PATH_LEN,
@@ -122,16 +133,31 @@ static bool event_handler(const struct event_header *eh)
 		}
 
 		/* If no error, submit in progress event. */
-		if (!fota_download_start(host_tmp, path_tmp, -1, 0, 0)) {
+		int ret = fota_download_start(host_tmp, path_tmp, -1, 0, 0);
+		if (ret == 0) {
 			struct dfu_status_event *status =
 				new_dfu_status_event();
 
 			status->dfu_status = DFU_STATUS_IN_PROGRESS;
 			status->dfu_error = 0;
-
+			EVENT_SUBMIT(status);
+		} else if (ret == -EALREADY) {
+			if (++fota_requests > FOTA_RETRIES) {
+				if (fota_requests == UINT32_MAX) fota_requests = FOTA_RETRIES;
+				struct dfu_status_event *status =
+					new_dfu_status_event();
+				status->dfu_status = DFU_STATUS_IDLE;
+				status->dfu_error = -ENODATA;
+				EVENT_SUBMIT(status);
+			}
+		}
+		else {
+			struct dfu_status_event *status =
+				new_dfu_status_event();
+			status->dfu_status = DFU_STATUS_IDLE;
+			status->dfu_error = -ENODATA;
 			EVENT_SUBMIT(status);
 		}
-
 		return false;
 	}
 	/* If event is unhandled, unsubscribe. */

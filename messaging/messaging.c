@@ -74,11 +74,13 @@ atomic_t cached_dist_correction_end = ATOMIC_INIT(0);
 
 K_SEM_DEFINE(cache_ready_sem, 0, 1);
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
-K_SEM_DEFINE(send_out_ack, 0, 1);
+K_SEM_DEFINE(send_out_ack, 1, 1);
 K_SEM_DEFINE(connection_ready, 0, 1);
 
 static collar_state_struct_t current_state;
 static gnss_last_fix_struct_t cached_fix;
+
+static bool fota_reset = true;
 
 typedef enum {
 	COLLAR_MODE,
@@ -98,7 +100,7 @@ typedef enum {
 static int cached_and_ready_reg[CACHED_READY_END_OF_LIST];
 
 static int rat, mnc, rssi, min_rssi, max_rssi;
-static uint8_t ccid[20];
+static uint8_t ccid[20] = "\0";
 
 static uint32_t new_fence_in_progress;
 static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
@@ -135,7 +137,7 @@ static bool m_transfer_boot_params = true;
 static bool m_confirm_acc_limits, m_confirm_ble_key;
 
 K_MUTEX_DEFINE(send_binary_mutex);
-
+static bool reboot_scheduled;
 #define MODULE messaging
 LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
 
@@ -500,6 +502,10 @@ static void update_cache_reg(cached_and_ready_enum index)
  */
 static bool event_handler(const struct event_header *eh)
 {
+	if (is_pwr_reboot_event(eh)) {
+		reboot_scheduled = true;
+		return false;
+	}
 	if (is_gnss_data(eh)) {
 		struct gnss_data *ev = cast_gnss_data(eh);
 		cached_gnss_mode = (gnss_mode_t)ev->gnss_data.lastfix.mode;
@@ -549,6 +555,13 @@ static bool event_handler(const struct event_header *eh)
 		struct update_collar_mode *ev = cast_update_collar_mode(eh);
 		current_state.collar_mode = ev->collar_mode;
 		update_cache_reg(COLLAR_MODE);
+		/* notify_server */
+		LOG_WRN("Schedule poll request: collar_mode!");
+		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
+						      K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Error starting modem poll worker: %d", err);
+		}
 		return false;
 	}
 	if (is_update_collar_status(eh)) {
@@ -561,15 +574,26 @@ static bool event_handler(const struct event_header *eh)
 		struct update_fence_status *ev = cast_update_fence_status(eh);
 		current_state.fence_status = ev->fence_status;
 		update_cache_reg(FENCE_STATUS);
+		if (ev->fence_status == FenceStatus_TurnedOffByBLE) {
+			return false;
+		} else {
+			/* notify_server */
+			LOG_WRN("Schedule poll request: fence_status!");
+			int err = k_work_reschedule_for_queue(
+				&send_q, &modem_poll_work, K_NO_WAIT);
+			if (err < 0) {
+				LOG_ERR("Error starting modem poll worker: %d",
+					err);
+			}
+		}
 		return false;
 	}
 	if (is_update_fence_version(eh)) {
 		struct update_fence_version *ev = cast_update_fence_version(eh);
 		current_state.fence_version = ev->fence_version;
-
 		update_cache_reg(FENCE_VERSION);
-
 		/* Notify server as soon as the new fence is activated. */
+		LOG_WRN("Schedule poll request: fence_version!");
 		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
 						      K_NO_WAIT);
 		if (err < 0) {
@@ -732,7 +756,15 @@ static bool event_handler(const struct event_header *eh)
 		update_cache_reg(GSM_INFO);
 		return false;
 	}
-
+	if (is_dfu_status_event(eh)) {
+		struct dfu_status_event *fw_upgrade_event =
+			cast_dfu_status_event(eh);
+		if (fw_upgrade_event->dfu_status == DFU_STATUS_IDLE &&
+		    fw_upgrade_event->dfu_error != 0) {
+			fota_reset = true;
+		}
+		return false;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -806,6 +838,7 @@ EVENT_SUBSCRIBE(MODULE, warn_correction_start_event);
 EVENT_SUBSCRIBE(MODULE, warn_correction_pause_event);
 EVENT_SUBSCRIBE(MODULE, warn_correction_end_event);
 EVENT_SUBSCRIBE(MODULE, gsm_info_event);
+EVENT_SUBSCRIBE(MODULE, dfu_status_event);
 
 static inline void process_ble_cmd_event(void)
 {
@@ -824,6 +857,8 @@ static inline void process_ble_cmd_event(void)
 	switch (ble_command) {
 	case CMD_TURN_OFF_FENCE: {
 		/* Wait for final AMC integration. Should simply issue an event. */
+		struct turn_off_fence_event *ev = new_turn_off_fence_event();
+		EVENT_SUBMIT(ev);
 		break;
 	}
 	case CMD_REBOOT_AVR_MCU: {
@@ -1051,7 +1086,7 @@ void build_poll_request(NofenceMessage *poll_req)
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 	}
-	if (m_confirm_ble_key) {
+	if (m_confirm_ble_key || m_transfer_boot_params) {
 		poll_req->m.poll_message_req.has_rgubcBleKey = true;
 		poll_req->m.poll_message_req.rgubcBleKey.size =
 			EEP_BLE_SEC_KEY_LEN;
@@ -1078,9 +1113,12 @@ void build_poll_request(NofenceMessage *poll_req)
 			.has_ulApplicationVersion = true;
 		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion =
 			NF_X25_VERSION_NUMBER;
-		poll_req->m.poll_message_req.has_xSimCardId = true;
-		memcpy(poll_req->m.poll_message_req.xSimCardId, ccid,
-		       sizeof(poll_req->m.poll_message_req.xSimCardId) - 1);
+		if (memcmp(ccid, "\0", 1) != 0) {
+			poll_req->m.poll_message_req.has_xSimCardId = true;
+			memcpy(poll_req->m.poll_message_req.xSimCardId, ccid,
+			       sizeof(poll_req->m.poll_message_req.xSimCardId) -
+				       1);
+		}
 		/* TODO pshustad, clean up and re-enable the commented code below */
 		//		uint16_t xbootVersion;
 		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
@@ -1171,14 +1209,20 @@ void fence_download(uint8_t new_fframe)
 				new_fence_in_progress);
 
 			expected_fframe = 0;
+			new_fence_in_progress = 0;
 			return;
 		}
 		if (new_fframe == expected_fframe) {
 			expected_fframe++;
 			/* TODO: handle failure to send request!*/
-			request_fframe(new_fence_in_progress, expected_fframe);
+			int err = request_fframe(new_fence_in_progress,
+						 expected_fframe);
 			LOG_INF("Requesting frame %d of new fence: %d",
 				expected_fframe, new_fence_in_progress);
+			if (err != 0) {
+				expected_fframe = 0;
+				new_fence_in_progress = 0;
+			}
 		}
 	}
 }
@@ -1266,31 +1310,39 @@ int send_binary_message(uint8_t *data, size_t len)
 		EVENT_SUBMIT(ev);
 		int ret = k_sem_take(&connection_ready, K_MINUTES(2));
 		if (ret != 0) {
-			LOG_WRN("Connection not ready, can't send message now! (%d)",
-				ret);
+			char *e_msg =
+				"Connection not ready, can't send message now!";
+			LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
+			nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
+			k_mutex_unlock(&send_binary_mutex);
 			return -ETIMEDOUT;
 		}
 		uint16_t byteswap_size = BYTESWAP16(len - 2);
 		memcpy(&data[0], &byteswap_size, 2);
-
+		int err = k_sem_take(&send_out_ack,
+				     K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC));
+		if (err != 0) {
+			char *e_msg = "Timed out waiting for cellular ack";
+			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			k_mutex_unlock(&send_binary_mutex);
+			struct messaging_stop_connection_event *ev =
+				new_messaging_stop_connection_event();
+			EVENT_SUBMIT(ev);
+			return -ETIMEDOUT;
+		}
 		struct messaging_proto_out_event *msg2send =
 			new_messaging_proto_out_event();
 		msg2send->buf = data;
 		msg2send->len = len;
 		EVENT_SUBMIT(msg2send);
 
-		int err = k_sem_take(&send_out_ack,
-				     K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC));
-		if (err != 0) {
-			LOG_ERR("Timed out waiting for cellular ack");
-			k_mutex_unlock(&send_binary_mutex);
-			return -ETIMEDOUT;
-		}
-		k_mutex_unlock(&send_binary_mutex);
-		return 0;
 	} else {
+		struct messaging_stop_connection_event *ev =
+			new_messaging_stop_connection_event();
+		EVENT_SUBMIT(ev);
 		return -ETIMEDOUT;
 	}
+	k_mutex_unlock(&send_binary_mutex);
 	return 0;
 }
 
@@ -1365,7 +1417,6 @@ void process_poll_response(NofenceMessage *proto)
 	// If we are asked to, reboot
 	if (pResp->has_bReboot && pResp->bReboot) {
 		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
-		r_ev->reason = REBOOT_SERVER_RESET;
 		EVENT_SUBMIT(r_ev);
 	}
 	/* TODO: set activation mode to (pResp->eActivationMode); */
@@ -1500,12 +1551,14 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 	    fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER) {
 		LOG_INF("Received new app version from server %i",
 			fw_ver_from_server->ulApplicationVersion);
-		struct start_fota_event *ev = new_start_fota_event();
-		ev->override_default_host = false;
-		ev->version = fw_ver_from_server->ulApplicationVersion;
-		EVENT_SUBMIT(ev);
-	} else {
-		LOG_INF("FW ver from server is same as current or not set");
+		if (!reboot_scheduled) {
+			struct start_fota_event *ev = new_start_fota_event();
+			ev->override_default_host = false;
+			ev->reset_download_client = fota_reset;
+			fota_reset = false;
+			ev->version = fw_ver_from_server->ulApplicationVersion;
+			EVENT_SUBMIT(ev);
+		}
 	}
 }
 

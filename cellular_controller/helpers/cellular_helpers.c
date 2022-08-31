@@ -11,6 +11,7 @@
 #include <modem_nf.h>
 #include "cellular_helpers_header.h"
 #include "cellular_controller_events.h"
+#include "messaging_module_events.h"
 #include <logging/log.h>
 
 LOG_MODULE_REGISTER(cellular_helpers, LOG_LEVEL_DBG);
@@ -24,9 +25,8 @@ struct msg2server {
 };
 K_MSGQ_DEFINE(msgq, sizeof(struct msg2server), 1, 4);
 
-struct k_poll_event events[1] = {
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
-					K_POLL_MODE_NOTIFY_ONLY, &msgq, 0)};
+struct k_poll_event events[1] = { K_POLL_EVENT_STATIC_INITIALIZER(
+	K_POLL_TYPE_MSGQ_DATA_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY, &msgq, 0) };
 
 K_TIMER_DEFINE(sendall_timer, NULL, NULL);
 
@@ -75,7 +75,7 @@ static size_t sendall(int sock, const void *buf, size_t len)
 		}
 		buf = (const char *)buf + out_len;
 		len -= out_len;
-		if (k_timer_remaining_ticks(&sendall_timer) == 0){
+		if (k_timer_remaining_ticks(&sendall_timer) == 0) {
 			return -ETIMEDOUT;
 		}
 	}
@@ -121,7 +121,7 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 			return ret;
 		}
 	}
-	ret = connect(data->tcp.sock, addr, addrlen);
+	ret = connect(socket_id, addr, addrlen);
 	if (ret < 0) {
 		LOG_ERR("Cannot connect to TCP remote (%s): %d", data->proto,
 			errno);
@@ -146,14 +146,13 @@ int socket_listen(struct data *data)
 			data->tcp.sock);
 	}
 
-	k_sleep(K_MSEC(50));
 	ret = listen(data->tcp.sock, 5);
 	if (ret < 0) {
 		LOG_ERR("Cannot start TCP listening socket (%s): %d",
 			data->proto, errno);
 		ret = -errno;
 	} else {
-		ret = data->tcp.sock;
+		ret = 0;
 	}
 	return ret;
 }
@@ -186,10 +185,16 @@ int socket_receive(struct data *data, char **msg)
 
 int reset_modem(void)
 {
-	for (int i=0; i<=6; i++) {
-		(void)close(i);
+	(void)close(conf_listen.ipv4.tcp.sock);
+	(void)close(conf.ipv4.tcp.sock);
+	int ret = modem_nf_reset();
+	if (ret != 0) {
+		LOG_WRN("modem_nf_reset() returned %d", ret);
+		return ret;
 	}
-	return modem_nf_reset();
+	ret = socket_listen(&conf_listen.ipv4);
+	LOG_WRN("socket_listen() returned %d", ret);
+	return ret;
 }
 
 /**
@@ -200,8 +205,8 @@ int reset_modem(void)
  * @param collar_ip
  * @return
  */
-int get_ip(char** collar_ip)
-{/*TODO: extract the quoted address if needed and return the exact length. */
+int get_ip(char **collar_ip)
+{ /*TODO: extract the quoted address if needed and return the exact length. */
 	int ret = get_pdp_addr(collar_ip);
 	return ret;
 }
@@ -210,7 +215,7 @@ int get_ip(char** collar_ip)
  * will close the latest TCP socket with id greater than zero, as zero is
  * reserved for the listening socket. */
 /* TODO: enhance robustness. */
-int stop_tcp(void)
+int stop_tcp(const bool keep_modem_awake)
 {
 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
 		if (conf.ipv6.tcp.sock > 0) {
@@ -226,22 +231,29 @@ int stop_tcp(void)
 		}
 	}
 
-	int ret = modem_nf_sleep();
-	if (ret != 0){
-		LOG_ERR("Failed to switch modem to power saving!");
-		/*TODO: notify error handler and take action.*/
+	if (!keep_modem_awake) {
+		int ret = modem_nf_sleep();
+		if (ret != 0) {
+			LOG_ERR("Failed to switch modem to power saving!");
+			/*TODO: notify error handler and take action.*/
+			return ret;
+		}
+		struct modem_state *modem_inavtive = new_modem_state();
+		modem_inavtive->mode = SLEEP;
+		EVENT_SUBMIT(modem_inavtive);
 	}
-	return ret;
+
+	return 0;
 }
 
 int send_tcp(char *msg, size_t len)
 {
 #if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
 	LOG_DBG("Socket sending %d bytes!\n", len);
-		for (int i = 0; i<len; i++){
-			printk("\\x%02x",*(msg+i));
-		}
-		printk("\n");
+	for (int i = 0; i < len; i++) {
+		printk("\\x%02x", *(msg + i));
+	}
+	printk("\n");
 #endif
 	int ret;
 	ret = (int)sendall(conf.ipv4.tcp.sock, msg, len);
@@ -255,7 +267,6 @@ int send_tcp(char *msg, size_t len)
      * this should be handled here as well.*/
 	return ret;
 }
-
 
 /** put a message in the send out queue
  * The queue can hold a single message and it will be discarded on arrival of
@@ -285,15 +296,18 @@ void send_tcp_fn(void)
 				struct msg2server msg_in_q;
 				k_msgq_get(&msgq, &msg_in_q, K_FOREVER);
 				int ret = send_tcp(msg_in_q.msg, msg_in_q.len);
-				if (ret != msg_in_q.len){
+				if (ret != msg_in_q.len) {
 					LOG_WRN("Failed to send TCP message!");
+					struct messaging_stop_connection_event *end_connection =
+						new_messaging_stop_connection_event();
+					EVENT_SUBMIT(end_connection);
 				}
 				struct free_message_mem_event *ev =
 					new_free_message_mem_event();
 				EVENT_SUBMIT(ev);
 			}
+			events[0].state = K_POLL_STATE_NOT_READY;
 		}
-		events[0].state = K_POLL_STATE_NOT_READY;
 	}
 }
 
@@ -302,25 +316,24 @@ const struct device *bind_modem(void)
 	return device_get_binding(GSM_DEVICE);
 }
 
-int check_ip(void){
-	char* collar_ip = NULL;
+int check_ip(void)
+{
+	char *collar_ip = NULL;
 	uint8_t timeout_counter = 0;
-	while(timeout_counter++ <= 40){
+	while (timeout_counter++ <= 200) {
 		k_sleep(K_MSEC(50));
 		int ret = get_ip(&collar_ip);
-		if (ret != 0){
+		if (ret != 0) {
 			LOG_ERR("Failed to get ip from sara r4 driver!");
 			return -1;
 			/*TODO: reset modem?*/
-		}else {
-			ret = memcmp(collar_ip,"\"0.0.0.0\"",
-				     9);
-			if (ret > 0){
+		} else {
+			ret = memcmp(collar_ip, "\"0.0.0.0\"", 9);
+			if (ret > 0) {
 				k_sleep(K_MSEC(50));
 				return 0;
 			}
 		}
-
 	}
 	LOG_ERR("Failed to acquire ip!");
 	return -1;

@@ -22,7 +22,7 @@ int init_movement_controller(void);
 #define A_DEC_THRESHOLD_MED 0
 
 /** Amplitude of z-acceleration needed to count a step. */
-#define STEP_THRESHOLD 3000
+#define STEP_THRESHOLD 1500
 
 /** Number of steps needed in the step counter for activity to be HIGH. */
 #define STEPS 10

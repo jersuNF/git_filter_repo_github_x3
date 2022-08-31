@@ -136,21 +136,18 @@ void reset_zap_count_day()
 void cache_eeprom_variables(void)
 {
 	int err = eep_uint16_read(EEP_ZAP_CNT_TOT, &total_zap_cnt);
-
 	if (err) {
 		LOG_ERR("Could not read zap count total %i", err);
 		return;
 	}
 
 	err = eep_uint32_read(EEP_WARN_CNT_TOT, &total_warn_cnt);
-
 	if (err) {
 		LOG_ERR("Could not read warn count total %i", err);
 		return;
 	}
 
 	err = eep_uint16_read(EEP_ZAP_CNT_DAY, &zap_count_day);
-
 	if (err) {
 		LOG_ERR("Could not read zap count day %i", err);
 		return;
@@ -166,7 +163,6 @@ void increment_warn_count(void)
 	  * Write everytime total_warn_cnt % n == true? 
 	  */
 	int err = eep_uint32_write(EEP_WARN_CNT_TOT, total_warn_cnt);
-
 	if (err) {
 		LOG_ERR("Could not write warn count total %i", err);
 		return;
@@ -181,34 +177,48 @@ static void enter_teach_mode()
 	uint16_t zap_cnt = 0;
 
 	err = eep_uint32_read(EEP_WARN_CNT_TOT, &warn_cnt);
-
 	if (err) {
 		LOG_ERR("Could not read warn count total %i", err);
-		return;
 	}
 
 	err = eep_uint16_read(EEP_ZAP_CNT_TOT, &zap_cnt);
-
 	if (err) {
 		LOG_ERR("Could not read zap count total %i", err);
-		return;
 	}
 
 	err = eep_uint8_read(EEP_TEACH_MODE_FINISHED, &teach_mode_finished);
-
 	if (err) {
 		LOG_ERR("Could not read teach mode finished %i", err);
-		return;
 	}
+	if (teach_mode_finished != 0) {
+		teach_mode_finished = 0;
 
+		err = eep_uint8_write(EEP_TEACH_MODE_FINISHED, teach_mode_finished);
+		if (err) {
+			LOG_ERR("Could not write teach mode finished %i", err);
+		}
+	}
 	teach_mode_saved_warn_cnt = (uint16_t)warn_cnt;
 	teach_mode_saved_zap_cnt = (uint8_t)zap_cnt;
 }
 
 void force_teach_mode()
 {
-	current_mode = Mode_Teach;
-	enter_teach_mode();
+	if (current_mode != Mode_Teach) {
+		current_mode = Mode_Teach;
+		
+		int err = eep_uint8_write(EEP_COLLAR_MODE, (uint8_t)current_mode);
+		if (err) {
+			LOG_ERR("Could not write to collar mode %i ", err);
+		}
+
+		enter_teach_mode();
+
+		/* Notify server about mode change. */
+		struct update_collar_mode *mode_ev = new_update_collar_mode();
+		mode_ev->collar_mode = current_mode;
+		EVENT_SUBMIT(mode_ev);
+	}
 }
 
 void init_states_and_variables(void)
@@ -360,123 +370,161 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 			      enum beacon_status_type beacon_status)
 {
 	FenceStatus new_fence_status = current_fence_status;
-
 	uint32_t maybe_out_of_fence_delta =
-		((k_uptime_get_32() - maybe_out_of_fence) / MSEC_PER_SEC);
+				((k_uptime_get_32() - maybe_out_of_fence) / MSEC_PER_SEC);
 
 	switch (current_fence_status) {
-	case FenceStatus_FenceStatus_UNKNOWN:
-		if (beacon_status == BEACON_STATUS_REGION_NEAR) {
-			new_fence_status = FenceStatus_BeaconContact;
-			LOG_INF("Unknown->BeaconContact");
-		} else if (fnc_valid_def()) {
-			new_fence_status = FenceStatus_NotStarted;
-			LOG_INF("Unknown->NotStarted");
-		}
-		break;
-	case FenceStatus_NotStarted:
-		if (beacon_status == BEACON_STATUS_REGION_NEAR) {
-			new_fence_status = FenceStatus_BeaconContact;
-			LOG_INF("NotStarted->BeaconContact");
-		} else if (is_inside_fence_relaxed()) {
-			new_fence_status = FenceStatus_FenceStatus_Normal;
-			LOG_INF("NotStarted->Normal");
-		}
-		break;
-	case FenceStatus_FenceStatus_Normal:
-		if (beacon_status == BEACON_STATUS_REGION_NEAR) {
-			new_fence_status = FenceStatus_BeaconContactNormal;
-			LOG_INF("Normal->BeaconContactNormal");
-		} else if (maybe_out_of_fence_delta > OUT_OF_FENCE_TIME) {
-			/** Old @todo ? UBX_Poll(UBXID_MON_HW);
-			 * v3.21-7: Poll hardware info (fex. jamming). 
-			 */
-			new_fence_status = FenceStatus_MaybeOutOfFence;
-			LOG_INF("Normal->MaybeOutsideFence");
-		} else if (zap_pain_cnt >= pain_cnt_def_free) {
-			new_fence_status = FenceStatus_Escaped;
-			LOG_INF("Normal->Escaped");
-		}
-		break;
-	case FenceStatus_MaybeOutOfFence:
-		if (beacon_status == BEACON_STATUS_REGION_NEAR) {
-			new_fence_status = FenceStatus_BeaconContact;
-			LOG_INF("MaybeOutside->BeaconContact");
-		} else if (zap_pain_cnt >= pain_cnt_def_free) {
-			new_fence_status = FenceStatus_Escaped;
-			LOG_INF("MaybeOutside->Escaped");
-		} else if (maybe_out_of_fence_delta < OUT_OF_FENCE_TIME) {
-			new_fence_status = FenceStatus_FenceStatus_Normal;
-			LOG_INF("MaybeOutside->Normal");
-		}
-		break;
-	case FenceStatus_Escaped:
-		if (beacon_status == BEACON_STATUS_REGION_NEAR) {
-			new_fence_status = FenceStatus_BeaconContact;
-			LOG_INF("Escaped->BeaconContact");
-		} else if (is_inside_fence_relaxed()) {
-			new_fence_status = FenceStatus_FenceStatus_Normal;
-			LOG_INF("Escaped->Normal");
-		}
-		break;
-
-	case FenceStatus_BeaconContact:
-		if (beacon_status != BEACON_STATUS_REGION_NEAR) {
-			if (fnc_valid_fence()) {
+		case FenceStatus_FenceStatus_UNKNOWN: {
+			if (beacon_status == BEACON_STATUS_REGION_NEAR) {
+				new_fence_status = FenceStatus_BeaconContact;
+				LOG_INF("FenceStatus:Unknown->BeaconContact");
+			} else if (fnc_valid_def()) {
 				new_fence_status = FenceStatus_NotStarted;
-				LOG_INF("BeaconContact->NotStarted");
-			} else {
-				new_fence_status =
-					FenceStatus_FenceStatus_UNKNOWN;
-				LOG_INF("BeaconContact->Unknown");
+				LOG_INF("FenceStatus:Unknown->NotStarted");
 			}
+			break;
 		}
-		break;
-	case FenceStatus_BeaconContactNormal:
-		if (beacon_status != BEACON_STATUS_REGION_NEAR) {
-			new_fence_status = FenceStatus_FenceStatus_Normal;
-			LOG_INF("BeaconContactNormal->Normal");
+		case FenceStatus_NotStarted: {
+			if (beacon_status == BEACON_STATUS_REGION_NEAR) {
+				new_fence_status = FenceStatus_BeaconContact;
+				LOG_INF("FenceStatus:NotStarted->BeaconContact");
+			} else if (is_inside_fence_relaxed()) {
+				new_fence_status = FenceStatus_FenceStatus_Normal;
+				LOG_INF("FenceStatus:NotStarted->Normal");
+			}
+			break;
 		}
-		break;
-	case FenceStatus_FenceStatus_Invalid:
-		LOG_INF("Invalid fence status.");
-		break;
-	case FenceStatus_TurnedOffByBLE:
-		LOG_INF("Fence turned of by BLE.");
-		break;
-	default:
-		new_fence_status = FenceStatus_FenceStatus_UNKNOWN;
-		LOG_INF("?->Unknown");
-		char *msg = "Unknown fence status received.";
-		nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
-		break;
+		case FenceStatus_FenceStatus_Normal: {
+			if (beacon_status == BEACON_STATUS_REGION_NEAR) {
+				new_fence_status = FenceStatus_BeaconContactNormal;
+				LOG_INF("FenceStatus:Normal->BeaconContactNormal");
+			} else if (maybe_out_of_fence_delta > OUT_OF_FENCE_TIME) {
+				/** Old @todo ? UBX_Poll(UBXID_MON_HW);
+				 * v3.21-7: Poll hardware info (fex. jamming). 
+				 */
+				new_fence_status = FenceStatus_MaybeOutOfFence;
+				LOG_INF("FenceStatus:Normal->MaybeOutsideFence");
+			} else if (zap_pain_cnt >= pain_cnt_def_free) {
+				new_fence_status = FenceStatus_Escaped;
+				LOG_INF("NFenceStatus:ormal->Escaped");
+			}
+			break;
+		}
+		case FenceStatus_MaybeOutOfFence: {
+			if (beacon_status == BEACON_STATUS_REGION_NEAR) {
+				new_fence_status = FenceStatus_BeaconContact;
+				LOG_INF("FenceStatus:MaybeOutside->BeaconContact");
+			} else if (zap_pain_cnt >= pain_cnt_def_free) {
+				new_fence_status = FenceStatus_Escaped;
+				LOG_INF("FenceStatus:MaybeOutside->Escaped");
+			} else if (maybe_out_of_fence_delta < OUT_OF_FENCE_TIME) {
+				new_fence_status = FenceStatus_FenceStatus_Normal;
+				LOG_INF("FenceStatus:MaybeOutside->Normal");
+			}
+			break;
+		}
+		case FenceStatus_Escaped: {
+			if (beacon_status == BEACON_STATUS_REGION_NEAR) {
+				new_fence_status = FenceStatus_BeaconContact;
+				LOG_INF("FenceStatus:Escaped->BeaconContact");
+			} else if (is_inside_fence_relaxed()) {
+				new_fence_status = FenceStatus_FenceStatus_Normal;
+				LOG_INF("FenceStatus:Escaped->Normal");
+			}
+			break;
+		}
+		case FenceStatus_BeaconContact: {
+			if (beacon_status != BEACON_STATUS_REGION_NEAR) {
+				if (fnc_valid_fence()) {
+					new_fence_status = FenceStatus_NotStarted;
+					LOG_INF("FenceStatus:BeaconContact->NotStarted");
+				} else {
+					new_fence_status = FenceStatus_FenceStatus_UNKNOWN;
+					LOG_INF("FenceStatus:BeaconContact->Unknown");
+				}
+			}
+			break;
+		}
+		case FenceStatus_BeaconContactNormal: {
+			if (beacon_status != BEACON_STATUS_REGION_NEAR) {
+				new_fence_status = FenceStatus_FenceStatus_Normal;
+				LOG_INF("FenceStatus:BeaconContactNormal->Normal");
+			}
+			break;
+		}
+		case FenceStatus_FenceStatus_Invalid: {
+			LOG_INF("FenceStatus:Invalid");
+			break;
+		}
+		case FenceStatus_TurnedOffByBLE: {
+			LOG_INF("FenceStatus:Fence turned of by BLE");
+			break;
+		}
+		default: {
+			new_fence_status = FenceStatus_FenceStatus_UNKNOWN;
+			LOG_INF("FenceStatus:?->Unknown");
+			char *msg = "Unknown fence status received.";
+			nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
+			break;
+		}
 	}
 
 	/* If new status, write to EEPROM. */
 	if (current_fence_status != new_fence_status) {
 		current_fence_status = new_fence_status;
-		int err = eep_uint8_write(EEP_FENCE_STATUS,
-					  (uint8_t)current_fence_status);
-
+		int err = eep_uint8_write(EEP_FENCE_STATUS, 
+					(uint8_t)current_fence_status);
 		if (err) {
 			LOG_ERR("Could not write to fence status %i ", err);
 		}
 
 		/* Notify server about fence status change. */
-		struct update_fence_status *fence_ev =
-			new_update_fence_status();
+		struct update_fence_status *fence_ev = new_update_fence_status();
 		fence_ev->fence_status = current_fence_status;
 		EVENT_SUBMIT(fence_ev);
 
 		/* Notify server if animal escaped. */
 		if (current_fence_status == FenceStatus_Escaped) {
-			struct animal_escape_event *ev =
-				new_animal_escape_event();
+			struct animal_escape_event *ev = new_animal_escape_event();
 			EVENT_SUBMIT(ev);
 		}
 	}
-
 	return new_fence_status;
+}
+
+int force_fence_status(FenceStatus new_fence_status)
+{
+	/* Only fence status "Unknown", "NotStarted" and "Invalid" can be forced */
+	if ((new_fence_status != FenceStatus_FenceStatus_UNKNOWN) && 
+		(new_fence_status != FenceStatus_NotStarted) &&
+		(new_fence_status != FenceStatus_FenceStatus_Invalid) &&
+		(new_fence_status != FenceStatus_TurnedOffByBLE)) {
+		return -EACCES;
+	}
+
+	if (new_fence_status != current_fence_status) {
+		if ((new_fence_status == FenceStatus_NotStarted) && 
+			(fnc_valid_def() != true)) {
+			LOG_WRN("Unable to force fence status");
+			return -EACCES;
+		}
+
+		/* Write new fence status to eeprom */
+		int err = eep_uint8_write(EEP_FENCE_STATUS, (uint8_t)new_fence_status);
+		if (err) {
+			LOG_WRN("Unable to write fence status to eeprom, error:%d", err);
+			return -EACCES;
+		}
+
+		/* Update current fence status */
+		current_fence_status = new_fence_status;
+
+		/* Notify listeners about fence status change. */
+		struct update_fence_status *event = new_update_fence_status();
+		event->fence_status = current_fence_status;
+		EVENT_SUBMIT(event);
+	}
+	return 0;
 }
 
 CollarStatus calc_collar_status(void)
@@ -486,67 +534,70 @@ CollarStatus calc_collar_status(void)
 	CollarStatus new_collar_status = current_collar_status;
 
 	switch (current_collar_status) {
-	case CollarStatus_CollarStatus_UNKNOWN:
-		if (mov_state == STATE_NORMAL) {
-			new_collar_status = CollarStatus_CollarStatus_Normal;
-			LOG_INF("Unknown->Normal");
-		} else if (mov_state == STATE_SLEEP) {
-			new_collar_status = CollarStatus_Sleep;
-			LOG_INF("Unknown->Sleep");
-		}
-		break;
-	case CollarStatus_CollarStatus_Normal:
-		if (mov_state == STATE_SLEEP) {
-			new_collar_status = CollarStatus_Sleep;
-			LOG_INF("Normal->Sleep");
-		} else if (mov_state == STATE_INACTIVE) {
-			LOG_WRN("Went directly to inactive in normal");
-		}
-		break;
-	case CollarStatus_Sleep:
-		if (mov_state == STATE_NORMAL) {
-			new_collar_status = CollarStatus_CollarStatus_Normal;
-			LOG_INF("Sleep->Normal");
-		} else if (mov_state == STATE_INACTIVE) {
-			new_collar_status = CollarStatus_OffAnimal;
-			LOG_INF("Sleep->OffAnimal");
-		}
-		break;
-	case CollarStatus_OffAnimal:
-		if (mov_state == STATE_NORMAL) {
-			new_collar_status = CollarStatus_CollarStatus_Normal;
-			LOG_INF("Off->Normal");
-		} else if (mov_state == STATE_SLEEP) {
-			new_collar_status = CollarStatus_Sleep;
-			LOG_INF("Off->Sleep");
-		}
-		break;
-	case CollarStatus_PowerOff:
-		if (atomic_get(&power_state) != PWR_CRITICAL) {
+		case CollarStatus_CollarStatus_UNKNOWN: {
 			if (mov_state == STATE_NORMAL) {
-				new_collar_status =
-					CollarStatus_CollarStatus_Normal;
-				LOG_INF("PowerOff->Normal");
+				new_collar_status = CollarStatus_CollarStatus_Normal;
+				LOG_INF("CollarStatus:Unknown->Normal");
 			} else if (mov_state == STATE_SLEEP) {
 				new_collar_status = CollarStatus_Sleep;
-				LOG_INF("PowerOff->Sleep");
-			} else if (mov_state == STATE_INACTIVE) {
-				char *msg =
-					"Went directly to inactive in powerOff";
-				nf_app_error(ERR_AMC, -EINVAL, msg,
-					     strlen(msg));
-			} else {
-				new_collar_status =
-					CollarStatus_CollarStatus_UNKNOWN;
-				LOG_INF("PowerOff->UNKNOWN");
+				LOG_INF("CollarStatus:Unknown->Sleep");
 			}
+			break;
 		}
-		break;
-	default:
-		new_collar_status = CollarStatus_CollarStatus_UNKNOWN;
-		char *msg = "Unknown collar status";
-		nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
-		break;
+		case CollarStatus_CollarStatus_Normal: {
+			if (mov_state == STATE_SLEEP) {
+				new_collar_status = CollarStatus_Sleep;
+				LOG_INF("CollarStatus:Normal->Sleep");
+			} else if (mov_state == STATE_INACTIVE) {
+				LOG_WRN("CollarStatus:Went directly to inactive in normal");
+			}
+			break;
+		}
+		case CollarStatus_Sleep: {
+			if (mov_state == STATE_NORMAL) {
+				new_collar_status = CollarStatus_CollarStatus_Normal;
+				LOG_INF("CollarStatus:Sleep->Normal");
+			} else if (mov_state == STATE_INACTIVE) {
+				new_collar_status = CollarStatus_OffAnimal;
+				LOG_INF("CollarStatus:Sleep->OffAnimal");
+			}
+			break;
+		}
+		case CollarStatus_OffAnimal: {
+			if (mov_state == STATE_NORMAL) {
+				new_collar_status = CollarStatus_CollarStatus_Normal;
+				LOG_INF("CollarStatus:Off->Normal");
+			} else if (mov_state == STATE_SLEEP) {
+				new_collar_status = CollarStatus_Sleep;
+				LOG_INF("CollarStatus:Off->Sleep");
+			}
+			break;
+		}
+		case CollarStatus_PowerOff: {
+			if (atomic_get(&power_state) != PWR_CRITICAL) {
+				if (mov_state == STATE_NORMAL) {
+					new_collar_status = CollarStatus_CollarStatus_Normal;
+					LOG_INF("CollarStatus:PowerOff->Normal");
+				} else if (mov_state == STATE_SLEEP) {
+					new_collar_status = CollarStatus_Sleep;
+					LOG_INF("CollarStatus:PowerOff->Sleep");
+				} else if (mov_state == STATE_INACTIVE) {
+					char *msg = 
+						"CollarStatus:Went directly to inactive from powerOff";
+					nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
+				} else {
+					new_collar_status = CollarStatus_CollarStatus_UNKNOWN;
+					LOG_INF("CollarStatus:PowerOff->UNKNOWN");
+				}
+			}
+			break;
+		}
+		default: {
+			new_collar_status = CollarStatus_CollarStatus_UNKNOWN;
+			char *msg = "Unknown collar status";
+			nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
+			break;
+		}
 	}
 
 	/* Added to enable power off mode without power switch. 
@@ -554,26 +605,23 @@ CollarStatus calc_collar_status(void)
 	 */
 	if (atomic_get(&power_state) == PWR_CRITICAL) {
 		new_collar_status = CollarStatus_PowerOff;
-		LOG_INF("...->PowerOff");
+		LOG_INF("CollarStatus:...->PowerOff");
 	}
 
 	/* If new status, write to EEPROM. */
 	if (current_collar_status != new_collar_status) {
 		current_collar_status = new_collar_status;
-		int err = eep_uint8_write(EEP_COLLAR_STATUS,
-					  (uint8_t)current_collar_status);
-
+		int err = eep_uint8_write(EEP_COLLAR_STATUS, 
+					(uint8_t)current_collar_status);
 		if (err) {
 			LOG_ERR("Could not write to collar status %i ", err);
 		}
 
 		/* Notify server about collar status change. */
-		struct update_collar_status *collar_ev =
-			new_update_collar_status();
+		struct update_collar_status *collar_ev = new_update_collar_status();
 		collar_ev->collar_status = current_collar_status;
 		EVENT_SUBMIT(collar_ev);
 	}
-
 	return new_collar_status;
 }
 

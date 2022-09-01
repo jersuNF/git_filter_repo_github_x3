@@ -249,7 +249,7 @@ static void build_log_message()
 	 *  has been entered. Consider to add this in future.
 	 */
 	seq_2.m.seq_msg_2.has_xGnssModeCounts = false;
-	seq_2.m.seq_msg_2.err = encode_and_store_message(&seq_2);
+	err = encode_and_store_message(&seq_2);
 	if (err) {
 		char *e_msg = "Failed to encode and save sequence message 2";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);

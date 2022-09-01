@@ -244,9 +244,12 @@ static void build_log_message()
 		histogram.qc_battery.usVbattMin;
 	seq_2.m.seq_msg_2.xBatteryQc.usTemperature =
 		(uint16_t)atomic_get(&cached_temp);
+	/** @todo Power modes in GNSS controller is not implemented. 
+	 *  The struct xGNSSModeCounts counts number of times each mode
+	 *  has been entered. Consider to add this in future.
+	 */
 	seq_2.m.seq_msg_2.has_xGnssModeCounts = false;
-
-	err = encode_and_store_message(&seq_2);
+	seq_2.m.seq_msg_2.err = encode_and_store_message(&seq_2);
 	if (err) {
 		char *e_msg = "Failed to encode and save sequence message 2";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);

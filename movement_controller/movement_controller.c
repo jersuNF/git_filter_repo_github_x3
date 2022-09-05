@@ -3,23 +3,22 @@
  */
 
 #include <zephyr.h>
-#include "movement_controller.h"
-#include "movement_events.h"
 #include <logging/log.h>
 #include <drivers/sensor.h>
 
+#include "movement_controller.h"
+#include "movement_events.h"
 #include "nf_settings.h"
-
 #include "nf_fifo.h"
 #include "trigonometry.h"
-#define STEPS_TRIGGER 1
 
 LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 
-static const struct device *sensor;
-
+#define STEPS_TRIGGER 1
 #define ACC_FIFO_ELEMENTS 32
 #define SENSOR_SAMPLE_INTERVAL_MS 100
+
+static const struct device *sensor;
 
 /** @todo Add to make configurable from messaging.c event. Also eeprom settings? */
 static uint16_t off_animal_time_limit_sec = OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT;
@@ -125,18 +124,14 @@ void process_acc_data(raw_acc_data_t *acc)
 	fifo_put(acc->z, acc_fifo_z, ACC_FIFO_ELEMENTS);
 
 	if (++num_acc_fifo_samples < ACC_FIFO_ELEMENTS) {
-		/** @todo Uncomment after testing */
-		// LOG_DBG("Filling data buffer, sample %d/%d", num_acc_fifo_samples, 
-		// 		(ACC_FIFO_ELEMENTS - 1));
+		LOG_DBG("Filling data buffer, sample %d/%d", num_acc_fifo_samples, 
+				(ACC_FIFO_ELEMENTS - 1));
 		return;
 	}
-	/** @todo Change the debug after testing */
 	LOG_DBG("Accel. data acquired (%d/%d samples), processing", 
 			num_acc_fifo_samples, ACC_FIFO_ELEMENTS);
 
 	num_acc_fifo_samples = 0; //Reset data sample counter
-
-	//LOG_DBG("Movement data acquired, performing activity level calculation");
 
 	/* FIFO is filled, start algorithm. */
 	bool is_active = true;
@@ -215,8 +210,7 @@ void process_acc_data(raw_acc_data_t *acc)
 	/** @todo Use total steps? */
 	total_steps += stepcount;
 
-	/* LOG_INF for testing purposes, should be set to LOG_DBG */
-	LOG_INF("Total steps = %d, Step count = %d", total_steps, stepcount);
+	LOG_DBG("Total steps = %d, Step count = %d", total_steps, stepcount);
 
 	if (stepcount >= STEPS_TRIGGER) {
 		if (total_steps >= UINT16_MAX) {
@@ -282,8 +276,7 @@ void process_acc_data(raw_acc_data_t *acc)
 			m_state = STATE_NORMAL;
 		}
 	}
-//	LOG_WRN("acc_std_final=%d, acc_sigma_sleep_limit=%d",
-//		acc_std_final, acc_sigma_sleep_limit);
+
 	/* Submit activity mode and stepcount event if have a new state. */
 	if (prev_state != m_state) {
 		struct movement_out_event *event = new_movement_out_event();
@@ -293,7 +286,6 @@ void process_acc_data(raw_acc_data_t *acc)
 			total_steps, m_state, cur_activity, acc_std_final);
 		EVENT_SUBMIT(event);
 		prev_state = m_state;
-//		LOG_WRN("State: %d", m_state);
 	}
 
 	/* Reset the timer since we just consumed the data successfully. */
@@ -351,69 +343,51 @@ void fetch_and_display(const struct device *sensor)
 	}
 }
 
-// /* Interrupt trigger function. */
-// static void trigger_handler(const struct device *dev, const struct sensor_trigger *trig)
-// {
-// 	fetch_and_display(dev);
-// 	/** @todo Resample logic to 1hz / 10hz. */
-// }
-
 static void sample_sensor_work_fn(struct k_work *work)
 {
 	k_work_reschedule(&sample_sensor_work, K_MSEC(SENSOR_SAMPLE_INTERVAL_MS));
 	fetch_and_display(sensor);
 }
 
-int update_acc_odr_and_trigger(acc_mode_t mode_hz)
+int update_acc_odr(acc_mode_t mode_hz)
 {
 	/* Setup interrupt triggers. */
 	struct sensor_trigger trig;
-	int rc;
-
 	trig.type = SENSOR_TRIG_DATA_READY;
 	trig.chan = SENSOR_CHAN_ACCEL_XYZ;
 
 	uint32_t hz = 0;
-
 	switch (mode_hz) {
-	case MODE_OFF: {
-		hz = 0;
-		break;
+		case MODE_OFF: {
+			hz = 0;
+			break;
+		}
+		case MODE_1_6_HZ: {
+			hz = 1;
+			break;
+		}
+		case MODE_12_5_HZ: {
+	#if CONFIG_LIS2DH
+			hz = 10;
+	#else
+			hz = 12;
+	#endif
+			break;
+		}
+		default: {
+			return -EINVAL;
+		}
 	}
-	case MODE_1_6_HZ: {
-		hz = 1;
-		break;
-	}
-	case MODE_12_5_HZ: {
-#if CONFIG_LIS2DH
-		hz = 10;
-#else
-		hz = 12;
-#endif
-		break;
-	}
-	default: {
-		return -EINVAL;
-	}
-	}
-
 	struct sensor_value odr = {
 		.val1 = hz,
 	};
 
-	rc = sensor_attr_set(sensor, trig.chan, SENSOR_ATTR_SAMPLING_FREQUENCY,
-			     &odr);
-	if (rc != 0) {
-		LOG_ERR("Failed to set odr: %d", rc);
-		return rc;
+	int ret = sensor_attr_set(sensor, trig.chan, SENSOR_ATTR_SAMPLING_FREQUENCY,
+			    &odr);
+	if (ret != 0) {
+		LOG_ERR("Failed to set odr: %d", ret);
+		return ret;
 	}
-
-	// rc = sensor_trigger_set(sensor, &trig, trigger_handler);
-	// if (rc != 0) {
-	// 	LOG_ERR("Failed to set trigger: %d", rc);
-	// 	return rc;
-	// }
-
 	return 0;
 }
 
@@ -435,7 +409,7 @@ int init_movement_controller(void)
 	}
 
 	/* Setup interrupt triggers. */
-	err = update_acc_odr_and_trigger(MODE_12_5_HZ);
+	err = update_acc_odr(MODE_12_5_HZ);
 	if (err) {
 		return err;
 	}
@@ -485,7 +459,7 @@ static bool event_handler(const struct event_header *eh)
 	if (is_movement_set_mode_event(eh)) {
 		struct movement_set_mode_event *ev =
 			cast_movement_set_mode_event(eh);
-		err = update_acc_odr_and_trigger(ev->acc_mode);
+		err = update_acc_odr(ev->acc_mode);
 		if (err) {
 			return false;
 		}

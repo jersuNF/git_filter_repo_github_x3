@@ -1351,6 +1351,7 @@ int send_binary_message(uint8_t *data, size_t len)
 
 int encode_and_send_message(NofenceMessage *msg_proto)
 {
+	/* NB: We assume the two first bytes are empty when sending */
 	uint8_t encoded_msg[NofenceMessage_size + 2];
 	memset(encoded_msg, 0, sizeof(encoded_msg));
 	size_t encoded_size = 0;
@@ -1366,9 +1367,6 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return ret;
 	}
-	/* Store the length of the message in the two first bytes */
-	encoded_msg[0] = (uint8_t)encoded_size;
-	encoded_msg[1] = (uint8_t)(encoded_size >> 8);
 
 	return send_binary_message(encoded_msg, encoded_size + header_size);
 }

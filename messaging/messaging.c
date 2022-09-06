@@ -1283,9 +1283,6 @@ int send_binary_message(uint8_t *data, size_t len)
 			nf_app_error(ERR_MESSAGING, -ETIMEDOUT, e_msg,
 				     strlen(e_msg));
 			k_mutex_unlock(&send_binary_mutex);
-			struct messaging_stop_connection_event *ev =
-				new_messaging_stop_connection_event();
-			EVENT_SUBMIT(ev);
 			return -ETIMEDOUT;
 		}
 		struct messaging_proto_out_event *msg2send =
@@ -1295,9 +1292,6 @@ int send_binary_message(uint8_t *data, size_t len)
 		EVENT_SUBMIT(msg2send);
 
 	} else {
-		struct messaging_stop_connection_event *ev =
-			new_messaging_stop_connection_event();
-		EVENT_SUBMIT(ev);
 		return -ETIMEDOUT;
 	}
 	k_mutex_unlock(&send_binary_mutex);

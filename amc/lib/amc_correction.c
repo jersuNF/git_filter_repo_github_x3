@@ -519,8 +519,3 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 		}
 	}
 }
-
-int16_t get_last_fence_dist(void)
-{
-	return (uint16_t)atomic_get(&last_mean_dist);
-}

@@ -167,8 +167,10 @@ struct k_work_delayable process_warning_work;
 struct k_work_delayable process_warning_correction_start_work;
 struct k_work_delayable process_warning_correction_end_work;
 
-atomic_t poll_period_minutes = ATOMIC_INIT(5);
+atomic_t poll_period_minutes = ATOMIC_INIT(15);
 atomic_t log_period_minutes = ATOMIC_INIT(30);
+
+static bool warning_active;
 
 K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE,
 		messaging_thread_fn, NULL, NULL, NULL,
@@ -705,6 +707,7 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_warn_correction_start_event(eh)) {
+		warning_active = true;
 		struct warn_correction_start_event *ev =
 			cast_warn_correction_start_event(eh);
 		atomic_set(&cached_dist_correction_start, ev->fence_dist);
@@ -730,10 +733,10 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_warn_correction_end_event(eh)) {
+		warning_active = false;
 		struct warn_correction_end_event *ev =
 			cast_warn_correction_end_event(eh);
 		atomic_set(&cached_dist_correction_end, ev->fence_dist);
-
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_warning_correction_end_work,
 			K_NO_WAIT);
@@ -1306,6 +1309,10 @@ void proto_InitHeader(NofenceMessage *msg)
  */
 int send_binary_message(uint8_t *data, size_t len)
 {
+	if (warning_active) { /*do not activate the modem until the warning
+ * stops*/
+		return -EIO;
+	}
 	/* We can only send 1 message at a time, use mutex. */
 	if (k_mutex_lock(&send_binary_mutex,
 			 K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC * 2)) == 0) {
@@ -1328,9 +1335,6 @@ int send_binary_message(uint8_t *data, size_t len)
 			char *e_msg = "Timed out waiting for cellular ack";
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 			k_mutex_unlock(&send_binary_mutex);
-			struct messaging_stop_connection_event *ev =
-				new_messaging_stop_connection_event();
-			EVENT_SUBMIT(ev);
 			return -ETIMEDOUT;
 		}
 		struct messaging_proto_out_event *msg2send =
@@ -1340,9 +1344,6 @@ int send_binary_message(uint8_t *data, size_t len)
 		EVENT_SUBMIT(msg2send);
 
 	} else {
-		struct messaging_stop_connection_event *ev =
-			new_messaging_stop_connection_event();
-		EVENT_SUBMIT(ev);
 		return -ETIMEDOUT;
 	}
 	k_mutex_unlock(&send_binary_mutex);
@@ -1368,6 +1369,10 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 		return ret;
 	}
 
+	if (msg_proto->which_m == NofenceMessage_poll_message_req_tag) {
+		/*force the poll request even if the buzzer is active*/
+		warning_active = false;
+	}
 	return send_binary_message(encoded_msg, encoded_size + header_size);
 }
 
@@ -1527,9 +1532,6 @@ void process_poll_response(NofenceMessage *proto)
 			}
 		}
 	}
-	if (pResp->has_versionInfo) {
-		process_upgrade_request(&pResp->versionInfo);
-	}
 	if (pResp->ulFenceDefVersion != current_state.fence_version &&
 	    new_fence_in_progress != pResp->ulFenceDefVersion) {
 		/* Request frame 0. */
@@ -1541,6 +1543,11 @@ void process_poll_response(NofenceMessage *proto)
 			first_frame = true;
 			new_fence_in_progress = pResp->ulFenceDefVersion;
 		}
+		return;
+	}
+
+	if (pResp->has_versionInfo) {
+		process_upgrade_request(&pResp->versionInfo);
 	}
 	return;
 }

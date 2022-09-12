@@ -185,7 +185,6 @@ void error_handler_thread_fn()
 #endif
 
 		/** @todo Notify server about error? */
-
 		/* Store part of the error to system diagnostic partition. */
 		int64_t unix_time;
 		if (date_time_now(&unix_time)) {

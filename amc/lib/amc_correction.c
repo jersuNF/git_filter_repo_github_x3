@@ -131,7 +131,6 @@ static void buzzer_update_fn()
 						struct amc_zapped_now_event *ev =
 							new_amc_zapped_now_event();
 
-						ev->has_fence_dist = true;
 						ev->fence_dist = atomic_get(
 							&last_mean_dist);
 
@@ -206,8 +205,6 @@ static void correction_start(int16_t mean_dist)
 				new_warn_correction_start_event();
 
 			ev->fence_dist = atomic_get(&last_mean_dist);
-			ev->has_fence_dist = true;
-
 			EVENT_SUBMIT(ev);
 
 			/** @deprecated ??
@@ -230,6 +227,7 @@ static void correction_start(int16_t mean_dist)
 
 			struct animal_warning_event *ev =
 				new_animal_warning_event();
+			ev->fence_dist = atomic_get(&last_mean_dist);
 			EVENT_SUBMIT(ev);
 
 			increment_warn_count();
@@ -250,8 +248,6 @@ static void correction_end(void)
 			new_warn_correction_end_event();
 
 		ev->fence_dist = atomic_get(&last_mean_dist);
-		ev->has_fence_dist = true;
-
 		EVENT_SUBMIT(ev);
 
 		/** @todo????
@@ -303,7 +299,6 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 			new_warn_correction_pause_event();
 
 		ev->fence_dist = atomic_get(&last_mean_dist);
-		ev->has_fence_dist = true;
 		ev->warn_duration =
 			correction_pause_timestamp - k_uptime_get_32();
 

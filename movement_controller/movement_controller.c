@@ -3,22 +3,22 @@
  */
 
 #include <zephyr.h>
-#include "movement_controller.h"
-#include "movement_events.h"
 #include <logging/log.h>
 #include <drivers/sensor.h>
 
+#include "movement_controller.h"
+#include "movement_events.h"
 #include "nf_settings.h"
-
 #include "nf_fifo.h"
 #include "trigonometry.h"
-#define STEPS_TRIGGER 1
 
 LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 
-static const struct device *sensor;
-
+#define STEPS_TRIGGER 1
 #define ACC_FIFO_ELEMENTS 32
+#define SENSOR_SAMPLE_INTERVAL_MS 100
+
+static const struct device *sensor;
 
 /** @todo Add to make configurable from messaging.c event. Also eeprom settings? */
 static uint16_t off_animal_time_limit_sec = OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT;
@@ -33,15 +33,14 @@ static uint32_t first_inactive_timestamp = 0;
 static uint32_t total_steps = 0;
 static uint16_t activity_decrease_timestamp = 0;
 static uint32_t active_timestamp = 0;
-
 static movement_state_t prev_state = STATE_INACTIVE;
-
 static uint8_t num_acc_fifo_samples = 0;
-
 static acc_activity_t last_activity = ACTIVITY_NO;
 
-/* Variable used to check if we time out regarding new accelerometer data. */
+/* Work queue item for triggering a read from the sensor */
+static struct k_work_delayable sample_sensor_work; 
 
+/* Variable used to check if we time out regarding new accelerometer data. */
 void movement_timeout_fn(struct k_timer *dummy);
 K_TIMER_DEFINE(movement_timeout_timer, movement_timeout_fn, NULL);
 
@@ -99,27 +98,40 @@ void reset_total_steps(void)
 	total_steps = 0;
 }
 
+/**
+ * @brief Processing of accelerometer data to compute animal activity level.
+ *  
+ * @details The animal activity computation is only performed on 32 consecutive 
+ * samples from the accelerometer. Thus, this function fills the data buffer
+ * from the first 31 calls of this function and perform the calculation on the 
+ * 32 call to this function.
+ * 
+ * @param acc Accelerometer data in the X-,Y- and Z-axis (See raw_acc_data_t).
+ */
 void process_acc_data(raw_acc_data_t *acc)
 {
 	if (acc == NULL) {
-		/* Error handle. */
 		LOG_ERR("No data available.");
 		return;
 	}
 
 	/* Gets set to true when we fill up the fifo. */
 	static bool first_read = true;
+
 	/* Store newest value into FIFO. */
 	fifo_put(acc->x, acc_fifo_x, ACC_FIFO_ELEMENTS);
 	fifo_put(acc->y, acc_fifo_y, ACC_FIFO_ELEMENTS);
 	fifo_put(acc->z, acc_fifo_z, ACC_FIFO_ELEMENTS);
 
 	if (++num_acc_fifo_samples < ACC_FIFO_ELEMENTS) {
-		/* Error/warning handle. */
-		LOG_DBG("Cannot calculate since FIFO is not filled.");
+		LOG_DBG("Filling data buffer, sample %d/%d", num_acc_fifo_samples, 
+				(ACC_FIFO_ELEMENTS - 1));
 		return;
 	}
-	num_acc_fifo_samples = 0;
+	LOG_DBG("Accel. data acquired (%d/%d samples), processing", 
+			num_acc_fifo_samples, ACC_FIFO_ELEMENTS);
+
+	num_acc_fifo_samples = 0; //Reset data sample counter
 
 	/* FIFO is filled, start algorithm. */
 	bool is_active = true;
@@ -134,7 +146,7 @@ void process_acc_data(raw_acc_data_t *acc)
 	 * Due to existing scaling bug, 8 bit values are returned in int16_t so values
 	 * are times 256. Since one "tick" is 16 mg, the max theoretical value is
 	 * math.sqrt(4+4+4) * 1000 * 256 / 16 = 55425.62584220407 ~ 55426.
-         */
+     */
 
 	uint32_t acc_norm_sum = 0;
 
@@ -197,7 +209,8 @@ void process_acc_data(raw_acc_data_t *acc)
 
 	/** @todo Use total steps? */
 	total_steps += stepcount;
-//	LOG_WRN("Total steps: %d", total_steps);
+
+	LOG_DBG("Total steps = %d, Step count = %d", total_steps, stepcount);
 
 	if (stepcount >= STEPS_TRIGGER) {
 		if (total_steps >= UINT16_MAX) {
@@ -214,8 +227,8 @@ void process_acc_data(raw_acc_data_t *acc)
 	}
 
 	/* Gradually increase or decrease of activity level. 
-         * If activity is greater than the last, increment instantly.
-         */
+     * If activity is greater than the last, increment instantly. 
+	 */
 	uint32_t a_delta = k_uptime_get_32() - activity_decrease_timestamp;
 	if (cur_activity > last_activity) {
 		cur_activity = last_activity + 1;
@@ -263,8 +276,7 @@ void process_acc_data(raw_acc_data_t *acc)
 			m_state = STATE_NORMAL;
 		}
 	}
-//	LOG_WRN("acc_std_final=%d, acc_sigma_sleep_limit=%d",
-//		acc_std_final, acc_sigma_sleep_limit);
+
 	/* Submit activity mode and stepcount event if have a new state. */
 	if (prev_state != m_state) {
 		struct movement_out_event *event = new_movement_out_event();
@@ -274,7 +286,6 @@ void process_acc_data(raw_acc_data_t *acc)
 			total_steps, m_state, cur_activity, acc_std_final);
 		EVENT_SUBMIT(event);
 		prev_state = m_state;
-//		LOG_WRN("State: %d", m_state);
 	}
 
 	/* Reset the timer since we just consumed the data successfully. */
@@ -295,8 +306,7 @@ void movement_thread_fn()
 		raw_acc_data_t raw_data;
 		int err = k_msgq_get(&acc_data_msgq, &raw_data, K_FOREVER);
 		if (err) {
-			LOG_ERR("Error retrieving accelerometer message queue %i",
-				err);
+			LOG_ERR("Error retrieving accelerometer message queue %i", err);
 			continue;
 		}
 		process_acc_data(&raw_data);
@@ -306,15 +316,14 @@ void movement_thread_fn()
 void fetch_and_display(const struct device *sensor)
 {
 	struct sensor_value accel[3];
-	int rc = sensor_sample_fetch(sensor);
 
+	int rc = sensor_sample_fetch(sensor);
 	if (rc < 0) {
 		LOG_ERR("Error fetching acc sensor values %i", rc);
 		return;
 	}
 
 	rc = sensor_channel_get(sensor, SENSOR_CHAN_ACCEL_XYZ, accel);
-
 	if (rc < 0) {
 		LOG_ERR("Error getting acc channel values %i", rc);
 		return;
@@ -329,68 +338,56 @@ void fetch_and_display(const struct device *sensor)
 
 	while (k_msgq_put(&acc_data_msgq, &data, K_NO_WAIT) != 0) {
 		/* Message queue is full: purge old data & try again */
+		LOG_WRN("Message queue full, purging and retry");
 		k_msgq_purge(&acc_data_msgq);
 	}
 }
 
-/* Interrupt trigger function. */
-static void trigger_handler(const struct device *dev,
-			    const struct sensor_trigger *trig)
+static void sample_sensor_work_fn(struct k_work *work)
 {
-	fetch_and_display(dev);
-	/** @todo Resample logic to 1hz / 10hz. */
+	k_work_reschedule(&sample_sensor_work, K_MSEC(SENSOR_SAMPLE_INTERVAL_MS));
+	fetch_and_display(sensor);
 }
 
-int update_acc_odr_and_trigger(acc_mode_t mode_hz)
+int update_acc_odr(acc_mode_t mode_hz)
 {
 	/* Setup interrupt triggers. */
 	struct sensor_trigger trig;
-	int rc;
-
 	trig.type = SENSOR_TRIG_DATA_READY;
 	trig.chan = SENSOR_CHAN_ACCEL_XYZ;
 
 	uint32_t hz = 0;
-
 	switch (mode_hz) {
-	case MODE_OFF: {
-		hz = 0;
-		break;
+		case MODE_OFF: {
+			hz = 0;
+			break;
+		}
+		case MODE_1_6_HZ: {
+			hz = 1;
+			break;
+		}
+		case MODE_12_5_HZ: {
+	#if CONFIG_LIS2DH
+			hz = 10;
+	#else
+			hz = 12;
+	#endif
+			break;
+		}
+		default: {
+			return -EINVAL;
+		}
 	}
-	case MODE_1_6_HZ: {
-		hz = 1;
-		break;
-	}
-	case MODE_12_5_HZ: {
-#if CONFIG_LIS2DH
-		hz = 10;
-#else
-		hz = 12;
-#endif
-		break;
-	}
-	default: {
-		return -EINVAL;
-	}
-	}
-
 	struct sensor_value odr = {
 		.val1 = hz,
 	};
 
-	rc = sensor_attr_set(sensor, trig.chan, SENSOR_ATTR_SAMPLING_FREQUENCY,
-			     &odr);
-	if (rc != 0) {
-		LOG_ERR("Failed to set odr: %d", rc);
-		return rc;
+	int ret = sensor_attr_set(sensor, trig.chan, SENSOR_ATTR_SAMPLING_FREQUENCY,
+			    &odr);
+	if (ret != 0) {
+		LOG_ERR("Failed to set odr: %d", ret);
+		return ret;
 	}
-
-	rc = sensor_trigger_set(sensor, &trig, trigger_handler);
-	if (rc != 0) {
-		LOG_ERR("Failed to set trigger: %d", rc);
-		return rc;
-	}
-
 	return 0;
 }
 
@@ -412,10 +409,14 @@ int init_movement_controller(void)
 	}
 
 	/* Setup interrupt triggers. */
-	err = update_acc_odr_and_trigger(MODE_12_5_HZ);
+	err = update_acc_odr(MODE_12_5_HZ);
 	if (err) {
 		return err;
 	}
+
+	/* Init and start the sensor sampling work item */
+	k_work_init_delayable(&sample_sensor_work, sample_sensor_work_fn);
+	k_work_reschedule(&sample_sensor_work, K_MSEC(SENSOR_SAMPLE_INTERVAL_MS));
 
 	/* Start the timeout timer. This is reset everytime we have calculated
 	 * the activity successfully.
@@ -458,7 +459,7 @@ static bool event_handler(const struct event_header *eh)
 	if (is_movement_set_mode_event(eh)) {
 		struct movement_set_mode_event *ev =
 			cast_movement_set_mode_event(eh);
-		err = update_acc_odr_and_trigger(ev->acc_mode);
+		err = update_acc_odr(ev->acc_mode);
 		if (err) {
 			return false;
 		}

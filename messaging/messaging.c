@@ -125,7 +125,7 @@ uint8_t process_ano_msg(UbxAnoReply *);
 int encode_and_send_message(NofenceMessage *);
 int encode_and_store_message(NofenceMessage *);
 int send_binary_message(uint8_t *, size_t);
-
+static int send_all_stored_messages(void);
 void messaging_thread_fn(void);
 
 static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix,
@@ -137,6 +137,7 @@ static bool m_transfer_boot_params = true;
 static bool m_confirm_acc_limits, m_confirm_ble_key;
 
 K_MUTEX_DEFINE(send_binary_mutex);
+K_MUTEX_DEFINE(read_flash_mutex);
 static bool reboot_scheduled;
 #define MODULE messaging
 LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
@@ -255,7 +256,6 @@ static void build_log_message()
 	if (err) {
 		char *e_msg = "Failed to encode and save sequence message 2";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return;
 	}
 	LOG_INF("Store seq_1 and seq_2 to flash");
@@ -264,7 +264,7 @@ static void build_log_message()
 int read_and_send_log_data_cb(uint8_t *data, size_t len)
 {
 	LOG_DBG("Send log message fetched from flash");
-	/* Fetch the lenght from the two first bytes */
+	/* Fetch the length from the two first bytes */
 	uint16_t new_len = (uint16_t)((data[1] << 8) + (data[0] & 0x00ff) + 2);
 	uint8_t *new_data = k_malloc(new_len);
 	memcpy(new_data, &data[0], new_len);
@@ -279,6 +279,39 @@ int read_and_send_log_data_cb(uint8_t *data, size_t len)
 	return err;
 }
 
+static int send_all_stored_messages(void)
+{
+	if (k_mutex_lock(&read_flash_mutex, K_NO_WAIT) == 0) {
+		/* Read and send out all the log data if any. */
+		int err = stg_read_log_data(read_and_send_log_data_cb, 0);
+		if (err && err != -ENODATA) {
+			k_mutex_unlock(&read_flash_mutex);
+			LOG_ERR("stg_read_log_data error: %i", err);
+			return err;
+		} else if (err == -ENODATA) {
+			LOG_INF("No log data available on flash for sending.");
+		}
+
+		/* If all entries has been consumed, empty storage
+	     * and we HAVE data on the partition.
+	     */
+		if (stg_log_pointing_to_last()) {
+			err = stg_clear_partition(STG_PARTITION_LOG);
+			if (err) {
+				LOG_ERR("Error clearing FCB storage for LOG %i",
+					err);
+				k_mutex_unlock(&read_flash_mutex);
+				return err;
+			} else {
+				LOG_INF("Emptied LOG partition data as we have read everything.");
+			}
+		}
+		k_mutex_unlock(&read_flash_mutex);
+		return 0;
+	}
+	return -ETIMEDOUT;
+}
+
 /**
  * @brief Build, send a log request, and reschedule after
  *        "log_period_minutes" minutes.
@@ -290,25 +323,8 @@ void log_data_periodic_fn()
 				    K_MINUTES(atomic_get(&log_period_minutes)));
 	/* Construct log data and write to storage controller. */
 	build_log_message();
-
-	/* Read and send out all the log data if any. */
-	int err = stg_read_log_data(read_and_send_log_data_cb, 0);
-	if (err && err != -ENODATA) {
-		LOG_ERR("stg_read_log_data error: %i", err);
-	} else if (err == -ENODATA) {
-		LOG_INF("No log data available on flash for sending.");
-	}
-
-	/* If all entries has been consumed, empty storage
-	 * and we HAVE data on the partition. 
-	 */
-	if (stg_log_pointing_to_last()) {
-		err = stg_clear_partition(STG_PARTITION_LOG);
-		if (err) {
-			LOG_ERR("Error clearing FCB storage for LOG %i", err);
-		} else {
-			LOG_INF("Emptied LOG partition data as we have read everything.");
-		}
+	int ret = send_all_stored_messages();
+	if (ret != 0) { /*TODO: handle failure if needed*/
 	}
 }
 
@@ -362,12 +378,14 @@ static void log_zap_message_work_fn()
 	if (err) {
 		char *e_msg = "Failed to encode and save zap status msg";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		return;
 	} else {
 		LOG_INF("Store zap message to flash");
 	}
-	/* Send data stored in external flash immediately */
-	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
+	int ret = send_all_stored_messages();
+	if (ret != 0) { /*TODO: handle failure if needed*/
+		return;
+	}
 }
 
 static void log_animal_escaped_work_fn()
@@ -388,12 +406,15 @@ static void log_animal_escaped_work_fn()
 	if (err) {
 		char *e_msg = "Failed to encode and save escaped status msg";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		return;
 	} else {
 		LOG_INF("Store escaped message to flash");
 	}
 	/* Send data stored in external flash immediately */
-	k_work_reschedule_for_queue(&send_q, &log_work, K_NO_WAIT);
+	int ret = send_all_stored_messages();
+	if (ret != 0) { /*TODO: handle failure if needed*/
+		return;
+	}
 }
 
 static void log_warning_work_fn()
@@ -412,9 +433,13 @@ static void log_warning_work_fn()
 	if (err) {
 		char *e_msg = "Failed to encode and save warning msg";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		return;
 	} else {
 		LOG_INF("Store warning message to flash");
+	}
+	int ret = send_all_stored_messages();
+	if (ret != 0) { /*TODO: handle failure if needed*/
+		return;
 	}
 }
 
@@ -434,9 +459,13 @@ static void log_correction_start_work_fn()
 	if (err) {
 		char *e_msg = "Failed to encode and save correction start msg";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		return;
 	} else {
 		LOG_INF("Store correction start message to flash");
+	}
+	int ret = send_all_stored_messages();
+	if (ret != 0) { /*TODO: handle failure if needed*/
+		return;
 	}
 }
 
@@ -456,9 +485,13 @@ static void log_correction_end_work_fn()
 	if (err) {
 		char *e_msg = "Failed to encode and save correction end msg";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		return;
 	} else {
 		LOG_INF("Store correction end message to flash");
+	}
+	int ret = send_all_stored_messages();
+	if (ret != 0) { /*TODO: handle failure if needed*/
+		return;
 	}
 }
 /**
@@ -526,10 +559,12 @@ static bool event_handler(const struct event_header *eh)
 			/* TODO, review pshustad, might block the event manager for 50 ms ? */
 			if (k_sem_take(&cache_lock_sem, K_MSEC(50)) == 0) {
 				cached_fix = ev->gnss_data.lastfix;
-				cached_ttff = (uint16_t)(
-					ev->gnss_data.latest.ttff / 1000);
-				cached_msss = (uint16_t)(
-					ev->gnss_data.latest.msss / 1000);
+				cached_ttff =
+					(uint16_t)(ev->gnss_data.latest.ttff /
+						   1000);
+				cached_msss =
+					(uint16_t)(ev->gnss_data.latest.msss /
+						   1000);
 				k_sem_give(&cache_lock_sem);
 			}
 			if (tm_time->tm_year < 2015) {

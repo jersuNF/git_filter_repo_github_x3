@@ -322,7 +322,7 @@ void log_data_periodic_fn()
 	k_work_reschedule_for_queue(&send_q, &log_work,
 				    K_MINUTES(atomic_get(&log_period_minutes)));
 	/* Construct log data and write to storage controller. */
-	build_log_message();
+	if (!m_transfer_boot_params) build_log_message();
 	int ret = send_all_stored_messages();
 	if (ret != 0) { /*TODO: handle failure if needed*/
 	}

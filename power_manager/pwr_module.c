@@ -148,6 +148,7 @@ static void battery_poll_work_fn()
 		/* Avoid sending the same state twice */
 		struct pwr_status_event *event = new_pwr_status_event();
 		event->pwr_state = current_state;
+		LOG_DBG("Sending state %d", current_state);
 		EVENT_SUBMIT(event);
 	}
 

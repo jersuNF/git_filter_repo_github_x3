@@ -53,21 +53,12 @@ static int current_state = PWR_NORMAL;
 
 /** A discharge curve specific to the power source. */
 static const struct battery_level_point levels[] = {
-	/* "Curve" here eyeballed from captured data for example cell [Adafruit
-	 * 3.7v 2000 mAh](https://www.adafruit.com/product/2011) LIPO
-	 * under full load that started with a charge of 3.96 V and
-	 * dropped about linearly to 3.58 V over 15 hours.  It then
-	 * dropped rapidly to 3.10 V over one hour, at which point it
-	 * stopped transmitting.
-	 *
-	 * Based on eyeball comparisons we'll say that 15/16 of life
-	 * goes between 3.95 and 3.55 V, and 1/16 goes between 3.55 V
-	 * and 3.1 V.
+	/**
+	 * Here 10000 corresponds to 100 % charge
+	 * For a non linear discharge curve, add more points below 
 	 */
-
-	{ 10000, 4200 },
-	{ 625, 3550 },
-	{ 0, 3100 },
+	{ 10000, CONFIG_BATTERY_FULL_MV },
+	{ 0, CONFIG_BATTERY_EMPTY_MV },
 
 };
 

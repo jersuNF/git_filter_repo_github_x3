@@ -27,6 +27,14 @@ if POWER_MANAGER
         int "Battery hysteresis in mV"
         default 50
 
+        config BATTERY_FULL_MV
+        int "Represent 100 % battery to the users. NB: This is not the max voltage capacity of the battery. NOTE: Value must match server"
+        default 4100
+
+        config BATTERY_EMPTY_MV
+        int "Represent 0 % battery to the users. NB: This is not the min voltage capacity of the battery. NOTE: Value must match server"
+        default 3400
+
         config BATTERY_LOW
         int "Battery threshold defined in mV to enter low state"
         default 3450

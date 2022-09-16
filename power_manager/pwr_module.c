@@ -35,7 +35,7 @@ static const struct device *clock0;
 #define MODULE pwr_module
 #include <logging/log.h>
 
-LOG_MODULE_REGISTER(MODULE, 4);
+LOG_MODULE_REGISTER(MODULE, CONFIG_BATTERY_LOG_LEVEL);
 
 static uint32_t extclk_request_flags = 0;
 
@@ -267,7 +267,7 @@ int log_and_fetch_battery_voltage(void)
 	event->param.battery = batt_soc;
 	EVENT_SUBMIT(event);
 
-	LOG_WRN("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
+	LOG_DBG("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
 		batt_soc);
 
 	return batt_mV;
@@ -293,9 +293,9 @@ static int pwr_module_extclk_enable(bool enable)
 int pwr_module_use_extclk(enum pwr_requester_module req, bool use_extclk)
 {
 	if (use_extclk) {
-		extclk_request_flags |= (1<<req);
+		extclk_request_flags |= (1 << req);
 	} else {
-		extclk_request_flags &= ~(1<<req);
+		extclk_request_flags &= ~(1 << req);
 	}
 
 	return pwr_module_extclk_enable(extclk_request_flags != 0);
@@ -379,11 +379,13 @@ static bool event_handler(const struct event_header *eh)
 			err = eep_uint8_write(EEP_RESET_REASON, REBOOT_UNKNOWN);
 		}
 		if (err != 0) {
-			LOG_ERR("Unable to write reboot reason to eeprom, err:%d", err);
+			LOG_ERR("Unable to write reboot reason to eeprom, err:%d",
+				err);
 		}
 		LOG_INF("Reboot event received, reason:%d", evt->reason);
 
-		k_work_reschedule(&power_reboot, K_SECONDS(CONFIG_SHUTDOWN_TIMER_SEC));
+		k_work_reschedule(&power_reboot,
+				  K_SECONDS(CONFIG_SHUTDOWN_TIMER_SEC));
 		return false;
 	}
 	/* If event is unhandled, unsubscribe. */

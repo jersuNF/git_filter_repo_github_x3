@@ -1154,7 +1154,7 @@ void build_poll_request(NofenceMessage *poll_req)
 			.has_ulApplicationVersion = true;
 		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion =
 			NF_X25_VERSION_NUMBER;
-		if (memcmp(ccid, "\0", 1) != 0) {
+		if (ccid[0] != '\0') {
 			poll_req->m.poll_message_req.has_xSimCardId = true;
 			memcpy(poll_req->m.poll_message_req.xSimCardId, ccid,
 			       sizeof(poll_req->m.poll_message_req.xSimCardId) -
@@ -1325,7 +1325,7 @@ void proto_InitHeader(NofenceMessage *msg)
 	msg->header.ulId = serial_id;
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
-	int64_t curr_time = 0;
+	static int64_t curr_time = 0;
 	if (!date_time_now(&curr_time)) {
 		/* Convert to seconds since 1.1.1970 */
 		msg->header.ulUnixTimestamp = (uint32_t)(curr_time / 1000);

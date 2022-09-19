@@ -410,6 +410,9 @@ static void log_animal_escaped_work_fn()
 	} else {
 		LOG_INF("Store escaped message to flash");
 	}
+
+	k_work_reschedule_for_queue(&send_q, &modem_poll_work, K_MINUTES(5));
+
 	/* Send data stored in external flash immediately */
 	int ret = send_all_stored_messages();
 	if (ret != 0) { /*TODO: handle failure if needed*/

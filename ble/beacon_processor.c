@@ -291,7 +291,8 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 			 int8_t scanner_rssi_measured, adv_data_t *p_adv_data)
 {
 	int8_t beacon_adv_rssi = signed2(p_adv_data->rssi);
-	double m = calculate_accuracy(beacon_adv_rssi, scanner_rssi_measured);
+	int8_t rssi_sample_value = -1 * scanner_rssi_measured;
+	double m = calculate_accuracy(beacon_adv_rssi, rssi_sample_value);
 
 	if (m > CONFIG_BEACON_DISTANCE_MAX) {
 		/* A beacon is seen, but out of desired range. Do not add to list */

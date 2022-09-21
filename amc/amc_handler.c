@@ -223,13 +223,12 @@ static inline int update_pasture_from_stg(void)
 void handle_new_fence_fn(struct k_work *item)
 {
 	m_fence_update_pending = true;
-
+	zone_set(NO_ZONE);
 	int err = update_pasture_from_stg();
 	if (err != 0) {
 		LOG_WRN("Fence update request denied, error:%d", err);
 	}
 	k_work_submit_to_queue(&amc_work_q, &handle_states_work);
-	m_fence_update_pending = false;
 	return;
 }
 
@@ -271,6 +270,9 @@ void handle_states_fn()
 	CollarStatus new_collar_status = calc_collar_status();
 
 	set_sensor_modes(amc_mode, new_fence_status, new_collar_status, cur_zone);
+	if (m_fence_update_pending) {
+		m_fence_update_pending = false;
+	}
 
 	LOG_DBG("AMC states:CollarMode=%d,CollarStatus=%d,Zone=%d,FenceStatus=%d",
 				get_mode(), calc_collar_status(), zone_get(), 
@@ -491,7 +493,6 @@ static bool event_handler(const struct event_header *eh)
 {
 	if (is_new_fence_available(eh)) {
 		k_work_submit_to_queue(&amc_work_q, &handle_new_fence_work);
-		k_work_submit_to_queue(&amc_work_q, &handle_states_work);
 		return false;
 	}
 	if (is_gnss_data(eh)) {

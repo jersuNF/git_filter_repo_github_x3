@@ -160,7 +160,8 @@ static bool event_handler(const struct event_header *eh)
 			EVENT_SUBMIT(status);
 		}
 		return false;
-	} else if (is_cancel_fota_event(eh)) {
+	}
+	if (is_cancel_fota_event(eh)) {
 		int ret = fota_download_cancel();
 		if (ret == -EAGAIN) {
 			LOG_WRN("LTE FOTA is not running");

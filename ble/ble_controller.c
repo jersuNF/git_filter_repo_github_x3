@@ -839,7 +839,7 @@ static bool event_handler(const struct event_header *eh)
 	if (is_update_fence_version(eh)) {
 		struct update_fence_version *evt =
 			cast_update_fence_version(eh);
-		fence_def_ver_update(evt->fence_version);
+		fence_def_ver_update((uint16_t)evt->fence_version);
 		if ((evt->fence_version != 0) && (evt->total_fences != 0)) {
 			pasture_update(VALID_PASTURE);
 		} else {

@@ -33,7 +33,8 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_FW_UPGRADE_LOG_LEVEL);
 #error Unsupported boardfile for performing Nofence FOTA! (SG25/C25 only)
 #endif
 
-#define FOTA_RETRIES 2 /* to ensure modem is switched back to PSV in case of
+#define FOTA_RETRIES                                                           \
+	2 /* to ensure modem is switched back to PSV in case of
  * unhandled FOTA download errors */
 
 static void fota_dl_handler(const struct fota_download_evt *evt)
@@ -143,15 +144,15 @@ static bool event_handler(const struct event_header *eh)
 			EVENT_SUBMIT(status);
 		} else if (ret == -EALREADY) {
 			if (++fota_requests > FOTA_RETRIES) {
-				if (fota_requests == UINT32_MAX) fota_requests = FOTA_RETRIES;
+				if (fota_requests == UINT32_MAX)
+					fota_requests = FOTA_RETRIES;
 				struct dfu_status_event *status =
 					new_dfu_status_event();
 				status->dfu_status = DFU_STATUS_IDLE;
 				status->dfu_error = -ENODATA;
 				EVENT_SUBMIT(status);
 			}
-		}
-		else {
+		} else {
 			struct dfu_status_event *status =
 				new_dfu_status_event();
 			status->dfu_status = DFU_STATUS_IDLE;
@@ -159,7 +160,23 @@ static bool event_handler(const struct event_header *eh)
 			EVENT_SUBMIT(status);
 		}
 		return false;
+	} else if (is_cancel_fota_event(eh)) {
+		int ret = fota_download_cancel();
+		if (ret == -EAGAIN) {
+			LOG_WRN("LTE FOTA is not running");
+			return false;
+		} else if (ret != 0) {
+			LOG_ERR("Failed to cancel FOTA request");
+			return false;
+		}
+
+		struct dfu_status_event *status = new_dfu_status_event();
+		status->dfu_status = DFU_STATUS_IDLE;
+		status->dfu_error = 0;
+		EVENT_SUBMIT(status);
+		return false;
 	}
+
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -168,3 +185,4 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, start_fota_event);
+EVENT_SUBSCRIBE(MODULE, cancel_fota_event);

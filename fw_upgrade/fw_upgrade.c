@@ -59,6 +59,15 @@ static void fota_dl_handler(const struct fota_download_evt *evt)
 		EVENT_SUBMIT(event);
 		break;
 	}
+	case FOTA_DOWNLOAD_EVT_CANCELLED: {
+		struct dfu_status_event *event = new_dfu_status_event();
+		LOG_WRN("Fota download cancelled");
+		event->dfu_status = DFU_STATUS_IDLE;
+		event->dfu_error = evt->cause;
+		/* Submit event. */
+		EVENT_SUBMIT(event);
+		break;
+	}
 	case FOTA_DOWNLOAD_EVT_FINISHED: {
 		struct dfu_status_event *event = new_dfu_status_event();
 		LOG_INF("Fota download finished, scheduling reboot...");
@@ -162,19 +171,15 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_cancel_fota_event(eh)) {
+		/* Cancel an ongoing FOTA. This will trigger FOTA_DOWNLOAD_EVT_CANCELLED 
+		 * status in the fota_dl_handler callback 
+		 */
 		int ret = fota_download_cancel();
 		if (ret == -EAGAIN) {
 			LOG_WRN("LTE FOTA is not running");
-			return false;
 		} else if (ret != 0) {
 			LOG_ERR("Failed to cancel FOTA request");
-			return false;
 		}
-
-		struct dfu_status_event *status = new_dfu_status_event();
-		status->dfu_status = DFU_STATUS_IDLE;
-		status->dfu_error = 0;
-		EVENT_SUBMIT(status);
 		return false;
 	}
 

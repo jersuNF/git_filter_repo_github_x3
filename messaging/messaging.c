@@ -162,7 +162,7 @@ static struct k_work_q send_q;
 struct k_work_delayable modem_poll_work;
 struct k_work_delayable log_work;
 struct k_work_delayable data_request_work;
-struct k_work_delayable process_fence_status_work;
+struct k_work_delayable log_status_message_work;
 struct k_work_delayable process_escape_work;
 struct k_work_delayable process_zap_work;
 struct k_work_delayable process_warning_work;
@@ -416,7 +416,7 @@ static void log_animal_escaped_work_fn()
 	}
 }
 
-static void process_fence_status_fn()
+static void log_status_message_fn()
 {
 	/* Create status message */
 	NofenceMessage msg;
@@ -624,22 +624,44 @@ static bool event_handler(const struct event_header *eh)
 		return true;
 	}
 	if (is_update_collar_mode(eh)) {
+		int err;
+		Mode prev_collar_mode = current_state.collar_mode;
+
 		struct update_collar_mode *ev = cast_update_collar_mode(eh);
 		current_state.collar_mode = ev->collar_mode;
 		update_cache_reg(COLLAR_MODE);
-		/* notify_server */
-		LOG_WRN("Schedule poll request: collar_mode!");
-		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
-						      K_NO_WAIT);
-		if (err < 0) {
-			LOG_ERR("Error starting modem poll worker: %d", err);
+
+		if (prev_collar_mode != current_state.collar_mode) {
+			/* Notify server by status message that collar mode has changed */
+			err = k_work_reschedule_for_queue(&send_q, &log_status_message_work, 
+					K_NO_WAIT);
+			if (err < 0) {
+				LOG_ERR("Failed to reschedule log status work (%d)", err);
+			}
 		}
 		return false;
 	}
 	if (is_update_collar_status(eh)) {
+		int err;
+		CollarStatus prev_collar_status = current_state.collar_status;
+
 		struct update_collar_status *ev = cast_update_collar_status(eh);
 		current_state.collar_status = ev->collar_status;
 		update_cache_reg(COLLAR_STATUS);
+
+		if ((prev_collar_status != current_state.collar_status) && 
+			((current_state.collar_status == CollarStatus_Stuck) || 
+			(prev_collar_status == CollarStatus_Stuck) || 
+			(current_state.collar_status == CollarStatus_OffAnimal) || 
+			(prev_collar_status == CollarStatus_OffAnimal))) {
+			
+			/* Notify server by status message that collar status has changed */
+			err = k_work_reschedule_for_queue(&send_q, &log_status_message_work, 
+					K_NO_WAIT);
+			if (err < 0) {
+				LOG_ERR("Failed to reschedule log status work (%d)", err);
+			}
+		}
 		return false;
 	}
 	if (is_update_fence_status(eh)) {
@@ -650,24 +672,21 @@ static bool event_handler(const struct event_header *eh)
 		current_state.fence_status = ev->fence_status;
 		update_cache_reg(FENCE_STATUS);
 
-		if ((prev_fence_status == FenceStatus_Escaped) && 
-			(current_state.fence_status != FenceStatus_Escaped)) {
-			/* Notify server that fence status has changed from escaped */
-			err = k_work_reschedule_for_queue(&send_q, 
-					&process_fence_status_work, K_NO_WAIT);
-			if (err < 0) {
-				LOG_ERR("Failed to reschedule fence status work (%d)", err);
-			}
-		}
-		if (current_state.fence_status != FenceStatus_Escaped)
-		{
-			/* Notify server of change in fence status. Don't notify for
-			 * animal escaped status as this is handled by a status messages. */
-			LOG_WRN("Schedule poll request: fence_status!");
-			err = k_work_reschedule_for_queue(&send_q, &modem_poll_work, 
+		if ((prev_fence_status != current_state.fence_status) && 
+			(((current_state.fence_status == FenceStatus_MaybeOutOfFence) || 
+				(prev_fence_status == FenceStatus_MaybeOutOfFence)) ||
+	        ((current_state.fence_status == FenceStatus_Escaped) || 
+				(prev_fence_status == FenceStatus_Escaped)) ||
+            ((current_state.fence_status == FenceStatus_FenceStatus_Normal) && 
+				(prev_fence_status == FenceStatus_NotStarted)) ||
+            ((current_state.fence_status == FenceStatus_TurnedOffByBLE) && 
+				(prev_fence_status == FenceStatus_TurnedOffByBLE)))) {
+
+			/* Notify server by status message that fence status has changed */
+			err = k_work_reschedule_for_queue(&send_q, &log_status_message_work, 
 					K_NO_WAIT);
 			if (err < 0) {
-				LOG_ERR("Error starting modem poll worker: %d", err);
+				LOG_ERR("Failed to reschedule log status work (%d)", err);
 			}
 		}
 		return false;
@@ -1066,7 +1085,7 @@ int messaging_module_init(void)
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
 	k_work_init_delayable(&log_work, log_data_periodic_fn);
 	k_work_init_delayable(&data_request_work, data_request_work_fn);
-	k_work_init_delayable(&process_fence_status_work, process_fence_status_fn);
+	k_work_init_delayable(&log_status_message_work, log_status_message_fn);
 	k_work_init_delayable(&process_escape_work, log_animal_escaped_work_fn);
 	k_work_init_delayable(&process_zap_work, log_zap_message_work_fn);
 	k_work_init_delayable(&process_warning_work, log_warning_work_fn);

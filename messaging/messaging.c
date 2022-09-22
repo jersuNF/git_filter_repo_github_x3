@@ -139,7 +139,7 @@ static bool m_confirm_acc_limits, m_confirm_ble_key;
 
 K_MUTEX_DEFINE(send_binary_mutex);
 K_MUTEX_DEFINE(read_flash_mutex);
-static bool reboot_scheduled;
+static bool reboot_scheduled = false;
 #define MODULE messaging
 LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
 

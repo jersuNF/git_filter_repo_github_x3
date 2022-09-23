@@ -674,9 +674,8 @@ static bool event_handler(const struct event_header *eh)
 
 		if ((prev_fence_status != current_state.fence_status) && 
 			(((current_state.fence_status == FenceStatus_MaybeOutOfFence) || 
-				(prev_fence_status == FenceStatus_MaybeOutOfFence)) ||
-	        ((current_state.fence_status == FenceStatus_Escaped) || 
-				(prev_fence_status == FenceStatus_Escaped)) ||
+				(prev_fence_status == FenceStatus_MaybeOutOfFence)) || 
+			(prev_fence_status == FenceStatus_Escaped) ||
             ((current_state.fence_status == FenceStatus_FenceStatus_Normal) && 
 				(prev_fence_status == FenceStatus_NotStarted)) ||
             ((current_state.fence_status == FenceStatus_TurnedOffByBLE) && 

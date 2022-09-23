@@ -77,7 +77,7 @@ atomic_t current_beacon_status = ATOMIC_INIT(BEACON_STATUS_NOT_FOUND);
 static uint32_t maybe_out_of_fence_timestamp = 0;
 
 static bool m_fence_update_pending = false;
-static uint32_t new_fence_version;
+static uint32_t m_new_fence_version;
 /**
  * @brief Updates the current pasture from storage (if a valid fence).
  * 
@@ -202,7 +202,8 @@ static inline int update_pasture_from_stg(void)
 		}
 
 		if (m_fence_update_pending) {
-			if (pasture->m.ul_fence_def_version == new_fence_version) {
+			if (pasture->m.ul_fence_def_version ==
+			    m_new_fence_version) {
 				m_fence_update_pending = false;
 			}
 		}
@@ -276,9 +277,6 @@ void handle_states_fn()
 	CollarStatus new_collar_status = calc_collar_status();
 
 	set_sensor_modes(amc_mode, new_fence_status, new_collar_status, cur_zone);
-	if (m_fence_update_pending) {
-		m_fence_update_pending = false;
-	}
 
 	LOG_DBG("AMC states:CollarMode=%d,CollarStatus=%d,Zone=%d,FenceStatus=%d",
 				get_mode(), calc_collar_status(), zone_get(), 
@@ -499,7 +497,7 @@ static bool event_handler(const struct event_header *eh)
 {
 	if (is_new_fence_available(eh)) {
 		struct new_fence_available *ev = cast_new_fence_available(eh);
-		new_fence_version = ev->new_fence_version;
+		m_new_fence_version = ev->new_fence_version;
 		k_work_submit_to_queue(&amc_work_q, &handle_new_fence_work);
 		return false;
 	}

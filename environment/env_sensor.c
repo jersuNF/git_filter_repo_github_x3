@@ -155,7 +155,6 @@ static inline void update_env_sensor_event_values(void)
 	if (err) {
 		return;
 	}
-
 	struct env_sensor_event *ev = new_env_sensor_event();
 	ev->temp = temp_d;
 	ev->press = press_d;

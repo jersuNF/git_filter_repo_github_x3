@@ -322,7 +322,7 @@ void log_data_periodic_fn()
 	k_work_reschedule_for_queue(&send_q, &log_work,
 				    K_MINUTES(atomic_get(&log_period_minutes)));
 	/* Construct log data and write to storage controller. */
-	build_log_message();
+	if (!m_transfer_boot_params) build_log_message();
 	int ret = send_all_stored_messages();
 	if (ret != 0) { /*TODO: handle failure if needed*/
 	}
@@ -1041,7 +1041,7 @@ int messaging_module_init(void)
 	if (err < 0) {
 		return err;
 	}
-	err = k_work_schedule_for_queue(&send_q, &log_work, K_SECONDS(2));
+	err = k_work_schedule_for_queue(&send_q, &log_work, K_SECONDS(25));
 	if (err < 0) {
 		return err;
 	}
@@ -1144,11 +1144,11 @@ void build_poll_request(NofenceMessage *poll_req)
 
 	if (m_transfer_boot_params) {
 		poll_req->m.poll_message_req.has_versionInfo = true;
-		poll_req->m.poll_message_req.versionInfo.has_ulApplicationVersion = true;
-		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion = 
-					NF_X25_VERSION_NUMBER;
-
-		if (memcmp(ccid, "\0", 1) != 0) {
+		poll_req->m.poll_message_req.versionInfo
+			.has_ulApplicationVersion = true;
+		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion =
+			NF_X25_VERSION_NUMBER;
+		if (ccid[0] != '\0') {
 			poll_req->m.poll_message_req.has_xSimCardId = true;
 			memcpy(poll_req->m.poll_message_req.xSimCardId, ccid, 
 						sizeof(poll_req->m.poll_message_req.xSimCardId) - 1);
@@ -1320,7 +1320,7 @@ void proto_InitHeader(NofenceMessage *msg)
 	msg->header.ulId = serial_id;
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
-	int64_t curr_time = 0;
+	static int64_t curr_time = 0;
 	if (!date_time_now(&curr_time)) {
 		/* Convert to seconds since 1.1.1970 */
 		msg->header.ulUnixTimestamp = (uint32_t)(curr_time / 1000);

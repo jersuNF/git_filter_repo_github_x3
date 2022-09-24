@@ -629,11 +629,14 @@ static bool event_handler(const struct event_header *eh)
 		struct update_collar_mode *ev = cast_update_collar_mode(eh);
 		current_state.collar_mode = ev->collar_mode;
 		update_cache_reg(COLLAR_MODE);
-		/* notify_server */
-		LOG_WRN("Schedule poll request: collar_mode!");
-		err = k_work_reschedule_for_queue(&send_q, &modem_poll_work, K_NO_WAIT);
-		if (err < 0) {
-			LOG_ERR("Error starting modem poll worker: %d", err);
+		if (prev_collar_mode != current_state.collar_mode) {
+			/* Notify server by status message that collar mode has changed */
+			err = k_work_reschedule_for_queue(
+				&send_q, &log_status_message_work, K_NO_WAIT);
+			if (err < 0) {
+				LOG_ERR("Failed to reschedule log status work (%d)",
+					err);
+			}
 		}
 		return false;
 	}

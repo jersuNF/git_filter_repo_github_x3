@@ -155,7 +155,7 @@ static bool event_handler(const struct event_header *eh)
 				(uint16_t)(ev->battery_mv_max / 10);
 			histogram.qc_battery.usVbattMin =
 				(uint16_t)(ev->battery_mv_min / 10);
-			LOG_INF("Save to histogram.qc_battery: max: %u, min: %u",
+			LOG_DBG("Save to histogram.qc_battery: max: %u, min: %u",
 				histogram.qc_battery.usVbattMax,
 				histogram.qc_battery.usVbattMin);
 		}
@@ -204,9 +204,9 @@ EVENT_SUBSCRIBE(MODULE, save_histogram);
 void collect_stats(void)
 {
 	static int64_t elapsed_time_ms = 0;
-	static int64_t resting, walking,running,grazing, unknown, ccsleep,
-		ccbeacon, modem_active, insleep,inbeacon, maxzone,
-		cautionzone, psmzone, nozone;
+	static int64_t resting, walking, running, grazing, unknown, ccsleep,
+		ccbeacon, modem_active, insleep, inbeacon, maxzone, cautionzone,
+		psmzone, nozone;
 
 	static int64_t uptime = 0;
 	while (true) {
@@ -264,14 +264,13 @@ void collect_stats(void)
 			m_i16_way_pnt[1] = fresh_pos[1];
 
 			//******************Add Stepcounter value*************************
-			histogram.animal_behave.has_usStepCounter =
-				true;
-			histogram.animal_behave.usStepCounter += (steps
-								- steps_old);
-//			LOG_WRN("STEPS: %d", histogram.animal_behave.usStepCounter);
-//			steps_old = steps;
-//			if (steps == UINT16_MAX) steps_old = 0;
-			steps_old = (steps==UINT16_MAX) ? 0:steps;
+			histogram.animal_behave.has_usStepCounter = true;
+			histogram.animal_behave.usStepCounter +=
+				(steps - steps_old);
+			//			LOG_WRN("STEPS: %d", histogram.animal_behave.usStepCounter);
+			//			steps_old = steps;
+			//			if (steps == UINT16_MAX) steps_old = 0;
+			steps_old = (steps == UINT16_MAX) ? 0 : steps;
 
 			//*****************Histogram to predict Current profile of the collar********************
 
@@ -376,42 +375,45 @@ void collect_stats(void)
 		if (save_and_reset) {
 			save_and_reset = false;
 			histogram.animal_behave.usRestingTime +=
-				resting/MSEC_PER_SEC;
+				resting / MSEC_PER_SEC;
 
 			histogram.animal_behave.usWalkingTime +=
-				walking/MSEC_PER_SEC;
+				walking / MSEC_PER_SEC;
 
 			histogram.animal_behave.usRunningTime +=
-				running/MSEC_PER_SEC;
+				running / MSEC_PER_SEC;
 
 			histogram.animal_behave.usGrazingTime +=
-				grazing/MSEC_PER_SEC;
+				grazing / MSEC_PER_SEC;
 
 			histogram.animal_behave.usUnknownTime +=
-				unknown/MSEC_PER_SEC;
+				unknown / MSEC_PER_SEC;
 
 			histogram.current_profile.usCC_Sleep +=
-				ccsleep/MSEC_PER_SEC;
+				ccsleep / MSEC_PER_SEC;
 
 			histogram.current_profile.usCC_BeaconZone +=
-				ccbeacon/MSEC_PER_SEC;
+				ccbeacon / MSEC_PER_SEC;
 
 			histogram.current_profile.usCC_Modem_Active +=
-				modem_active/MSEC_PER_SEC;
+				modem_active / MSEC_PER_SEC;
 
-			histogram.in_zone.usInSleepTime += insleep/MSEC_PER_SEC;
+			histogram.in_zone.usInSleepTime +=
+				insleep / MSEC_PER_SEC;
 
 			histogram.in_zone.usBeaconZoneTime +=
-				inbeacon/MSEC_PER_SEC;
+				inbeacon / MSEC_PER_SEC;
 
-			histogram.in_zone.usMAXZoneTime += maxzone/MSEC_PER_SEC;
+			histogram.in_zone.usMAXZoneTime +=
+				maxzone / MSEC_PER_SEC;
 
 			histogram.in_zone.usCAUTIONZoneTime +=
-				cautionzone/MSEC_PER_SEC;
+				cautionzone / MSEC_PER_SEC;
 
-			histogram.in_zone.usPSMZoneTime += psmzone/MSEC_PER_SEC;
+			histogram.in_zone.usPSMZoneTime +=
+				psmzone / MSEC_PER_SEC;
 
-			histogram.in_zone.usNOZoneTime += nozone/MSEC_PER_SEC;
+			histogram.in_zone.usNOZoneTime += nozone / MSEC_PER_SEC;
 
 			/*write to queue*/
 			while (k_msgq_put(&histogram_msgq, &histogram,

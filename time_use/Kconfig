@@ -11,7 +11,7 @@ menuconfig TIME_USE
 if TIME_USE
 	config TIME_USE_LOG_LEVEL
 		int "Log level for the time_use module"
-		default 4
+		default 3
 
 	config TIME_USE_THREAD_STACK_SIZE
 		int "Size of the time_use processing thread"

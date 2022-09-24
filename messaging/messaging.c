@@ -162,6 +162,7 @@ static struct k_work_q send_q;
 struct k_work_delayable modem_poll_work;
 struct k_work_delayable log_work;
 struct k_work_delayable data_request_work;
+struct k_work_delayable log_status_message_work;
 struct k_work_delayable process_escape_work;
 struct k_work_delayable process_zap_work;
 struct k_work_delayable process_warning_work;
@@ -334,9 +335,8 @@ void log_data_periodic_fn()
  */
 void modem_poll_work_fn()
 {
-	//	sys_heap_print_info(&_system_heap.heap, true);
-	k_work_reschedule_for_queue(
-		&send_q, &modem_poll_work,
+	/* Reschedule a periodic poll request */
+	k_work_reschedule_for_queue(&send_q, &modem_poll_work, 
 		K_MINUTES(atomic_get(&poll_period_minutes)));
 	/* Add logic for the periodic protobuf modem poller. */
 	LOG_INF("Starting periodic poll work and building poll request.");
@@ -410,9 +410,43 @@ static void log_animal_escaped_work_fn()
 	} else {
 		LOG_INF("Store escaped message to flash");
 	}
+
 	/* Send data stored in external flash immediately */
 	int ret = send_all_stored_messages();
 	if (ret != 0) { /*TODO: handle failure if needed*/
+		return;
+	}
+}
+
+static void log_status_message_fn()
+{
+	/* Create status message */
+	NofenceMessage msg;
+	proto_InitHeader(&msg);
+	msg.which_m = NofenceMessage_status_msg_tag;
+	msg.m.status_msg.has_datePos = true;
+	proto_get_last_known_date_pos(&cached_fix, &msg.m.status_msg.datePos);
+	msg.m.status_msg.eMode = current_state.collar_mode;
+	msg.m.status_msg.eReason = Reason_NOREASON;
+	msg.m.status_msg.eCollarStatus = current_state.collar_status;
+	msg.m.status_msg.eFenceStatus = current_state.fence_status;
+	msg.m.status_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
+	msg.m.status_msg.has_ucGpsMode = true;
+	msg.m.status_msg.ucGpsMode = (uint8_t)cached_gnss_mode;
+
+	/* Store message to external flash */
+	int err = encode_and_store_message(&msg);
+	if (err) {
+		char *e_msg = "Failed to encode and save fence status message";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		return;
+	} else {
+		LOG_DBG("Storing fence status message to external flash");
+	}
+
+	/* Send data stored in external flash immediately */
+	int ret = send_all_stored_messages();
+	if (ret != 0) {
 		return;
 	}
 }
@@ -589,35 +623,68 @@ static bool event_handler(const struct event_header *eh)
 		return true;
 	}
 	if (is_update_collar_mode(eh)) {
+		int err;
+		Mode prev_collar_mode = current_state.collar_mode;
+
 		struct update_collar_mode *ev = cast_update_collar_mode(eh);
 		current_state.collar_mode = ev->collar_mode;
 		update_cache_reg(COLLAR_MODE);
-		/* notify_server */
-		LOG_WRN("Schedule poll request: collar_mode!");
-		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work, K_NO_WAIT);
-		if (err < 0) {
-			LOG_ERR("Error starting modem poll worker: %d", err);
+		if (prev_collar_mode != current_state.collar_mode) {
+			/* Notify server by status message that collar mode has changed */
+			err = k_work_reschedule_for_queue(
+				&send_q, &log_status_message_work, K_NO_WAIT);
+			if (err < 0) {
+				LOG_ERR("Failed to reschedule log status work (%d)",
+					err);
+			}
 		}
 		return false;
 	}
 	if (is_update_collar_status(eh)) {
+		int err;
+		CollarStatus prev_collar_status = current_state.collar_status;
+
 		struct update_collar_status *ev = cast_update_collar_status(eh);
 		current_state.collar_status = ev->collar_status;
 		update_cache_reg(COLLAR_STATUS);
+
+		if ((prev_collar_status != current_state.collar_status) && 
+			((current_state.collar_status == CollarStatus_Stuck) || 
+			(prev_collar_status == CollarStatus_Stuck) || 
+			(current_state.collar_status == CollarStatus_OffAnimal) || 
+			(prev_collar_status == CollarStatus_OffAnimal))) {
+			
+			/* Notify server by status message that collar status has changed */
+			err = k_work_reschedule_for_queue(&send_q, &log_status_message_work, 
+					K_NO_WAIT);
+			if (err < 0) {
+				LOG_ERR("Failed to reschedule log status work (%d)", err);
+			}
+		}
 		return false;
 	}
 	if (is_update_fence_status(eh)) {
+		int err;
+		FenceStatus prev_fence_status = current_state.fence_status;
+
 		struct update_fence_status *ev = cast_update_fence_status(eh);
 		current_state.fence_status = ev->fence_status;
 		update_cache_reg(FENCE_STATUS);
-		if (ev->fence_status == FenceStatus_TurnedOffByBLE) {
-			return false;
-		} else {
-			/* notify_server */
-			LOG_WRN("Schedule poll request: fence_status!");
-			int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work, K_NO_WAIT);
+
+		if ((prev_fence_status != current_state.fence_status) && 
+			(((current_state.fence_status == FenceStatus_MaybeOutOfFence) || 
+				(prev_fence_status == FenceStatus_MaybeOutOfFence)) || 
+			(prev_fence_status == FenceStatus_Escaped) ||
+            ((current_state.fence_status == FenceStatus_FenceStatus_Normal) && 
+				(prev_fence_status == FenceStatus_NotStarted)) ||
+            ((current_state.fence_status == FenceStatus_TurnedOffByBLE) && 
+				(prev_fence_status == FenceStatus_TurnedOffByBLE)))) {
+
+			/* Notify server by status message that fence status has changed */
+			err = k_work_reschedule_for_queue(&send_q, &log_status_message_work, 
+					K_NO_WAIT);
 			if (err < 0) {
-				LOG_ERR("Error starting modem poll worker: %d", err);
+				LOG_ERR("Failed to reschedule log status work (%d)", err);
 			}
 		}
 		return false;
@@ -1016,6 +1083,7 @@ int messaging_module_init(void)
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
 	k_work_init_delayable(&log_work, log_data_periodic_fn);
 	k_work_init_delayable(&data_request_work, data_request_work_fn);
+	k_work_init_delayable(&log_status_message_work, log_status_message_fn);
 	k_work_init_delayable(&process_escape_work, log_animal_escaped_work_fn);
 	k_work_init_delayable(&process_zap_work, log_zap_message_work_fn);
 	k_work_init_delayable(&process_warning_work, log_warning_work_fn);

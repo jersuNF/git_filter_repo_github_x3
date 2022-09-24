@@ -55,8 +55,8 @@ extern struct k_heap _system_heap;
 #define EMPTY_FENCE_CRC 0xFFFF
 static pasture_t pasture_temp;
 static uint8_t cached_fences_counter = 0;
-static uint16_t cached_msss = 0;
-static uint16_t cached_ttff = 0;
+static uint32_t cached_msss = 0;
+static uint32_t cached_ttff = 0;
 
 /** @todo This should be fetched from EEPROM */
 static gnss_mode_t cached_gnss_mode = GNSSMODE_NOMODE;
@@ -323,7 +323,7 @@ void log_data_periodic_fn()
 	k_work_reschedule_for_queue(&send_q, &log_work,
 				    K_MINUTES(atomic_get(&log_period_minutes)));
 	/* Construct log data and write to storage controller. */
-	build_log_message();
+	if (!m_transfer_boot_params) build_log_message();
 	int ret = send_all_stored_messages();
 	if (ret != 0) { /*TODO: handle failure if needed*/
 	}
@@ -343,7 +343,8 @@ void modem_poll_work_fn()
 	NofenceMessage new_poll_msg;
 
 	/* Only process the poll request if cache is ready. */
-	if (k_sem_take(&cache_ready_sem, K_SECONDS(CACHE_READY_TIMEOUT_SEC)) != 0) {
+	if (k_sem_take(&cache_ready_sem, K_SECONDS(CACHE_READY_TIMEOUT_SEC)) !=
+	    0) {
 		LOG_WRN("Timed out. Cached data not ready yet. Just sending the data that we have..");
 	}
 	k_sem_give(&cache_ready_sem);
@@ -355,7 +356,8 @@ void modem_poll_work_fn()
 		encode_and_send_message(&new_poll_msg);
 	} else {
 		LOG_ERR("Cached state semaphore hanged, retrying in 1 second.");
-		k_work_reschedule_for_queue(&send_q, &modem_poll_work, K_SECONDS(1));
+		k_work_reschedule_for_queue(&send_q, &modem_poll_work,
+					    K_SECONDS(1));
 	}
 }
 
@@ -583,22 +585,20 @@ static bool event_handler(const struct event_header *eh)
 		/* Update that we received GNSS data regardless of validity. */
 		update_cache_reg(GNSS_STRUCT);
 
+		/* TODO, review pshustad, might block the event manager for 50 ms ? */
+		if (k_sem_take(&cache_lock_sem, K_MSEC(50)) == 0) {
+			if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
+				cached_fix = ev->gnss_data.lastfix;
+			}
+			cached_ttff = ev->gnss_data.latest.ttff;
+			cached_msss = ev->gnss_data.latest.msss;
+			k_sem_give(&cache_lock_sem);
+		}
+
 		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
-			time_t gm_time =
-				(time_t)ev->gnss_data.lastfix.unix_timestamp;
+			time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
 			struct tm *tm_time = gmtime(&gm_time);
 
-			/* TODO, review pshustad, might block the event manager for 50 ms ? */
-			if (k_sem_take(&cache_lock_sem, K_MSEC(50)) == 0) {
-				cached_fix = ev->gnss_data.lastfix;
-				cached_ttff =
-					(uint16_t)(ev->gnss_data.latest.ttff /
-						   1000);
-				cached_msss =
-					(uint16_t)(ev->gnss_data.latest.msss /
-						   1000);
-				k_sem_give(&cache_lock_sem);
-			}
 			if (tm_time->tm_year < 2015) {
 				LOG_DBG("Invalid gnss packet.");
 				return false;
@@ -616,8 +616,7 @@ static bool event_handler(const struct event_header *eh)
 		return true;
 	}
 	if (is_cellular_proto_in_event(eh)) {
-		struct cellular_proto_in_event *ev =
-			cast_cellular_proto_in_event(eh);
+		struct cellular_proto_in_event *ev = cast_cellular_proto_in_event(eh);
 		while (k_msgq_put(&lte_proto_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&lte_proto_msgq);
 		}
@@ -630,14 +629,11 @@ static bool event_handler(const struct event_header *eh)
 		struct update_collar_mode *ev = cast_update_collar_mode(eh);
 		current_state.collar_mode = ev->collar_mode;
 		update_cache_reg(COLLAR_MODE);
-
-		if (prev_collar_mode != current_state.collar_mode) {
-			/* Notify server by status message that collar mode has changed */
-			err = k_work_reschedule_for_queue(&send_q, &log_status_message_work, 
-					K_NO_WAIT);
-			if (err < 0) {
-				LOG_ERR("Failed to reschedule log status work (%d)", err);
-			}
+		/* notify_server */
+		LOG_WRN("Schedule poll request: collar_mode!");
+		err = k_work_reschedule_for_queue(&send_q, &modem_poll_work, K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Error starting modem poll worker: %d", err);
 		}
 		return false;
 	}
@@ -1110,7 +1106,7 @@ int messaging_module_init(void)
 	if (err < 0) {
 		return err;
 	}
-	err = k_work_schedule_for_queue(&send_q, &log_work, K_SECONDS(2));
+	err = k_work_schedule_for_queue(&send_q, &log_work, K_SECONDS(25));
 	if (err < 0) {
 		return err;
 	}
@@ -1121,23 +1117,24 @@ int messaging_module_init(void)
 void build_poll_request(NofenceMessage *poll_req)
 {
 	proto_InitHeader(poll_req); /* fill up message header. */
+
 	poll_req->which_m = NofenceMessage_poll_message_req_tag;
-	proto_get_last_known_date_pos(&cached_fix,
-				      &poll_req->m.poll_message_req.datePos);
-	poll_req->m.poll_message_req.has_datePos =
-		proto_has_last_known_date_pos(&cached_fix);
+	proto_get_last_known_date_pos(&cached_fix, 
+				&poll_req->m.poll_message_req.datePos);
+	poll_req->m.poll_message_req.has_datePos = 
+				proto_has_last_known_date_pos(&cached_fix);
 	poll_req->m.poll_message_req.eMode = current_state.collar_mode;
 	poll_req->m.poll_message_req.usZapCount = current_state.zap_count;
-	poll_req->m.poll_message_req.eCollarStatus =
-		current_state.collar_status;
+	poll_req->m.poll_message_req.eCollarStatus = current_state.collar_status;
 	poll_req->m.poll_message_req.eFenceStatus = current_state.fence_status;
-	poll_req->m.poll_message_req.ulFenceDefVersion =
-		current_state.fence_version;
-	poll_req->m.poll_message_req.usBatteryVoltage =
-		(uint16_t)atomic_get(&cached_batt);
+	poll_req->m.poll_message_req.ulFenceDefVersion = 
+				current_state.fence_version;
+	poll_req->m.poll_message_req.usBatteryVoltage = 
+				(uint16_t)atomic_get(&cached_batt);
 	poll_req->m.poll_message_req.has_ucMCUSR = 0;
 	poll_req->m.poll_message_req.ucMCUSR = 0;
 	poll_req->m.poll_message_req.has_xGsmInfo = true;
+
 	_GSM_INFO p_gsm_info;
 	p_gsm_info.ucRAT = (uint8_t)rat;
 	sprintf(p_gsm_info.xMMC_MNC, "%d", mnc);
@@ -1148,55 +1145,47 @@ void build_poll_request(NofenceMessage *poll_req)
 	if (current_state.flash_erase_count) {
 		// m_flash_erase_count is reset when we receive a poll reply
 		poll_req->m.poll_message_req.has_usFlashEraseCount = true;
-		poll_req->m.poll_message_req.usFlashEraseCount =
-			current_state.flash_erase_count;
+		poll_req->m.poll_message_req.usFlashEraseCount = 
+					current_state.flash_erase_count;
 	}
 	if (m_confirm_acc_limits) {
 		/** @warning Assumes all the activity values are given with the
 		 *  m_confirm_acc_limits flag set in poll response from server.
 		 */
 		poll_req->m.poll_message_req.has_usAccSigmaSleepLimit = true;
-		poll_req->m.poll_message_req.has_usAccSigmaNoActivityLimit =
-			true;
+		poll_req->m.poll_message_req.has_usAccSigmaNoActivityLimit = true;
 		poll_req->m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
 
-		int err = eep_uint16_read(
-			EEP_ACC_SIGMA_SLEEP_LIMIT,
-			&poll_req->m.poll_message_req.usAccSigmaSleepLimit);
+		int err = eep_uint16_read(EEP_ACC_SIGMA_SLEEP_LIMIT, 
+					&poll_req->m.poll_message_req.usAccSigmaSleepLimit);
 		if (err) {
-			char *e_msg =
-				"Failed to read EEP_ACC_SIGMA_SLEEP_LIMIT";
+			char *e_msg = "Failed to read EEP_ACC_SIGMA_SLEEP_LIMIT";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 
-		err = eep_uint16_read(
-			EEP_ACC_SIGMA_NOACTIVITY_LIMIT,
-			&poll_req->m.poll_message_req.usAccSigmaNoActivityLimit);
+		err = eep_uint16_read(EEP_ACC_SIGMA_NOACTIVITY_LIMIT, 
+					&poll_req->m.poll_message_req.usAccSigmaNoActivityLimit);
 		if (err) {
-			char *e_msg =
-				"Failed to read EEP_ACC_SIGMA_NOACTIVITY_LIMIT";
+			char *e_msg = "Failed to read EEP_ACC_SIGMA_NOACTIVITY_LIMIT";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 
-		err = eep_uint16_read(
-			EEP_OFF_ANIMAL_TIME_LIMIT_SEC,
-			&poll_req->m.poll_message_req.usOffAnimalTimeLimitSec);
+		err = eep_uint16_read(EEP_OFF_ANIMAL_TIME_LIMIT_SEC, 
+					&poll_req->m.poll_message_req.usOffAnimalTimeLimitSec);
 		if (err) {
-			char *e_msg =
-				"Failed to read EEP_OFF_ANIMAL_TIME_LIMIT_SEC";
+			char *e_msg = "Failed to read EEP_OFF_ANIMAL_TIME_LIMIT_SEC";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 	}
 	if (m_confirm_ble_key || m_transfer_boot_params) {
 		poll_req->m.poll_message_req.has_rgubcBleKey = true;
-		poll_req->m.poll_message_req.rgubcBleKey.size =
-			EEP_BLE_SEC_KEY_LEN;
+		poll_req->m.poll_message_req.rgubcBleKey.size = EEP_BLE_SEC_KEY_LEN;
 		int err = eep_read_ble_sec_key(
-			poll_req->m.poll_message_req.rgubcBleKey.bytes,
-			EEP_BLE_SEC_KEY_LEN);
+						poll_req->m.poll_message_req.rgubcBleKey.bytes, 
+						EEP_BLE_SEC_KEY_LEN);
 		if (err) {
 			char *e_msg = "Failed to read ble_sec_key";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
@@ -1205,11 +1194,18 @@ void build_poll_request(NofenceMessage *poll_req)
 	}
 	/* TODO pshustad, fill GNSSS parameters for MIA M10 */
 	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec = true;
-	poll_req->m.poll_message_req.usGnssOnFixAgeSec =
-		cached_msss - (uint16_t)(cached_fix.msss / 1000);
+	uint32_t timeSinceFixSec = (cached_msss - cached_fix.msss)/1000;
+	if (timeSinceFixSec > UINT16_MAX) {
+		timeSinceFixSec = UINT16_MAX;
+	}
+	poll_req->m.poll_message_req.usGnssOnFixAgeSec = timeSinceFixSec;
 
 	poll_req->m.poll_message_req.has_usGnssTTFFSec = true;
-	poll_req->m.poll_message_req.usGnssTTFFSec = cached_ttff;
+	uint32_t timeSinceFirstFixSec = cached_ttff/1000;
+	if (timeSinceFirstFixSec > UINT16_MAX) {
+		timeSinceFirstFixSec = UINT16_MAX;
+	}
+	poll_req->m.poll_message_req.usGnssTTFFSec = timeSinceFirstFixSec;
 
 	if (m_transfer_boot_params) {
 		poll_req->m.poll_message_req.has_versionInfo = true;
@@ -1217,12 +1213,12 @@ void build_poll_request(NofenceMessage *poll_req)
 			.has_ulApplicationVersion = true;
 		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion =
 			NF_X25_VERSION_NUMBER;
-		if (memcmp(ccid, "\0", 1) != 0) {
+		if (ccid[0] != '\0') {
 			poll_req->m.poll_message_req.has_xSimCardId = true;
-			memcpy(poll_req->m.poll_message_req.xSimCardId, ccid,
-			       sizeof(poll_req->m.poll_message_req.xSimCardId) -
-				       1);
+			memcpy(poll_req->m.poll_message_req.xSimCardId, ccid, 
+						sizeof(poll_req->m.poll_message_req.xSimCardId) - 1);
 		}
+
 		/* TODO pshustad, clean up and re-enable the commented code below */
 		//		uint16_t xbootVersion;
 		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
@@ -1232,36 +1228,37 @@ void build_poll_request(NofenceMessage *poll_req)
 		//			poll_req.m.poll_message_req.versionInfo
 		//				.has_usATmegaBootloaderVersion = true;
 		//		}
+
 		poll_req->m.poll_message_req.has_versionInfoHW = true;
 
 		uint8_t pcb_rf_version = 0;
 		eep_uint8_read(EEP_HW_VERSION, &pcb_rf_version);
-		poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version =
-			pcb_rf_version;
+		poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version = 
+					pcb_rf_version;
 
 		uint16_t pcb_product_type = 0;
 		eep_uint16_read(EEP_PRODUCT_TYPE, &pcb_product_type);
-		poll_req->m.poll_message_req.versionInfoHW.usPCB_Product_Type =
-			pcb_product_type;
+		poll_req->m.poll_message_req.versionInfoHW.usPCB_Product_Type = 
+					pcb_product_type;
 
 		poll_req->m.poll_message_req.has_versionInfoBOM = true;
 
 		uint8_t bom_mec_rev = 0;
 		eep_uint8_read(EEP_BOM_MEC_REV, &bom_mec_rev);
 		poll_req->m.poll_message_req.versionInfoBOM.ucBom_mec_rev =
-			bom_mec_rev;
+					bom_mec_rev;
 		uint8_t bom_pcb_rev = 0;
 		eep_uint8_read(EEP_BOM_PCB_REV, &bom_pcb_rev);
 		poll_req->m.poll_message_req.versionInfoBOM.ucBom_pcb_rev =
-			bom_pcb_rev;
+					bom_pcb_rev;
 		uint8_t ems_provider = 0;
 		eep_uint8_read(EEP_EMS_PROVIDER, &ems_provider);
 		poll_req->m.poll_message_req.versionInfoBOM.ucEms_provider =
-			ems_provider;
+					ems_provider;
 		uint8_t product_record_rev = 0;
 		eep_uint8_read(EEP_PRODUCT_RECORD_REV, &product_record_rev);
-		poll_req->m.poll_message_req.versionInfoBOM
-			.ucProduct_record_rev = product_record_rev;
+		poll_req->m.poll_message_req.versionInfoBOM.ucProduct_record_rev = 
+					product_record_rev;
 
 		/** @todo Add information of SIM card */
 #if 0
@@ -1388,7 +1385,7 @@ void proto_InitHeader(NofenceMessage *msg)
 	msg->header.ulId = serial_id;
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
-	int64_t curr_time = 0;
+	static int64_t curr_time = 0;
 	if (!date_time_now(&curr_time)) {
 		/* Convert to seconds since 1.1.1970 */
 		msg->header.ulUnixTimestamp = (uint32_t)(curr_time / 1000);

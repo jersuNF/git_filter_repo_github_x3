@@ -1307,6 +1307,7 @@ void fence_download(uint8_t new_fframe)
 			/* Notify AMC that a new fence is available. */
 			struct new_fence_available *fence_ready =
 				new_new_fence_available();
+			fence_ready->new_fence_version = new_fence_in_progress;
 			EVENT_SUBMIT(fence_ready);
 
 			LOG_INF("Fence ver %d download complete and notified AMC.",

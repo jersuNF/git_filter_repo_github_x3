@@ -45,7 +45,7 @@ if POWER_MANAGER
 
         config BATTERY_MOVING_AVERAGE_SAMPLES
         int "Number of moving average samples to be considered. Higher number gives smoother voltage change"
-        default 30
+        default 3
 
         config SHUTDOWN_TIMER_SEC
         int "Seconds to wait before reboot"

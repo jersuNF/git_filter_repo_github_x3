@@ -149,7 +149,7 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_pwr_status_event(eh)) {
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
-		if (ev->pwr_state == PWR_BATTERY) {
+		if (ev->pwr_state != PWR_CHARGING) {
 			/* Add battery max/min voltage [centi-voltage] */
 			histogram.qc_battery.usVbattMax =
 				(uint16_t)(ev->battery_mv_max / 10);

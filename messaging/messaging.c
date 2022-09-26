@@ -209,7 +209,9 @@ static void build_log_message()
 	seq_1.m.seq_msg.has_usBatteryVoltage = true;
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	seq_1.m.seq_msg.has_usChargeMah = true;
-	seq_1.m.seq_msg.usChargeMah = cached_chrg/3600;
+	seq_1.m.seq_msg.usChargeMah =
+		cached_chrg*CONFIG_BATTERY_POLLER_WORK_SEC/3600; /*TODO:
+ * consider using a higher time resolution for more accurate integration*/
 	cached_chrg = 0;
 	seq_1.m.seq_msg.has_xGprsRssi = true;
 	seq_1.m.seq_msg.xGprsRssi.ucMaxRSSI = (uint8_t)max_rssi;
@@ -777,9 +779,7 @@ static bool event_handler(const struct event_header *eh)
 			atomic_set(&cached_batt,
 				   (uint16_t)(ev->battery_mv / 10));
 		} else {
-			cached_chrg += ev->charging_ma; /*TODO: properly
- * integrate the charging energy, for now we assume that the time between
- * readings is one second and use the average current.*/
+			cached_chrg += ev->charging_ma;
 		}
 		return false;
 	}

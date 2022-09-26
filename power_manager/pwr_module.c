@@ -199,11 +199,7 @@ int pwr_module_init(void)
 		return err;
 	}
 #endif
-	current_state = PWR_CRITICAL;
-	struct pwr_status_event *event = new_pwr_status_event();
-	event->pwr_state = current_state;
-	EVENT_SUBMIT(event);
-
+	current_state = PWR_LOW;
 
 	/* NB: Battery is already initialized with SYS_INIT in battery.c */
 	err = log_and_fetch_battery_voltage();
@@ -216,7 +212,7 @@ int pwr_module_init(void)
 	/* Initialize periodic battery poll function */
 	k_work_init_delayable(&battery_poll_work, battery_poll_work_fn);
 	k_work_reschedule(&battery_poll_work,
-			  K_SECONDS(CONFIG_BATTERY_POLLER_WORK_SEC));
+			  K_NO_WAIT);
 
 #if CONFIG_ADC_NRFX_SAADC
 	/* Initialize and start periodic charging poll function */

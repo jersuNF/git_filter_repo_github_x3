@@ -205,6 +205,9 @@ static inline int update_pasture_from_stg(void)
 			if (pasture->m.ul_fence_def_version ==
 			    m_new_fence_version) {
 				m_fence_update_pending = false;
+			} else {
+//				force_fence_status(FenceStatus_FenceStatus_Invalid);
+				m_fence_update_pending = false;
 			}
 		}
 

@@ -51,7 +51,7 @@ K_SEM_DEFINE(listen_sem, 0, 1); /* this semaphore will be given by the modem
 K_SEM_DEFINE(close_main_socket_sem, 0, 1);
 
 static bool modem_is_ready = false;
-static bool power_level_ok = true;
+static bool power_level_ok = false;
 static bool fota_in_progress = false;
 static bool sending_in_progress = false;
 APP_DMEM struct configs conf = {
@@ -325,7 +325,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 	}
 	else if (is_pwr_status_event(eh)) {
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
-		if (ev->pwr_state < PWR_NORMAL) {
+		if (ev->pwr_state < PWR_NORMAL && power_level_ok) {
 			LOG_WRN("Will power off the modem!");
 			power_level_ok = false;
 		} else if (ev->pwr_state == PWR_NORMAL) {
@@ -416,8 +416,12 @@ static void cellular_controller_keep_alive(void *dev)
 				modem_is_ready = false;
 				ret = modem_nf_pwr_off();
 				if (ret != 0) {
-					LOG_ERR("Failed to switch off"
-						" modem!");
+					if (ret == -EALREADY) {
+						LOG_WRN("Modem suspended!");
+					} else {
+						LOG_ERR("Failed to switch off"
+							" modem!");
+					}
 				} else {
 					LOG_WRN("Modem switched off!");
 				}

@@ -8,7 +8,6 @@
 #include <bluetooth/addr.h>
 #include "beacon.h"
 
-#define MAC_CHARBUF_SIZE (37 + 8)
 #define BEACON_DISTANCE_INFINITY (UINT8_MAX - 1)
 
 struct beacon_connection_info {

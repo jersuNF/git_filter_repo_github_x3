@@ -35,7 +35,7 @@ static const struct device *clock0;
 #define MODULE pwr_module
 #include <logging/log.h>
 
-LOG_MODULE_REGISTER(MODULE, 4);
+LOG_MODULE_REGISTER(MODULE, CONFIG_BATTERY_LOG_LEVEL);
 
 static uint32_t extclk_request_flags = 0;
 
@@ -53,21 +53,12 @@ static int current_state = PWR_NORMAL;
 
 /** A discharge curve specific to the power source. */
 static const struct battery_level_point levels[] = {
-	/* "Curve" here eyeballed from captured data for example cell [Adafruit
-	 * 3.7v 2000 mAh](https://www.adafruit.com/product/2011) LIPO
-	 * under full load that started with a charge of 3.96 V and
-	 * dropped about linearly to 3.58 V over 15 hours.  It then
-	 * dropped rapidly to 3.10 V over one hour, at which point it
-	 * stopped transmitting.
-	 *
-	 * Based on eyeball comparisons we'll say that 15/16 of life
-	 * goes between 3.95 and 3.55 V, and 1/16 goes between 3.55 V
-	 * and 3.1 V.
+	/**
+	 * Here 10000 corresponds to 100 % charge
+	 * For a non linear discharge curve, add more points below 
 	 */
-
-	{ 10000, 4200 },
-	{ 625, 3550 },
-	{ 0, 3100 },
+	{ 10000, CONFIG_BATTERY_FULL_MV },
+	{ 0, CONFIG_BATTERY_EMPTY_MV },
 
 };
 
@@ -148,6 +139,7 @@ static void battery_poll_work_fn()
 		/* Avoid sending the same state twice */
 		struct pwr_status_event *event = new_pwr_status_event();
 		event->pwr_state = current_state;
+		LOG_DBG("Sending state %d", current_state);
 		EVENT_SUBMIT(event);
 	}
 
@@ -267,7 +259,7 @@ int log_and_fetch_battery_voltage(void)
 	event->param.battery = batt_soc;
 	EVENT_SUBMIT(event);
 
-	LOG_WRN("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
+	LOG_DBG("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
 		batt_soc);
 
 	return batt_mV;
@@ -293,9 +285,9 @@ static int pwr_module_extclk_enable(bool enable)
 int pwr_module_use_extclk(enum pwr_requester_module req, bool use_extclk)
 {
 	if (use_extclk) {
-		extclk_request_flags |= (1<<req);
+		extclk_request_flags |= (1 << req);
 	} else {
-		extclk_request_flags &= ~(1<<req);
+		extclk_request_flags &= ~(1 << req);
 	}
 
 	return pwr_module_extclk_enable(extclk_request_flags != 0);
@@ -379,11 +371,13 @@ static bool event_handler(const struct event_header *eh)
 			err = eep_uint8_write(EEP_RESET_REASON, REBOOT_UNKNOWN);
 		}
 		if (err != 0) {
-			LOG_ERR("Unable to write reboot reason to eeprom, err:%d", err);
+			LOG_ERR("Unable to write reboot reason to eeprom, err:%d",
+				err);
 		}
 		LOG_INF("Reboot event received, reason:%d", evt->reason);
 
-		k_work_reschedule(&power_reboot, K_SECONDS(CONFIG_SHUTDOWN_TIMER_SEC));
+		k_work_reschedule(&power_reboot,
+				  K_SECONDS(CONFIG_SHUTDOWN_TIMER_SEC));
 		return false;
 	}
 	/* If event is unhandled, unsubscribe. */

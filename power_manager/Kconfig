@@ -21,11 +21,19 @@ if POWER_MANAGER
 
         config BATTERY_POLLER_WORK_SEC
         int "Seconds between modem poll"
-        default 60
+        default 1
 
         config BATTERY_THRESHOLD
         int "Battery hysteresis in mV"
         default 50
+
+        config BATTERY_FULL_MV
+        int "Represent 100 % battery to the users. NB: This is not the max voltage capacity of the battery. NOTE: Value must match server"
+        default 4100
+
+        config BATTERY_EMPTY_MV
+        int "Represent 0 % battery to the users. NB: This is not the min voltage capacity of the battery. NOTE: Value must match server"
+        default 3400
 
         config BATTERY_LOW
         int "Battery threshold defined in mV to enter low state"
@@ -37,7 +45,7 @@ if POWER_MANAGER
 
         config BATTERY_MOVING_AVERAGE_SAMPLES
         int "Number of moving average samples to be considered. Higher number gives smoother voltage change"
-        default 300
+        default 30
 
         config SHUTDOWN_TIMER_SEC
         int "Seconds to wait before reboot"

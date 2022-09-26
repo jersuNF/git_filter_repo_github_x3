@@ -143,13 +143,6 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	struct ble_conn_event *event = new_ble_conn_event();
 	event->conn_state = BLE_STATE_CONNECTED;
 	EVENT_SUBMIT(event);
-
-	struct block_fota_event *block_ev = new_block_fota_event();
-	block_ev->block_lte_fota = true;
-	EVENT_SUBMIT(block_ev);
-
-	struct cancel_fota_event *cancel_ev = new_cancel_fota_event();
-	EVENT_SUBMIT(cancel_ev);
 }
 
 /**
@@ -172,6 +165,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	event->conn_state = BLE_STATE_DISCONNECTED;
 	EVENT_SUBMIT(event);
 
+	/* Assume BLE fota is paused or aborted upon disconect. */
 	struct block_fota_event *ev = new_block_fota_event();
 	ev->block_lte_fota = false;
 	EVENT_SUBMIT(ev);

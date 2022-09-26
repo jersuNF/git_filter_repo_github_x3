@@ -210,7 +210,8 @@ static void build_log_message()
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	seq_1.m.seq_msg.has_usChargeMah = true;
 	seq_1.m.seq_msg.usChargeMah =
-		cached_chrg*CONFIG_BATTERY_POLLER_WORK_SEC/3600; /*TODO:
+		(uint16_t)(cached_chrg*CONFIG_BATTERY_POLLER_WORK_SEC/3600);
+	/*TODO:
  * consider using a higher time resolution for more accurate integration*/
 	cached_chrg = 0;
 	seq_1.m.seq_msg.has_xGprsRssi = true;

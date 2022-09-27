@@ -46,6 +46,7 @@ extern struct k_heap _system_heap;
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
 #define SECONDS_IN_THREE_DAYS 259200
+#define MSECCONDS_PER_HOUR 3600000
 #define TWO_DAYS_SEC SEC_DAY * 2
 
 #define CACHE_READY_TIMEOUT_SEC 60
@@ -210,7 +211,8 @@ static void build_log_message()
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	seq_1.m.seq_msg.has_usChargeMah = true;
 	seq_1.m.seq_msg.usChargeMah =
-		(uint16_t)(cached_chrg*CONFIG_BATTERY_POLLER_WORK_SEC/3600);
+		(uint16_t)(cached_chrg*CONFIG_CHARGING_POLLER_WORK_MSEC
+			   /MSECCONDS_PER_HOUR);
 	/*TODO:
  * consider using a higher time resolution for more accurate integration*/
 	cached_chrg = 0;

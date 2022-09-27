@@ -49,7 +49,7 @@ static uint32_t extclk_request_flags = 0;
 static int pwr_module_extclk_enable(bool enable);
 
 /** Variable to keep track of current power state */
-static int current_state = PWR_NORMAL;
+static int current_state = PWR_LOW;
 
 /** A discharge curve specific to the power source. */
 static const struct battery_level_point levels[] = {
@@ -135,7 +135,7 @@ static void battery_poll_work_fn()
 	EVENT_SUBMIT(event);
 
 	k_work_reschedule(&battery_poll_work,
-			  K_SECONDS(CONFIG_BATTERY_POLLER_WORK_SEC));
+			  K_MSEC(CONFIG_BATTERY_POLLER_WORK_MSEC));
 }
 #if CONFIG_ADC_NRFX_SAADC
 /** @brief Periodic solar charging work function */
@@ -155,7 +155,7 @@ static void charging_poll_work_fn()
 	event->charging_ma = charging_current_avg;
 	EVENT_SUBMIT(event);
 	k_work_reschedule(&charging_poll_work,
-			  K_SECONDS(CONFIG_CHARGING_POLLER_WORK_SEC));
+			  K_MSEC(CONFIG_CHARGING_POLLER_WORK_MSEC));
 }
 #endif
 
@@ -211,14 +211,12 @@ int pwr_module_init(void)
 
 	/* Initialize periodic battery poll function */
 	k_work_init_delayable(&battery_poll_work, battery_poll_work_fn);
-	k_work_reschedule(&battery_poll_work,
-			  K_NO_WAIT);
+	k_work_reschedule(&battery_poll_work, K_NO_WAIT);
 
 #if CONFIG_ADC_NRFX_SAADC
 	/* Initialize and start periodic charging poll function */
 	k_work_init_delayable(&charging_poll_work, charging_poll_work_fn);
-	k_work_reschedule(&charging_poll_work,
-			  K_SECONDS(CONFIG_CHARGING_POLLER_WORK_SEC));
+	k_work_reschedule(&charging_poll_work, K_NO_WAIT);
 #endif
 
 	/* Initialize the reboot function */

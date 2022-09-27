@@ -8,6 +8,7 @@
 #include <modem_nf.h>
 #include "fw_upgrade_events.h"
 #include "selftest.h"
+#include "pwr_event.h"
 
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define RCV_PRIORITY CONFIG_RECV_THREAD_PRIORITY
@@ -50,6 +51,7 @@ K_SEM_DEFINE(listen_sem, 0, 1); /* this semaphore will be given by the modem
 K_SEM_DEFINE(close_main_socket_sem, 0, 1);
 
 static bool modem_is_ready = false;
+static bool power_level_ok = false;
 static bool fota_in_progress = false;
 static bool sending_in_progress = false;
 APP_DMEM struct configs conf = {
@@ -321,6 +323,16 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	else if (is_pwr_status_event(eh)) {
+		struct pwr_status_event *ev = cast_pwr_status_event(eh);
+		if (ev->pwr_state < PWR_NORMAL && power_level_ok) {
+			LOG_WRN("Will power off the modem!");
+			power_level_ok = false;
+		} else if (ev->pwr_state == PWR_NORMAL) {
+			power_level_ok = true;
+		}
+		return false;
+	}
 	return false;
 }
 
@@ -399,7 +411,23 @@ static void cellular_controller_keep_alive(void *dev)
 	int ret;
 	while (true) {
 		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
-			socket_idle_count = 0;
+			if (!power_level_ok) {
+				connected = false;
+				modem_is_ready = false;
+				ret = modem_nf_pwr_off();
+				if (ret != 0) {
+					if (ret == -EALREADY) {
+						LOG_WRN("Modem suspended!");
+					} else {
+						LOG_ERR("Failed to switch off"
+							" modem!");
+					}
+				} else {
+					LOG_WRN("Modem switched off!");
+				}
+				goto update_connection_state;
+			}
+		socket_idle_count = 0;
 			if (!cellular_controller_is_ready()) {
 				/* reset flags to avoid hanging the
 				 * communication with the
@@ -451,6 +479,7 @@ static void cellular_controller_keep_alive(void *dev)
 
 				}
 			}
+	update_connection_state:
 			announce_connection_state(connected);
 		}
 	}
@@ -514,4 +543,5 @@ EVENT_SUBSCRIBE(MODULE, messaging_host_address_event);
 EVENT_SUBSCRIBE(MODULE, check_connection);
 EVENT_SUBSCRIBE(MODULE, free_message_mem_event);
 EVENT_SUBSCRIBE(MODULE, dfu_status_event);
+EVENT_SUBSCRIBE(MODULE, pwr_status_event);
 

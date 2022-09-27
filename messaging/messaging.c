@@ -46,6 +46,7 @@ extern struct k_heap _system_heap;
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
 #define SECONDS_IN_THREE_DAYS 259200
+#define MSECCONDS_PER_HOUR 3600000
 #define TWO_DAYS_SEC SEC_DAY * 2
 
 #define CACHE_READY_TIMEOUT_SEC 60
@@ -62,7 +63,7 @@ static uint32_t cached_ttff = 0;
 static gnss_mode_t cached_gnss_mode = GNSSMODE_NOMODE;
 
 atomic_t cached_batt = ATOMIC_INIT(0);
-atomic_t cached_chrg = ATOMIC_INIT(0);
+static uint32_t cached_chrg;
 atomic_t cached_temp = ATOMIC_INIT(0);
 atomic_t cached_press = ATOMIC_INIT(0);
 atomic_t cached_hum = ATOMIC_INIT(0);
@@ -209,7 +210,12 @@ static void build_log_message()
 	seq_1.m.seq_msg.has_usBatteryVoltage = true;
 	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	seq_1.m.seq_msg.has_usChargeMah = true;
-	seq_1.m.seq_msg.usChargeMah = (uint16_t)atomic_get(&cached_chrg);
+	seq_1.m.seq_msg.usChargeMah =
+		(uint16_t)(cached_chrg*CONFIG_CHARGING_POLLER_WORK_MSEC
+			   /MSECCONDS_PER_HOUR);
+	/*TODO:
+ * consider using a higher time resolution for more accurate integration*/
+	cached_chrg = 0;
 	seq_1.m.seq_msg.has_xGprsRssi = true;
 	seq_1.m.seq_msg.xGprsRssi.ucMaxRSSI = (uint8_t)max_rssi;
 	seq_1.m.seq_msg.xGprsRssi.ucMinRSSI = (uint8_t)min_rssi;
@@ -771,12 +777,12 @@ static bool event_handler(const struct event_header *eh)
 	if (is_pwr_status_event(eh)) {
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
 		/* Update shaddow register */
-		if (ev->pwr_state == PWR_BATTERY) {
+		if (ev->pwr_state != PWR_CHARGING) {
 			/* We want battery voltage in deci volt */
 			atomic_set(&cached_batt,
 				   (uint16_t)(ev->battery_mv / 10));
-		} else if (ev->pwr_state == PWR_CHARGING) {
-			atomic_set(&cached_chrg, ev->charging_ma);
+		} else {
+			cached_chrg += ev->charging_ma;
 		}
 		return false;
 	}

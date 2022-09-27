@@ -49,7 +49,7 @@ static uint32_t extclk_request_flags = 0;
 static int pwr_module_extclk_enable(bool enable);
 
 /** Variable to keep track of current power state */
-static int current_state = PWR_NORMAL;
+static int current_state = PWR_LOW;
 
 /** A discharge curve specific to the power source. */
 static const struct battery_level_point levels[] = {
@@ -84,15 +84,6 @@ static void battery_poll_work_fn()
 			     strlen(e_msg));
 		return;
 	}
-
-	/* Publish battery event with averaged voltage */
-	struct pwr_status_event *event = new_pwr_status_event();
-	event->pwr_state = PWR_BATTERY;
-	event->battery_mv = batt_voltage;
-	event->battery_mv_min = battery_get_min();
-	event->battery_mv_max = battery_get_max();
-	EVENT_SUBMIT(event);
-
 	/* Keep old state as reference for later */
 	int old_state = current_state;
 
@@ -135,16 +126,16 @@ static void battery_poll_work_fn()
 		break;
 	}
 
-	if (old_state != current_state) {
-		/* Avoid sending the same state twice */
-		struct pwr_status_event *event = new_pwr_status_event();
-		event->pwr_state = current_state;
-		LOG_DBG("Sending state %d", current_state);
-		EVENT_SUBMIT(event);
-	}
+	/* Publish battery event with averaged voltage */
+	struct pwr_status_event *event = new_pwr_status_event();
+	event->pwr_state = current_state;
+	event->battery_mv = batt_voltage;
+	event->battery_mv_min = battery_get_min();
+	event->battery_mv_max = battery_get_max();
+	EVENT_SUBMIT(event);
 
 	k_work_reschedule(&battery_poll_work,
-			  K_SECONDS(CONFIG_BATTERY_POLLER_WORK_SEC));
+			  K_MSEC(CONFIG_BATTERY_POLLER_WORK_MSEC));
 }
 #if CONFIG_ADC_NRFX_SAADC
 /** @brief Periodic solar charging work function */
@@ -164,7 +155,7 @@ static void charging_poll_work_fn()
 	event->charging_ma = charging_current_avg;
 	EVENT_SUBMIT(event);
 	k_work_reschedule(&charging_poll_work,
-			  K_SECONDS(CONFIG_CHARGING_POLLER_WORK_SEC));
+			  K_MSEC(CONFIG_CHARGING_POLLER_WORK_MSEC));
 }
 #endif
 
@@ -208,11 +199,7 @@ int pwr_module_init(void)
 		return err;
 	}
 #endif
-	/* Set PWR state to NORMAL as initial state */
-	struct pwr_status_event *event = new_pwr_status_event();
-	event->pwr_state = PWR_NORMAL;
-	EVENT_SUBMIT(event);
-	current_state = PWR_NORMAL;
+	current_state = PWR_LOW;
 
 	/* NB: Battery is already initialized with SYS_INIT in battery.c */
 	err = log_and_fetch_battery_voltage();
@@ -224,14 +211,12 @@ int pwr_module_init(void)
 
 	/* Initialize periodic battery poll function */
 	k_work_init_delayable(&battery_poll_work, battery_poll_work_fn);
-	k_work_reschedule(&battery_poll_work,
-			  K_SECONDS(CONFIG_BATTERY_POLLER_WORK_SEC));
+	k_work_reschedule(&battery_poll_work, K_NO_WAIT);
 
 #if CONFIG_ADC_NRFX_SAADC
 	/* Initialize and start periodic charging poll function */
 	k_work_init_delayable(&charging_poll_work, charging_poll_work_fn);
-	k_work_reschedule(&charging_poll_work,
-			  K_SECONDS(CONFIG_CHARGING_POLLER_WORK_SEC));
+	k_work_reschedule(&charging_poll_work, K_NO_WAIT);
 #endif
 
 	/* Initialize the reboot function */
@@ -337,7 +322,7 @@ static bool event_handler(const struct event_header *eh)
 
 		/* Publish battery event with averaged voltage */
 		struct pwr_status_event *event = new_pwr_status_event();
-		event->pwr_state = PWR_BATTERY;
+		event->pwr_state = current_state;
 		event->battery_mv = batt_voltage;
 		event->battery_mv_min = battery_get_min();
 		event->battery_mv_max = battery_get_max();

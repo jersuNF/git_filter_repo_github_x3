@@ -51,17 +51,6 @@ static int pwr_module_extclk_enable(bool enable);
 /** Variable to keep track of current power state */
 static int current_state = PWR_LOW;
 
-/** A discharge curve specific to the power source. */
-static const struct battery_level_point levels[] = {
-	/**
-	 * Here 10000 corresponds to 100 % charge
-	 * For a non linear discharge curve, add more points below 
-	 */
-	{ 10000, CONFIG_BATTERY_FULL_MV },
-	{ 0, CONFIG_BATTERY_EMPTY_MV },
-
-};
-
 /* Define the workers for battery and charger */
 static struct k_work_delayable battery_poll_work;
 static struct k_work_delayable power_reboot;
@@ -237,7 +226,7 @@ int log_and_fetch_battery_voltage(void)
 		return -ENOENT;
 	}
 
-	uint8_t batt_soc = battery_level_soc(batt_mV, levels);
+	uint8_t batt_soc = battery_level_soc(batt_mV);
 
 	struct ble_ctrl_event *event = new_ble_ctrl_event();
 	event->cmd = BLE_CTRL_BATTERY_UPDATE;
@@ -285,7 +274,7 @@ int fetch_battery_percent(void)
 		LOG_ERR("Failed to read battery voltage: %d", batt_mV);
 		return -ENOENT;
 	}
-	return battery_level_soc(batt_mV, levels);
+	return battery_level_soc(batt_mV);
 }
 
 int pwr_module_reboot_reason(uint8_t *aReason)

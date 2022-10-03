@@ -275,8 +275,8 @@ int read_and_send_log_data_cb(uint8_t *data, size_t len)
 	memset(encoded_msg, 0, sizeof(encoded_msg));
 	LOG_DBG("Send log message fetched from flash");
 	/* Fetch the length from the two first bytes */
-	uint16_t *new_len = &data[0];
-	memcpy(&encoded_msg[0], &data[0], *new_len);
+	uint16_t new_len = *(uint16_t*) &data[0];
+	memcpy(&encoded_msg[0], &data[0], new_len);
 	int err = send_binary_message(encoded_msg, new_len);
 	if (err) {
 		char *e_msg = "Error sending binary message for log data";
@@ -489,7 +489,7 @@ static void log_warning_work_fn()
 static void log_correction_start_work_fn()
 {
 	NofenceMessage msg;
-	proto_InitHeader(&msg); /* fill up message header. */ 
+	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m = NofenceMessage_client_correction_start_message_tag;
 	msg.m.client_correction_start_message.has_sFenceDist = true;
 	msg.m.client_correction_start_message.sFenceDist =

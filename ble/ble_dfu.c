@@ -28,12 +28,11 @@ static void dfu_started_cb(void)
 
 static void dfu_stopped_cb(void)
 {
-	LOG_ERR("BLE DFU process went wrong.");
+	LOG_ERR("BLE FOTA failed. Collar will reboot in 5 seconds...");
 
-	/* Unblock LTE FOTA here */
-	struct block_fota_event *block_ev = new_block_fota_event();
-	block_ev->block_lte_fota = false;
-	EVENT_SUBMIT(block_ev);
+	/* Fatal error. Perform a cold restart after 5 seconds */
+	char *e_msg = "BLE FOTA upgrade failed to complete";
+	nf_app_error(ERR_BLE_MODULE, -EIO, e_msg, strlen(e_msg));
 }
 
 static void dfu_pending_cb(void)

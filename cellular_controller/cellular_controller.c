@@ -164,12 +164,11 @@ void listen_sock_poll(void)
 	}
 }
 
-int start_tcp(void)
+static int start_tcp(void)
 {
 	int ret = modem_nf_wakeup();
 	if (ret != 0) {
 		LOG_ERR("Failed to wake up the modem!");
-		modem_nf_reset();
 		return ret;
 	}
 	if (!fota_in_progress) {
@@ -179,7 +178,6 @@ int start_tcp(void)
 		char *e_msg = "Failed to get ip address!";
 		nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
 		return ret;
-			return ret;
 		}
 	}
 

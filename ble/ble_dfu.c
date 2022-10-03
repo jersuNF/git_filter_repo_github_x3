@@ -10,6 +10,7 @@
 
 #include <logging/log.h>
 #include "fw_upgrade_events.h"
+#include "error_handler.h"
 
 LOG_MODULE_REGISTER(ble_dfu);
 

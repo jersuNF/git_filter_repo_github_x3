@@ -75,7 +75,7 @@ atomic_t cached_dist_correction_end = ATOMIC_INIT(0);
 
 K_SEM_DEFINE(cache_ready_sem, 0, 1);
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
-K_SEM_DEFINE(send_out_ack, 1, 1);
+K_SEM_DEFINE(send_out_ack, 0, 1);
 K_SEM_DEFINE(connection_ready, 0, 1);
 
 static collar_state_struct_t current_state;
@@ -177,7 +177,7 @@ static bool warning_active;
 
 K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE,
 		messaging_thread_fn, NULL, NULL, NULL,
-		CONFIG_MESSAGING_THREAD_PRIORITY, 0, 0);
+		K_PRIO_COOP(CONFIG_MESSAGING_THREAD_PRIORITY), 0, 0);
 
 K_KERNEL_STACK_DEFINE(messaging_send_thread,
 		      CONFIG_MESSAGING_SEND_THREAD_STACK_SIZE);
@@ -259,6 +259,7 @@ static void build_log_message()
 	 *  has been entered. Consider to add this in future.
 	 */
 	seq_2.m.seq_msg_2.has_xGnssModeCounts = false;
+
 	err = encode_and_store_message(&seq_2);
 	if (err) {
 		char *e_msg = "Failed to encode and save sequence message 2";
@@ -270,18 +271,18 @@ static void build_log_message()
 
 int read_and_send_log_data_cb(uint8_t *data, size_t len)
 {
+	uint8_t encoded_msg[NofenceMessage_size];
+	memset(encoded_msg, 0, sizeof(encoded_msg));
 	LOG_DBG("Send log message fetched from flash");
 	/* Fetch the length from the two first bytes */
-	uint16_t new_len = (uint16_t)((data[1] << 8) + (data[0] & 0x00ff) + 2);
-	uint8_t *new_data = k_malloc(new_len);
-	memcpy(new_data, &data[0], new_len);
-	int err = send_binary_message(new_data, new_len);
+	uint16_t *new_len = &data[0];
+	memcpy(&encoded_msg[0], &data[0], *new_len);
+	int err = send_binary_message(encoded_msg, new_len);
 	if (err) {
 		char *e_msg = "Error sending binary message for log data";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 	}
-	k_free(new_data);
 	k_yield();
 	return err;
 }
@@ -315,8 +316,9 @@ static int send_all_stored_messages(void)
 		}
 		k_mutex_unlock(&read_flash_mutex);
 		return 0;
+	} else {
+		return -ETIMEDOUT;
 	}
-	return -ETIMEDOUT;
 }
 
 /**
@@ -342,7 +344,7 @@ void log_data_periodic_fn()
 void modem_poll_work_fn()
 {
 	/* Reschedule a periodic poll request */
-	k_work_reschedule_for_queue(&send_q, &modem_poll_work, 
+	k_work_reschedule_for_queue(&send_q, &modem_poll_work,
 		K_MINUTES(atomic_get(&poll_period_minutes)));
 	/* Add logic for the periodic protobuf modem poller. */
 	LOG_INF("Starting periodic poll work and building poll request.");
@@ -361,9 +363,9 @@ void modem_poll_work_fn()
 		k_sem_give(&cache_lock_sem);
 		encode_and_send_message(&new_poll_msg);
 	} else {
-		LOG_ERR("Cached state semaphore hanged, retrying in 1 second.");
+		LOG_ERR("Cached state semaphore hanged, retrying in 1 minute.");
 		k_work_reschedule_for_queue(&send_q, &modem_poll_work,
-					    K_SECONDS(1));
+					    K_MINUTES(1));
 	}
 }
 
@@ -373,7 +375,7 @@ static void log_zap_message_work_fn()
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m = NofenceMessage_client_zap_message_tag;
 	msg.m.client_zap_message.has_sFenceDist = true;
-	msg.m.client_zap_message.sFenceDist = atomic_get(&cached_dist_zap);
+	msg.m.client_zap_message.sFenceDist = (int16_t)atomic_get(&cached_dist_zap);
 
 	proto_get_last_known_date_pos(&cached_fix,
 				      &msg.m.client_zap_message.xDatePos);
@@ -463,7 +465,8 @@ static void log_warning_work_fn()
 	proto_InitHeader(&msg); /* fill up message header. */
 	msg.which_m = NofenceMessage_client_warning_message_tag;
 	msg.m.client_warning_message.has_sFenceDist = true;
-	msg.m.client_warning_message.sFenceDist = atomic_get(&cached_dist_warn);
+	msg.m.client_warning_message.sFenceDist = (int16_t)atomic_get
+						   (&cached_dist_warn);
 	msg.m.client_warning_message.usDuration =
 		atomic_get(&cached_warning_duration);
 	proto_get_last_known_date_pos(&cached_fix,
@@ -490,7 +493,7 @@ static void log_correction_start_work_fn()
 	msg.which_m = NofenceMessage_client_correction_start_message_tag;
 	msg.m.client_correction_start_message.has_sFenceDist = true;
 	msg.m.client_correction_start_message.sFenceDist =
-		atomic_get(&cached_dist_correction_start);
+		(int16_t)atomic_get(&cached_dist_correction_start);
 
 	proto_get_last_known_date_pos(
 		&cached_fix, &msg.m.client_correction_start_message.xDatePos);
@@ -516,7 +519,7 @@ static void log_correction_end_work_fn()
 	msg.which_m = NofenceMessage_client_correction_end_message_tag;
 	msg.m.client_correction_end_message.has_sFenceDist = true;
 	msg.m.client_correction_end_message.sFenceDist =
-		atomic_get(&cached_dist_correction_end);
+		(int16_t)atomic_get(&cached_dist_correction_end);
 
 	proto_get_last_known_date_pos(
 		&cached_fix, &msg.m.client_correction_end_message.xDatePos);
@@ -571,11 +574,11 @@ static void update_cache_reg(cached_and_ready_enum index)
 }
 
 /**
- * @brief Main event handler function. 
- * 
- * @param[in] eh Event_header for the if-chain to 
+ * @brief Main event handler function.
+ *
+ * @param[in] eh Event_header for the if-chain to
  *               use to recognize which event triggered.
- * 
+ *
  * @return True or false based on if we want to consume the event or not.
  */
 static bool event_handler(const struct event_header *eh)
@@ -809,7 +812,6 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_warn_correction_start_event(eh)) {
-		warning_active = true;
 		struct warn_correction_start_event *ev =
 			cast_warn_correction_start_event(eh);
 		atomic_set(&cached_dist_correction_start, ev->fence_dist);
@@ -825,17 +827,7 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-	if (is_warn_correction_pause_event(eh)) {
-		struct warn_correction_pause_event *ev =
-			cast_warn_correction_pause_event(eh);
-		LOG_DBG("Warn correction pause event. Duraction: %d s",
-			ev->warn_duration);
-		atomic_set(&cached_warning_duration, ev->warn_duration);
-
-		return false;
-	}
 	if (is_warn_correction_end_event(eh)) {
-		warning_active = false;
 		struct warn_correction_end_event *ev =
 			cast_warn_correction_end_event(eh);
 		atomic_set(&cached_dist_correction_end, ev->fence_dist);
@@ -870,6 +862,16 @@ static bool event_handler(const struct event_header *eh)
 		if (fw_upgrade_event->dfu_status == DFU_STATUS_IDLE &&
 		    fw_upgrade_event->dfu_error != 0) {
 			fota_reset = true;
+		}
+		return false;
+	}
+	if (is_sound_status_event(eh)) {
+		struct sound_status_event *buzzer_state =
+			cast_sound_status_event(eh);
+		if (buzzer_state->status != SND_STATUS_IDLE) {
+			warning_active = true;
+		} else {
+			warning_active = false;
 		}
 		return false;
 	}
@@ -943,10 +945,10 @@ EVENT_SUBSCRIBE(MODULE, env_sensor_event);
 EVENT_SUBSCRIBE(MODULE, gnss_data);
 EVENT_SUBSCRIBE(MODULE, send_poll_request_now);
 EVENT_SUBSCRIBE(MODULE, warn_correction_start_event);
-EVENT_SUBSCRIBE(MODULE, warn_correction_pause_event);
 EVENT_SUBSCRIBE(MODULE, warn_correction_end_event);
 EVENT_SUBSCRIBE(MODULE, gsm_info_event);
 EVENT_SUBSCRIBE(MODULE, dfu_status_event);
+EVENT_SUBSCRIBE(MODULE, sound_status_event);
 
 static inline void process_ble_cmd_event(void)
 {
@@ -1084,7 +1086,8 @@ int messaging_module_init(void)
 	k_work_queue_init(&send_q);
 	k_work_queue_start(&send_q, messaging_send_thread,
 			   K_THREAD_STACK_SIZEOF(messaging_send_thread),
-			   CONFIG_MESSAGING_SEND_THREAD_PRIORITY, NULL);
+			   K_PRIO_COOP(CONFIG_MESSAGING_SEND_THREAD_PRIORITY),
+			   NULL);
 
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
 	k_work_init_delayable(&log_work, log_data_periodic_fn);
@@ -1289,6 +1292,7 @@ int8_t request_fframe(uint32_t version, uint8_t frame)
 	fence_req.which_m = NofenceMessage_fence_definition_req_tag;
 	fence_req.m.fence_definition_req.ulFenceDefVersion = version;
 	fence_req.m.fence_definition_req.ucFrameNumber = frame;
+	warning_active = false;
 	int ret = encode_and_send_message(&fence_req);
 	if (ret) {
 		char *e_msg = "Failed to send request for fence frame";
@@ -1423,6 +1427,7 @@ int send_binary_message(uint8_t *data, size_t len)
 			 K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC * 2)) == 0) {
 		struct check_connection *ev = new_check_connection();
 		EVENT_SUBMIT(ev);
+
 		int ret = k_sem_take(&connection_ready, K_MINUTES(2));
 		if (ret != 0) {
 			char *e_msg =
@@ -1434,6 +1439,13 @@ int send_binary_message(uint8_t *data, size_t len)
 		}
 		uint16_t byteswap_size = BYTESWAP16(len - 2);
 		memcpy(&data[0], &byteswap_size, 2);
+		k_sem_reset(&send_out_ack);
+		struct messaging_proto_out_event *msg2send =
+			new_messaging_proto_out_event();
+		msg2send->buf = data;
+		msg2send->len = len;
+		EVENT_SUBMIT(msg2send);
+
 		int err = k_sem_take(&send_out_ack,
 				     K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC));
 		if (err != 0) {
@@ -1442,14 +1454,6 @@ int send_binary_message(uint8_t *data, size_t len)
 			k_mutex_unlock(&send_binary_mutex);
 			return -ETIMEDOUT;
 		}
-		struct messaging_proto_out_event *msg2send =
-			new_messaging_proto_out_event();
-		msg2send->buf = data;
-		msg2send->len = len;
-		EVENT_SUBMIT(msg2send);
-
-	} else {
-		return -ETIMEDOUT;
 	}
 	k_mutex_unlock(&send_binary_mutex);
 	return 0;
@@ -1457,8 +1461,7 @@ int send_binary_message(uint8_t *data, size_t len)
 
 int encode_and_send_message(NofenceMessage *msg_proto)
 {
-	/* NB: We assume the two first bytes are empty when sending */
-	uint8_t encoded_msg[NofenceMessage_size + 2];
+	uint8_t encoded_msg[NofenceMessage_size];
 	memset(encoded_msg, 0, sizeof(encoded_msg));
 	size_t encoded_size = 0;
 	size_t header_size = 2;
@@ -1483,10 +1486,10 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 
 int encode_and_store_message(NofenceMessage *msg_proto)
 {
-	uint8_t encoded_msg[NofenceMessage_size + 2];
-	memset(encoded_msg, 0, sizeof(encoded_msg));
 	size_t encoded_size = 0;
 	size_t header_size = 2;
+	uint8_t encoded_msg[NofenceMessage_size];
+	memset(encoded_msg, 0, sizeof(encoded_msg));
 
 	LOG_INF("Start message encoding, size: %d, version: %u",
 		sizeof(msg_proto), msg_proto->header.ulVersion);
@@ -1498,12 +1501,15 @@ int encode_and_store_message(NofenceMessage *msg_proto)
 		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return ret;
 	}
+	uint16_t total_size = encoded_size + header_size;
 
 	/* Store the length of the message in the two first bytes */
-	encoded_msg[0] = (uint8_t)encoded_size;
-	encoded_msg[1] = (uint8_t)(encoded_size >> 8);
-
-	return stg_write_log_data(encoded_msg, encoded_size + header_size);
+	memcpy(&encoded_msg[0], &total_size,2);
+	ret = stg_write_log_data(encoded_msg, (size_t)total_size);
+	if (ret != 0) {
+		LOG_ERR("Failed to store message to flash!");
+	}
+	return ret;
 }
 
 void process_poll_response(NofenceMessage *proto)

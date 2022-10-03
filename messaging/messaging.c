@@ -489,7 +489,7 @@ static void log_warning_work_fn()
 static void log_correction_start_work_fn()
 {
 	NofenceMessage msg;
-	proto_InitHeader(&msg); /* fill up message header. */
+	proto_InitHeader(&msg); /* fill up message header. */ 
 	msg.which_m = NofenceMessage_client_correction_start_message_tag;
 	msg.m.client_correction_start_message.has_sFenceDist = true;
 	msg.m.client_correction_start_message.sFenceDist =

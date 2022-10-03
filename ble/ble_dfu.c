@@ -29,7 +29,11 @@ static void dfu_started_cb(void)
 static void dfu_stopped_cb(void)
 {
 	LOG_ERR("BLE DFU process went wrong.");
-	/* Do we want to restart the collar here ? */
+
+	/* Unblock LTE FOTA here */
+	struct block_fota_event *block_ev = new_block_fota_event();
+	block_ev->block_lte_fota = false;
+	EVENT_SUBMIT(block_ev);
 }
 
 static void dfu_pending_cb(void)

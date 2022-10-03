@@ -290,7 +290,7 @@ int read_and_send_log_data_cb(uint8_t *data, size_t len)
 static int send_all_stored_messages(void)
 {
 	if (k_mutex_lock(&read_flash_mutex, K_NO_WAIT) == 0) {
-		/* Read and send out all the log data if any. */
+		/*Read and send out all the log data if any.*/
 		int err = stg_read_log_data(read_and_send_log_data_cb, 0);
 		if (err && err != -ENODATA) {
 			k_mutex_unlock(&read_flash_mutex);

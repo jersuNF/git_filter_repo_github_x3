@@ -127,9 +127,9 @@ void receive_tcp(struct data *sock_data)
 						 * enabling it with 2G during
 						 * slow FOTA to save some
 						 * energy.*/
+						connected = false;
 						int ret = stop_tcp(fota_in_progress);
 						socket_idle_count = 0;
-						connected = false;
 						if (ret != 0) {
 							modem_is_ready = false;
 						}
@@ -140,8 +140,8 @@ void receive_tcp(struct data *sock_data)
 				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
 					(e_msg));
 				if (!sending_in_progress) {
-					int ret = stop_tcp(fota_in_progress);
 					connected = false;
+					int ret = stop_tcp(fota_in_progress);
 					if (ret != 0) {
 						modem_is_ready = false;
 					}
@@ -201,25 +201,6 @@ int start_tcp(void)
 	return ret;
 }
 
-int listen_tcp(void)
-{
-	int ret = check_ip();
-	if (ret != 0) {
-		LOG_ERR("Failed to get ip "
-			"address!");
-		/*TODO: notify error handler*/
-		return ret;
-	}
-	if (IS_ENABLED(CONFIG_NET_IPV4)) {
-		ret = socket_listen(&conf_listen.ipv4);
-		if (ret < 0) {
-			/*TODO: notify error handler*/
-			LOG_DBG("Failed to start listening socket!");
-			return ret;
-		}
-	}
-	return ret;
-}
 static uint8_t *CharMsgOut = NULL;
 static bool cellular_controller_event_handler(const struct event_header *eh)
 {
@@ -270,32 +251,35 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 	}
 	else if (is_messaging_proto_out_event(eh)) {
 		if (connected) {
+			sending_in_progress = true;
 			k_sem_reset(&close_main_socket_sem);
 			socket_idle_count = 0;
-			sending_in_progress = true;
 			struct messaging_proto_out_event *event =
 				cast_messaging_proto_out_event(eh);
 			uint8_t *pCharMsgOut = event->buf;
 			size_t MsgOutLen = event->len;
 
-			/* make a local copy of the message to send.*/
-
-			CharMsgOut = (char *)k_malloc(MsgOutLen);
-			if (CharMsgOut ==
-			    memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
-				LOG_DBG("Publishing ack to messaging!\n");
-				struct cellular_ack_event *ack =
-					new_cellular_ack_event();
-				EVENT_SUBMIT(ack);
-			}
-			int err = send_tcp_q(CharMsgOut, MsgOutLen);
-			if (err != 0) {
-				char *sendq_err = "Couldn't push message to queue!";
-				nf_app_error(ERR_MESSAGING, -EAGAIN, sendq_err,
-					     strlen(sendq_err));
-				k_free(CharMsgOut);
-				CharMsgOut = NULL;
-				return false;
+			if (CharMsgOut == NULL) {
+				/* make a local copy of the message to send.*/
+				CharMsgOut = (char *)k_malloc(MsgOutLen);
+				if (CharMsgOut ==
+				    memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
+					LOG_DBG("Publishing ack to messaging!\n");
+					struct cellular_ack_event *ack =
+						new_cellular_ack_event();
+					EVENT_SUBMIT(ack);
+				}
+				int err = send_tcp_q(CharMsgOut, MsgOutLen);
+				if (err != 0) {
+					char *sendq_err = "Couldn't push message to queue!";
+					nf_app_error(ERR_MESSAGING, -EAGAIN, sendq_err,
+						     strlen(sendq_err));
+					k_free(CharMsgOut);
+					CharMsgOut = NULL;
+					return false;
+				}
+			} else {
+				LOG_WRN("Dropping message!");
 			}
 		}
 		return false;
@@ -469,6 +453,7 @@ static void cellular_controller_keep_alive(void *dev)
 						stop_tcp(fota_in_progress);
 					}
 				} else {
+					socket_idle_count = 0;
 					if (!fota_in_progress) {
 						ret = check_ip();
 						if (ret != 0) {
@@ -494,7 +479,6 @@ void announce_connection_state(bool state) {
 	if (state == true) {
 		k_sem_reset(&close_main_socket_sem);
 		socket_idle_count = 0;
-		sending_in_progress = true;
 		struct modem_state
 			*modem_active =
 			new_modem_state();

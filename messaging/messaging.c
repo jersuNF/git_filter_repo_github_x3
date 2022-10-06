@@ -363,9 +363,9 @@ void modem_poll_work_fn()
 		k_sem_give(&cache_lock_sem);
 		encode_and_send_message(&new_poll_msg);
 	} else {
-		LOG_ERR("Cached state semaphore hanged, retrying in 1 minute.");
+		LOG_ERR("Cached state semaphore hanged, retrying in 3 minutes.");
 		k_work_reschedule_for_queue(&send_q, &modem_poll_work,
-					    K_MINUTES(1));
+					    K_MINUTES(3));
 	}
 }
 
@@ -545,16 +545,6 @@ void data_request_work_fn()
 	LOG_INF("Periodic request data");
 	k_work_reschedule_for_queue(&send_q, &data_request_work, K_MINUTES(1));
 
-	/* Request of battery voltage */
-	struct request_pwr_battery_event *ev_batt =
-		new_request_pwr_battery_event();
-	EVENT_SUBMIT(ev_batt);
-
-	/* Request of charging current */
-	struct request_pwr_charging_event *ev_charge =
-		new_request_pwr_charging_event();
-	EVENT_SUBMIT(ev_charge);
-
 	/* Request of temp, press, humidity */
 	struct request_env_sensor_event *ev_env =
 		new_request_env_sensor_event();
@@ -684,8 +674,7 @@ static bool event_handler(const struct event_header *eh)
 			(((current_state.fence_status == FenceStatus_MaybeOutOfFence) || 
 				(prev_fence_status == FenceStatus_MaybeOutOfFence)) || 
 			(prev_fence_status == FenceStatus_Escaped) ||
-            ((current_state.fence_status == FenceStatus_FenceStatus_Normal) && 
-				(prev_fence_status == FenceStatus_NotStarted)) ||
+            ((current_state.fence_status == FenceStatus_FenceStatus_Normal)) ||
             ((current_state.fence_status == FenceStatus_TurnedOffByBLE) && 
 				(prev_fence_status == FenceStatus_TurnedOffByBLE)))) {
 
@@ -1674,9 +1663,9 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 			struct start_fota_event *ev = new_start_fota_event();
 			ev->override_default_host = false;
 			ev->reset_download_client = fota_reset;
-			fota_reset = false;
 			ev->version = fw_ver_from_server->ulApplicationVersion;
 			EVENT_SUBMIT(ev);
+			fota_reset = false;
 		}
 	}
 }

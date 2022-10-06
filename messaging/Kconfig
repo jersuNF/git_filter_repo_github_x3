@@ -19,7 +19,7 @@ if MESSAGING
 
 	config MESSAGING_THREAD_PRIORITY
 		int "Priority of the message processing thread"
-		default 2
+		default 4
 		help
 		  A cooperative thread has a negative priority value. 
 		  Once it becomes the current thread, a cooperative thread 
@@ -37,7 +37,7 @@ if MESSAGING
 
 	config MESSAGING_SEND_THREAD_PRIORITY
 		int "Priority of the send to server queue thread"
-		default 2
+		default 3
 
 	config CC_ACK_TIMEOUT_SEC
 	    int "Timeout when waiting for ack from cellular controller"

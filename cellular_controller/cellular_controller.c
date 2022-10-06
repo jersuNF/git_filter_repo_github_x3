@@ -274,6 +274,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 						     strlen(sendq_err));
 					k_free(CharMsgOut);
 					CharMsgOut = NULL;
+					sending_in_progress = false;
 					return false;
 				}
 			} else {

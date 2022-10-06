@@ -51,11 +51,9 @@ typedef enum { RESTING, GRAZING, WALKING, RUNNING, UNKNOWN } STATE;
 
 static STATE cur_animal_state = UNKNOWN;
 static amc_zone_t cur_zone;
-static Mode cur_collar_mode;
 static CollarStatus cur_collar_status;
 static FenceStatus cur_fence_status;
 static bool in_beacon_or_sleep, save_and_reset;
-static movement_state_t cur_mv_state;
 static acc_activity_t cur_activity_level = ACTIVITY_NO;
 static uint16_t steps = 0, steps_old = 0;
 int16_t m_i16_way_pnt[2], fresh_pos[2];
@@ -77,11 +75,6 @@ static bool event_handler(const struct event_header *eh)
 		cur_zone = ev->zone;
 		return false;
 	}
-	if (is_update_collar_mode(eh)) {
-		struct update_collar_mode *ev = cast_update_collar_mode(eh);
-		cur_collar_mode = ev->collar_mode;
-		return false;
-	}
 	if (is_update_collar_status(eh)) {
 		struct update_collar_status *ev = cast_update_collar_status(eh);
 		cur_collar_status = ev->collar_status;
@@ -100,11 +93,6 @@ static bool event_handler(const struct event_header *eh)
 			return false;
 		}
 		in_beacon_or_sleep = false;
-		return false;
-	}
-	if (is_movement_out_event(eh)) {
-		struct movement_out_event *ev = cast_movement_out_event(eh);
-		cur_mv_state = ev->state;
 		return false;
 	}
 	if (is_activity_level(eh)) {
@@ -182,13 +170,12 @@ EVENT_LISTENER(MODULE, event_handler);
 
 EVENT_SUBSCRIBE(MODULE, amc_zone_changed);
 EVENT_SUBSCRIBE(MODULE, xy_location);
-EVENT_SUBSCRIBE(MODULE, update_collar_mode);
+
 EVENT_SUBSCRIBE(MODULE, update_collar_status);
 EVENT_SUBSCRIBE(MODULE, update_fence_status);
 
 EVENT_SUBSCRIBE(MODULE, ble_beacon_event);
 
-EVENT_SUBSCRIBE(MODULE, movement_out_event);
 EVENT_SUBSCRIBE(MODULE, activity_level);
 EVENT_SUBSCRIBE(MODULE, step_counter_event);
 
@@ -220,7 +207,7 @@ void collect_stats(void)
 			} else if (cur_activity_level == ACTIVITY_HIGH) {
 				cur_animal_state = RUNNING;
 			} else
-				cur_mv_state = UNKNOWN;
+				cur_animal_state = UNKNOWN;
 
 			switch (cur_animal_state) {
 			case RESTING:

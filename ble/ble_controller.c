@@ -718,7 +718,7 @@ int ble_module_init()
 	k_work_init_delayable(&periodic_beacon_scanner_work,
 			      periodic_beacon_scanner_work_fn);
 	k_work_reschedule(&periodic_beacon_scanner_work,
-			  K_SECONDS(K_NO_WAIT));
+			  K_NO_WAIT);
 #endif
 	k_work_init_delayable(&disconnect_peer_work, disconnect_peer_work_fn);
 	return 0;

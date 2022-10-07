@@ -36,7 +36,7 @@
 
 #include <logging/log.h>
 #define MODULE storage_controller
-LOG_MODULE_REGISTER(MODULE, CONFIG_STORAGE_CONTROLLER_LOG_LEVEL);
+LOG_MODULE_REGISTER(MODULE, 4);
 
 /* Log partition. */
 static const struct flash_area *log_area;
@@ -189,6 +189,13 @@ static inline int init_fcb_on_partition(flash_partition_t partition)
 			partition, err);
 		return err;
 	}
+
+	LOG_INF("FCB Init: Partition(%d), AreaID(%d), FaID(%d), FaOff(%d), FaSize(%d)", partition, 
+						area_id, (uint8_t)area->fa_id, (int)area->fa_off, (int)area->fa_size);
+
+	// if (partition == STG_PARTITION_LOG) {
+	// 	flash_area_erase(area, (uint32_t)area->fa_off, (uint32_t)area->fa_size);
+	// }
 
 	/* Check if area has a flash device available. */
 	dev = device_get_binding(area->fa_dev_name);
@@ -774,6 +781,54 @@ bool stg_log_pointing_to_last()
 	k_mutex_unlock(&log_mutex);
 	return false;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 static bool event_handler(const struct event_header *eh)
 {

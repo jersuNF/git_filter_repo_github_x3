@@ -289,7 +289,13 @@ int read_and_send_log_data_cb(uint8_t *data, size_t len)
 
 static int send_all_stored_messages(void)
 {
+//	static bool force_poll_req = true;
 	if (k_mutex_lock(&read_flash_mutex, K_NO_WAIT) == 0) {
+//		if (force_poll_req) {
+//			k_work_reschedule_for_queue(&send_q, &modem_poll_work,
+//						    K_NO_WAIT);
+//			force_poll_req = false;
+//		}
 		/*Read and send out all the log data if any.*/
 		int err = stg_read_log_data(read_and_send_log_data_cb, 0);
 		if (err && err != -ENODATA) {
@@ -304,6 +310,7 @@ static int send_all_stored_messages(void)
 	     * and we HAVE data on the partition.
 	     */
 		if (stg_log_pointing_to_last()) {
+//			force_poll_req = true;
 			err = stg_clear_partition(STG_PARTITION_LOG);
 			if (err) {
 				LOG_ERR("Error clearing FCB storage for LOG %i",

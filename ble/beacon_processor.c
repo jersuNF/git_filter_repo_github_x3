@@ -333,10 +333,10 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		add_to_beacon_history(&info,
 				      &beacons.beacon_array[target_beacon]);
 	}
-	if (beacons.beacon_array[target_beacon].num_measurements < 4) {
-		/* Wait for at least four measurements to evaluate a beacon */
-		return -EIO;
-	}
+//	if (beacons.beacon_array[target_beacon].num_measurements < 4) {
+//		/* Wait for at least four measurements to evaluate a beacon */
+//		return -EIO;
+//	}
 	uint8_t last_distance = m_beacon_min_distance;
 	uint8_t beacon_index = 0;
 	int err = get_shortest_distance(&beacons, &m_beacon_min_distance,

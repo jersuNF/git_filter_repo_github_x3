@@ -148,7 +148,7 @@ void receive_tcp(struct data *sock_data)
 				}
 			}
 		}
-		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
+//		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
 	}
 }
 
@@ -248,7 +248,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return false;
 	}
 	else if (is_messaging_proto_out_event(eh)) {
-		if (connected) {
+//		if (connected) {
 			sending_in_progress = true;
 			k_sem_reset(&close_main_socket_sem);
 			socket_idle_count = 0;
@@ -280,7 +280,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			} else {
 				LOG_WRN("Dropping message!");
 			}
-		}
+//		}
 		return false;
 	}
 	else if (is_check_connection(eh)) {

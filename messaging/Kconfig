@@ -19,7 +19,7 @@ if MESSAGING
 
 	config MESSAGING_THREAD_PRIORITY
 		int "Priority of the message processing thread"
-		default 4
+		default 3
 		help
 		  A cooperative thread has a negative priority value. 
 		  Once it becomes the current thread, a cooperative thread 

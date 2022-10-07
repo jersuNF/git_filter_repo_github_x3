@@ -184,13 +184,9 @@ static void periodic_beacon_scanner_work_fn()
 	watchdog_report_module_alive(WDG_BLE_SCAN);
 #endif
 	/* Start scanner again if not already running */
-	if (!atomic_get(&atomic_bt_scan_active)) {
-		struct ble_ctrl_event *event = new_ble_ctrl_event();
-		event->cmd = BLE_CTRL_SCAN_START;
-		EVENT_SUBMIT(event);
-		/* Save ON-timestamp */
-		beacon_scanner_timer = k_uptime_get();
-	}
+	struct ble_ctrl_event *event = new_ble_ctrl_event();
+	event->cmd = BLE_CTRL_SCAN_START;
+	EVENT_SUBMIT(event);
 }
 #endif
 /**
@@ -533,7 +529,7 @@ static bool data_cb(struct bt_data *data, void *user_data)
 	}
 }
 
-bool beacon_found = false;
+static bool beacon_found = false;
 
 /**
  * @brief Callback for reporting LE scan results.
@@ -570,12 +566,10 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 	int64_t delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
 	if (delta_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
 		/* Stop beacon scanner. Check if scan is active */
-		if (atomic_get(&atomic_bt_scan_active) == true) {
-			struct ble_ctrl_event *ctrl_event =
-				new_ble_ctrl_event();
-			ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
-			EVENT_SUBMIT(ctrl_event);
-		}
+		struct ble_ctrl_event *ctrl_event =
+			new_ble_ctrl_event();
+		ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
+		EVENT_SUBMIT(ctrl_event);
 	}
 }
 
@@ -708,12 +702,6 @@ int ble_module_init()
 #endif
 
 #if CONFIG_BEACON_SCAN_ENABLE
-	/* Start scanning after beacons. Set flag to true */
-	if (atomic_get(&atomic_bt_scan_active) == false) {
-		scan_start();
-		atomic_set(&atomic_bt_scan_active, true);
-	}
-
 	/* Init and start periodic scan work function */
 	k_work_init_delayable(&periodic_beacon_scanner_work,
 			      periodic_beacon_scanner_work_fn);

@@ -145,10 +145,10 @@ static int set_new_shortest_dist(struct beacon_info *beacon)
 	/* Initialize to largest possible distance */
 	uint8_t shortest_dist = UINT8_MAX;
 	uint8_t entries = 0;
-	// printk("[ "); /* Uncomment for debug */
+	printk("[ "); /* Uncomment for debug */
 	for (uint8_t i = 0; i < beacon->num_measurements; i++) {
 		struct beacon_connection_info *info = &beacon->history[i];
-		// printk("%d ", info->beacon_dist); /* Uncomment for debug */
+		printk("%d ", info->beacon_dist); /* Uncomment for debug */
 		if (k_uptime_get_32() - info->time_diff <
 		    CONFIG_BEACON_MAX_MEASUREMENT_AGE * MSEC_PER_SEC) {
 			if (info->beacon_dist < 1) {
@@ -160,7 +160,7 @@ static int set_new_shortest_dist(struct beacon_info *beacon)
 			entries++;
 		}
 	}
-	// printk("]\n"); /* Uncomment for debug */
+	printk("]\n"); /* Uncomment for debug */
 
 	if (entries == 0) {
 		return -ENODATA;
@@ -228,7 +228,7 @@ static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist,
 		bt_addr_le_to_str(&c_info->mac_address, beacon_str,
 				  sizeof(beacon_str));
 		/* Uncomment below for debug */
-		// printk("Beacon %s: ", log_strdup(beacon_str));
+		printk("Beacon %s: ", log_strdup(beacon_str));
 #ifdef CONFIG_BEACON_SHORTEST_DISTANCE
 		/* Update the shortest distance across last 10 second
 		 * readings 
@@ -333,7 +333,8 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		add_to_beacon_history(&info,
 				      &beacons.beacon_array[target_beacon]);
 	}
-	if (beacons.beacon_array[target_beacon].num_measurements < 4) {
+	if (beacons.beacon_array[target_beacon].num_measurements <
+	    CONFIG_BEACON_MIN_MEASUREMENTS) {
 		/* Wait for at least four measurements to evaluate a beacon */
 		return -EIO;
 	}
@@ -351,7 +352,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		bt_addr_le_to_str(
 			&beacons.beacon_array[beacon_index].mac_address,
 			beacon_str, sizeof(beacon_str));
-		LOG_DBG("Use shortest distance %u m from Beacon: %s",
+		LOG_INF("Use shortest distance %u m from Beacon: %s",
 			m_beacon_min_distance, log_strdup(beacon_str));
 	}
 

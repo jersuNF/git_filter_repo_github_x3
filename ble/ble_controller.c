@@ -69,7 +69,7 @@ static struct k_work_delayable disconnect_peer_work;
 static char bt_device_name[DEVICE_NAME_LEN + 1];
 
 // Shaddow register. Should be initialized with data from EEPROM or FLASH
-static uint16_t current_fw_ver =  NF_X25_VERSION_NUMBER;
+static uint16_t current_fw_ver = NF_X25_VERSION_NUMBER;
 static uint32_t current_serial_number = CONFIG_NOFENCE_SERIAL_NUMBER;
 static uint8_t current_battery_level = 0;
 static uint8_t current_error_flags = 0;
@@ -717,8 +717,7 @@ int ble_module_init()
 	/* Init and start periodic scan work function */
 	k_work_init_delayable(&periodic_beacon_scanner_work,
 			      periodic_beacon_scanner_work_fn);
-	k_work_reschedule(&periodic_beacon_scanner_work,
-			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
+	k_work_reschedule(&periodic_beacon_scanner_work, K_NO_WAIT);
 #endif
 	k_work_init_delayable(&disconnect_peer_work, disconnect_peer_work_fn);
 	return 0;
@@ -802,6 +801,7 @@ static bool event_handler(const struct event_header *eh)
 			break;
 		case BLE_CTRL_SCAN_STOP:
 			if (atomic_get(&atomic_bt_scan_active) == true) {
+				LOG_INF("Scanning stop");
 				scan_stop();
 				atomic_set(&atomic_bt_scan_active, false);
 			}

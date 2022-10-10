@@ -7,11 +7,17 @@
 
 #include <zephyr.h>
 
+/* Length of a null-terminated IPv4 host/port string */
+#define STG_CONFIG_HOST_PORT_BUF_LEN 24
+/* Length of a Bluetooth Security Key */
+#define STG_CONFIG_BLE_SEC_KEY_LEN 8
+
 /**
  * @brief Identifiers for flash configuration parameters.
  */
 typedef enum {
-    /* NB! Do NOT change or reorder the identifiers without a sector erase */
+    /* NB! Do NOT change or reorder the identifiers of NVS Id-data pairs without 
+	 * a sector erase of all NVS sectors */
     STG_U8_WARN_MAX_DURATION = 0,
 	STG_U8_WARN_MIN_DURATION,
 	STG_U8_PAIN_CNT_DEF_ESCAPED,
@@ -58,7 +64,7 @@ int stg_config_u8_read(stg_config_param_id_t id, uint8_t *value);
  * @param value The u8 data value to write.
  * @return 0 if successful, otherwise a negative error code. 
  */
-int stg_config_u8_write(stg_config_param_id_t id, uint8_t value);
+int stg_config_u8_write(stg_config_param_id_t id, const uint8_t value);
 
 /**
  * @brief Reads the u16 config parameter as specified by the identifier.
@@ -74,7 +80,7 @@ int stg_config_u16_read(stg_config_param_id_t id, uint16_t *value);
  * @param value The u16 data value to write.
  * @return 0 if successful, otherwise a negative error code. 
  */
-int stg_config_u16_write(stg_config_param_id_t id, uint16_t value);
+int stg_config_u16_write(stg_config_param_id_t id, const uint16_t value);
 
 /**
  * @brief Reads the u32 config parameter as specified by the identifier.
@@ -90,7 +96,7 @@ int stg_config_u32_read(stg_config_param_id_t id, uint32_t *value);
  * @param value The u32 data value to write.
  * @return 0 if successful, otherwise a negative error code. 
  */
-int stg_config_u32_write(stg_config_param_id_t id, uint32_t value);
+int stg_config_u32_write(stg_config_param_id_t id, const uint32_t value);
 
 /**
  * @brief Reads the string config parameter as specified by the identifier.
@@ -99,7 +105,7 @@ int stg_config_u32_write(stg_config_param_id_t id, uint32_t value);
  * @param len The length of the data.
  * @return 0 if successful, otherwise a negative error code. 
  */
-int stg_config_str_read(stg_config_param_id_t id, uint8_t *str, size_t len);
+int stg_config_str_read(stg_config_param_id_t id, char *str, uint8_t *len);
 
 /**
  * @brief Writes to the string config parameter as specified by the identifier.
@@ -108,6 +114,6 @@ int stg_config_str_read(stg_config_param_id_t id, uint8_t *str, size_t len);
  * @param len The length of the data.
  * @return 0 if successful, otherwise a negative error code. 
  */
-int stg_config_str_write(stg_config_param_id_t id, uint8_t *str, size_t len);
+int stg_config_str_write(stg_config_param_id_t id, const char *str, const uint8_t len);
 
 #endif /* STG_CONFIG_H */

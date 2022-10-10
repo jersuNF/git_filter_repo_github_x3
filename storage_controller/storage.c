@@ -36,7 +36,7 @@
 
 #include <logging/log.h>
 #define MODULE storage_controller
-LOG_MODULE_REGISTER(MODULE, 4);
+LOG_MODULE_REGISTER(MODULE, CONFIG_STORAGE_CONTROLLER_LOG_LEVEL);
 
 /* Log partition. */
 static const struct flash_area *log_area;
@@ -190,7 +190,7 @@ static inline int init_fcb_on_partition(flash_partition_t partition)
 		return err;
 	}
 
-	LOG_INF("FCB Init: Partition(%d), AreaID(%d), FaID(%d), FaOff(%d), FaSize(%d)", partition, 
+	LOG_DBG("FCB Init: Partition(%d), AreaID(%d), FaID(%d), FaOff(%d), FaSize(%d)", partition, 
 						area_id, (uint8_t)area->fa_id, (int)area->fa_off, (int)area->fa_size);
 
 	// if (partition == STG_PARTITION_LOG) {

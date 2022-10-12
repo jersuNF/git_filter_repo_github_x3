@@ -13,7 +13,7 @@
 #include "ep_event.h"
 #include "error_event.h"
 #include "sound_event.h"
-#include "nf_settings.h"
+#include "stg_config.h"
 
 #define MODULE ep_module
 LOG_MODULE_REGISTER(MODULE, CONFIG_EP_MODULE_LOG_LEVEL);
@@ -93,9 +93,9 @@ int ep_module_init(void)
 			break;
 		}
 
-		ret = eep_uint16_read(EEP_PRODUCT_TYPE, &g_product_type);
+		ret = stg_config_u16_read(STG_U16_PRODUCT_TYPE, &g_product_type);
 		if (ret != 0) {
-			LOG_WRN("Failed to read product type from EEPROM");
+			LOG_WRN("Failed to read product type from flash");
 			break;
 		}
 		if ((g_product_type != PRODUCT_TYPE_SHEEP) && (g_product_type != PRODUCT_TYPE_CATTLE)) {

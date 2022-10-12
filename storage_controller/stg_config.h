@@ -13,7 +13,7 @@
 #define STG_CONFIG_BLE_SEC_KEY_LEN 8
 
 /**
- * @brief Identifiers for flash configuration parameters.
+ * @brief Identifiers for configuration parameters.
  */
 typedef enum {
     /* NB! Do NOT change or reorder the identifiers of NVS Id-data pairs without 
@@ -41,7 +41,8 @@ typedef enum {
     STG_U32_UID, 
     STG_U32_WARN_CNT_TOT,
     STG_STR_HOST_PORT,
-    STG_STR_BLE_KEY
+    STG_STR_BLE_KEY,
+	STG_PARAM_ID_CNT
 }stg_config_param_id_t;
 
 /**
@@ -115,5 +116,12 @@ int stg_config_str_read(stg_config_param_id_t id, char *str, uint8_t *len);
  * @return 0 if successful, otherwise a negative error code. 
  */
 int stg_config_str_write(stg_config_param_id_t id, const char *str, const uint8_t len);
+
+/**
+ * @brief Erase all flash sectors associated with STG config.
+ * @note All STG config data will be lost and is NOT recoverable.
+ * @return 0 if successful, otherwise a negative error code. 
+ */
+int stg_config_erase_all(void);
 
 #endif /* STG_CONFIG_H */

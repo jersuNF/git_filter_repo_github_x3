@@ -26,7 +26,7 @@
 #include "messaging_module_events.h"
 
 #include "nf_version.h"
-#include "nf_settings.h"
+#include "stg_config.h"
 
 #include "beacon_processor.h"
 #include "ble_beacon_event.h"
@@ -68,7 +68,7 @@ static struct k_work_delayable disconnect_peer_work;
 
 static char bt_device_name[DEVICE_NAME_LEN + 1];
 
-// Shaddow register. Should be initialized with data from EEPROM or FLASH
+// Shaddow register. Should be initialized with data from storage
 static uint16_t current_fw_ver =  NF_X25_VERSION_NUMBER;
 static uint32_t current_serial_number = CONFIG_NOFENCE_SERIAL_NUMBER;
 static uint8_t current_battery_level = 0;
@@ -649,10 +649,12 @@ static void disconnect_peer_work_fn()
 
 int ble_module_init()
 {
+	int err;
+
 	uint32_t serial_id = 0;
-	int err = eep_uint32_read(EEP_UID, &serial_id);
+	err = stg_config_u32_read(STG_U32_UID, &serial_id);
 	if (err != 0) {
-		char *e_msg = "Failed to read serial number from eeprom!";
+		char *e_msg = "Failed to read serial number from storage!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 	} else {

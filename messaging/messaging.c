@@ -25,23 +25,21 @@
 #include "unixTime.h"
 #include "error_event.h"
 #include "helpers.h"
-
 #include "nf_crc16.h"
-
 #include "storage_event.h"
 
 #include <date_time.h>
 #include <time.h>
 
 #include "storage.h"
-
+#include "stg_config.h"
 #include "movement_events.h"
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
-#include "nf_settings.h"
 #include "histogram_events.h"
 #include <sys/sys_heap.h>
+
 extern struct k_heap _system_heap;
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
@@ -59,7 +57,7 @@ static uint8_t cached_fences_counter = 0;
 static uint32_t cached_msss = 0;
 static uint32_t cached_ttff = 0;
 
-/** @todo This should be fetched from EEPROM */
+/** @todo This should be fetched from storage */
 static gnss_mode_t cached_gnss_mode = GNSSMODE_NOMODE;
 
 atomic_t cached_batt = ATOMIC_INIT(0);
@@ -88,7 +86,7 @@ typedef enum {
 	COLLAR_STATUS,
 	FENCE_STATUS,
 	FENCE_VERSION,
-	/** @todo Not written to eeprom, should it? -> FLASH_ERASE_COUNT,*/
+	/** @todo Not written to storage, should it? -> FLASH_ERASE_COUNT,*/
 	ZAP_COUNT,
 	GNSS_STRUCT,
 	GSM_INFO,
@@ -710,7 +708,7 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_update_flash_erase(eh)) {
 		current_state.flash_erase_count++;
-		/** @todo Not written to @eeprom. Should it? And also be added to
+		/** @todo Not written to storage. Should it? And also be added to
 		 * update cache reg??
 		 */
 		/*update_cache_reg(FLASH_ERASE_COUNT);*/
@@ -1070,9 +1068,9 @@ void messaging_thread_fn()
 int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module.");
-	int err = eep_uint32_read(EEP_UID, &serial_id);
+	int err = stg_config_u32_read(STG_U32_UID, &serial_id);
 	if (err != 0) {
-		char *e_msg = "Failed to read serial number from eeprom!";
+		char *e_msg = "Failed to read serial number from storage!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		return err;
@@ -1125,6 +1123,8 @@ int messaging_module_init(void)
 
 void build_poll_request(NofenceMessage *poll_req)
 {
+	int err;
+
 	proto_InitHeader(poll_req); /* fill up message header. */
 
 	poll_req->which_m = NofenceMessage_poll_message_req_tag;
@@ -1165,37 +1165,39 @@ void build_poll_request(NofenceMessage *poll_req)
 		poll_req->m.poll_message_req.has_usAccSigmaNoActivityLimit = true;
 		poll_req->m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
 
-		int err = eep_uint16_read(EEP_ACC_SIGMA_SLEEP_LIMIT, 
-					&poll_req->m.poll_message_req.usAccSigmaSleepLimit);
-		if (err) {
-			char *e_msg = "Failed to read EEP_ACC_SIGMA_SLEEP_LIMIT";
+		err = stg_config_u16_read(STG_U16_ACC_SIGMA_SLEEP_LIMIT, 
+				&poll_req->m.poll_message_req.usAccSigmaSleepLimit);
+		if (err != 0) {
+			char *e_msg = "Failed to read STG_U16_ACC_SIGMA_SLEEP_LIMIT";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 
-		err = eep_uint16_read(EEP_ACC_SIGMA_NOACTIVITY_LIMIT, 
-					&poll_req->m.poll_message_req.usAccSigmaNoActivityLimit);
-		if (err) {
-			char *e_msg = "Failed to read EEP_ACC_SIGMA_NOACTIVITY_LIMIT";
+		err = stg_config_u16_read(STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT, 
+				&poll_req->m.poll_message_req.usAccSigmaNoActivityLimit);
+		if (err != 0) {
+			char *e_msg = "Failed to read STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 
-		err = eep_uint16_read(EEP_OFF_ANIMAL_TIME_LIMIT_SEC, 
-					&poll_req->m.poll_message_req.usOffAnimalTimeLimitSec);
-		if (err) {
-			char *e_msg = "Failed to read EEP_OFF_ANIMAL_TIME_LIMIT_SEC";
+		err = stg_config_u16_read(STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC, 
+				&poll_req->m.poll_message_req.usOffAnimalTimeLimitSec);
+		if (err != 0) {
+			char *e_msg = "Failed to read STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 	}
 	if (m_confirm_ble_key || m_transfer_boot_params) {
 		poll_req->m.poll_message_req.has_rgubcBleKey = true;
-		poll_req->m.poll_message_req.rgubcBleKey.size = EEP_BLE_SEC_KEY_LEN;
-		int err = eep_read_ble_sec_key(
-						poll_req->m.poll_message_req.rgubcBleKey.bytes, 
-						EEP_BLE_SEC_KEY_LEN);
-		if (err) {
+		poll_req->m.poll_message_req.rgubcBleKey.size = 
+			STG_CONFIG_BLE_SEC_KEY_LEN;
+		uint8_t key_length = 0;
+		err = stg_config_str_read(STG_STR_BLE_KEY, 
+				poll_req->m.poll_message_req.rgubcBleKey.bytes, 
+				&key_length);		
+		if (err != 0) {
 			char *e_msg = "Failed to read ble_sec_key";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
@@ -1241,33 +1243,36 @@ void build_poll_request(NofenceMessage *poll_req)
 		poll_req->m.poll_message_req.has_versionInfoHW = true;
 
 		uint8_t pcb_rf_version = 0;
-		eep_uint8_read(EEP_HW_VERSION, &pcb_rf_version);
+		stg_config_u8_read(STG_U8_HW_VERSION, &pcb_rf_version);
 		poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version = 
-					pcb_rf_version;
+			pcb_rf_version;
 
 		uint16_t pcb_product_type = 0;
-		eep_uint16_read(EEP_PRODUCT_TYPE, &pcb_product_type);
+		stg_config_u16_read(STG_U16_PRODUCT_TYPE, &pcb_product_type);
 		poll_req->m.poll_message_req.versionInfoHW.usPCB_Product_Type = 
-					pcb_product_type;
+			pcb_product_type;
 
 		poll_req->m.poll_message_req.has_versionInfoBOM = true;
 
 		uint8_t bom_mec_rev = 0;
-		eep_uint8_read(EEP_BOM_MEC_REV, &bom_mec_rev);
+		stg_config_u8_read(STG_U8_BOM_MEC_REV, &bom_mec_rev);
 		poll_req->m.poll_message_req.versionInfoBOM.ucBom_mec_rev =
-					bom_mec_rev;
+			bom_mec_rev;
+
 		uint8_t bom_pcb_rev = 0;
-		eep_uint8_read(EEP_BOM_PCB_REV, &bom_pcb_rev);
+		stg_config_u8_read(STG_U8_BOM_PCB_REV, &bom_pcb_rev);
 		poll_req->m.poll_message_req.versionInfoBOM.ucBom_pcb_rev =
-					bom_pcb_rev;
+			bom_pcb_rev;
+
 		uint8_t ems_provider = 0;
-		eep_uint8_read(EEP_EMS_PROVIDER, &ems_provider);
+		stg_config_u8_read(STG_U8_EMS_PROVIDER, &ems_provider);
 		poll_req->m.poll_message_req.versionInfoBOM.ucEms_provider =
-					ems_provider;
+			ems_provider;
+
 		uint8_t product_record_rev = 0;
-		eep_uint8_read(EEP_PRODUCT_RECORD_REV, &product_record_rev);
+		stg_config_u8_read(STG_U8_PRODUCT_RECORD_REV, &product_record_rev);
 		poll_req->m.poll_message_req.versionInfoBOM.ucProduct_record_rev = 
-					product_record_rev;
+			product_record_rev;
 
 		/** @todo Add information of SIM card */
 #if 0
@@ -1508,6 +1513,8 @@ int encode_and_store_message(NofenceMessage *msg_proto)
 
 void process_poll_response(NofenceMessage *proto)
 {
+	int err;
+
 	/* When we receive a poll reply, we don't want to transfer boot params */
 	m_transfer_boot_params = false;
 	PollMessageResponse *pResp = &proto->m.poll_message_resp;
@@ -1516,8 +1523,9 @@ void process_poll_response(NofenceMessage *proto)
 			new_messaging_host_address_event();
 		strncpy(host_add_event->address, pResp->xServerIp,
 			sizeof(pResp->xServerIp));
-		EVENT_SUBMIT(host_add_event); /*cellular controller writes it
- * to eeprom if it is different from the previously stored address.*/
+		EVENT_SUBMIT(host_add_event); 
+		/*cellular controller writes it to ext flash if it is different from the 
+		 * previously stored address.*/
 	}
 	if (pResp->has_bEraseFlash && pResp->bEraseFlash) {
 		struct request_flash_erase_event *flash_erase_event =
@@ -1540,7 +1548,7 @@ void process_poll_response(NofenceMessage *proto)
 		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
 		struct tm *tm_time = gmtime(&gm_time);
 		/* Update date_time library which storage uses for ANO data. */
-		int err = date_time_set(tm_time);
+		err = date_time_set(tm_time);
 		if (err) {
 			char *e_msg = "Error updating time from server";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
@@ -1567,10 +1575,10 @@ void process_poll_response(NofenceMessage *proto)
 	m_confirm_acc_limits = false;
 	if (pResp->has_usAccSigmaSleepLimit) {
 		m_confirm_acc_limits = true;
-		int err = eep_uint16_write(EEP_ACC_SIGMA_SLEEP_LIMIT,
-					   pResp->usAccSigmaSleepLimit);
-		if (err) {
-			char *e_msg = "Error updating sleep sigma to eeprom";
+		err = stg_config_u16_write(STG_U16_ACC_SIGMA_SLEEP_LIMIT,
+				pResp->usAccSigmaSleepLimit);
+		if (err != 0) {
+			char *e_msg = "Error updating sleep sigma to ext flash";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
@@ -1582,28 +1590,25 @@ void process_poll_response(NofenceMessage *proto)
 	}
 	if (pResp->has_usAccSigmaNoActivityLimit) {
 		m_confirm_acc_limits = true;
-		int err = eep_uint16_write(EEP_ACC_SIGMA_NOACTIVITY_LIMIT,
-					   pResp->usAccSigmaNoActivityLimit);
-		if (err) {
-			char *e_msg =
-				"Error updating no activity sigma to eeprom";
+		err = stg_config_u16_write(STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT,
+				pResp->usAccSigmaNoActivityLimit);
+		if (err != 0) {
+			char *e_msg = "Error updating no activity sigma to ext flash";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
 
 		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
 		sigma_ev->type = NO_ACTIVITY_SIGMA;
-		sigma_ev->param.no_activity_sigma =
-			pResp->usAccSigmaNoActivityLimit;
+		sigma_ev->param.no_activity_sigma = pResp->usAccSigmaNoActivityLimit;
 		EVENT_SUBMIT(sigma_ev);
 	}
 	if (pResp->has_usOffAnimalTimeLimitSec) {
 		m_confirm_acc_limits = true;
-		int err = eep_uint16_write(EEP_OFF_ANIMAL_TIME_LIMIT_SEC,
-					   pResp->usOffAnimalTimeLimitSec);
-		if (err) {
-			char *e_msg =
-				"Error updating off animal sigma to eeprom";
+		err = stg_config_u16_write(STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC,
+				pResp->usOffAnimalTimeLimitSec);
+		if (err != 0) {
+			char *e_msg = "Error updating off animal sigma to ext flash";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 		}
@@ -1618,19 +1623,19 @@ void process_poll_response(NofenceMessage *proto)
 	m_confirm_ble_key = false;
 	if (pResp->has_rgubcBleKey) {
 		m_confirm_ble_key = true;
-		LOG_INF("Received a ble_sec_key of size %d",
-			pResp->rgubcBleKey.size);
-		uint8_t current_ble_sec_key[EEP_BLE_SEC_KEY_LEN];
-		eep_read_ble_sec_key(current_ble_sec_key, EEP_BLE_SEC_KEY_LEN);
+		LOG_INF("Received a ble_sec_key of size %d", pResp->rgubcBleKey.size);
+
+		uint8_t current_ble_sec_key[STG_CONFIG_BLE_SEC_KEY_LEN];
+		uint8_t key_length = 0;
+		stg_config_str_read(STG_STR_BLE_KEY, current_ble_sec_key, &key_length);
 		int ret = memcmp(pResp->rgubcBleKey.bytes, current_ble_sec_key,
 				 pResp->rgubcBleKey.size);
 		if (ret != 0) {
-			LOG_INF("New ble sec key is different. Will update eeprom");
-			ret = eep_write_ble_sec_key(pResp->rgubcBleKey.bytes,
-						    pResp->rgubcBleKey.size);
+			LOG_INF("New ble sec key is different. Will update ext flash");
+			ret = stg_config_str_write(STG_STR_BLE_KEY, 
+					pResp->rgubcBleKey.bytes, pResp->rgubcBleKey.size);
 			if (ret < 0) {
-				char *e_msg =
-					"Failed to write ble sec key to EEPROM";
+				char *e_msg = "Failed to write ble sec key to ext flash";
 				LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
 				nf_app_error(ERR_MESSAGING, ret, e_msg,
 					     strlen(e_msg));
@@ -1723,19 +1728,16 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 		/* Pasture header. */
 		if (fenceResp->m.xHeader.has_bKeepMode) {
 			pasture_temp.m.has_keep_mode = true;
-			pasture_temp.m.keep_mode =
-				fenceResp->m.xHeader.bKeepMode;
+			pasture_temp.m.keep_mode = fenceResp->m.xHeader.bKeepMode;
 
-			/* Write to EEPROM. */
-			err = eep_uint8_write(EEP_KEEP_MODE,
-					      fenceResp->m.xHeader.bKeepMode);
-			if (err) {
+			/* Write to ext flash storage. */
+			err = stg_config_u8_write(STG_U8_KEEP_MODE, 
+					(uint8_t)fenceResp->m.xHeader.bKeepMode);
+			if (err != 0) {
 				/* We always expect the header to be the first frame. */
-				char *e_msg =
-					"Error writing keep mode to eeprom.";
+				char *e_msg = "Error writing keep mode to storage.";
 				LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-				nf_app_error(ERR_MESSAGING, err, e_msg,
-					     strlen(e_msg));
+				nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
 			}
 		}
 

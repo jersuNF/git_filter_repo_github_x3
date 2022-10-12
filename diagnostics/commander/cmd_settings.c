@@ -1,6 +1,5 @@
 #include "cmd_settings.h"
-
-#include "nf_settings.h"
+#include "stg_config.h"
 
 #include <string.h>
 
@@ -79,8 +78,7 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 		case SERIAL:
 		{
 			uint32_t serial = 0;
-			err = eep_uint32_read(EEP_UID, &serial);
-
+			err = stg_config_u32_read(STG_U32_UID, &serial);
 			if (err == 0) {
 				memcpy(&buf[1], &serial, sizeof(uint32_t));
 				commander_send_resp(interface, SETTINGS, READ, DATA, buf, 1+sizeof(uint32_t));
@@ -91,9 +89,12 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 		}
 		case HOST_PORT:
 		{
-			err = eep_read_host_port(&buf[1], sizeof(buf)-1);
-
+			//err = eep_read_host_port(&buf[1], sizeof(buf)-1);
+			char port[STG_CONFIG_HOST_PORT_BUF_LEN];
+			uint8_t port_length = 0;
+			err = stg_config_str_read(STG_STR_HOST_PORT, port, &port_length);
 			if (err == 0) {
+				memcpy(&buf[1], port, port_length);
 				commander_send_resp(interface, SETTINGS, READ, DATA, buf, 1 + strnlen(&buf[1], sizeof(buf)-1));
 			} else {
 				commander_send_resp(interface, SETTINGS, READ, ERROR, NULL, 0);
@@ -103,8 +104,7 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 		case EMS_PROVIDER:
 		{
 			uint8_t ems_provider = 0;
-			err = eep_uint8_read(EEP_EMS_PROVIDER, &ems_provider);
-
+			err = stg_config_u8_read(STG_U8_EMS_PROVIDER, &ems_provider);
 			if (err == 0) {
 				buf[1] = ems_provider;
 				commander_send_resp(interface, SETTINGS, READ, DATA, buf, 1+sizeof(uint8_t));
@@ -116,7 +116,7 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 		case PRODUCT_RECORD_REV:
 		{
 			uint8_t product_record_rev = 0;
-			err = eep_uint8_read(EEP_PRODUCT_RECORD_REV, &product_record_rev);
+			err = stg_config_u8_read(STG_U8_PRODUCT_RECORD_REV, &product_record_rev);
 
 			if (err == 0) {
 				buf[1] = product_record_rev;
@@ -129,8 +129,7 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 		case BOM_MEC_REV:
 		{
 			uint8_t bom_mec_rev = 0;
-			err = eep_uint8_read(EEP_BOM_MEC_REV, &bom_mec_rev);
-
+			err = stg_config_u8_read(STG_U8_BOM_MEC_REV, &bom_mec_rev);
 			if (err == 0) {
 				buf[1] = bom_mec_rev;
 				commander_send_resp(interface, SETTINGS, READ, DATA, buf, 1+sizeof(uint8_t));
@@ -142,8 +141,7 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 		case BOM_PCB_REV:
 		{
 			uint8_t bom_pcb_rev = 0;
-			err = eep_uint8_read(EEP_BOM_PCB_REV, &bom_pcb_rev);
-
+			err = stg_config_u8_read(STG_U8_BOM_PCB_REV, &bom_pcb_rev);
 			if (err == 0) {
 				buf[1] = bom_pcb_rev;
 				commander_send_resp(interface, SETTINGS, READ, DATA, buf, 1+sizeof(uint8_t));
@@ -155,8 +153,7 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 		case HW_VERSION:
 		{
 			uint8_t hw_ver = 0;
-			err = eep_uint8_read(EEP_HW_VERSION, &hw_ver);
-
+			err = stg_config_u8_read(STG_U8_HW_VERSION, &hw_ver);
 			if (err == 0) {
 				buf[1] = hw_ver;
 				commander_send_resp(interface, SETTINGS, READ, DATA, buf, 1+sizeof(uint8_t));
@@ -168,8 +165,7 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 		case PRODUCT_TYPE:
 		{
 			uint16_t prod_type = 0;
-			err = eep_uint16_read(EEP_PRODUCT_TYPE, &prod_type);
-
+			err = stg_config_u16_read(STG_U16_PRODUCT_TYPE, &prod_type);
 			if (err == 0) {
 				memcpy(&buf[1], &prod_type, sizeof(uint16_t));
 				commander_send_resp(interface, SETTINGS, READ, DATA, buf, 1+sizeof(uint16_t));
@@ -203,14 +199,15 @@ static int commander_settings_write(enum diagnostics_interface interface, settin
 						  (data[1]<<8) +
 						  (data[2]<<16) +
 						  (data[3]<<24);
-				err = eep_uint32_write(EEP_UID, serial);
+				err = stg_config_u32_write(STG_U32_UID, serial);
 			}
 			break;
 		}
 		case HOST_PORT:
 		{
-			if (size <= EEP_HOST_PORT_BUF_SIZE) {
-				err = eep_write_host_port(data);
+			if (size <= STG_CONFIG_HOST_PORT_BUF_LEN) {
+				err = stg_config_str_write(STG_STR_HOST_PORT, data, 
+						STG_CONFIG_HOST_PORT_BUF_LEN-1);
 			}
 			break;
 		}
@@ -219,7 +216,7 @@ static int commander_settings_write(enum diagnostics_interface interface, settin
 			/* Must be exactly 1 byte for uint8_t */
 			if (size == 1) {
 				uint8_t ems_provider = (data[0]<<0);
-				err = eep_uint8_write(EEP_EMS_PROVIDER, ems_provider);
+				err = stg_config_u8_write(STG_U8_EMS_PROVIDER, ems_provider);
 			}
 			break;
 		}
@@ -228,7 +225,7 @@ static int commander_settings_write(enum diagnostics_interface interface, settin
 			/* Must be exactly 1 byte for uint8_t */
 			if (size == 1) {
 				uint8_t product_record_rev = (data[0]<<0);
-				err = eep_uint8_write(EEP_PRODUCT_RECORD_REV, product_record_rev);
+				err = stg_config_u8_write(STG_U8_PRODUCT_RECORD_REV, product_record_rev);
 			}
 			break;
 		}
@@ -237,7 +234,7 @@ static int commander_settings_write(enum diagnostics_interface interface, settin
 			/* Must be exactly 1 byte for uint8_t */
 			if (size == 1) {
 				uint8_t bom_mec_rev = (data[0]<<0);
-				err = eep_uint8_write(EEP_BOM_MEC_REV, bom_mec_rev);
+				err = stg_config_u8_write(STG_U8_BOM_MEC_REV, bom_mec_rev);
 			}
 			break;
 		}
@@ -246,7 +243,7 @@ static int commander_settings_write(enum diagnostics_interface interface, settin
 			/* Must be exactly 1 byte for uint8_t */
 			if (size == 1) {
 				uint8_t bom_pcb_rev = (data[0]<<0);
-				err = eep_uint8_write(EEP_BOM_PCB_REV, bom_pcb_rev);
+				err = stg_config_u8_write(STG_U8_BOM_PCB_REV, bom_pcb_rev);
 			}
 			break;
 		}
@@ -255,7 +252,7 @@ static int commander_settings_write(enum diagnostics_interface interface, settin
 			/* Must be exactly 1 byte for uint8_t */
 			if (size == 1) {
 				uint8_t hw_ver = (data[0]<<0);
-				err = eep_uint8_write(EEP_HW_VERSION, hw_ver);
+				err = stg_config_u8_write(STG_U8_HW_VERSION, hw_ver);
 			}
 			break;
 		}
@@ -263,9 +260,8 @@ static int commander_settings_write(enum diagnostics_interface interface, settin
 		{
 			/* Must be exactly 2 bytes for uint16_t */
 			if (size == 2) {
-				uint32_t prod_type = (data[0]<<0) + 
-						     (data[1]<<8);
-				err = eep_uint16_write(EEP_PRODUCT_TYPE, prod_type);
+				uint32_t prod_type = (data[0]<<0) + (data[1]<<8);
+				err = stg_config_u16_write(STG_U16_PRODUCT_TYPE, (uint16_t)prod_type);
 			}
 			break;
 		}

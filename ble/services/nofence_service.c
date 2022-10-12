@@ -20,9 +20,9 @@
 #include <zephyr.h>
 #include <zephyr/types.h>
 
-#include "nf_settings.h"
 #include "ble_cmd_event.h"
 #include "ble_ctrl_event.h"
+#include "stg_config.h"
 
 #define MODULE nofence_ble_service
 #include <logging/log.h>
@@ -111,17 +111,18 @@ ssize_t write_command_char(struct bt_conn *conn,
 			   uint16_t len, uint16_t offset, uint8_t flags)
 {
 	if (len == sizeof(nofence_data.cmd)) {
-		uint8_t ble_key_ret[8];
-		memset(ble_key_ret, 0, sizeof(ble_key_ret));
-		int ret =
-			eep_read_ble_sec_key(ble_key_ret, sizeof(ble_key_ret));
+		char ble_key[STG_CONFIG_BLE_SEC_KEY_LEN];
+		uint8_t key_length = 0;
+		memset(ble_key, 0, sizeof(ble_key));
+		int ret = stg_config_str_read(STG_STR_BLE_KEY, ble_key, &key_length);
 		if (ret < 0) {
 			LOG_ERR("Failed to read ble_sec_key, err %d", ret);
 			return len;
 		}
 
-		LOG_HEXDUMP_INF(ble_key_ret, 8, "BLE sec key");
-		ret = memcmp(nofence_data.pwd_char, ble_key_ret, 8);
+		LOG_HEXDUMP_INF(ble_key, STG_CONFIG_BLE_SEC_KEY_LEN, "BLE sec key");
+		ret = memcmp(nofence_data.pwd_char, ble_key, 
+				STG_CONFIG_BLE_SEC_KEY_LEN);
 		if (ret == 0) {
 			/* BLE sec key match. Set nofence_data.cmd shaddow register*/
 			uint8_t *cmd_char = (uint8_t *)buf;
@@ -137,8 +138,7 @@ ssize_t write_command_char(struct bt_conn *conn,
 			LOG_ERR("BLE sec key mismatch. Remember to write correct key to PWD char first");
 			/* TODO: Disconnect peer here */
 
-			struct ble_ctrl_event *ctrl_event =
-				new_ble_ctrl_event();
+			struct ble_ctrl_event *ctrl_event = new_ble_ctrl_event();
 			ctrl_event->cmd = BLE_CTRL_DISCONNECT_PEER;
 			EVENT_SUBMIT(ctrl_event);
 			return len;

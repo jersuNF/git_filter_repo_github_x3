@@ -25,6 +25,7 @@
 #include "ble_beacon_event.h"
 #include "movement_events.h"
 #include "storage.h"
+#include "stg_config.h"
 
 #define MODULE amc
 LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
@@ -152,9 +153,9 @@ static inline int update_pasture_from_stg(void)
 
 	/* Success setting the pasture. set to teach mode if not keepmode active. */
 	uint8_t keep_mode;
-	err = eep_uint8_read(EEP_KEEP_MODE, &keep_mode);
-	if (err) {
-		char *e_msg = "Error reading keep mode from eeprom.";
+	err = stg_config_u8_read(STG_U8_KEEP_MODE, &keep_mode);
+	if (err != 0) {
+		char *e_msg = "Error reading keep mode from storage.";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_warning(ERR_AMC, err, e_msg, strlen(e_msg));
 

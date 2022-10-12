@@ -3,11 +3,12 @@
 * Copyright (c) 2022 Nofence AS
 */
 
+#include <zephyr.h>
+#include <device.h>
+#include <devicetree.h>
 #include <drivers/flash.h>
 #include <storage/flash_map.h>
 #include <fs/nvs.h>
-#include <device.h>
-#include <devicetree.h>
 #include <logging/log.h>
 #include <pm_config.h>
 
@@ -59,9 +60,6 @@ int stg_config_init(void)
             (int)mp_flash_area->fa_off, 
             (int)mp_flash_area->fa_size);
 
-        /* Erase the NVS flash sectors */
-        //flash_area_erase(mp_flash_area, (uint32_t)mp_flash_area->fa_off, (uint32_t)mp_flash_area->fa_size);
-
         mp_device = device_get_binding(mp_flash_area->fa_dev_name);
         if (mp_device == NULL) 
         {
@@ -102,11 +100,16 @@ int stg_config_u8_read(stg_config_param_id_t id, uint8_t *value)
 
     uint8_t val;
     ret = nvs_read(&m_file_system, (uint16_t)id, &val, sizeof(uint8_t));
-    if (ret < 0) 
+    if (ret == -ENOENT) 
+    {
+        /* Return u8 max if id-data pair does not exist */
+        val = UINT8_MAX; 
+    }
+    else if ((ret < 0) && (ret != -ENOENT))
     {
         LOG_ERR("STG u8 read, failed to read storage at id %d", (int)id);
         return ret;
-    } 
+    }
     *value = val;
     LOG_DBG("Read: Id=%d, Value=%d", (int)id, *value);
     return 0;
@@ -157,7 +160,12 @@ int stg_config_u16_read(stg_config_param_id_t id, uint16_t *value)
 
     uint16_t val;
     ret = nvs_read(&m_file_system, (uint16_t)id, &val, sizeof(uint16_t));
-	if (ret < 0) 
+    if (ret == -ENOENT) 
+    {
+        /* Return u16 max if id-data pair does not exist */
+        val = UINT16_MAX;
+    }
+	else if ((ret < 0) && (ret != -ENOENT)) 
 	{
 		LOG_ERR("STG u16 read, failed to read storage at id %d", (int)id);
         return ret;
@@ -211,7 +219,12 @@ int stg_config_u32_read(stg_config_param_id_t id, uint32_t *value)
 
     uint32_t val;
     ret = nvs_read(&m_file_system, (uint16_t)id, &val, sizeof(uint32_t));
-	if (ret < 0) 
+    if (ret == -ENOENT) 
+    {
+        /* Return u32 max if id-data pair does not exist */
+        val = UINT32_MAX;
+    }
+	else if ((ret < 0) && (ret != -ENOENT)) 
 	{
 		LOG_ERR("STG u32 read, failed to read storage at id %d", (int)id);
         return ret;
@@ -273,7 +286,12 @@ int stg_config_str_read(stg_config_param_id_t id, char *str, uint8_t *len)
     memset(buff, 0, sizeof(buff));
 
     ret = nvs_read(&m_file_system, (uint16_t)id, &buff, sizeof(buff));
-    if (ret < 0)
+    if (ret == -ENOENT)
+    {
+        /* Return empty string if id-data pair does not exist */
+        strcpy(buff, "\0");
+    }
+    else if ((ret < 0) && (ret != -ENOENT))
     {
         LOG_ERR("STG str read, failed read to storage at id %d", (int)id);
         return ret;
@@ -325,6 +343,25 @@ int stg_config_str_write(stg_config_param_id_t id, const char *str, const uint8_
         return ret;
     }
     LOG_DBG("Write: Id=%d, Length=%d, Data=%s", (int)id, sizeof(buff), buff);
+    return 0;
+}
+
+int stg_config_erase_all()
+{
+    int ret;
+    if (m_initialized != true)
+    {
+        LOG_WRN("STG Config not initialized");
+        return -ENODEV;
+    }
+
+    ret = flash_area_erase(mp_flash_area, (uint32_t)mp_flash_area->fa_off, 
+            (uint32_t)mp_flash_area->fa_size);
+    if (ret != 0)
+    {
+        LOG_ERR("STG Config, unable to erase flash sectors, err %d", ret);
+        return ret;
+    }
     return 0;
 }
 

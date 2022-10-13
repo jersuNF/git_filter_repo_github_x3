@@ -20,7 +20,6 @@
 #include "gnss_controller_events.h"
 #include "request_events.h"
 #include "nf_version.h"
-#include "collar_protocol.h"
 #include "UBX.h"
 #include "unixTime.h"
 #include "error_event.h"

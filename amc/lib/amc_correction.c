@@ -92,7 +92,6 @@ static void buzzer_update_fn()
 		}
 
 		if (!zap_eval_doing) {
-			/* Only submit events etc, if we have freq change and no zap eval. */
 			if (queueZap ||
 			    k_sem_take(&freq_update_sem, K_NO_WAIT) == 0) {
 				/** Update buzzer frequency event. */
@@ -112,37 +111,35 @@ static void buzzer_update_fn()
 			 	 *  up to 3 times untill it is considered
 			 	 *  "escaped."
 			 	 */
-				if (queueZap) {
+				if (queueZap && freq == WARN_FREQ_INIT) {
 					queueZap = false;
-//					if (freq >= WARN_FREQ_MAX) {
-						struct ep_status_event *ep_ev =
-							new_ep_status_event();
-						ep_ev->ep_status = EP_RELEASE;
-						EVENT_SUBMIT(ep_ev);
-						zap_eval_doing = true;
-						zap_timestamp =
-							k_uptime_get_32();
-						increment_zap_count();
-						LOG_INF("AMC notified EP to zap!");
+					struct ep_status_event *ep_ev =
+						new_ep_status_event();
+					ep_ev->ep_status = EP_RELEASE;
+					EVENT_SUBMIT(ep_ev);
+					zap_eval_doing = true;
+					zap_timestamp =
+						k_uptime_get_32();
+					increment_zap_count();
+					LOG_INF("AMC notified EP to zap!");
 
-						struct amc_zapped_now_event *ev =
-							new_amc_zapped_now_event();
+					struct amc_zapped_now_event *ev =
+						new_amc_zapped_now_event();
 
-						ev->fence_dist = atomic_get(
-							&last_mean_dist);
+					ev->fence_dist = atomic_get(
+						&last_mean_dist);
 
-						EVENT_SUBMIT(ev);
+					EVENT_SUBMIT(ev);
 
-						/* We need to reschedule this function
-				 	 * after ZAP_EVALUATION_TIME, to be able to zap
-				 	 * again based on this variable, not buzzer
-				 	 * update rate.
-				 	 */
-						k_work_reschedule(
-							&update_buzzer_work,
-							K_MSEC
-							(ZAP_EVALUATION_TIME_MS));
-//					}
+					/* We need to reschedule this function
+				 * after ZAP_EVALUATION_TIME, to be able to zap
+				 * again based on this variable, not buzzer
+				 * update rate.
+				 */
+					k_work_reschedule(
+						&update_buzzer_work,
+						K_MSEC
+						(ZAP_EVALUATION_TIME_MS));
 				}
 				if (freq >= WARN_FREQ_MAX &&
 				    atomic_get(&sound_max_atomic)) {
@@ -307,6 +304,7 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 		ev->fence_dist = atomic_get(&last_mean_dist);
 		ev->warn_duration =
 			correction_pause_timestamp - k_uptime_get_32();
+		ev->reason = reason;
 
 		EVENT_SUBMIT(ev);
 	}

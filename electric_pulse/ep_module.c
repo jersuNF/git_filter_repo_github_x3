@@ -4,7 +4,7 @@
 
 #include <zephyr.h>
 #include <device.h>
-#include <devicetree.h>
+
 #include <drivers/gpio.h>
 #include <drivers/pwm.h>
 #include <logging/log.h>
@@ -12,8 +12,8 @@
 #include "ep_module.h"
 #include "ep_event.h"
 #include "error_event.h"
-#include "sound_event.h"
-#include "nf_settings.h"
+#include "messaging_module_events.h"
+
 
 #define MODULE ep_module
 LOG_MODULE_REGISTER(MODULE, CONFIG_EP_MODULE_LOG_LEVEL);
@@ -176,18 +176,19 @@ static bool event_handler(const struct event_header *eh)
 		const struct ep_status_event *event = cast_ep_status_event(eh);
 		switch (event->ep_status) {
 			case EP_RELEASE: {
-//				if (g_trigger_ready) {
+				if (g_trigger_ready) {
+					g_trigger_ready = false;
 					err = ep_module_release();
 					if (err < 0) {
 						char *e_msg = "Error in ep release";
 						LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 						nf_app_error(ERR_EP_MODULE, err, e_msg, strlen(e_msg));
 					}
-//				} else {
-//					char *e_msg = "Tried to give EP outside sound max event";
-//					LOG_ERR("%s (%d)", log_strdup(e_msg), -EACCES);
-//					nf_app_error(ERR_EP_MODULE, -EACCES, e_msg, strlen(e_msg));
-//				}
+				} else {
+					char *e_msg = "Tried to give EP outside sound max event";
+					LOG_ERR("%s (%d)", log_strdup(e_msg), -EACCES);
+					nf_app_error(ERR_EP_MODULE, -EACCES, e_msg, strlen(e_msg));
+				}
 				break;
 			}
 			default: {
@@ -198,11 +199,12 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-	if (is_sound_status_event(eh)) {
+	if (is_warn_correction_pause_event(eh)) {
 		/* Open up window for zapping since we recieved that
 		 * the sound controller is playing MAX warn freq. */
-		const struct sound_status_event *event = cast_sound_status_event(eh);
-		if (event->status == SND_STATUS_PLAYING_MAX) {
+		const struct warn_correction_pause_event *event
+			= cast_warn_correction_pause_event(eh);
+		if (event->reason == Reason_WARNPAUSEREASON_ZAP) {
 			g_trigger_ready = true;
 		} else {
 			g_trigger_ready = false;
@@ -215,4 +217,4 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(LOG_MODULE_NAME, event_handler);
 EVENT_SUBSCRIBE(LOG_MODULE_NAME, ep_status_event);
-EVENT_SUBSCRIBE_EARLY(LOG_MODULE_NAME, sound_status_event);
+EVENT_SUBSCRIBE_EARLY(LOG_MODULE_NAME, warn_correction_pause_event);

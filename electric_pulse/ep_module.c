@@ -176,18 +176,18 @@ static bool event_handler(const struct event_header *eh)
 		const struct ep_status_event *event = cast_ep_status_event(eh);
 		switch (event->ep_status) {
 			case EP_RELEASE: {
-				if (g_trigger_ready) {
+//				if (g_trigger_ready) {
 					err = ep_module_release();
 					if (err < 0) {
 						char *e_msg = "Error in ep release";
 						LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 						nf_app_error(ERR_EP_MODULE, err, e_msg, strlen(e_msg));
 					}
-				} else {
-					char *e_msg = "Tried to give EP outside sound max event";
-					LOG_ERR("%s (%d)", log_strdup(e_msg), -EACCES);
-					nf_app_error(ERR_EP_MODULE, -EACCES, e_msg, strlen(e_msg));
-				}
+//				} else {
+//					char *e_msg = "Tried to give EP outside sound max event";
+//					LOG_ERR("%s (%d)", log_strdup(e_msg), -EACCES);
+//					nf_app_error(ERR_EP_MODULE, -EACCES, e_msg, strlen(e_msg));
+//				}
 				break;
 			}
 			default: {

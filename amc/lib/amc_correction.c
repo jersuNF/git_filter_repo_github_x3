@@ -59,7 +59,7 @@ static bool first_correction_pause = false;
 K_SEM_DEFINE(freq_update_sem, 0, 1);
 
 static bool queueZap = false;
-
+#define DELAY_ZAP_AFTER_SND_OFF_MSEC 1500
 #ifdef CONFIG_AMC_USE_LEGACY_STEP
 static uint32_t convert_to_legacy_frequency(uint32_t frequency)
 {
@@ -79,7 +79,7 @@ static uint32_t convert_to_legacy_frequency(uint32_t frequency)
 static void buzzer_update_fn()
 {
 	/* Update frequency only if we're in WARN/MAX state off buzzer. */
-	if (atomic_get(&can_update_buzzer)) {
+	if (queueZap || atomic_get(&can_update_buzzer)) {
 		uint16_t freq = atomic_get(&last_warn_freq);
 
 		if (zap_eval_doing) {
@@ -93,7 +93,8 @@ static void buzzer_update_fn()
 
 		if (!zap_eval_doing) {
 			/* Only submit events etc, if we have freq change and no zap eval. */
-			if (k_sem_take(&freq_update_sem, K_NO_WAIT) == 0) {
+			if (queueZap ||
+			    k_sem_take(&freq_update_sem, K_NO_WAIT) == 0) {
 				/** Update buzzer frequency event. */
 				uint32_t set_frequency = freq;
 #ifdef CONFIG_AMC_USE_LEGACY_STEP
@@ -113,11 +114,7 @@ static void buzzer_update_fn()
 			 	 */
 				if (queueZap) {
 					queueZap = false;
-					if (freq >= WARN_FREQ_MAX) {
-						correction_pause(
-							Reason_WARNPAUSEREASON_ZAP,
-							atomic_get(
-								&last_mean_dist));
+//					if (freq >= WARN_FREQ_MAX) {
 						struct ep_status_event *ep_ev =
 							new_ep_status_event();
 						ep_ev->ep_status = EP_RELEASE;
@@ -145,16 +142,25 @@ static void buzzer_update_fn()
 							&update_buzzer_work,
 							K_MSEC
 							(ZAP_EVALUATION_TIME_MS));
-					}
+//					}
 				}
 				if (freq >= WARN_FREQ_MAX &&
 				    atomic_get(&sound_max_atomic)) {
+					correction_pause(
+						Reason_WARNPAUSEREASON_ZAP,
+						atomic_get(
+							&last_mean_dist));
 					queueZap = true;
 				}
 			}
 		}
-		k_work_schedule(&update_buzzer_work,
-				K_MSEC(WARN_BUZZER_UPDATE_RATE));
+		if (queueZap) {
+			k_work_schedule(&update_buzzer_work,
+					K_NO_WAIT);
+		} else {
+			k_work_schedule(&update_buzzer_work,
+					K_MSEC(WARN_BUZZER_UPDATE_RATE));
+		}
 	}
 }
 

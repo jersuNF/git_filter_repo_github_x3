@@ -439,7 +439,7 @@ static void log_status_message_fn()
 	NofenceMessage msg;
 	proto_InitHeader(&msg);
 	msg.which_m = NofenceMessage_status_msg_tag;
-	msg.m.status_msg.has_datePos = true;
+	msg.m.status_msg.has_datePos = proto_has_last_known_date_pos(&cached_fix);
 	proto_get_last_known_date_pos(&cached_fix, &msg.m.status_msg.datePos);
 	msg.m.status_msg.eMode = current_state.collar_mode;
 	msg.m.status_msg.eReason = Reason_NOREASON;

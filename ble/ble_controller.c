@@ -68,6 +68,16 @@ static struct k_work_delayable disconnect_peer_work;
 
 static char bt_device_name[DEVICE_NAME_LEN + 1];
 
+typedef enum {
+	CROSS_UNDEFINED = 0,
+	CROSS_LOW_FROM_BELOW,
+	CROSS_HIGH_FROM_ABOVE
+} cross_type_t;
+
+/** @brief : Used for hysteresis calculation **/
+static cross_type_t cross_type = CROSS_UNDEFINED;
+
+
 // Shaddow register. Should be initialized with data from EEPROM or FLASH
 static uint16_t current_fw_ver = NF_X25_VERSION_NUMBER;
 static uint32_t current_serial_number = CONFIG_NOFENCE_SERIAL_NUMBER;
@@ -188,8 +198,6 @@ static void periodic_beacon_scanner_work_fn()
 		struct ble_ctrl_event *event = new_ble_ctrl_event();
 		event->cmd = BLE_CTRL_SCAN_START;
 		EVENT_SUBMIT(event);
-		/* Save ON-timestamp */
-		beacon_scanner_timer = k_uptime_get();
 	}
 }
 #endif
@@ -533,7 +541,7 @@ static bool data_cb(struct bt_data *data, void *user_data)
 	}
 }
 
-bool beacon_found = false;
+uint8_t m_shortest_dist2beacon;
 
 /**
  * @brief Callback for reporting LE scan results.
@@ -546,7 +554,6 @@ bool beacon_found = false;
 static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 		    struct net_buf_simple *buf)
 {
-	int err;
 	adv_data_t adv_data;
 	/* Extract major_id, minor_id, tx rssi and uuid */
 	bt_data_parse(buf, data_cb, (void *)&adv_data);
@@ -554,17 +561,8 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 	    adv_data.minor == BEACON_MINOR_ID) {
 		LOG_DBG("Nofence beacon detected");
 		const uint32_t now = k_uptime_get_32();
-		err = beacon_process_event(now, addr, rssi, &adv_data);
-		if (err == -EPERM) {
-			char *e_msg = "Process of beacon state event error";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_BEACON, err, e_msg, strlen(e_msg));
-		} else if (err == -EIO) {
-			/* Beacon is out of valid range or not enough readings*/
-		} else {
-			/* Beacon is detected within valid range */
-			beacon_found = true;
-		}
+		m_shortest_dist2beacon = beacon_process_event(now, addr, rssi,
+							     &adv_data);
 	}
 
 	int64_t delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
@@ -581,7 +579,7 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 
 static void scan_start(void)
 {
-	beacon_found = false;
+	m_shortest_dist2beacon = UINT8_MAX;
 
 	if (!atomic_get(&atomic_bt_ready)) {
 		/* Scan will start when bt is ready */
@@ -615,6 +613,7 @@ static void scan_start(void)
 
 static void scan_stop(void)
 {
+	static uint8_t last_distance = UINT8_MAX;
 	int err = bt_le_scan_stop();
 	if (err) {
 		char *e_msg = "Stop Beacon scanning failed";
@@ -623,11 +622,57 @@ static void scan_stop(void)
 	} else {
 		LOG_INF("Stop scanning for Beacons");
 	}
-	if (!beacon_found) {
-		struct ble_beacon_event *bc_event = new_ble_beacon_event();
-		bc_event->status = BEACON_STATUS_NOT_FOUND;
-		EVENT_SUBMIT(bc_event);
+
+	struct ble_beacon_event *event = new_ble_beacon_event();
+	if (m_shortest_dist2beacon == UINT8_MAX) {
+		cross_type = CROSS_UNDEFINED;
+		event->status = BEACON_STATUS_NOT_FOUND;
+		LOG_DBG("1: Status: BEACON_STATUS_NOT_FOUND, Type: CROSS_UNDEFINED");
+		goto end;
+
+
+	} else if (m_shortest_dist2beacon > CONFIG_BEACON_HIGH_LIMIT) {
+		cross_type = CROSS_UNDEFINED;
+		event->status = BEACON_STATUS_REGION_FAR;
+		LOG_DBG("2: Status: BEACON_STATUS_REGION_FAR, Type: CROSS_UNDEFINED");
+		goto end;
+
+
+	} else if (m_shortest_dist2beacon <= CONFIG_BEACON_LOW_LIMIT) {
+		cross_type = CROSS_UNDEFINED;
+		event->status = BEACON_STATUS_REGION_NEAR;
+		LOG_DBG("3: Status: BEACON_STATUS_REGION_NEAR, Type: CROSS_UNDEFINED");
+		goto end;
+
+	} else if (last_distance <= CONFIG_BEACON_LOW_LIMIT &&
+		   m_shortest_dist2beacon > CONFIG_BEACON_LOW_LIMIT) {
+		cross_type = CROSS_LOW_FROM_BELOW;
+		event->status = BEACON_STATUS_REGION_NEAR;
+		LOG_DBG("4: Status: BEACON_STATUS_REGION_NEAR, Type: CROSS_LOW_FROM_BELOW");
+		goto end;
+
+	} else if (last_distance > CONFIG_BEACON_HIGH_LIMIT &&
+		   m_shortest_dist2beacon <= CONFIG_BEACON_HIGH_LIMIT) {
+		cross_type = CROSS_HIGH_FROM_ABOVE;
+		event->status = BEACON_STATUS_REGION_FAR;
+		LOG_DBG("5: Status: BEACON_STATUS_REGION_FAR, Type: CROSS_HIGH_FROM_ABOVE");
+		goto end;
+
+
+	} else {
+		if (cross_type == CROSS_LOW_FROM_BELOW) {
+			event->status = BEACON_STATUS_REGION_NEAR;
+			LOG_DBG("6: Status: BEACON_STATUS_REGION_NEAR, Type: CROSS_LOW_FROM_BELOW");
+			goto end;
+		} else if (cross_type == CROSS_HIGH_FROM_ABOVE) {
+			event->status = BEACON_STATUS_REGION_FAR;
+			LOG_DBG("7: Status: BEACON_STATUS_REGION_FAR, Type: CROSS_HIGH_FROM_ABOVE");
+			goto end;
+		}
 	}
+end:
+	EVENT_SUBMIT(event);
+	last_distance = m_shortest_dist2beacon;
 }
 
 static void disconnect_peer_work_fn()
@@ -708,12 +753,6 @@ int ble_module_init()
 #endif
 
 #if CONFIG_BEACON_SCAN_ENABLE
-	/* Start scanning after beacons. Set flag to true */
-	if (atomic_get(&atomic_bt_scan_active) == false) {
-		scan_start();
-		atomic_set(&atomic_bt_scan_active, true);
-	}
-
 	/* Init and start periodic scan work function */
 	k_work_init_delayable(&periodic_beacon_scanner_work,
 			      periodic_beacon_scanner_work_fn);
@@ -801,7 +840,6 @@ static bool event_handler(const struct event_header *eh)
 			break;
 		case BLE_CTRL_SCAN_STOP:
 			if (atomic_get(&atomic_bt_scan_active) == true) {
-				LOG_INF("Scanning stop");
 				scan_stop();
 				atomic_set(&atomic_bt_scan_active, false);
 			}

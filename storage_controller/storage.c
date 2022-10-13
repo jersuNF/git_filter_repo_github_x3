@@ -782,54 +782,6 @@ bool stg_log_pointing_to_last()
 	return false;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_request_flash_erase_event(eh)) {

@@ -1424,7 +1424,7 @@ int send_binary_message(uint8_t *data, size_t len)
 			 K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC * 2)) == 0) {
 		struct check_connection *ev = new_check_connection();
 		EVENT_SUBMIT(ev);
-
+		k_sem_reset(&connection_ready);
 		int ret = k_sem_take(&connection_ready, K_MINUTES(2));
 		if (ret != 0) {
 			char *e_msg =

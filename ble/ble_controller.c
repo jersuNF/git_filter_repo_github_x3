@@ -60,9 +60,9 @@ static uint32_t nus_max_send_len;
 static atomic_t atomic_bt_ready;
 static atomic_t atomic_bt_adv_active;
 static atomic_t atomic_bt_scan_active;
+static int64_t beacon_scanner_timer;
 #if CONFIG_BEACON_SCAN_ENABLE
-static struct k_work_delayable periodic_beacon_scanner_start_work;
-static struct k_work_delayable periodic_beacon_scanner_stop_work;
+static struct k_work_delayable periodic_beacon_scanner_work;
 #endif
 static struct k_work_delayable disconnect_peer_work;
 
@@ -186,10 +186,10 @@ static struct bt_conn_cb conn_callbacks = {
 /**
  * @brief Periodic beacon scanner work function
  */
-static void periodic_beacon_scanner_start_work_fn()
+static void periodic_beacon_scanner_work_fn()
 {
 	/* Reschedule worker to start again after given interval */
-	k_work_reschedule(&periodic_beacon_scanner_start_work,
+	k_work_reschedule(&periodic_beacon_scanner_work,
 			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
 
 #if defined(CONFIG_WATCHDOG_ENABLE)
@@ -204,19 +204,8 @@ static void periodic_beacon_scanner_start_work_fn()
 		EVENT_SUBMIT(event);
 	}
 }
-
-static void periodic_beacon_scanner_stop_work_fn() 
-{
-	/* Stop beacon scanner. Check if scan is active */
-	if (atomic_get(&atomic_bt_scan_active) == true) {
-		struct ble_ctrl_event *ctrl_event =
-			new_ble_ctrl_event();
-		ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
-		EVENT_SUBMIT(ctrl_event);
-	}
-}
-
 #endif /* CONFIG_BEACON_SCAN_ENABLE */
+
 /**
  * @brief Work function to send data from rx ring buffer with bt nus
  * @param[in] work work item
@@ -581,6 +570,18 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 							     &adv_data);
 	}
 
+	int64_t delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
+	if (delta_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
+		/* Stop beacon scanner. Check if scan is active */
+		if (atomic_get(&atomic_bt_scan_active) == true) {
+			struct ble_ctrl_event *ctrl_event =
+				new_ble_ctrl_event();
+			ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
+			EVENT_SUBMIT(ctrl_event);
+		}
+	}
+
+
 }
 
 static void scan_start(void)
@@ -611,11 +612,11 @@ static void scan_start(void)
 
 	} else {
 		LOG_INF("Start scanning for Beacons");
+		
+		/* Start beacon scanner countdown */
+		beacon_scanner_timer = k_uptime_get();
 
 	}
-	/* Reschedule worker to stop scanning after a given interval */
-	k_work_reschedule(&periodic_beacon_scanner_stop_work,
-			  K_SECONDS(CONFIG_BEACON_SCAN_DURATION));
 }
 
 static void scan_stop(void)
@@ -767,14 +768,11 @@ int ble_module_init()
 #if CONFIG_BEACON_SCAN_ENABLE
 
 	/* Init periodic function to start scanning */
-	k_work_init_delayable(&periodic_beacon_scanner_start_work,
-			      periodic_beacon_scanner_start_work_fn);
+	k_work_init_delayable(&periodic_beacon_scanner_work,
+			      periodic_beacon_scanner_work_fn);
 
-	/* Init periodic function to stop scanning */
-	k_work_init_delayable(&periodic_beacon_scanner_stop_work,
-			      periodic_beacon_scanner_stop_work_fn);
 	/* Start periodic scan work function */
-	k_work_reschedule(&periodic_beacon_scanner_start_work, K_NO_WAIT);
+	k_work_reschedule(&periodic_beacon_scanner_work, K_NO_WAIT);
 #endif
 	/* Init bluetooth disconnect work handler */
 	k_work_init_delayable(&disconnect_peer_work, disconnect_peer_work_fn);

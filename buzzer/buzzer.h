@@ -10,7 +10,7 @@
 #include "sound_event.h"
 
 /** Default loudness for the buzzer in percent. */
-#define BUZZER_SOUND_VOLUME_PERCENT 1
+#define BUZZER_SOUND_VOLUME_PERCENT 100
 
 typedef enum { d_16 = 250, d_8 = 500 } duration_t;
 

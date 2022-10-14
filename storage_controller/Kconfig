@@ -36,5 +36,5 @@ if STORAGE_CONTROLLER
 	
 	config STG_CONFIG_LOG_LEVEL
 		int "Default log level for STG Config"
-		default 4
+		default 2
 endif

@@ -765,9 +765,11 @@ int ble_module_init()
 #endif
 
 #if CONFIG_BEACON_SCAN_ENABLE
+
 	/* Init periodic function to start scanning */
 	k_work_init_delayable(&periodic_beacon_scanner_start_work,
 			      periodic_beacon_scanner_start_work_fn);
+
 	/* Init periodic function to stop scanning */
 	k_work_init_delayable(&periodic_beacon_scanner_stop_work,
 			      periodic_beacon_scanner_stop_work_fn);

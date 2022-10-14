@@ -39,8 +39,7 @@ struct battery_level_point {
  * on the system.
  * @return the estimated remaining capacity in precentage.
  */
-unsigned int battery_level_soc(unsigned int batt_mV,
-			       const struct battery_level_point *curve);
+unsigned int battery_level_soc(unsigned int batt_mV);
 
 /** 
  * @brief Calculate a moving average of the battery voltage

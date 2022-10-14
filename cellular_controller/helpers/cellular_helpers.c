@@ -320,7 +320,7 @@ int check_ip(void)
 {
 	char *collar_ip = NULL;
 	uint8_t timeout_counter = 0;
-	while (timeout_counter++ <= 200) {
+	while (timeout_counter++ <= 100) {
 		k_sleep(K_SECONDS(1));
 		int ret = get_ip(&collar_ip);
 		if (ret != 0) {

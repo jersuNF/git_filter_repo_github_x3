@@ -60,7 +60,7 @@ static uint32_t nus_max_send_len;
 static atomic_t atomic_bt_ready;
 static atomic_t atomic_bt_adv_active;
 static atomic_t atomic_bt_scan_active;
-static int64_t beacon_scanner_timer;
+static int64_t beacon_scanner_started;
 #if CONFIG_BEACON_SCAN_ENABLE
 static struct k_work_delayable periodic_beacon_scanner_work;
 #endif
@@ -570,8 +570,8 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 							     &adv_data);
 	}
 
-	int64_t delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
-	if (delta_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
+	int64_t beacon_scanner_uptime = k_uptime_get() - beacon_scanner_started;
+	if (beacon_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
 		/* Stop beacon scanner. Check if scan is active */
 		if (atomic_get(&atomic_bt_scan_active) == true) {
 			struct ble_ctrl_event *ctrl_event =
@@ -614,7 +614,7 @@ static void scan_start(void)
 		LOG_INF("Start scanning for Beacons");
 		
 		/* Start beacon scanner countdown */
-		beacon_scanner_timer = k_uptime_get();
+		beacon_scanner_started = k_uptime_get();
 
 	}
 }

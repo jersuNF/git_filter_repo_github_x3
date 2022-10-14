@@ -51,17 +51,6 @@ static int pwr_module_extclk_enable(bool enable);
 /** Variable to keep track of current power state */
 static int current_state = PWR_LOW;
 
-/** A discharge curve specific to the power source. */
-static const struct battery_level_point levels[] = {
-	/**
-	 * Here 10000 corresponds to 100 % charge
-	 * For a non linear discharge curve, add more points below 
-	 */
-	{ 10000, CONFIG_BATTERY_FULL_MV },
-	{ 0, CONFIG_BATTERY_EMPTY_MV },
-
-};
-
 /* Define the workers for battery and charger */
 static struct k_work_delayable battery_poll_work;
 static struct k_work_delayable power_reboot;
@@ -237,7 +226,7 @@ int log_and_fetch_battery_voltage(void)
 		return -ENOENT;
 	}
 
-	uint8_t batt_soc = battery_level_soc(batt_mV, levels);
+	uint8_t batt_soc = battery_level_soc(batt_mV);
 
 	struct ble_ctrl_event *event = new_ble_ctrl_event();
 	event->cmd = BLE_CTRL_BATTERY_UPDATE;
@@ -285,7 +274,7 @@ int fetch_battery_percent(void)
 		LOG_ERR("Failed to read battery voltage: %d", batt_mV);
 		return -ENOENT;
 	}
-	return battery_level_soc(batt_mV, levels);
+	return battery_level_soc(batt_mV);
 }
 
 int pwr_module_reboot_reason(uint8_t *aReason)
@@ -311,40 +300,6 @@ int pwr_module_reboot_reason(uint8_t *aReason)
  */
 static bool event_handler(const struct event_header *eh)
 {
-	if (is_request_pwr_battery_event(eh)) {
-		int batt_voltage = log_and_fetch_battery_voltage();
-		if (batt_voltage < 0) {
-			char *e_msg = "Error in fetching battery voltage";
-			nf_app_error(ERR_PWR_MODULE, batt_voltage, e_msg,
-				     strlen(e_msg));
-			return false;
-		}
-
-		/* Publish battery event with averaged voltage */
-		struct pwr_status_event *event = new_pwr_status_event();
-		event->pwr_state = current_state;
-		event->battery_mv = batt_voltage;
-		event->battery_mv_min = battery_get_min();
-		event->battery_mv_max = battery_get_max();
-		EVENT_SUBMIT(event);
-		return false;
-	}
-#if CONFIG_ADC_NRFX_SAADC
-	if (is_request_pwr_charging_event(eh)) {
-		int charging_current_avg = charging_current_sample_averaged();
-		if (charging_current_avg < 0) {
-			char *msg = "Unable fetch charging data";
-			nf_app_error(ERR_PWR_MODULE, charging_current_avg, msg,
-				     strlen(msg));
-			return false;
-		}
-		struct pwr_status_event *event = new_pwr_status_event();
-		event->pwr_state = PWR_CHARGING;
-		event->charging_ma = charging_current_avg;
-		EVENT_SUBMIT(event);
-		return false;
-	}
-#endif
 	/* Received reboot event */
 	if (is_pwr_reboot_event(eh)) {
 		struct pwr_reboot_event *evt = cast_pwr_reboot_event(eh);
@@ -372,6 +327,4 @@ static bool event_handler(const struct event_header *eh)
 }
 
 EVENT_LISTENER(MODULE, event_handler);
-EVENT_SUBSCRIBE(MODULE, request_pwr_battery_event);
-EVENT_SUBSCRIBE(MODULE, request_pwr_charging_event);
 EVENT_SUBSCRIBE_FINAL(MODULE, pwr_reboot_event);

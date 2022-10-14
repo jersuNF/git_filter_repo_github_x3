@@ -277,7 +277,7 @@ int stg_config_str_read(stg_config_param_id_t id, char *str, uint8_t *len)
     }
 
     char buff[(id == STG_STR_HOST_PORT) ? STG_CONFIG_HOST_PORT_BUF_LEN : 
-                (id == STG_STR_HOST_PORT) ? STG_CONFIG_BLE_SEC_KEY_LEN : 0];
+                (id == STG_STR_BLE_KEY) ? STG_CONFIG_BLE_SEC_KEY_LEN : 0];
     if (sizeof(buff) <= 0)
     {
         LOG_WRN("STG str read, unknown data size (%d)", sizeof(buff));
@@ -318,15 +318,15 @@ int stg_config_str_write(stg_config_param_id_t id, const char *str, const uint8_
         LOG_WRN("STG str write, invalid id (%d), access denied", (int)id);
         return -ENOMSG;
     }
-    if (((id == STG_STR_HOST_PORT) && (len > STG_CONFIG_HOST_PORT_BUF_LEN-1)) ||
-        ((id == STG_STR_BLE_KEY) && (len > STG_CONFIG_BLE_SEC_KEY_LEN-1)))
+    if (((id == STG_STR_HOST_PORT) && (len > STG_CONFIG_HOST_PORT_BUF_LEN)) ||
+        ((id == STG_STR_BLE_KEY) && (len > STG_CONFIG_BLE_SEC_KEY_LEN)))
     {
         LOG_WRN("STG str write, incorrect size (%d) for id (%d)", len, (int)id);
         return -EOVERFLOW;
     }
 
     char buff[(id == STG_STR_HOST_PORT) ? STG_CONFIG_HOST_PORT_BUF_LEN : 
-                (id == STG_STR_HOST_PORT) ? STG_CONFIG_BLE_SEC_KEY_LEN : 0];
+                (id == STG_STR_BLE_KEY) ? STG_CONFIG_BLE_SEC_KEY_LEN : 0];
     if (sizeof(buff) <= 0)
     {
         LOG_WRN("STG str write, unknown data size (%d)", sizeof(buff));
@@ -334,7 +334,10 @@ int stg_config_str_write(stg_config_param_id_t id, const char *str, const uint8_
     }
     memset(buff, 0, sizeof(buff));
     memcpy(buff, str, sizeof(buff));
-    buff[sizeof(buff)-1] = '\0';
+    if (id != STG_STR_BLE_KEY)
+    {
+        buff[sizeof(buff)-1] = '\0';
+    }
 
     ret = nvs_write(&m_file_system, (uint16_t)id, buff, sizeof(buff));
     if (ret < 0)

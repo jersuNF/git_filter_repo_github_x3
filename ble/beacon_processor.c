@@ -71,7 +71,7 @@ static inline int get_beacon_index_by_mac(struct beacon_list *list,
  * @param[in] m Measured distance to the beacon we want to add
  */
 static inline void add_to_beacon_list(struct beacon_list *list,
-				      struct beacon_info *src, uint8_t m)
+				      struct beacon_info *src)
 {
 	int index = -1;
 
@@ -86,7 +86,7 @@ static inline void add_to_beacon_list(struct beacon_list *list,
 				index = i;
 			}
 		}
-		if (m > worst_distance || m == UINT8_MAX) {
+		if (src->min_dist > worst_distance || src->min_dist == UINT8_MAX) {
 			/* Check if we try to add something worse than already added */
 			return;
 		}
@@ -201,9 +201,9 @@ static int set_new_avg_dist(struct beacon_info *beacon)
  * 
  * @param[in] list struct of beacon_list
  * @param[out] dist Distance pointer
- * @param[out] beacon_index Pointer to index in beacon array
  */
-static inline int get_shortest_distance(struct beacon_list *list, uint8_t *dist)
+static inline void get_shortest_distance(struct beacon_list *list, uint8_t 
+									   *dist)
 {
 	int err;
 	*dist = UINT8_MAX;
@@ -306,11 +306,11 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		LOG_DBG("New beacon detected %s, %d", log_strdup(beacon_str),
 			(uint8_t)m);
 		/* Populate 1 new history entry. */
-		beacon.min_dist = m;
+		beacon.min_dist = (uint8_t)m;
 		beacon.num_measurements = 0;
 		beacon.conn_history_peeker = 0;
 		add_to_beacon_history(&info, &beacon);
-		add_to_beacon_list(&beacons, &beacon, (uint8_t)m);
+		add_to_beacon_list(&beacons, &beacon);
 	} else {
 		LOG_DBG("Add measurement from beacon %s to list",
 			log_strdup(beacon_str));

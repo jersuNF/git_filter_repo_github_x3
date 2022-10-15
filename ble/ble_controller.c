@@ -575,6 +575,9 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 
 static void scan_start(void)
 {
+	if (atomic_get(&atomic_bt_scan_active) == true) {
+		return;
+	}
 	m_shortest_dist2beacon = UINT8_MAX;
 
 	if (!atomic_get(&atomic_bt_ready)) {
@@ -601,14 +604,17 @@ static void scan_start(void)
 
 	} else {
 		LOG_INF("Start scanning for Beacons");
-
 		/* Start beacon scanner countdown */
 		beacon_scanner_timer = k_uptime_get();
+		atomic_set(&atomic_bt_scan_active, true);
 	}
 }
 
 static void scan_stop(void)
 {
+	if (atomic_get(&atomic_bt_scan_active) == false) {
+		return;
+	}
 	static uint8_t last_distance = UINT8_MAX;
 	int err = bt_le_scan_stop();
 	if (err) {
@@ -669,6 +675,7 @@ static void scan_stop(void)
 end:
 	EVENT_SUBMIT(event);
 	last_distance = m_shortest_dist2beacon;
+	atomic_set(&atomic_bt_scan_active, false);
 }
 
 static void disconnect_peer_work_fn()
@@ -829,16 +836,12 @@ static bool event_handler(const struct event_header *eh)
 			error_flag_update(event->param.error_flags);
 			break;
 		case BLE_CTRL_SCAN_START:
-			if (atomic_get(&atomic_bt_scan_active) == false) {
-				scan_start();
-				atomic_set(&atomic_bt_scan_active, true);
-			}
+			scan_start();
+			atomic_set(&atomic_bt_scan_active, true);
 			break;
 		case BLE_CTRL_SCAN_STOP:
-			if (atomic_get(&atomic_bt_scan_active) == true) {
-				scan_stop();
-				atomic_set(&atomic_bt_scan_active, false);
-			}
+			scan_stop();
+			atomic_set(&atomic_bt_scan_active, false);
 			break;
 		case BLE_CTRL_DISCONNECT_PEER:
 			if (current_conn != NULL) {

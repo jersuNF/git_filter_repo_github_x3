@@ -114,10 +114,6 @@ int play_from_ms(const uint32_t period, const uint32_t sustain,
 
 	int pwm_idle_err;
 	if (k_sem_take(&abort_sound_sem, dur) == 0) {
-		pwm_idle_err = set_pwm_to_idle();
-		if (pwm_idle_err) {
-			return pwm_idle_err;
-		}
 		err = -EINTR;
 	}
 

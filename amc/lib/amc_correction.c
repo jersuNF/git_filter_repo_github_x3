@@ -140,6 +140,8 @@ static void buzzer_update_fn()
 						&update_buzzer_work,
 						K_MSEC
 						(ZAP_EVALUATION_TIME_MS));
+				} else {
+					queueZap = false;
 				}
 				if (freq >= WARN_FREQ_MAX &&
 				    atomic_get(&sound_max_atomic)) {

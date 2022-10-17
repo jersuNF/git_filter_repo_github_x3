@@ -23,7 +23,8 @@ enum {
     STG_U8_PARAM_TYPE,
     STG_U16_PARAM_TYPE,
     STG_U32_PARAM_TYPE,
-    STG_STR_PARAM_TYPE
+    STG_STR_PARAM_TYPE,
+    STG_BLOB_PARAM_TYPE
 }stg_param_type;
 
 static const struct device* mp_device;
@@ -276,8 +277,7 @@ int stg_config_str_read(stg_config_param_id_t id, char *str, uint8_t *len)
         return -ENOMSG;
     }
 
-    char buff[(id == STG_STR_HOST_PORT) ? STG_CONFIG_HOST_PORT_BUF_LEN : 
-                (id == STG_STR_BLE_KEY) ? STG_CONFIG_BLE_SEC_KEY_LEN : 0];
+    char buff[(id == STG_STR_HOST_PORT) ? STG_CONFIG_HOST_PORT_BUF_LEN : 0];
     if (sizeof(buff) <= 0)
     {
         LOG_WRN("STG str read, unknown data size (%d)", sizeof(buff));
@@ -296,14 +296,14 @@ int stg_config_str_read(stg_config_param_id_t id, char *str, uint8_t *len)
         LOG_ERR("STG str read, failed read to storage at id %d", (int)id);
         return ret;
     }
-    strcpy(str, buff);
+    memcpy(str, buff, sizeof(buff));
     *len = strlen(buff);
-
-    LOG_DBG("Read: Id=%d, Length=%d, Data=%s", (int)id, strlen(buff), buff);
+    LOG_DBG("Read: Id=%d, Length=%d, Data=%s", (int)id, *len, str);
     return 0;
 }
 
-int stg_config_str_write(stg_config_param_id_t id, const char *str, const uint8_t len)
+int stg_config_str_write(stg_config_param_id_t id, const char *str, 
+        const uint8_t len)
 {
     int ret;
     if (m_initialized != true)
@@ -318,15 +318,13 @@ int stg_config_str_write(stg_config_param_id_t id, const char *str, const uint8_
         LOG_WRN("STG str write, invalid id (%d), access denied", (int)id);
         return -ENOMSG;
     }
-    if (((id == STG_STR_HOST_PORT) && (len > STG_CONFIG_HOST_PORT_BUF_LEN)) ||
-        ((id == STG_STR_BLE_KEY) && (len > STG_CONFIG_BLE_SEC_KEY_LEN)))
+    if ((id == STG_STR_HOST_PORT) && (len > STG_CONFIG_HOST_PORT_BUF_LEN))
     {
         LOG_WRN("STG str write, incorrect size (%d) for id (%d)", len, (int)id);
         return -EOVERFLOW;
     }
 
-    char buff[(id == STG_STR_HOST_PORT) ? STG_CONFIG_HOST_PORT_BUF_LEN : 
-                (id == STG_STR_BLE_KEY) ? STG_CONFIG_BLE_SEC_KEY_LEN : 0];
+    char buff[(id == STG_STR_HOST_PORT) ? STG_CONFIG_HOST_PORT_BUF_LEN : 0];
     if (sizeof(buff) <= 0)
     {
         LOG_WRN("STG str write, unknown data size (%d)", sizeof(buff));
@@ -334,10 +332,7 @@ int stg_config_str_write(stg_config_param_id_t id, const char *str, const uint8_
     }
     memset(buff, 0, sizeof(buff));
     memcpy(buff, str, sizeof(buff));
-    if (id != STG_STR_BLE_KEY)
-    {
-        buff[sizeof(buff)-1] = '\0';
-    }
+    buff[sizeof(buff)-1] = '\0'; //Ensure termination
 
     ret = nvs_write(&m_file_system, (uint16_t)id, buff, sizeof(buff));
     if (ret < 0)
@@ -345,7 +340,95 @@ int stg_config_str_write(stg_config_param_id_t id, const char *str, const uint8_
         LOG_ERR("STG str write, failed write to storage at id %d", (int)id);
         return ret;
     }
-    LOG_DBG("Write: Id=%d, Length=%d, Data=%s", (int)id, sizeof(buff), buff);
+    LOG_DBG("Read: Id=%d, Length=%d, Data=%s", (int)id, strlen(buff), buff);
+    return 0;
+}
+
+int stg_config_blob_read(stg_config_param_id_t id, uint8_t *arr, uint8_t *len)
+{
+    int ret;
+    if (m_initialized != true)
+    {
+        LOG_WRN("STG Config not initialized");
+        return -ENODEV;
+    }
+
+    ret = is_valid_id(id);
+    if (ret != STG_BLOB_PARAM_TYPE)
+    {
+        LOG_WRN("STG blob write, invalid id (%d), access denied", (int)id);
+        return -ENOMSG;
+    }
+
+    uint8_t buff[(id == STG_BLOB_BLE_KEY) ? STG_CONFIG_BLE_SEC_KEY_LEN : 0];
+    if (sizeof(buff) <= 0)
+    {
+        LOG_WRN("STG blob read, unknown data size (%d)", sizeof(buff));
+        return -ENOMSG;
+    }
+    memset(buff, 0, sizeof(buff));
+
+    ret = nvs_read(&m_file_system, (uint16_t)id, &buff, sizeof(buff));
+    if (ret == -ENOENT)
+    {
+        /* Return nothing if blob id-data pair does not exist */
+        return 0;
+    }
+    else if ((ret < 0) && (ret != -ENOENT))
+    {
+        LOG_ERR("STG blob read, failed read to storage at id %d", (int)id);
+        return ret;
+    }
+    memcpy(arr, buff, sizeof(buff));
+    *len = sizeof(buff);
+
+    LOG_DBG("Read: Id=%d, Length=%d, Data=0x%X%X%X%X%X%X%X%X", (int)id, *len, 
+        arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7]);
+
+    return 0;
+}
+
+int stg_config_blob_write(stg_config_param_id_t id, const uint8_t *arr, 
+        const uint8_t len)
+{
+    int ret;
+    if (m_initialized != true)
+    {
+        LOG_WRN("STG Config not initialized");
+        return -ENODEV;
+    }
+
+    ret = is_valid_id(id);
+    if (ret != STG_BLOB_PARAM_TYPE)
+    {
+        LOG_WRN("STG blob write, invalid id (%d), access denied", (int)id);
+        return -ENOMSG;
+    }
+    if ((id == STG_BLOB_BLE_KEY) && (len > STG_CONFIG_BLE_SEC_KEY_LEN))
+    {
+        LOG_WRN("STG blb write, incorrect size (%d) for id (%d)", len, (int)id);
+        return -EOVERFLOW;
+    }
+
+    // uint8_t buff[(id == STG_BLOB_BLE_KEY) ? STG_CONFIG_BLE_SEC_KEY_LEN : 0];
+    // if (sizeof(buff) <= 0)
+    // {
+    //     LOG_WRN("STG blob write, unknown data size (%d)", sizeof(buff));
+    //     return -ENOMSG;
+    // }
+    // memset(buff, 0, sizeof(buff));
+    // memcpy(buff, arr, sizeof(buff));
+
+    ret = nvs_write(&m_file_system, (uint16_t)id, arr, len);
+    if (ret < 0)
+    {
+        LOG_ERR("STG blob write, failed write to storage at id %d", (int)id);
+        return ret;
+    }
+
+    LOG_DBG("Read: Id=%d, Length=%d, Data=0x%X%X%X%X%X%X%X%X", (int)id, len, 
+        arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7]);
+
     return 0;
 }
 
@@ -408,9 +491,13 @@ int is_valid_id(stg_config_param_id_t param_id)
             break;
         }
         case STG_STR_HOST_PORT:
-        case STG_STR_BLE_KEY:
         {
             param_type = STG_STR_PARAM_TYPE;
+            break;
+        }
+        case STG_BLOB_BLE_KEY:
+        {
+            param_type = STG_BLOB_PARAM_TYPE;
             break;
         }
         default:

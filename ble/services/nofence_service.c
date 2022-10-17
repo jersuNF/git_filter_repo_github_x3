@@ -114,7 +114,7 @@ ssize_t write_command_char(struct bt_conn *conn,
 		char ble_key[STG_CONFIG_BLE_SEC_KEY_LEN];
 		uint8_t key_length = 0;
 		memset(ble_key, 0, sizeof(ble_key));
-		int ret = stg_config_str_read(STG_STR_BLE_KEY, ble_key, &key_length);
+		int ret = stg_config_blob_read(STG_BLOB_BLE_KEY, ble_key, &key_length);
 		if (ret < 0) {
 			LOG_ERR("Failed to read ble_sec_key, err %d", ret);
 			return len;

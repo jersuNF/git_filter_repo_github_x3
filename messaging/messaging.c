@@ -1194,7 +1194,7 @@ void build_poll_request(NofenceMessage *poll_req)
 		poll_req->m.poll_message_req.rgubcBleKey.size = 
 			STG_CONFIG_BLE_SEC_KEY_LEN;
 		uint8_t key_length = 0;
-		err = stg_config_str_read(STG_STR_BLE_KEY, 
+		err = stg_config_blob_read(STG_BLOB_BLE_KEY, 
 				poll_req->m.poll_message_req.rgubcBleKey.bytes, 
 				&key_length);		
 		if (err != 0) {
@@ -1627,12 +1627,12 @@ void process_poll_response(NofenceMessage *proto)
 
 		uint8_t current_ble_sec_key[STG_CONFIG_BLE_SEC_KEY_LEN];
 		uint8_t key_length = 0;
-		stg_config_str_read(STG_STR_BLE_KEY, current_ble_sec_key, &key_length);
+		stg_config_blob_read(STG_BLOB_BLE_KEY, current_ble_sec_key, &key_length);
 		int ret = memcmp(pResp->rgubcBleKey.bytes, current_ble_sec_key,
 				 pResp->rgubcBleKey.size);
 		if (ret != 0) {
 			LOG_INF("New ble sec key is different. Will update ext flash");
-			ret = stg_config_str_write(STG_STR_BLE_KEY, 
+			ret = stg_config_blob_write(STG_BLOB_BLE_KEY, 
 					pResp->rgubcBleKey.bytes, pResp->rgubcBleKey.size);
 			if (ret < 0) {
 				char *e_msg = "Failed to write ble sec key to ext flash";

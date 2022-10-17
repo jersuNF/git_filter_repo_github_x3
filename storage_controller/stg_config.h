@@ -41,7 +41,7 @@ typedef enum {
     STG_U32_UID, 
     STG_U32_WARN_CNT_TOT,
     STG_STR_HOST_PORT,
-    STG_STR_BLE_KEY,
+    STG_BLOB_BLE_KEY,
 	STG_PARAM_ID_CNT
 }stg_config_param_id_t;
 
@@ -115,7 +115,27 @@ int stg_config_str_read(stg_config_param_id_t id, char *str, uint8_t *len);
  * @param len The length of the data.
  * @return 0 if successful, otherwise a negative error code. 
  */
-int stg_config_str_write(stg_config_param_id_t id, const char *str, const uint8_t len);
+int stg_config_str_write(stg_config_param_id_t id, const char *str, 
+		const uint8_t len);
+
+/**
+ * @brief Reads the binary blob config parameter as specified by the identifier.
+ * @param id The identifier of the config parameter (See stg_config_param_id_t).
+ * @param arr Pointer to the data array.
+ * @param len The length of the data.
+ * @return 0 if successful, otherwise a negative error code. 
+ */
+int stg_config_blob_read(stg_config_param_id_t id, uint8_t *arr, uint8_t *len);
+
+/**
+ * @brief Writes to binary blob config parameter as specified by the identifier.
+ * @param id The identifier of the config parameter (See stg_config_param_id_t).
+ * @param arr Pointer to the data array.
+ * @param len The length of the data.
+ * @return 0 if successful, otherwise a negative error code. 
+ */
+int stg_config_blob_write(stg_config_param_id_t id, const uint8_t *arr, 
+		const uint8_t len);
 
 /**
  * @brief Erase all flash sectors associated with STG config.

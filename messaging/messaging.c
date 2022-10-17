@@ -698,12 +698,14 @@ static bool event_handler(const struct event_header *eh)
 		struct update_fence_version *ev = cast_update_fence_version(eh);
 		current_state.fence_version = ev->fence_version;
 		update_cache_reg(FENCE_VERSION);
-		/* Notify server as soon as the new fence is activated. */
-		LOG_WRN("Schedule poll request: fence_version!");
-		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
-						      K_NO_WAIT);
-		if (err < 0) {
-			LOG_ERR("Error reschedule modem poll work (%d)", err);
+		if (!m_transfer_boot_params) {
+			/* Notify server as soon as the new fence is activated. */
+			LOG_WRN("Schedule poll request: fence_version!");
+			int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
+							      K_NO_WAIT);
+			if (err < 0) {
+				LOG_ERR("Error reschedule modem poll work (%d)", err);
+			}
 		}
 		return false;
 	}
@@ -753,8 +755,7 @@ static bool event_handler(const struct event_header *eh)
 		if (ev->state) {
 			k_sem_give(&connection_ready);
 		} else {
-			/*TODO: take some action while waiting for cellular
-			 * controller to recover the connection.*/
+			k_sem_reset(&connection_ready);
 		}
 		return false;
 	}
@@ -1423,7 +1424,7 @@ int send_binary_message(uint8_t *data, size_t len)
 			 K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC * 2)) == 0) {
 		struct check_connection *ev = new_check_connection();
 		EVENT_SUBMIT(ev);
-
+		k_sem_reset(&connection_ready);
 		int ret = k_sem_take(&connection_ready, K_MINUTES(2));
 		if (ret != 0) {
 			char *e_msg =

@@ -132,13 +132,24 @@ void handle_gnss_data_fn(struct k_work *item);
  */
 static bool event_handler(const struct event_header *eh);
 
-
 static inline int update_pasture_from_stg(void)
 {
 	int err;
+
+	if (get_fence_status() == FenceStatus_TurnedOffByBLE) {
+		LOG_WRN("Fence is turned off by BLE");
+		/* Submit event that we have now begun to use the new fence. */
+		struct update_fence_version *ver = new_update_fence_version();
+		ver->fence_version = UINT32_MAX;
+		ver->total_fences = 0;
+		EVENT_SUBMIT(ver);
+		return 0;
+	}
+
 	err = stg_read_pasture_data(set_pasture_cache);
 	if (err == -ENODATA) {
 		char *err_msg = "No pasture found on external flash.";
+		LOG_WRN("%s (%d)", log_strdup(err_msg), err);
 		nf_app_warning(ERR_AMC, err, err_msg, strlen(err_msg));
 		/* Submit event that we have now begun to use the new fence. */
 		struct update_fence_version *ver = new_update_fence_version();
@@ -148,6 +159,7 @@ static inline int update_pasture_from_stg(void)
 		return 0;
 	} else if (err) {
 		char *err_msg = "Couldn't update pasture cache in AMC.";
+		LOG_ERR("%s (%d)", log_strdup(err_msg), err);
 		nf_app_fatal(ERR_AMC, err, err_msg, strlen(err_msg));
 
 		/* Set pasture/fence to invalid */
@@ -168,8 +180,7 @@ static inline int update_pasture_from_stg(void)
 
 	/* Take pasture sem, since we need to access the version to send to 
 	 * messaging module. */
-	err = k_sem_take(&fence_data_sem, 
-				K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
+	err = k_sem_take(&fence_data_sem, K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	do {
 		if (err) {
 			char *e_msg = "Error taking pasture semaphore for version check.";
@@ -181,7 +192,7 @@ static inline int update_pasture_from_stg(void)
 		/* Verify it has been cached correctly. */
 		pasture_t *pasture = NULL;
 		get_pasture_cache(&pasture);
-		if (pasture == NULL) {		
+		if (pasture == NULL) {
 			char *e_msg = "Pasture was not cached correctly.";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_AMC, -ENODATA, e_msg, strlen(e_msg));
@@ -208,8 +219,7 @@ static inline int update_pasture_from_stg(void)
 
 		if (m_fence_update_pending) {
 			m_fence_update_pending = false;
-			if (pasture->m.ul_fence_def_version !=
-			    m_new_fence_version) {
+			if (pasture->m.ul_fence_def_version != m_new_fence_version) {
 				force_fence_status(FenceStatus_FenceStatus_Invalid);
 			}
 		}
@@ -220,12 +230,12 @@ static inline int update_pasture_from_stg(void)
 		ver->total_fences = pasture->m.ul_total_fences;
 		EVENT_SUBMIT(ver);
 
-		LOG_INF("Pasture change:FenceVersion=%d,FenceStatus=%d", 
-					pasture->m.ul_fence_def_version, get_fence_status());
+		LOG_INF("Pasture change:FenceVersion=%d,FenceStatus=%d",
+			pasture->m.ul_fence_def_version, get_fence_status());
 
 		k_sem_give(&fence_data_sem);
 		return 0;
-	}while(0);
+	} while (0);
 	LOG_WRN("Failed to update pasture!");
 	/* Update fence status to unknown in case of failure */
 	force_fence_status(FenceStatus_FenceStatus_Invalid);
@@ -235,9 +245,18 @@ static inline int update_pasture_from_stg(void)
 
 void handle_new_fence_fn(struct k_work *item)
 {
+	int err;
 	m_fence_update_pending = true;
 	zone_set(NO_ZONE);
-	int err = update_pasture_from_stg();
+
+	if (get_fence_status() == FenceStatus_TurnedOffByBLE) {
+		err = force_fence_status(FenceStatus_FenceStatus_UNKNOWN);
+		if (err != 0) {
+			LOG_ERR("Set fence status to UNKNOWN failed %d", err);
+		}
+	}
+
+	err = update_pasture_from_stg();
 	if (err != 0) {
 		LOG_WRN("Fence update request denied, error:%d", err);
 	}
@@ -276,17 +295,15 @@ void handle_states_fn()
 		maybe_out_of_fence_timestamp = k_uptime_get_32();
 	}
 
-	FenceStatus new_fence_status = 
-				calc_fence_status(maybe_out_of_fence_timestamp,
-				atomic_get(&current_beacon_status));
+	FenceStatus new_fence_status = calc_fence_status(
+		maybe_out_of_fence_timestamp, atomic_get(&current_beacon_status));
 
 	CollarStatus new_collar_status = calc_collar_status();
 
 	set_sensor_modes(amc_mode, new_fence_status, new_collar_status, cur_zone);
 
 	LOG_DBG("AMC states:CollarMode=%d,CollarStatus=%d,Zone=%d,FenceStatus=%d",
-				get_mode(), calc_collar_status(), zone_get(), 
-				get_fence_status());
+		get_mode(), calc_collar_status(), zone_get(), get_fence_status());
 }
 
 void handle_corrections_fn()
@@ -304,8 +321,8 @@ void handle_corrections_fn()
 	FenceStatus fence_status = get_fence_status();
 	amc_zone_t current_zone = zone_get();
 
-	process_correction(collar_mode, &gnss->lastfix, fence_status, current_zone, 
-				mean_dist, dist_change);
+	process_correction(collar_mode, &gnss->lastfix, fence_status, current_zone,
+			   mean_dist, dist_change);
 }
 
 void handle_gnss_data_fn(struct k_work *item)
@@ -316,8 +333,7 @@ void handle_gnss_data_fn(struct k_work *item)
 	}
 
 	/* Take fence semaphore since we're going to use the cached area. */
-	int err = k_sem_take(&fence_data_sem, 
-				K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
+	int err = k_sem_take(&fence_data_sem, K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
 		char *e_msg = "Error waiting for fence data semaphore to release.";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
@@ -340,9 +356,8 @@ void handle_gnss_data_fn(struct k_work *item)
 	}
 
 	LOG_DBG("\n\n--== START ==--");
-	LOG_DBG("  GNSS data: %d, %d, %d, %d, %d", gnss->latest.lon, 
-				gnss->latest.lat, gnss->latest.pvt_flags, gnss->latest.h_acc_dm,
-				gnss->latest.num_sv);
+	LOG_DBG("  GNSS data: %d, %d, %d, %d, %d", gnss->latest.lon, gnss->latest.lat,
+		gnss->latest.pvt_flags, gnss->latest.h_acc_dm, gnss->latest.num_sv);
 
 	/* Set local variables used in AMC logic. */
 	int16_t height_delta = INT16_MAX;
@@ -359,8 +374,8 @@ void handle_gnss_data_fn(struct k_work *item)
 	/* Fetch x and y position based on gnss data */
 	int16_t pos_x = 0, pos_y = 0;
 	err = gnss_calc_xy(gnss, &pos_x, &pos_y, pasture->m.l_origin_lon,
-				pasture->m.l_origin_lat, pasture->m.us_k_lon,
-				pasture->m.us_k_lat);
+			   pasture->m.l_origin_lat, pasture->m.us_k_lon,
+			   pasture->m.us_k_lat);
 
 	struct xy_location *loc = new_xy_location();
 	loc->x = pos_x;
@@ -400,11 +415,13 @@ void handle_gnss_data_fn(struct k_work *item)
 			 */
 			if (++fifo_dist_elem_count >= FIFO_ELEMENTS) {
 				fifo_dist_elem_count = 0;
-				fifo_put(fifo_avg(dist_array, FIFO_ELEMENTS), dist_avg_array,
-							FIFO_AVG_DISTANCE_ELEMENTS);
+				fifo_put(fifo_avg(dist_array, FIFO_ELEMENTS),
+					 dist_avg_array, FIFO_AVG_DISTANCE_ELEMENTS);
 
-				if (++fifo_avg_dist_elem_count >= FIFO_AVG_DISTANCE_ELEMENTS) {
-					fifo_avg_dist_elem_count = FIFO_AVG_DISTANCE_ELEMENTS;
+				if (++fifo_avg_dist_elem_count >=
+				    FIFO_AVG_DISTANCE_ELEMENTS) {
+					fifo_avg_dist_elem_count =
+						FIFO_AVG_DISTANCE_ELEMENTS;
 				}
 			}
 		} else {
@@ -423,13 +440,12 @@ void handle_gnss_data_fn(struct k_work *item)
 			height_delta = fifo_delta(height_avg_array, FIFO_ELEMENTS);
 
 			if (fifo_avg_dist_elem_count >= FIFO_AVG_DISTANCE_ELEMENTS) {
-				dist_avg_change = fifo_slope(dist_avg_array, 
-							FIFO_AVG_DISTANCE_ELEMENTS);
+				dist_avg_change = fifo_slope(dist_avg_array,
+							     FIFO_AVG_DISTANCE_ELEMENTS);
 			}
 		}
-		LOG_INF("  mean_dist: %d, dist_change: %d, dist_inc_count: %d, acc_delta: %d, height_delta: %d", 
-					mean_dist, dist_change, dist_inc_count, acc_delta, 
-					height_delta);
+		LOG_INF("  mean_dist: %d, dist_change: %d, dist_inc_count: %d, acc_delta: %d, height_delta: %d",
+			mean_dist, dist_change, dist_inc_count, acc_delta, height_delta);
 
 		int16_t dist_incr_slope_lim = 0;
 		uint8_t dist_incr_count = 0;
@@ -444,9 +460,10 @@ void handle_gnss_data_fn(struct k_work *item)
 		}
 
 		/* Set final accuracy flags based on previous calculations. */
-		err = gnss_update_dist_flags(dist_avg_change, dist_change, 
-					dist_incr_slope_lim, dist_inc_count, dist_incr_count,
-					height_delta, acc_delta, mean_dist, gnss->lastfix.h_acc_dm);
+		err = gnss_update_dist_flags(dist_avg_change, dist_change,
+					     dist_incr_slope_lim, dist_inc_count,
+					     dist_incr_count, height_delta, acc_delta,
+					     mean_dist, gnss->lastfix.h_acc_dm);
 		if (err) {
 			goto cleanup;
 		}
@@ -496,6 +513,8 @@ int amc_module_init(void)
 	init_states_and_variables();
 
 	/* Fetch the fence from external flash and update fence cache. */
+
+	/* Add check for old fence status. */
 	return update_pasture_from_stg();
 }
 

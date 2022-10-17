@@ -32,7 +32,7 @@
 #include "ble_beacon_event.h"
 #include "watchdog_event.h"
 #include "error_event.h"
-#if defined(CONFIG_BOARD_NF_SG25_27O_NRF52840) ||                              \
+#if defined(CONFIG_BOARD_NF_SG25_27O_NRF52840) ||                                        \
 	defined(CONFIG_BOARD_NF_C25_25G_NRF52840)
 #include "ble_dfu.h"
 #elif CONFIG_BOARD_NATIVE_POSIX
@@ -46,8 +46,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_CONTROLLER_LOG_LEVEL);
 
 static void bt_send_work_handler(struct k_work *work);
 
-K_MEM_SLAB_DEFINE(ble_rx_slab, BLE_RX_BLOCK_SIZE, BLE_RX_BUF_COUNT,
-		  BLE_SLAB_ALIGNMENT);
+K_MEM_SLAB_DEFINE(ble_rx_slab, BLE_RX_BLOCK_SIZE, BLE_RX_BUF_COUNT, BLE_SLAB_ALIGNMENT);
 RING_BUF_DECLARE(ble_tx_ring_buf, BLE_TX_BUF_SIZE);
 
 static K_SEM_DEFINE(ble_tx_sem, 0, 1);
@@ -85,10 +84,10 @@ static uint16_t current_fw_ver = NF_X25_VERSION_NUMBER;
 static uint32_t current_serial_number = CONFIG_NOFENCE_SERIAL_NUMBER;
 static uint8_t current_battery_level = 0;
 static uint8_t current_error_flags = 0;
-static uint8_t current_collar_mode = 0;
-static uint8_t current_collar_status = 0;
-static uint8_t current_fence_status = 0;
-static uint8_t current_valid_pasture = 0;
+static uint8_t current_collar_mode = Mode_Mode_UNKNOWN;
+static uint8_t current_collar_status = CollarStatus_CollarStatus_UNKNOWN;
+static uint8_t current_fence_status = FenceStatus_FenceStatus_UNKNOWN;
+static uint8_t current_valid_pasture = false;
 static uint16_t current_fence_def_ver = 0;
 static uint8_t current_hw_ver = CONFIG_NOFENCE_HARDWARE_NUMBER;
 static uint16_t atmega_ver = 0xFFFF; // NB: Not in use, needed for App to work.
@@ -96,8 +95,8 @@ static uint16_t atmega_ver = 0xFFFF; // NB: Not in use, needed for App to work.
 static uint8_t mfg_data[BLE_MFG_ARR_SIZE];
 
 static struct bt_data ad[] = {
-	[BLE_AD_IDX_FLAGS] = BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL |
-							   BT_LE_AD_NO_BREDR)),
+	[BLE_AD_IDX_FLAGS] =
+		BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
 	[BLE_AD_IDX_MANUFACTURER] =
 		BT_DATA(BT_DATA_MANUFACTURER_DATA, mfg_data, sizeof(mfg_data)),
 };
@@ -219,8 +218,7 @@ static void bt_send_work_handler(struct k_work *work)
 	bool notif_disabled = false;
 
 	do {
-		len = ring_buf_get_claim(&ble_tx_ring_buf, &buf,
-					 nus_max_send_len);
+		len = ring_buf_get_claim(&ble_tx_ring_buf, &buf, nus_max_send_len);
 
 		err = bt_nus_send(current_conn, buf, len);
 		if (err == -EINVAL) {
@@ -250,8 +248,7 @@ static void bt_send_work_handler(struct k_work *work)
  * @param[in] len length of data received
  *
  */
-static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data,
-			  uint16_t len)
+static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data, uint16_t len)
 {
 	void *buf;
 	uint16_t remainder;
@@ -268,8 +265,7 @@ static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data,
 			break;
 		}
 
-		copy_len = remainder > BLE_RX_BLOCK_SIZE ? BLE_RX_BLOCK_SIZE :
-							   remainder;
+		copy_len = remainder > BLE_RX_BLOCK_SIZE ? BLE_RX_BLOCK_SIZE : remainder;
 		remainder -= copy_len;
 		memcpy(buf, data, copy_len);
 
@@ -414,7 +410,18 @@ static void collar_status_update(uint8_t collar_status)
 
 /**
  * @brief Function to update fence status in advertising array
- * @param[in] fence_status where 1 is fence status normal
+ * @param[in] fence_status
+ * 
+ *  0 Unset state 
+ *  1 NORMAL: Collar carrier is within a defined pasture and fence function is turned on (normal)
+ *  2 Collar carrier has no fence or has not yet been registered in the fence
+ *  3 Collar carrier has moved out of pasture
+ *  4 Collar carrier has escaped from the pasture
+ *  5 Collar has contact with a owner Beacon, it will turn off any fence functionality and GPS.
+ *    when entering this state, the fence status was not normal
+ *  6 Contact with beacon, when entering this state, the fencestatus was normal
+ *  7 Fence stored on collar has invalid CRC, presume broken
+ *  8 Fence has been turned off by BLE
  */
 static void fence_status_update(uint8_t fence_status)
 {
@@ -483,19 +490,15 @@ static void bt_ready(int err)
 	}
 
 	/* Convert data to uint_8 ad array format */
-	mfg_data[BLE_MFG_IDX_COMPANY_ID] =
-		(NOFENCE_BLUETOOTH_SIG_COMPANY_ID & 0x00ff);
+	mfg_data[BLE_MFG_IDX_COMPANY_ID] = (NOFENCE_BLUETOOTH_SIG_COMPANY_ID & 0x00ff);
 	mfg_data[BLE_MFG_IDX_COMPANY_ID + 1] =
 		(NOFENCE_BLUETOOTH_SIG_COMPANY_ID & 0xff00) >> 8;
 	mfg_data[BLE_MFG_IDX_NRF_FW_VER] = (current_fw_ver & 0x00ff);
 	mfg_data[BLE_MFG_IDX_NRF_FW_VER + 1] = (current_fw_ver & 0xff00) >> 8;
 	mfg_data[BLE_MFG_IDX_SERIAL_NR] = (current_serial_number & 0x000000ff);
-	mfg_data[BLE_MFG_IDX_SERIAL_NR + 1] =
-		(current_serial_number & 0x0000ff00) >> 8;
-	mfg_data[BLE_MFG_IDX_SERIAL_NR + 2] =
-		(current_serial_number & 0x00ff0000) >> 16;
-	mfg_data[BLE_MFG_IDX_SERIAL_NR + 3] =
-		(current_serial_number & 0xff000000) >> 24;
+	mfg_data[BLE_MFG_IDX_SERIAL_NR + 1] = (current_serial_number & 0x0000ff00) >> 8;
+	mfg_data[BLE_MFG_IDX_SERIAL_NR + 2] = (current_serial_number & 0x00ff0000) >> 16;
+	mfg_data[BLE_MFG_IDX_SERIAL_NR + 3] = (current_serial_number & 0xff000000) >> 24;
 	mfg_data[BLE_MFG_IDX_BATTERY] = current_battery_level;
 	mfg_data[BLE_MFG_IDX_ERROR] = current_error_flags;
 	mfg_data[BLE_MFG_IDX_COLLAR_MODE] = current_collar_mode;
@@ -503,8 +506,7 @@ static void bt_ready(int err)
 	mfg_data[BLE_MFG_IDX_FENCE_STATUS] = current_fence_status;
 	mfg_data[BLE_MFG_IDX_VALID_PASTURE] = current_valid_pasture;
 	mfg_data[BLE_MFG_IDX_FENCE_DEF_VER] = (current_fence_def_ver & 0x00ff);
-	mfg_data[BLE_MFG_IDX_FENCE_DEF_VER + 1] =
-		(current_fence_def_ver & 0xff00) >> 8;
+	mfg_data[BLE_MFG_IDX_FENCE_DEF_VER + 1] = (current_fence_def_ver & 0xff00) >> 8;
 	mfg_data[BLE_MFG_IDX_HW_VER] = current_hw_ver;
 	mfg_data[BLE_MFG_IDX_ATMEGA_VER] = (atmega_ver & 0x00ff);
 	mfg_data[BLE_MFG_IDX_ATMEGA_VER + 1] = (atmega_ver & 0xff00) >> 8;
@@ -532,8 +534,8 @@ static bool data_cb(struct bt_data *data, void *user_data)
 		adv_data->beacon_dev_type = net_buf_simple_pull_u8(&net_buf);
 		uint8_t data_len = net_buf_simple_pull_u8(&net_buf);
 		if (data_len == BEACON_DATA_LEN) {
-			memcpy(&adv_data->uuid.val,
-			       net_buf_simple_pull_mem(&net_buf, 16), 16);
+			memcpy(&adv_data->uuid.val, net_buf_simple_pull_mem(&net_buf, 16),
+			       16);
 			adv_data->major = net_buf_simple_pull_be16(&net_buf);
 			adv_data->minor = net_buf_simple_pull_be16(&net_buf);
 			adv_data->rssi = net_buf_simple_pull_u8(&net_buf); //197
@@ -562,26 +564,21 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 	adv_data_t adv_data;
 	/* Extract major_id, minor_id, tx rssi and uuid */
 	bt_data_parse(buf, data_cb, (void *)&adv_data);
-	if (adv_data.major == BEACON_MAJOR_ID &&
-	    adv_data.minor == BEACON_MINOR_ID) {
+	if (adv_data.major == BEACON_MAJOR_ID && adv_data.minor == BEACON_MINOR_ID) {
 		LOG_DBG("Nofence beacon detected");
 		const uint32_t now = k_uptime_get_32();
-		m_shortest_dist2beacon = beacon_process_event(now, addr, rssi,
-							     &adv_data);
+		m_shortest_dist2beacon = beacon_process_event(now, addr, rssi, &adv_data);
 	}
 
 	int64_t beacon_scanner_uptime = k_uptime_get() - beacon_scanner_started;
 	if (beacon_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
 		/* Stop beacon scanner. Check if scan is active */
 		if (atomic_get(&atomic_bt_scan_active) == true) {
-			struct ble_ctrl_event *ctrl_event =
-				new_ble_ctrl_event();
+			struct ble_ctrl_event *ctrl_event = new_ble_ctrl_event();
 			ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
 			EVENT_SUBMIT(ctrl_event);
 		}
 	}
-
-
 }
 
 static void scan_start(void)
@@ -612,10 +609,9 @@ static void scan_start(void)
 
 	} else {
 		LOG_INF("Start scanning for Beacons");
-		
+
 		/* Start beacon scanner countdown */
 		beacon_scanner_started = k_uptime_get();
-
 	}
 }
 
@@ -637,13 +633,11 @@ static void scan_stop(void)
 		LOG_DBG("1: Status: BEACON_STATUS_NOT_FOUND, Type: CROSS_UNDEFINED");
 		goto end;
 
-
 	} else if (m_shortest_dist2beacon > CONFIG_BEACON_HIGH_LIMIT) {
 		cross_type = CROSS_UNDEFINED;
 		event->status = BEACON_STATUS_REGION_FAR;
 		LOG_DBG("2: Status: BEACON_STATUS_REGION_FAR, Type: CROSS_UNDEFINED");
 		goto end;
-
 
 	} else if (m_shortest_dist2beacon <= CONFIG_BEACON_LOW_LIMIT) {
 		cross_type = CROSS_UNDEFINED;
@@ -664,7 +658,6 @@ static void scan_stop(void)
 		event->status = BEACON_STATUS_REGION_FAR;
 		LOG_DBG("5: Status: BEACON_STATUS_REGION_FAR, Type: CROSS_HIGH_FROM_ABOVE");
 		goto end;
-
 
 	} else {
 		if (cross_type == CROSS_LOW_FROM_BELOW) {
@@ -699,18 +692,19 @@ static void disconnect_peer_work_fn()
 	EVENT_SUBMIT(event);
 }
 
-int ble_module_init()
+static void init_eeprom_variables(void)
 {
+	int err;
+	/* Init serial number */
 	uint32_t serial_id = 0;
-	int err = eep_uint32_read(EEP_UID, &serial_id);
+	err = eep_uint32_read(EEP_UID, &serial_id);
 	if (err != 0) {
 		char *e_msg = "Failed to read serial number from eeprom!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 	} else {
 		if (serial_id > 999999) {
-			strncpy(bt_device_name, "NF??????",
-				DEVICE_NAME_LEN + 1);
+			strncpy(bt_device_name, "NF??????", DEVICE_NAME_LEN + 1);
 		} else {
 			char tmp[DEVICE_NAME_LEN + 1];
 			snprintf(tmp, 7, "%i", serial_id);
@@ -724,13 +718,61 @@ int ble_module_init()
 		}
 	}
 
+	/* Init collar mode */
+	uint8_t eep_collar_mode;
+	err = eep_uint8_read(EEP_COLLAR_MODE, &eep_collar_mode);
+	if (err != 0) {
+		char *e_msg = "Failed to read collar mode from eeprom!";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+	} else {
+		current_collar_mode = eep_collar_mode;
+	}
+
+	/* Init collar status */
+	uint8_t eep_collar_status;
+	err = eep_uint8_read(EEP_COLLAR_STATUS, &eep_collar_status);
+	if (err != 0) {
+		char *e_msg = "Failed to read collar status from eeprom!";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+	} else {
+		current_collar_status = eep_collar_status;
+	}
+
+	/* Init fence status */
+	uint8_t eep_fence_status;
+	err = eep_uint8_read(EEP_FENCE_STATUS, &eep_fence_status);
+	if (err != 0) {
+		char *e_msg = "Failed to read fence status from eeprom!";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+	} else {
+		current_fence_status = eep_fence_status;
+	}
+
+	/* Init hw version */
+	uint8_t eep_hw_version;
+	err = eep_uint8_read(EEP_HW_VERSION, &eep_hw_version);
+	if (err != 0) {
+		char *e_msg = "Failed to read hw version from eeprom!";
+		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+	} else {
+		current_hw_ver = eep_hw_version;
+	}
+}
+
+int ble_module_init()
+{
+	init_eeprom_variables();
 	atomic_set(&atomic_bt_adv_active, false);
 	atomic_set(&atomic_bt_scan_active, false);
 
 	nus_max_send_len = ATT_MIN_PAYLOAD;
 
 	/* Enable ble subsystem */
-	err = bt_enable(bt_ready);
+	int err = bt_enable(bt_ready);
 	if (err) {
 		char *e_msg = "Failed to enable Bluetooth";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
@@ -751,10 +793,10 @@ int ble_module_init()
 
 	/* Callback to monitor connected/disconnected state */
 	bt_conn_cb_register(&conn_callbacks);
-#if defined(CONFIG_BOARD_NF_SG25_27O_NRF52840) ||                              \
+#if defined(CONFIG_BOARD_NF_SG25_27O_NRF52840) ||                                        \
 	defined(CONFIG_BOARD_NF_C25_25G_NRF52840)
 	err = bt_dfu_init();
-	if(err < 0){
+	if (err < 0) {
 		char *e_msg = "Failed to init ble dfu handler";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
@@ -776,7 +818,7 @@ int ble_module_init()
 #endif
 	/* Init bluetooth disconnect work handler */
 	k_work_init_delayable(&disconnect_peer_work, disconnect_peer_work_fn);
-	
+
 	return 0;
 }
 
@@ -795,16 +837,14 @@ static bool event_handler(const struct event_header *eh)
 			return false;
 		}
 
-		uint32_t written =
-			ring_buf_put(&ble_tx_ring_buf, event->dyndata.data,
-				     event->dyndata.size);
+		uint32_t written = ring_buf_put(&ble_tx_ring_buf, event->dyndata.data,
+						event->dyndata.size);
 		if (written != event->dyndata.size) {
 			LOG_WRN("MSG -> BLE overflow");
 		}
 
-		uint32_t buf_utilization =
-			(ring_buf_capacity_get(&ble_tx_ring_buf) -
-			 ring_buf_space_get(&ble_tx_ring_buf));
+		uint32_t buf_utilization = (ring_buf_capacity_get(&ble_tx_ring_buf) -
+					    ring_buf_space_get(&ble_tx_ring_buf));
 
 		/* Simple check to start transmission. */
 		/* If bt_send_work is already running, this has no effect */
@@ -864,8 +904,7 @@ static bool event_handler(const struct event_header *eh)
 			break;
 		case BLE_CTRL_DISCONNECT_PEER:
 			if (current_conn != NULL) {
-				k_work_schedule(&disconnect_peer_work,
-						K_MSEC(500));
+				k_work_schedule(&disconnect_peer_work, K_MSEC(500));
 			}
 			break;
 		default:
@@ -882,8 +921,7 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_update_collar_status(eh)) {
-		struct update_collar_status *evt =
-			cast_update_collar_status(eh);
+		struct update_collar_status *evt = cast_update_collar_status(eh);
 		collar_status_update(evt->collar_status);
 		return false;
 	}
@@ -893,8 +931,7 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_update_fence_version(eh)) {
-		struct update_fence_version *evt =
-			cast_update_fence_version(eh);
+		struct update_fence_version *evt = cast_update_fence_version(eh);
 		fence_def_ver_update((uint16_t)evt->fence_version);
 		if ((evt->fence_version != 0) && (evt->total_fences != 0)) {
 			pasture_update(VALID_PASTURE);

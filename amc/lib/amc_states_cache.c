@@ -128,7 +128,7 @@ void reset_zap_count_day()
 	}
 }
 
-void cache_eeprom_variables(void)
+void cache_storage_variables(void)
 {
 	int err = stg_config_u16_read(STG_U16_ZAP_CNT_TOT, &total_zap_cnt);
 	if (err != 0) {
@@ -220,7 +220,7 @@ void force_teach_mode()
 
 void init_states_and_variables(void)
 {
-	cache_eeprom_variables();
+	cache_storage_variables();
 	
 	/* Collar mode. */
 	uint8_t collar_mode = 0;

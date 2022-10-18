@@ -410,15 +410,6 @@ int stg_config_blob_write(stg_config_param_id_t id, const uint8_t *arr,
         return -EOVERFLOW;
     }
 
-    // uint8_t buff[(id == STG_BLOB_BLE_KEY) ? STG_CONFIG_BLE_SEC_KEY_LEN : 0];
-    // if (sizeof(buff) <= 0)
-    // {
-    //     LOG_WRN("STG blob write, unknown data size (%d)", sizeof(buff));
-    //     return -ENOMSG;
-    // }
-    // memset(buff, 0, sizeof(buff));
-    // memcpy(buff, arr, sizeof(buff));
-
     ret = nvs_write(&m_file_system, (uint16_t)id, arr, len);
     if (ret < 0)
     {

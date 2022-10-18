@@ -59,7 +59,7 @@ static uint32_t nus_max_send_len;
 static atomic_t atomic_bt_ready;
 static atomic_t atomic_bt_adv_active;
 static atomic_t atomic_bt_scan_active;
-static int64_t beacon_scanner_started;
+static int64_t beacon_scanner_timer;
 #if CONFIG_BEACON_SCAN_ENABLE
 static struct k_work_delayable periodic_beacon_scanner_work;
 #endif
@@ -75,9 +75,6 @@ typedef enum {
 
 /** @brief : Used for hysteresis calculation **/
 static cross_type_t cross_type = CROSS_UNDEFINED;
-
-/** @brief : Used to save the last seen beacon distance **/
-static uint8_t last_distance = UINT8_MAX;
 
 // Shaddow register. Should be initialized with data from EEPROM or FLASH
 static uint16_t current_fw_ver = NF_X25_VERSION_NUMBER;
@@ -190,21 +187,16 @@ static void periodic_beacon_scanner_work_fn()
 	/* Reschedule worker to start again after given interval */
 	k_work_reschedule(&periodic_beacon_scanner_work,
 			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
-
 #if defined(CONFIG_WATCHDOG_ENABLE)
 	/* Report alive */
 	watchdog_report_module_alive(WDG_BLE_SCAN);
-#endif /* CONFIG_WATCHDOG_ENABLE */
-
+#endif
 	/* Start scanner again if not already running */
-	if (!atomic_get(&atomic_bt_scan_active)) {
-		struct ble_ctrl_event *event = new_ble_ctrl_event();
-		event->cmd = BLE_CTRL_SCAN_START;
-		EVENT_SUBMIT(event);
-	}
+	struct ble_ctrl_event *event = new_ble_ctrl_event();
+	event->cmd = BLE_CTRL_SCAN_START;
+	EVENT_SUBMIT(event);
 }
-#endif /* CONFIG_BEACON_SCAN_ENABLE */
-
+#endif
 /**
  * @brief Work function to send data from rx ring buffer with bt nus
  * @param[in] work work item
@@ -570,19 +562,20 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 		m_shortest_dist2beacon = beacon_process_event(now, addr, rssi, &adv_data);
 	}
 
-	int64_t beacon_scanner_uptime = k_uptime_get() - beacon_scanner_started;
-	if (beacon_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
-		/* Stop beacon scanner. Check if scan is active */
-		if (atomic_get(&atomic_bt_scan_active) == true) {
-			struct ble_ctrl_event *ctrl_event = new_ble_ctrl_event();
-			ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
-			EVENT_SUBMIT(ctrl_event);
-		}
+	int64_t delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
+	if (delta_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
+		/* Stop beacon scanner */
+		struct ble_ctrl_event *ctrl_event = new_ble_ctrl_event();
+		ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
+		EVENT_SUBMIT(ctrl_event);
 	}
 }
 
 static void scan_start(void)
 {
+	if (atomic_get(&atomic_bt_scan_active) == true) {
+		return;
+	}
 	m_shortest_dist2beacon = UINT8_MAX;
 
 	if (!atomic_get(&atomic_bt_ready)) {
@@ -609,14 +602,18 @@ static void scan_start(void)
 
 	} else {
 		LOG_INF("Start scanning for Beacons");
-
 		/* Start beacon scanner countdown */
-		beacon_scanner_started = k_uptime_get();
+		beacon_scanner_timer = k_uptime_get();
+		atomic_set(&atomic_bt_scan_active, true);
 	}
 }
 
 static void scan_stop(void)
 {
+	if (atomic_get(&atomic_bt_scan_active) == false) {
+		return;
+	}
+	static uint8_t last_distance = UINT8_MAX;
 	int err = bt_le_scan_stop();
 	if (err) {
 		char *e_msg = "Stop Beacon scanning failed";
@@ -673,6 +670,7 @@ static void scan_stop(void)
 end:
 	EVENT_SUBMIT(event);
 	last_distance = m_shortest_dist2beacon;
+	atomic_set(&atomic_bt_scan_active, false);
 }
 
 static void disconnect_peer_work_fn()
@@ -808,17 +806,12 @@ int ble_module_init()
 #endif
 
 #if CONFIG_BEACON_SCAN_ENABLE
-
-	/* Init periodic function to start scanning */
+	/* Init and start periodic scan work function */
 	k_work_init_delayable(&periodic_beacon_scanner_work,
 			      periodic_beacon_scanner_work_fn);
-
-	/* Start periodic scan work function */
 	k_work_reschedule(&periodic_beacon_scanner_work, K_NO_WAIT);
 #endif
-	/* Init bluetooth disconnect work handler */
 	k_work_init_delayable(&disconnect_peer_work, disconnect_peer_work_fn);
-
 	return 0;
 }
 
@@ -891,16 +884,12 @@ static bool event_handler(const struct event_header *eh)
 			error_flag_update(event->param.error_flags);
 			break;
 		case BLE_CTRL_SCAN_START:
-			if (atomic_get(&atomic_bt_scan_active) == false) {
-				scan_start();
-				atomic_set(&atomic_bt_scan_active, true);
-			}
+			scan_start();
+			atomic_set(&atomic_bt_scan_active, true);
 			break;
 		case BLE_CTRL_SCAN_STOP:
-			if (atomic_get(&atomic_bt_scan_active) == true) {
-				scan_stop();
-				atomic_set(&atomic_bt_scan_active, false);
-			}
+			scan_stop();
+			atomic_set(&atomic_bt_scan_active, false);
 			break;
 		case BLE_CTRL_DISCONNECT_PEER:
 			if (current_conn != NULL) {

@@ -226,7 +226,7 @@ void init_states_and_variables(void)
 	cache_eeprom_variables();
 	uint8_t status_code = 0;
 
-	/* Collar mode. */
+	/* Read collar mode from eeprom */
 	int err = eep_uint8_read(EEP_COLLAR_MODE, &status_code);
 	if (err) {
 		LOG_ERR("Could not read collar mode %i", err);
@@ -236,6 +236,14 @@ void init_states_and_variables(void)
 	if (current_mode == Mode_Teach) {
 		enter_teach_mode();
 	}
+
+	/* Read collar status from eeprom */
+	err = eep_uint8_read(EEP_COLLAR_STATUS, &status_code);
+	if (err) {
+		LOG_ERR("Could not read collar mode %i", err);
+		status_code = CollarStatus_CollarStatus_UNKNOWN;
+	}
+	current_collar_status = (CollarStatus)status_code;
 
 	/* Read fence status from eeprom */
 	err = eep_uint8_read(EEP_FENCE_STATUS, &status_code);

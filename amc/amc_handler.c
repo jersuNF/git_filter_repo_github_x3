@@ -514,7 +514,6 @@ int amc_module_init(void)
 
 	/* Fetch the fence from external flash and update fence cache. */
 
-	/* Add check for old fence status. */
 	return update_pasture_from_stg();
 }
 
@@ -581,6 +580,13 @@ static bool event_handler(const struct event_header *eh)
 		if (err != 0) {
 			LOG_ERR("Turn off fence over BLE failed %d", err);
 		}
+		/* Update fence version to set valid fence advertised to false */
+		struct update_fence_version *ver = new_update_fence_version();
+		ver->fence_version = UINT32_MAX;
+		ver->total_fences = 0;
+		EVENT_SUBMIT(ver);
+
+		return false;
 	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);

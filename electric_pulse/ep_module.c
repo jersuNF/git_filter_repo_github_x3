@@ -63,6 +63,7 @@ const struct device *ep_detect_dev;
 static uint16_t g_product_type = 0;
 static int64_t g_last_pulse_time = 0;
 volatile bool g_trigger_ready = false;
+extern struct k_sem ep_trigger_ready;
 
 int ep_module_init(void)
 {
@@ -206,6 +207,7 @@ static bool event_handler(const struct event_header *eh)
 			= cast_warn_correction_pause_event(eh);
 		if (event->reason == Reason_WARNPAUSEREASON_ZAP) {
 			g_trigger_ready = true;
+			k_sem_give(&ep_trigger_ready);
 		} else {
 			g_trigger_ready = false;
 		}

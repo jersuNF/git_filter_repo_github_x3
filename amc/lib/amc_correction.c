@@ -61,6 +61,12 @@ K_SEM_DEFINE(freq_update_sem, 0, 1);
 static bool queueZap = false;
 #define DELAY_ZAP_AFTER_SND_OFF_MSEC 1500
 #ifdef CONFIG_AMC_USE_LEGACY_STEP
+
+K_SEM_DEFINE(ep_trigger_ready, 0, 1);
+extern struct k_sem ep_trigger_ready;
+
+#define EP_TIMEOUT_MS 200
+
 static uint32_t convert_to_legacy_frequency(uint32_t frequency)
 {
 	uint8_t ocr_value = (4000000 / (2 * 32 * frequency)) - 1;
@@ -80,6 +86,9 @@ static void buzzer_update_fn()
 {
 	/* Update frequency only if we're in WARN/MAX state off buzzer. */
 	if (queueZap || atomic_get(&can_update_buzzer)) {
+		k_work_schedule(&update_buzzer_work,
+				K_MSEC(WARN_BUZZER_UPDATE_RATE));
+
 		uint16_t freq = atomic_get(&last_warn_freq);
 
 		if (zap_eval_doing) {
@@ -111,38 +120,31 @@ static void buzzer_update_fn()
 			 	 *  up to 3 times untill it is considered
 			 	 *  "escaped."
 			 	 */
-				if (queueZap && freq == WARN_FREQ_INIT) {
-					queueZap = false;
-					struct ep_status_event *ep_ev =
-						new_ep_status_event();
-					ep_ev->ep_status = EP_RELEASE;
-					EVENT_SUBMIT(ep_ev);
-					zap_eval_doing = true;
-					zap_timestamp =
-						k_uptime_get_32();
-					increment_zap_count();
-					LOG_INF("AMC notified EP to zap!");
+				if (queueZap) {
+					if (k_sem_take(&ep_trigger_ready,
+						   K_MSEC(EP_TIMEOUT_MS)) ==
+					    0) {
+						queueZap = false;
+						struct ep_status_event *ep_ev =
+							new_ep_status_event();
+						ep_ev->ep_status = EP_RELEASE;
+						EVENT_SUBMIT(ep_ev);
+						zap_eval_doing = true;
+						zap_timestamp = k_uptime_get_32();
+						increment_zap_count();
+						LOG_INF("AMC notified EP to zap!");
 
-					struct amc_zapped_now_event *ev =
-						new_amc_zapped_now_event();
-
-					ev->fence_dist = atomic_get(
-						&last_mean_dist);
-
-					EVENT_SUBMIT(ev);
-
-					/* We need to reschedule this function
-				 * after ZAP_EVALUATION_TIME, to be able to zap
-				 * again based on this variable, not buzzer
-				 * update rate.
-				 */
-					k_work_reschedule(
-						&update_buzzer_work,
-						K_MSEC
-						(ZAP_EVALUATION_TIME_MS));
-				} else {
-					queueZap = false;
+						struct amc_zapped_now_event *ev =
+							new_amc_zapped_now_event();
+						ev->fence_dist = atomic_get(
+							&last_mean_dist);
+						EVENT_SUBMIT(ev);
+					} else {
+						LOG_ERR("EP trigger "
+							"ack missed!");
+					}
 				}
+				queueZap = false;
 				if (freq >= WARN_FREQ_MAX &&
 				    atomic_get(&sound_max_atomic)) {
 					correction_pause(
@@ -150,15 +152,10 @@ static void buzzer_update_fn()
 						atomic_get(
 							&last_mean_dist));
 					queueZap = true;
+					k_work_reschedule(&update_buzzer_work,
+							K_NO_WAIT);
 				}
 			}
-		}
-		if (queueZap) {
-			k_work_schedule(&update_buzzer_work,
-					K_NO_WAIT);
-		} else {
-			k_work_schedule(&update_buzzer_work,
-					K_MSEC(WARN_BUZZER_UPDATE_RATE));
 		}
 	}
 }

@@ -23,14 +23,12 @@
 #include "UBX.h"
 #include "unixTime.h"
 #include "error_event.h"
-#include "helpers.h"
 
 #include "nf_crc16.h"
 
 #include "storage_event.h"
 
 #include <date_time.h>
-#include <time.h>
 
 #include "storage.h"
 
@@ -38,9 +36,10 @@
 #include "pasture_structure.h"
 #include "fw_upgrade_events.h"
 #include "sound_event.h"
-#include "nf_settings.h"
 #include "histogram_events.h"
 #include <sys/sys_heap.h>
+#include "amc_const.h"
+
 extern struct k_heap _system_heap;
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20

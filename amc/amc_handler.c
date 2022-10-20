@@ -140,6 +140,11 @@ static inline int update_pasture_from_stg(void)
 	if (err == -ENODATA) {
 		char *err_msg = "No pasture found on external flash.";
 		nf_app_warning(ERR_AMC, err, err_msg, strlen(err_msg));
+		/* Submit event that we have now begun to use the new fence. */
+		struct update_fence_version *ver = new_update_fence_version();
+		ver->fence_version = UINT32_MAX;
+		ver->total_fences = 0;
+		EVENT_SUBMIT(ver);
 		return 0;
 	} else if (err) {
 		char *err_msg = "Couldn't update pasture cache in AMC.";
@@ -202,9 +207,10 @@ static inline int update_pasture_from_stg(void)
 		}
 
 		if (m_fence_update_pending) {
-			if (pasture->m.ul_fence_def_version ==
+			m_fence_update_pending = false;
+			if (pasture->m.ul_fence_def_version !=
 			    m_new_fence_version) {
-				m_fence_update_pending = false;
+				force_fence_status(FenceStatus_FenceStatus_Invalid);
 			}
 		}
 

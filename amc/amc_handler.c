@@ -306,8 +306,8 @@ void handle_states_fn()
 	set_sensor_modes(amc_mode, new_fence_status, new_collar_status, cur_zone);
 
 	LOG_DBG("AMC states:CollarMode=%d,CollarStatus=%d,Zone=%d,FenceStatus=%d",
-			get_mode(), calc_collar_status(), zone_get(), 
-			get_fence_status());
+				get_mode(), calc_collar_status(), zone_get(), 
+				get_fence_status());
 }
 
 void handle_corrections_fn()
@@ -362,8 +362,8 @@ void handle_gnss_data_fn(struct k_work *item)
 
 	LOG_DBG("\n\n--== START ==--");
 	LOG_DBG("  GNSS data: %d, %d, %d, %d, %d", gnss->latest.lon, 
-			gnss->latest.lat, gnss->latest.pvt_flags, gnss->latest.h_acc_dm,
-			gnss->latest.num_sv);
+				gnss->latest.lat, gnss->latest.pvt_flags, gnss->latest.h_acc_dm,
+				gnss->latest.num_sv);
 
 	/* Set local variables used in AMC logic. */
 	int16_t height_delta = INT16_MAX;
@@ -443,15 +443,15 @@ void handle_gnss_data_fn(struct k_work *item)
 			dist_inc_count = fifo_inc_cnt(dist_array, FIFO_ELEMENTS);
 			acc_delta = fifo_delta(acc_array, FIFO_ELEMENTS);
 			height_delta = fifo_delta(height_avg_array, FIFO_ELEMENTS);
-	
 			if (fifo_avg_dist_elem_count >= FIFO_AVG_DISTANCE_ELEMENTS) {
-				dist_avg_change = fifo_slope(dist_avg_array,
+				dist_avg_change = fifo_slope(dist_avg_array, 
 							FIFO_AVG_DISTANCE_ELEMENTS);
 			}
 		}
 		LOG_INF("  mean_dist: %d, dist_change: %d, dist_inc_count: %d, acc_delta: %d, height_delta: %d", 
 					mean_dist, dist_change, dist_inc_count, acc_delta, 
 					height_delta);
+		
 		int16_t dist_incr_slope_lim = 0;
 		uint8_t dist_incr_count = 0;
 

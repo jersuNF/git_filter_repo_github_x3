@@ -401,8 +401,8 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 				LOG_INF("FenceStatus:Normal->BeaconContactNormal");
 			} else if (maybe_out_of_fence_delta > OUT_OF_FENCE_TIME) {
 				/** Old @todo ? UBX_Poll(UBXID_MON_HW);
-					 * v3.21-7: Poll hardware info (fex. jamming). 
-					 */
+				 * v3.21-7: Poll hardware info (fex. jamming). 
+				 */
 				new_fence_status = FenceStatus_MaybeOutOfFence;
 				LOG_INF("FenceStatus:Normal->MaybeOutsideFence");
 			} else if (zap_pain_cnt >= pain_cnt_def_free) {
@@ -440,8 +440,7 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 					new_fence_status = FenceStatus_NotStarted;
 					LOG_INF("FenceStatus:BeaconContact->NotStarted");
 				} else {
-					new_fence_status =
-						FenceStatus_FenceStatus_UNKNOWN;
+					new_fence_status = FenceStatus_FenceStatus_UNKNOWN;
 					LOG_INF("FenceStatus:BeaconContact->Unknown");
 				}
 			}
@@ -505,8 +504,8 @@ int force_fence_status(FenceStatus new_fence_status)
 	}
 
 	if (new_fence_status != current_fence_status) {
-		if ((new_fence_status == FenceStatus_NotStarted) &&
-		    	(fnc_valid_def() != true)) {
+		if ((new_fence_status == FenceStatus_NotStarted) && 
+			(fnc_valid_def() != true)) {
 			LOG_WRN("Unable to force fence status");
 			return -EACCES;
 		}
@@ -578,20 +577,18 @@ CollarStatus calc_collar_status(void)
 		case CollarStatus_PowerOff: {
 			if (atomic_get(&power_state) != PWR_CRITICAL) {
 				if (mov_state == STATE_NORMAL) {
-					new_collar_status =
-						CollarStatus_CollarStatus_Normal;
+					new_collar_status = CollarStatus_CollarStatus_Normal;
 					LOG_INF("CollarStatus:PowerOff->Normal");
 				} else if (mov_state == STATE_SLEEP) {
 					new_collar_status = CollarStatus_Sleep;
 					LOG_INF("CollarStatus:PowerOff->Sleep");
 				} else if (mov_state == STATE_INACTIVE) {
-					char *msg =
+					char *msg = 
 						"CollarStatus:Went directly to inactive from powerOff";
 					nf_app_error(ERR_AMC, -EINVAL, msg,
 						strlen(msg));
 				} else {
-					new_collar_status =
-						CollarStatus_CollarStatus_UNKNOWN;
+					new_collar_status = CollarStatus_CollarStatus_UNKNOWN;
 					LOG_INF("CollarStatus:PowerOff->UNKNOWN");
 				}
 			}

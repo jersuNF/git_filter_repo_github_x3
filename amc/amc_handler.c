@@ -135,7 +135,7 @@ static bool event_handler(const struct event_header *eh);
 static inline int update_pasture_from_stg(void)
 {
 	int err;
-
+	/* Add check for fence status, in case collar has rebooted after invalidation */
 	if (get_fence_status() == FenceStatus_TurnedOffByBLE) {
 		LOG_WRN("Fence is turned off by BLE");
 		/* Submit event that we have now begun to use the new fence. */

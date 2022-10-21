@@ -59,7 +59,6 @@ static bool first_correction_pause = false;
 K_SEM_DEFINE(freq_update_sem, 0, 1);
 
 static bool queueZap = false;
-#define DELAY_ZAP_AFTER_SND_OFF_MSEC 1500
 #ifdef CONFIG_AMC_USE_LEGACY_STEP
 
 K_SEM_DEFINE(ep_trigger_ready, 0, 1);

@@ -181,7 +181,7 @@ static inline int update_pasture_from_stg(void)
 	/* Take pasture sem, since we need to access the version to send to 
 	 * messaging module. */
 	err = k_sem_take(&fence_data_sem, 
-			K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
+				K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	do {
 		if (err) {
 			char *e_msg = "Error taking pasture semaphore for version check.";

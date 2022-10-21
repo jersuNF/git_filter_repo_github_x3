@@ -78,7 +78,6 @@ typedef enum {
 /** @brief : Used for hysteresis calculation **/
 static cross_type_t cross_type = CROSS_UNDEFINED;
 
-
 // Shaddow register. Should be initialized with data from EEPROM or FLASH
 static uint16_t current_fw_ver = NF_X25_VERSION_NUMBER;
 static uint32_t current_serial_number = CONFIG_NOFENCE_SERIAL_NUMBER;
@@ -565,15 +564,14 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 	    adv_data.minor == BEACON_MINOR_ID) {
 		LOG_DBG("Nofence beacon detected");
 		const uint32_t now = k_uptime_get_32();
-		m_shortest_dist2beacon = beacon_process_event(now, addr, rssi,
-							     &adv_data);
+		m_shortest_dist2beacon =
+			beacon_process_event(now, addr, rssi, &adv_data);
 	}
 
 	int64_t delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
 	if (delta_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
 		/* Stop beacon scanner. Check if scan is active */
-		struct ble_ctrl_event *ctrl_event =
-			new_ble_ctrl_event();
+		struct ble_ctrl_event *ctrl_event = new_ble_ctrl_event();
 		ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
 		EVENT_SUBMIT(ctrl_event);
 	}
@@ -638,13 +636,11 @@ static void scan_stop(void)
 		LOG_DBG("1: Status: BEACON_STATUS_NOT_FOUND, Type: CROSS_UNDEFINED");
 		goto end;
 
-
 	} else if (m_shortest_dist2beacon > CONFIG_BEACON_HIGH_LIMIT) {
 		cross_type = CROSS_UNDEFINED;
 		event->status = BEACON_STATUS_REGION_FAR;
 		LOG_DBG("2: Status: BEACON_STATUS_REGION_FAR, Type: CROSS_UNDEFINED");
 		goto end;
-
 
 	} else if (m_shortest_dist2beacon <= CONFIG_BEACON_LOW_LIMIT) {
 		cross_type = CROSS_UNDEFINED;
@@ -665,7 +661,6 @@ static void scan_stop(void)
 		event->status = BEACON_STATUS_REGION_FAR;
 		LOG_DBG("5: Status: BEACON_STATUS_REGION_FAR, Type: CROSS_HIGH_FROM_ABOVE");
 		goto end;
-
 
 	} else {
 		if (cross_type == CROSS_LOW_FROM_BELOW) {

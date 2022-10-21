@@ -180,10 +180,12 @@ static inline int update_pasture_from_stg(void)
 
 	/* Take pasture sem, since we need to access the version to send to 
 	 * messaging module. */
-	err = k_sem_take(&fence_data_sem, K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
+	err = k_sem_take(&fence_data_sem,
+			 K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	do {
 		if (err) {
-			char *e_msg = "Error taking pasture semaphore for version check.";
+			char *e_msg =
+				"Error taking pasture semaphore for version check.";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
 			break;
@@ -211,7 +213,8 @@ static inline int update_pasture_from_stg(void)
 		/* Update fence status, this also notify listeners */
 		err = force_fence_status(FenceStatus_NotStarted);
 		if (err) {
-			char *e_msg = "Error when forcing fence status after update";
+			char *e_msg =
+				"Error when forcing fence status after update";
 			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 			nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
 			break;
@@ -219,8 +222,10 @@ static inline int update_pasture_from_stg(void)
 
 		if (m_fence_update_pending) {
 			m_fence_update_pending = false;
-			if (pasture->m.ul_fence_def_version != m_new_fence_version) {
-				force_fence_status(FenceStatus_FenceStatus_Invalid);
+			if (pasture->m.ul_fence_def_version !=
+			    m_new_fence_version) {
+				force_fence_status(
+					FenceStatus_FenceStatus_Invalid);
 			}
 		}
 
@@ -295,15 +300,18 @@ void handle_states_fn()
 		maybe_out_of_fence_timestamp = k_uptime_get_32();
 	}
 
-	FenceStatus new_fence_status = calc_fence_status(
-		maybe_out_of_fence_timestamp, atomic_get(&current_beacon_status));
+	FenceStatus new_fence_status =
+		calc_fence_status(maybe_out_of_fence_timestamp,
+				  atomic_get(&current_beacon_status));
 
 	CollarStatus new_collar_status = calc_collar_status();
 
-	set_sensor_modes(amc_mode, new_fence_status, new_collar_status, cur_zone);
+	set_sensor_modes(amc_mode, new_fence_status, new_collar_status,
+			 cur_zone);
 
 	LOG_DBG("AMC states:CollarMode=%d,CollarStatus=%d,Zone=%d,FenceStatus=%d",
-		get_mode(), calc_collar_status(), zone_get(), get_fence_status());
+		get_mode(), calc_collar_status(), zone_get(),
+		get_fence_status());
 }
 
 void handle_corrections_fn()
@@ -321,8 +329,8 @@ void handle_corrections_fn()
 	FenceStatus fence_status = get_fence_status();
 	amc_zone_t current_zone = zone_get();
 
-	process_correction(collar_mode, &gnss->lastfix, fence_status, current_zone,
-			   mean_dist, dist_change);
+	process_correction(collar_mode, &gnss->lastfix, fence_status,
+			   current_zone, mean_dist, dist_change);
 }
 
 void handle_gnss_data_fn(struct k_work *item)
@@ -333,9 +341,11 @@ void handle_gnss_data_fn(struct k_work *item)
 	}
 
 	/* Take fence semaphore since we're going to use the cached area. */
-	int err = k_sem_take(&fence_data_sem, K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
+	int err = k_sem_take(&fence_data_sem,
+			     K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
-		char *e_msg = "Error waiting for fence data semaphore to release.";
+		char *e_msg =
+			"Error waiting for fence data semaphore to release.";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
 		goto cleanup;
@@ -356,8 +366,9 @@ void handle_gnss_data_fn(struct k_work *item)
 	}
 
 	LOG_DBG("\n\n--== START ==--");
-	LOG_DBG("  GNSS data: %d, %d, %d, %d, %d", gnss->latest.lon, gnss->latest.lat,
-		gnss->latest.pvt_flags, gnss->latest.h_acc_dm, gnss->latest.num_sv);
+	LOG_DBG("  GNSS data: %d, %d, %d, %d, %d", gnss->latest.lon,
+		gnss->latest.lat, gnss->latest.pvt_flags, gnss->latest.h_acc_dm,
+		gnss->latest.num_sv);
 
 	/* Set local variables used in AMC logic. */
 	int16_t height_delta = INT16_MAX;
@@ -389,7 +400,8 @@ void handle_gnss_data_fn(struct k_work *item)
 		/* Calculate distance to closest polygon. */
 		uint8_t fence_index = 0;
 		uint8_t vertex_index = 0;
-		instant_dist = fnc_calc_dist(pos_x, pos_y, &fence_index, &vertex_index);
+		instant_dist = fnc_calc_dist(pos_x, pos_y, &fence_index,
+					     &vertex_index);
 		LOG_INF("  Calculated distance: %d", instant_dist);
 
 		/* Reset dist_change since we acquired a new distance. */
@@ -405,8 +417,10 @@ void handle_gnss_data_fn(struct k_work *item)
 			LOG_INF("  Has accepted fix!");
 
 			/* Accepted position. Fill FIFOs. */
-			fifo_put(gnss->lastfix.h_acc_dm, acc_array, FIFO_ELEMENTS);
-			fifo_put(gnss->lastfix.height, height_avg_array, FIFO_ELEMENTS);
+			fifo_put(gnss->lastfix.h_acc_dm, acc_array,
+				 FIFO_ELEMENTS);
+			fifo_put(gnss->lastfix.height, height_avg_array,
+				 FIFO_ELEMENTS);
 			fifo_put(instant_dist, dist_array, FIFO_ELEMENTS);
 
 			/* If we have filled the distance FIFO, calculate
@@ -416,7 +430,8 @@ void handle_gnss_data_fn(struct k_work *item)
 			if (++fifo_dist_elem_count >= FIFO_ELEMENTS) {
 				fifo_dist_elem_count = 0;
 				fifo_put(fifo_avg(dist_array, FIFO_ELEMENTS),
-					 dist_avg_array, FIFO_AVG_DISTANCE_ELEMENTS);
+					 dist_avg_array,
+					 FIFO_AVG_DISTANCE_ELEMENTS);
 
 				if (++fifo_avg_dist_elem_count >=
 				    FIFO_AVG_DISTANCE_ELEMENTS) {
@@ -435,17 +450,22 @@ void handle_gnss_data_fn(struct k_work *item)
 			 * valid data over a short period. */
 			mean_dist = fifo_avg(dist_array, FIFO_ELEMENTS);
 			dist_change = fifo_slope(dist_array, FIFO_ELEMENTS);
-			dist_inc_count = fifo_inc_cnt(dist_array, FIFO_ELEMENTS);
+			dist_inc_count =
+				fifo_inc_cnt(dist_array, FIFO_ELEMENTS);
 			acc_delta = fifo_delta(acc_array, FIFO_ELEMENTS);
-			height_delta = fifo_delta(height_avg_array, FIFO_ELEMENTS);
+			height_delta =
+				fifo_delta(height_avg_array, FIFO_ELEMENTS);
 
-			if (fifo_avg_dist_elem_count >= FIFO_AVG_DISTANCE_ELEMENTS) {
-				dist_avg_change = fifo_slope(dist_avg_array,
-							     FIFO_AVG_DISTANCE_ELEMENTS);
+			if (fifo_avg_dist_elem_count >=
+			    FIFO_AVG_DISTANCE_ELEMENTS) {
+				dist_avg_change =
+					fifo_slope(dist_avg_array,
+						   FIFO_AVG_DISTANCE_ELEMENTS);
 			}
 		}
 		LOG_INF("  mean_dist: %d, dist_change: %d, dist_inc_count: %d, acc_delta: %d, height_delta: %d",
-			mean_dist, dist_change, dist_inc_count, acc_delta, height_delta);
+			mean_dist, dist_change, dist_inc_count, acc_delta,
+			height_delta);
 
 		int16_t dist_incr_slope_lim = 0;
 		uint8_t dist_incr_count = 0;
@@ -461,9 +481,10 @@ void handle_gnss_data_fn(struct k_work *item)
 
 		/* Set final accuracy flags based on previous calculations. */
 		err = gnss_update_dist_flags(dist_avg_change, dist_change,
-					     dist_incr_slope_lim, dist_inc_count,
-					     dist_incr_count, height_delta, acc_delta,
-					     mean_dist, gnss->lastfix.h_acc_dm);
+					     dist_incr_slope_lim,
+					     dist_inc_count, dist_incr_count,
+					     height_delta, acc_delta, mean_dist,
+					     gnss->lastfix.h_acc_dm);
 		if (err) {
 			goto cleanup;
 		}
@@ -557,7 +578,8 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_sound_status_event(eh)) {
-		const struct sound_status_event *event = cast_sound_status_event(eh);
+		const struct sound_status_event *event =
+			cast_sound_status_event(eh);
 		if (event->status == SND_STATUS_PLAYING_MAX) {
 			atomic_set(&buzzer_state, true);
 			atomic_set(&sound_max_atomic, true);
@@ -571,7 +593,8 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_movement_out_event(eh)) {
-		const struct movement_out_event *ev = cast_movement_out_event(eh);
+		const struct movement_out_event *ev =
+			cast_movement_out_event(eh);
 		update_movement_state(ev->state);
 		return false;
 	}

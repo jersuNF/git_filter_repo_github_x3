@@ -193,7 +193,8 @@ static void enter_teach_mode()
 	if (teach_mode_finished != 0) {
 		teach_mode_finished = 0;
 
-		err = eep_uint8_write(EEP_TEACH_MODE_FINISHED, teach_mode_finished);
+		err = eep_uint8_write(EEP_TEACH_MODE_FINISHED,
+				      teach_mode_finished);
 		if (err) {
 			LOG_ERR("Could not write teach mode finished %i", err);
 		}
@@ -207,7 +208,8 @@ void force_teach_mode()
 	if (current_mode != Mode_Teach) {
 		current_mode = Mode_Teach;
 
-		int err = eep_uint8_write(EEP_COLLAR_MODE, (uint8_t)current_mode);
+		int err =
+			eep_uint8_write(EEP_COLLAR_MODE, (uint8_t)current_mode);
 		if (err) {
 			LOG_ERR("Could not write to collar mode %i ", err);
 		}
@@ -315,7 +317,8 @@ Mode calc_mode(void)
 			/** @todo Need to set to 0 when going from
 			 *  Fence -> Teach
 			 */
-			eep_uint8_write(EEP_TEACH_MODE_FINISHED, teach_mode_finished);
+			eep_uint8_write(EEP_TEACH_MODE_FINISHED,
+					teach_mode_finished);
 		}
 		break;
 	case Mode_Fence:
@@ -363,7 +366,8 @@ static inline bool is_inside_fence_relaxed()
 {
 	amc_zone_t cur_zone = zone_get();
 	/** @todo gpsp_isGpsFresh()??????? */
-	return fnc_valid_fence() /*&& gpsp_isGpsFresh()*/ && gnss_has_accepted_fix() &&
+	return fnc_valid_fence() /*&& gpsp_isGpsFresh()*/ &&
+	       gnss_has_accepted_fix() &&
 	       !(cur_zone == WARN_ZONE || cur_zone == NO_ZONE);
 }
 
@@ -450,7 +454,8 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 				new_fence_status = FenceStatus_NotStarted;
 				LOG_INF("FenceStatus:BeaconContact->NotStarted");
 			} else {
-				new_fence_status = FenceStatus_FenceStatus_UNKNOWN;
+				new_fence_status =
+					FenceStatus_FenceStatus_UNKNOWN;
 				LOG_INF("FenceStatus:BeaconContact->Unknown");
 			}
 		}
@@ -483,20 +488,22 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 	/* If new status, write to EEPROM. */
 	if (current_fence_status != new_fence_status) {
 		current_fence_status = new_fence_status;
-		int err =
-			eep_uint8_write(EEP_FENCE_STATUS, (uint8_t)current_fence_status);
+		int err = eep_uint8_write(EEP_FENCE_STATUS,
+					  (uint8_t)current_fence_status);
 		if (err) {
 			LOG_ERR("Could not write to fence status %i ", err);
 		}
 
 		/* Notify server about fence status change. */
-		struct update_fence_status *fence_ev = new_update_fence_status();
+		struct update_fence_status *fence_ev =
+			new_update_fence_status();
 		fence_ev->fence_status = current_fence_status;
 		EVENT_SUBMIT(fence_ev);
 
 		/* Notify server if animal escaped. */
 		if (current_fence_status == FenceStatus_Escaped) {
-			struct animal_escape_event *ev = new_animal_escape_event();
+			struct animal_escape_event *ev =
+				new_animal_escape_event();
 			EVENT_SUBMIT(ev);
 		}
 	}
@@ -521,9 +528,11 @@ int force_fence_status(FenceStatus new_fence_status)
 		}
 
 		/* Write new fence status to eeprom */
-		int err = eep_uint8_write(EEP_FENCE_STATUS, (uint8_t)new_fence_status);
+		int err = eep_uint8_write(EEP_FENCE_STATUS,
+					  (uint8_t)new_fence_status);
 		if (err) {
-			LOG_WRN("Unable to write fence status to eeprom, error:%d", err);
+			LOG_WRN("Unable to write fence status to eeprom, error:%d",
+				err);
 			return -EACCES;
 		}
 
@@ -587,7 +596,8 @@ CollarStatus calc_collar_status(void)
 	case CollarStatus_PowerOff: {
 		if (atomic_get(&power_state) != PWR_CRITICAL) {
 			if (mov_state == STATE_NORMAL) {
-				new_collar_status = CollarStatus_CollarStatus_Normal;
+				new_collar_status =
+					CollarStatus_CollarStatus_Normal;
 				LOG_INF("CollarStatus:PowerOff->Normal");
 			} else if (mov_state == STATE_SLEEP) {
 				new_collar_status = CollarStatus_Sleep;
@@ -595,9 +605,11 @@ CollarStatus calc_collar_status(void)
 			} else if (mov_state == STATE_INACTIVE) {
 				char *msg =
 					"CollarStatus:Went directly to inactive from powerOff";
-				nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
+				nf_app_error(ERR_AMC, -EINVAL, msg,
+					     strlen(msg));
 			} else {
-				new_collar_status = CollarStatus_CollarStatus_UNKNOWN;
+				new_collar_status =
+					CollarStatus_CollarStatus_UNKNOWN;
 				LOG_INF("CollarStatus:PowerOff->UNKNOWN");
 			}
 		}
@@ -629,7 +641,8 @@ CollarStatus calc_collar_status(void)
 		}
 
 		/* Notify server about collar status change. */
-		struct update_collar_status *collar_ev = new_update_collar_status();
+		struct update_collar_status *collar_ev =
+			new_update_collar_status();
 		collar_ev->collar_status = current_collar_status;
 		EVENT_SUBMIT(collar_ev);
 	}
@@ -648,12 +661,14 @@ void restart_force_gnss_to_fix(void)
 	first_time_since_start = true;
 }
 
-void set_sensor_modes(Mode mode, FenceStatus fs, CollarStatus cs, amc_zone_t zone)
+void set_sensor_modes(Mode mode, FenceStatus fs, CollarStatus cs,
+		      amc_zone_t zone)
 {
 	uint8_t gnss_mode = GNSSMODE_CAUTION;
 
 	if (cs == CollarStatus_Sleep || cs == CollarStatus_OffAnimal ||
-	    fs == FenceStatus_BeaconContact || fs == FenceStatus_BeaconContactNormal) {
+	    fs == FenceStatus_BeaconContact ||
+	    fs == FenceStatus_BeaconContactNormal) {
 		gnss_mode = GNSSMODE_INACTIVE;
 	} else if (mode == Mode_Teach || mode == Mode_Fence) {
 		if (fs == FenceStatus_Escaped) {
@@ -706,8 +721,9 @@ void set_sensor_modes(Mode mode, FenceStatus fs, CollarStatus cs, amc_zone_t zon
 			first_time_since_start = false;
 		}
 		/* Timeout this function after 1 hour. */
-		uint32_t delta_fix = (uint32_t)(
-			(k_uptime_get() - forcegnsstofix_timestamp) / MSEC_PER_SEC);
+		uint32_t delta_fix =
+			(uint32_t)((k_uptime_get() - forcegnsstofix_timestamp) /
+				   MSEC_PER_SEC);
 		if (delta_fix >= 3600) {
 			first_time_since_start = false;
 		}

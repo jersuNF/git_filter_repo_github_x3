@@ -303,8 +303,7 @@ Mode calc_mode(void)
 			/** @todo Need to set to 0 when going from
 			 *  Fence -> Teach
 			 */
-			eep_uint8_write(EEP_TEACH_MODE_FINISHED,
-					teach_mode_finished);
+			eep_uint8_write(EEP_TEACH_MODE_FINISHED, teach_mode_finished);
 		}
 		break;
 	case Mode_Fence:
@@ -496,7 +495,7 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 int force_fence_status(FenceStatus new_fence_status)
 {
 	/* Only fence status "Unknown", "NotStarted" and "Invalid" can be forced */
-	if ((new_fence_status != FenceStatus_FenceStatus_UNKNOWN) &&
+	if ((new_fence_status != FenceStatus_FenceStatus_UNKNOWN) && 
 		(new_fence_status != FenceStatus_NotStarted) &&
 		(new_fence_status != FenceStatus_FenceStatus_Invalid) &&
 		(new_fence_status != FenceStatus_TurnedOffByBLE)) {
@@ -585,8 +584,7 @@ CollarStatus calc_collar_status(void)
 				} else if (mov_state == STATE_INACTIVE) {
 					char *msg = 
 						"CollarStatus:Went directly to inactive from powerOff";
-					nf_app_error(ERR_AMC, -EINVAL, msg,
-						strlen(msg));
+					nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
 				} else {
 					new_collar_status = CollarStatus_CollarStatus_UNKNOWN;
 					LOG_INF("CollarStatus:PowerOff->UNKNOWN");

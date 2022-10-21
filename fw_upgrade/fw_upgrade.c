@@ -153,15 +153,15 @@ static bool event_handler(const struct event_header *eh)
 			EVENT_SUBMIT(status);
 		} else if (ret == -EALREADY) {
 			if (++fota_requests > FOTA_RETRIES) {
-				if (fota_requests == UINT32_MAX)
-					fota_requests = FOTA_RETRIES;
+				if (fota_requests == UINT32_MAX) fota_requests = FOTA_RETRIES;
 				struct dfu_status_event *status =
 					new_dfu_status_event();
 				status->dfu_status = DFU_STATUS_IDLE;
 				status->dfu_error = -ENODATA;
 				EVENT_SUBMIT(status);
 			}
-		} else {
+		} 
+		else {
 			struct dfu_status_event *status =
 				new_dfu_status_event();
 			status->dfu_status = DFU_STATUS_IDLE;

@@ -564,14 +564,15 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 	    adv_data.minor == BEACON_MINOR_ID) {
 		LOG_DBG("Nofence beacon detected");
 		const uint32_t now = k_uptime_get_32();
-		m_shortest_dist2beacon =
-			beacon_process_event(now, addr, rssi, &adv_data);
+		m_shortest_dist2beacon = beacon_process_event(now, addr, rssi, 
+							     &adv_data);
 	}
 
 	int64_t delta_scanner_uptime = k_uptime_get() - beacon_scanner_timer;
 	if (delta_scanner_uptime > CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC) {
 		/* Stop beacon scanner. Check if scan is active */
-		struct ble_ctrl_event *ctrl_event = new_ble_ctrl_event();
+		struct ble_ctrl_event *ctrl_event = 
+			new_ble_ctrl_event();
 		ctrl_event->cmd = BLE_CTRL_SCAN_STOP;
 		EVENT_SUBMIT(ctrl_event);
 	}

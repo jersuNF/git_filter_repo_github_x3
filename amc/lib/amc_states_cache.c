@@ -198,7 +198,8 @@ static void enter_teach_mode()
 	if (teach_mode_finished != 0) {
 		teach_mode_finished = 0;
 
-		err = eep_uint8_write(EEP_TEACH_MODE_FINISHED, teach_mode_finished);
+		err = eep_uint8_write(EEP_TEACH_MODE_FINISHED,
+				      teach_mode_finished);
 		if (err) {
 			LOG_ERR("Could not write teach mode finished %i", err);
 		}
@@ -211,7 +212,7 @@ void force_teach_mode()
 {
 	if (current_mode != Mode_Teach) {
 		current_mode = Mode_Teach;
-		
+
 		int err = eep_uint8_write(EEP_COLLAR_MODE, (uint8_t)current_mode);
 		if (err) {
 			LOG_ERR("Could not write to collar mode %i ", err);
@@ -307,8 +308,7 @@ Mode calc_mode(void)
 			/** @todo Need to set to 0 when going from
 			 *  Fence -> Teach
 			 */
-			eep_uint8_write(EEP_TEACH_MODE_FINISHED,
-					teach_mode_finished);
+			eep_uint8_write(EEP_TEACH_MODE_FINISHED, teach_mode_finished);
 		}
 		break;
 	case Mode_Fence:

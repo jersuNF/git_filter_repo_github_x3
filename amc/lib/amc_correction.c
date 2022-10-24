@@ -59,8 +59,13 @@ static bool first_correction_pause = false;
 K_SEM_DEFINE(freq_update_sem, 0, 1);
 
 static bool queueZap = false;
-
 #ifdef CONFIG_AMC_USE_LEGACY_STEP
+
+K_SEM_DEFINE(ep_trigger_ready, 0, 1);
+extern struct k_sem ep_trigger_ready;
+
+#define EP_TIMEOUT_MS 200
+
 static uint32_t convert_to_legacy_frequency(uint32_t frequency)
 {
 	uint8_t ocr_value = (4000000 / (2 * 32 * frequency)) - 1;
@@ -79,7 +84,10 @@ static uint32_t convert_to_legacy_frequency(uint32_t frequency)
 static void buzzer_update_fn()
 {
 	/* Update frequency only if we're in WARN/MAX state off buzzer. */
-	if (atomic_get(&can_update_buzzer)) {
+	if (queueZap || atomic_get(&can_update_buzzer)) {
+		k_work_schedule(&update_buzzer_work,
+				K_MSEC(WARN_BUZZER_UPDATE_RATE));
+
 		uint16_t freq = atomic_get(&last_warn_freq);
 
 		if (zap_eval_doing) {
@@ -92,8 +100,8 @@ static void buzzer_update_fn()
 		}
 
 		if (!zap_eval_doing) {
-			/* Only submit events etc, if we have freq change and no zap eval. */
-			if (k_sem_take(&freq_update_sem, K_NO_WAIT) == 0) {
+			if (queueZap ||
+			    k_sem_take(&freq_update_sem, K_NO_WAIT) == 0) {
 				/** Update buzzer frequency event. */
 				uint32_t set_frequency = freq;
 #ifdef CONFIG_AMC_USE_LEGACY_STEP
@@ -112,12 +120,10 @@ static void buzzer_update_fn()
 			 	 *  "escaped."
 			 	 */
 				if (queueZap) {
-					queueZap = false;
-					if (freq >= WARN_FREQ_MAX) {
-						correction_pause(
-							Reason_WARNPAUSEREASON_ZAP,
-							atomic_get(
-								&last_mean_dist));
+					if (k_sem_take(&ep_trigger_ready,
+						   K_MSEC(EP_TIMEOUT_MS)) ==
+					    0) {
+						queueZap = false;
 						struct ep_status_event *ep_ev =
 							new_ep_status_event();
 						ep_ev->ep_status = EP_RELEASE;
@@ -125,38 +131,33 @@ static void buzzer_update_fn()
 							get_zap_pain_cnt() == 0;
 						EVENT_SUBMIT(ep_ev);
 						zap_eval_doing = true;
-						zap_timestamp =
-							k_uptime_get_32();
+						zap_timestamp = k_uptime_get_32();
 						increment_zap_count();
 						LOG_INF("AMC notified EP to zap!");
 
 						struct amc_zapped_now_event *ev =
 							new_amc_zapped_now_event();
-
 						ev->fence_dist = atomic_get(
 							&last_mean_dist);
-
 						EVENT_SUBMIT(ev);
-
-						/* We need to reschedule this function
-				 	 * after ZAP_EVALUATION_TIME, to be able to zap
-				 	 * again based on this variable, not buzzer
-				 	 * update rate.
-				 	 */
-						k_work_reschedule(
-							&update_buzzer_work,
-							K_MSEC
-							(ZAP_EVALUATION_TIME_MS));
+					} else {
+						LOG_ERR("EP trigger "
+							"ack missed!");
 					}
 				}
+				queueZap = false;
 				if (freq >= WARN_FREQ_MAX &&
 				    atomic_get(&sound_max_atomic)) {
+					correction_pause(
+						Reason_WARNPAUSEREASON_ZAP,
+						atomic_get(
+							&last_mean_dist));
 					queueZap = true;
+					k_work_reschedule(&update_buzzer_work,
+							K_NO_WAIT);
 				}
 			}
 		}
-		k_work_schedule(&update_buzzer_work,
-				K_MSEC(WARN_BUZZER_UPDATE_RATE));
 	}
 }
 
@@ -303,6 +304,7 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 		ev->fence_dist = atomic_get(&last_mean_dist);
 		ev->warn_duration =
 			correction_pause_timestamp - k_uptime_get_32();
+		ev->reason = reason;
 
 		EVENT_SUBMIT(ev);
 	}

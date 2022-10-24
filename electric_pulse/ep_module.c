@@ -12,8 +12,8 @@
 #include "ep_module.h"
 #include "ep_event.h"
 #include "error_event.h"
-#include "sound_event.h"
-#include "nf_settings.h"
+#include "messaging_module_events.h"
+
 
 #define MODULE ep_module
 LOG_MODULE_REGISTER(MODULE, CONFIG_EP_MODULE_LOG_LEVEL);
@@ -67,6 +67,7 @@ const struct device *ep_detect_dev;
 static uint16_t g_product_type = 0;
 static int64_t g_last_pulse_time = 0;
 volatile bool g_trigger_ready = false;
+extern struct k_sem ep_trigger_ready;
 
 int ep_module_init(void)
 {
@@ -192,6 +193,7 @@ static bool event_handler(const struct event_header *eh)
 		switch (event->ep_status) {
 			case EP_RELEASE: {
 				if (g_trigger_ready) {
+					g_trigger_ready = false;
 					err = ep_module_release(event->is_first_pulse);
 					if (err < 0) {
 						char *e_msg = "Error in ep release";
@@ -213,12 +215,14 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-	if (is_sound_status_event(eh)) {
+	if (is_warn_correction_pause_event(eh)) {
 		/* Open up window for zapping since we recieved that
 		 * the sound controller is playing MAX warn freq. */
-		const struct sound_status_event *event = cast_sound_status_event(eh);
-		if (event->status == SND_STATUS_PLAYING_MAX) {
+		const struct warn_correction_pause_event *event
+			= cast_warn_correction_pause_event(eh);
+		if (event->reason == Reason_WARNPAUSEREASON_ZAP) {
 			g_trigger_ready = true;
+			k_sem_give(&ep_trigger_ready);
 		} else {
 			g_trigger_ready = false;
 		}
@@ -230,4 +234,4 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(LOG_MODULE_NAME, event_handler);
 EVENT_SUBSCRIBE(LOG_MODULE_NAME, ep_status_event);
-EVENT_SUBSCRIBE_EARLY(LOG_MODULE_NAME, sound_status_event);
+EVENT_SUBSCRIBE_EARLY(LOG_MODULE_NAME, warn_correction_pause_event);

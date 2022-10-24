@@ -24,6 +24,7 @@
 #include "ble_controller.h"
 #include "msg_data_event.h"
 #include "messaging_module_events.h"
+#include "fw_upgrade_events.h"
 
 #include "nf_version.h"
 #include "nf_settings.h"
@@ -77,9 +78,8 @@ typedef enum {
 /** @brief : Used for hysteresis calculation **/
 static cross_type_t cross_type = CROSS_UNDEFINED;
 
-
 // Shaddow register. Should be initialized with data from EEPROM or FLASH
-static uint16_t current_fw_ver =  NF_X25_VERSION_NUMBER;
+static uint16_t current_fw_ver = NF_X25_VERSION_NUMBER;
 static uint32_t current_serial_number = CONFIG_NOFENCE_SERIAL_NUMBER;
 static uint8_t current_battery_level = 0;
 static uint8_t current_error_flags = 0;
@@ -173,6 +173,11 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	struct ble_conn_event *event = new_ble_conn_event();
 	event->conn_state = BLE_STATE_DISCONNECTED;
 	EVENT_SUBMIT(event);
+
+	/* Assume BLE fota is paused or aborted upon disconect. */
+	struct block_fota_event *ev = new_block_fota_event();
+	ev->block_lte_fota = false;
+	EVENT_SUBMIT(ev);
 }
 
 static struct bt_conn_cb conn_callbacks = {
@@ -632,13 +637,11 @@ static void scan_stop(void)
 		LOG_DBG("1: Status: BEACON_STATUS_NOT_FOUND, Type: CROSS_UNDEFINED");
 		goto end;
 
-
 	} else if (m_shortest_dist2beacon > CONFIG_BEACON_HIGH_LIMIT) {
 		cross_type = CROSS_UNDEFINED;
 		event->status = BEACON_STATUS_REGION_FAR;
 		LOG_DBG("2: Status: BEACON_STATUS_REGION_FAR, Type: CROSS_UNDEFINED");
 		goto end;
-
 
 	} else if (m_shortest_dist2beacon <= CONFIG_BEACON_LOW_LIMIT) {
 		cross_type = CROSS_UNDEFINED;
@@ -659,7 +662,6 @@ static void scan_stop(void)
 		event->status = BEACON_STATUS_REGION_FAR;
 		LOG_DBG("5: Status: BEACON_STATUS_REGION_FAR, Type: CROSS_HIGH_FROM_ABOVE");
 		goto end;
-
 
 	} else {
 		if (cross_type == CROSS_LOW_FROM_BELOW) {

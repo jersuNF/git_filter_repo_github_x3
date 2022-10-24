@@ -45,7 +45,7 @@ static uint8_t pain_cnt_def_free = _PAIN_CNT_DEF_ESCAPED;
  *  eeprom on init.
  */
 static Mode current_mode = Mode_Mode_UNKNOWN;
-static FenceStatus current_fence_status = FenceStatus_NotStarted;
+static FenceStatus current_fence_status = FenceStatus_FenceStatus_UNKNOWN;
 static CollarStatus current_collar_status = CollarStatus_CollarStatus_UNKNOWN;
 static gnss_mode_t current_gnss_mode = GNSSMODE_NOMODE;
 
@@ -212,7 +212,6 @@ void force_teach_mode()
 {
 	if (current_mode != Mode_Teach) {
 		current_mode = Mode_Teach;
-
 		int err = eep_uint8_write(EEP_COLLAR_MODE, (uint8_t)current_mode);
 		if (err) {
 			LOG_ERR("Could not write to collar mode %i ", err);
@@ -232,19 +231,32 @@ void init_states_and_variables(void)
 	cache_eeprom_variables();
 	uint8_t status_code = 0;
 
-	/* Collar mode. */
+	/* Read collar mode from eeprom */
 	int err = eep_uint8_read(EEP_COLLAR_MODE, &status_code);
 	if (err) {
 		LOG_ERR("Could not read collar mode %i", err);
 		status_code = Mode_Mode_UNKNOWN;
 	}
 	current_mode = (Mode)status_code;
-
-	/** @todo should remove EEP_FENCE_STATUS/EEP_COLLAR_STATUS FROM EEPROM. */
-
 	if (current_mode == Mode_Teach) {
 		enter_teach_mode();
 	}
+
+	/* Read collar status from eeprom */
+	err = eep_uint8_read(EEP_COLLAR_STATUS, &status_code);
+	if (err) {
+		LOG_ERR("Could not read collar mode %i", err);
+		status_code = CollarStatus_CollarStatus_UNKNOWN;
+	}
+	current_collar_status = (CollarStatus)status_code;
+
+	/* Read fence status from eeprom */
+	err = eep_uint8_read(EEP_FENCE_STATUS, &status_code);
+	if (err) {
+		LOG_ERR("Could not read collar mode %i", err);
+		status_code = FenceStatus_FenceStatus_UNKNOWN;
+	}
+	current_fence_status = (FenceStatus)status_code;
 
 	LOG_INF("Cached AMC states: Collarmode %i, collarstatus %i, fencestatus %i",
 		current_mode, current_fence_status, current_collar_status);
@@ -388,6 +400,7 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 				LOG_INF("FenceStatus:Unknown->NotStarted");
 			}
 			break;
+
 		}
 		case FenceStatus_NotStarted: {
 			if (beacon_status == BEACON_STATUS_REGION_NEAR) {
@@ -499,7 +512,7 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 
 int force_fence_status(FenceStatus new_fence_status)
 {
-	/* Only fence status "Unknown", "NotStarted" and "Invalid" can be forced */
+	/* Only fence status "Unknown", "NotStarted", "Invalid" and "FenceStatus_TurnedOffByBLE" can be forced */
 	if ((new_fence_status != FenceStatus_FenceStatus_UNKNOWN) && 
 		(new_fence_status != FenceStatus_NotStarted) &&
 		(new_fence_status != FenceStatus_FenceStatus_Invalid) &&
@@ -508,7 +521,7 @@ int force_fence_status(FenceStatus new_fence_status)
 	}
 
 	if (new_fence_status != current_fence_status) {
-		if ((new_fence_status == FenceStatus_NotStarted) && 
+		if ((new_fence_status == FenceStatus_NotStarted) &&
 			(fnc_valid_def() != true)) {
 			LOG_WRN("Unable to force fence status");
 			return -EACCES;

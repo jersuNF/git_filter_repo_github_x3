@@ -415,7 +415,7 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 	}
 
 	err = fcb_walk_from_entry(cb, &log_fcb, &start_entry, num_entries);
-	if (err && err != -EINTR) {
+	if (err != 0) {
 		LOG_ERR("Error reading from log partition.");
 		k_mutex_unlock(&log_mutex);
 		return err;

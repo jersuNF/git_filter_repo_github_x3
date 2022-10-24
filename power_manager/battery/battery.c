@@ -240,32 +240,17 @@ int battery_sample(void)
 	return rc;
 }
 
-unsigned int battery_level_soc(unsigned int batt_mV,
-			       const struct battery_level_point *curve)
+unsigned int battery_level_soc(unsigned int batt_mV)
 {
-	const struct battery_level_point *pb = curve;
-
-	if (batt_mV >= pb->lvl_mV) {
-		/* Measured voltage above highest point, cap at maximum. */
-		return (pb->lvl_pptt / 100);
+	unsigned int batt_level_precentage;
+	if (batt_mV < CONFIG_BATTERY_EMPTY_MV) {
+		return 0;
+	} else if (batt_mV > CONFIG_BATTERY_FULL_MV) {
+		return 100;
 	}
-	/* Go down to the last point at or below the measured voltage. */
-	while ((pb->lvl_pptt > 0) && (batt_mV < pb->lvl_mV)) {
-		++pb;
-	}
-	if (batt_mV < pb->lvl_mV) {
-		/* Below lowest point, cap at minimum */
-		return pb->lvl_pptt;
-	}
-
-	/* Linear interpolation between below and above points. */
-	const struct battery_level_point *pa = pb - 1;
-	int batt_level_pptt = pb->lvl_pptt + ((pa->lvl_pptt - pb->lvl_pptt) *
-					      (batt_mV - pb->lvl_mV) /
-					      (pa->lvl_mV - pb->lvl_mV));
-
-	/* Return the battery State Of Charge (SOC) in % based on battery discharge curve */
-	unsigned int batt_level_precentage = (batt_level_pptt / 100);
+	batt_level_precentage = 100 * (batt_mV - CONFIG_BATTERY_EMPTY_MV)/
+				(CONFIG_BATTERY_FULL_MV -
+					  CONFIG_BATTERY_EMPTY_MV);
 	return batt_level_precentage;
 }
 

@@ -128,6 +128,7 @@ void set_sensor_modes(Mode amc_mode, FenceStatus fs, CollarStatus cs,
 /** @todo Should zap stuff be moved somewhere else? */
 void increment_zap_count(void);
 void increment_warn_count(void);
+uint16_t get_zap_pain_cnt(void);
 
 /** @brief Resets the pain zap count to 0. This is so that we can measure
  *         the number of zaps this breakout. I.e this is called on correction

@@ -90,6 +90,11 @@ void reset_zap_pain_cnt(void)
 	zap_pain_cnt = 0;
 }
 
+uint16_t get_zap_pain_cnt(void)
+{
+	return zap_pain_cnt;
+}
+
 void increment_zap_count(void)
 {
 	int err;
@@ -195,7 +200,7 @@ static void enter_teach_mode()
 		}
 	}
 	teach_mode_saved_warn_cnt = (uint16_t)warn_cnt;
-	teach_mode_saved_zap_cnt = (uint8_t)zap_cnt;
+	teach_mode_saved_zap_cnt = (uint16_t)zap_cnt;
 }
 
 void force_teach_mode()

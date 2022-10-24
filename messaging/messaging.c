@@ -80,6 +80,7 @@ static collar_state_struct_t current_state;
 static gnss_last_fix_struct_t cached_fix;
 
 static bool fota_reset = true;
+static bool block_fota_request = false;
 
 typedef enum {
 	COLLAR_MODE,
@@ -852,6 +853,11 @@ static bool event_handler(const struct event_header *eh)
 		update_cache_reg(GSM_INFO);
 		return false;
 	}
+	if (is_block_fota_event(eh)) {
+		struct block_fota_event *ev = cast_block_fota_event(eh);
+		block_fota_request = ev->block_lte_fota;
+		return false;
+	}
 	if (is_dfu_status_event(eh)) {
 		struct dfu_status_event *fw_upgrade_event =
 			cast_dfu_status_event(eh);
@@ -944,6 +950,7 @@ EVENT_SUBSCRIBE(MODULE, warn_correction_start_event);
 EVENT_SUBSCRIBE(MODULE, warn_correction_end_event);
 EVENT_SUBSCRIBE(MODULE, gsm_info_event);
 EVENT_SUBSCRIBE(MODULE, dfu_status_event);
+EVENT_SUBSCRIBE(MODULE, block_fota_event);
 EVENT_SUBSCRIBE(MODULE, sound_status_event);
 
 static inline void process_ble_cmd_event(void)
@@ -1663,7 +1670,8 @@ void process_poll_response(NofenceMessage *proto)
 void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 {
 	if (fw_ver_from_server->has_ulApplicationVersion &&
-	    fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER) {
+	    fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER && 
+	    block_fota_request == false) {
 		LOG_INF("Received new app version from server %i",
 			fw_ver_from_server->ulApplicationVersion);
 		if (!reboot_scheduled) {

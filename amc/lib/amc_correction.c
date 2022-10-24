@@ -127,6 +127,8 @@ static void buzzer_update_fn()
 						struct ep_status_event *ep_ev =
 							new_ep_status_event();
 						ep_ev->ep_status = EP_RELEASE;
+						ep_ev->is_first_pulse =
+							get_zap_pain_cnt() == 0;
 						EVENT_SUBMIT(ep_ev);
 						zap_eval_doing = true;
 						zap_timestamp = k_uptime_get_32();

@@ -93,6 +93,11 @@ void reset_zap_pain_cnt(void)
 	zap_pain_cnt = 0;
 }
 
+uint16_t get_zap_pain_cnt(void)
+{
+	return zap_pain_cnt;
+}
+
 void increment_zap_count(void)
 {
 	teach_zap_cnt++;

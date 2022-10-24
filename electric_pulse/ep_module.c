@@ -4,7 +4,7 @@
 
 #include <zephyr.h>
 #include <device.h>
-
+#include <devicetree.h>
 #include <drivers/gpio.h>
 #include <drivers/pwm.h>
 #include <logging/log.h>
@@ -25,8 +25,12 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_EP_MODULE_LOG_LEVEL);
 #define PRODUCT_TYPE_CATTLE 2
 
 /* Electric pulse PWM configuration, NB! Must be fine tuned for new HW */
-#define EP_DURATION_CATTLE_US 1000000
-#define EP_DURATION_SHEEP_US 500000
+#define EP_DURATION_CATTLE_US_FIRST_PULSE_US 233333
+#define EP_DURATION_CATTLE_US 700000
+
+#define EP_DURATION_SHEEP_US_FIRST_PULSE_US 116666
+#define EP_DURATION_SHEEP_US 350000
+
 #define EP_ON_TIME_US 3
 #define EP_OFF_TIME_US 8
 
@@ -109,7 +113,7 @@ int ep_module_init(void)
 	return ret;
 }
 
-static int ep_module_release(void)
+static int ep_module_release(bool first_pulse)
 {
 	if (!device_is_ready(ep_ctrl_pwm_dev)) {
 		LOG_WRN("Electic pulse PWM device not ready!");
@@ -129,7 +133,18 @@ static int ep_module_release(void)
 
 	uint32_t ep_duration_us = (uint32_t)EP_DURATION_SHEEP_US;
 	if (g_product_type == PRODUCT_TYPE_CATTLE) {
-		ep_duration_us = (uint32_t)EP_DURATION_CATTLE_US;
+		if (first_pulse) {
+			ep_duration_us = (uint32_t)EP_DURATION_CATTLE_US_FIRST_PULSE_US;
+		} else {
+			ep_duration_us = (uint32_t)EP_DURATION_CATTLE_US;
+		}
+	} else {
+		if (first_pulse) {
+			ep_duration_us =
+				(uint32_t)EP_DURATION_SHEEP_US_FIRST_PULSE_US;
+		} else {
+			ep_duration_us = (uint32_t)EP_DURATION_SHEEP_US;
+		}
 	}
 
 	LOG_INF("Triggering electric pulse now (Period[us]:%d, Pulse width[us]:%d, Duration[us]:%d)", 
@@ -179,7 +194,7 @@ static bool event_handler(const struct event_header *eh)
 			case EP_RELEASE: {
 				if (g_trigger_ready) {
 					g_trigger_ready = false;
-					err = ep_module_release();
+					err = ep_module_release(event->is_first_pulse);
 					if (err < 0) {
 						char *e_msg = "Error in ep release";
 						LOG_ERR("%s (%d)", log_strdup(e_msg), err);

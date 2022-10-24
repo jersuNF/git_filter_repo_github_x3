@@ -93,6 +93,11 @@ void reset_zap_pain_cnt(void)
 	zap_pain_cnt = 0;
 }
 
+uint16_t get_zap_pain_cnt(void)
+{
+	return zap_pain_cnt;
+}
+
 void increment_zap_count(void)
 {
 	teach_zap_cnt++;
@@ -193,7 +198,8 @@ static void enter_teach_mode()
 	if (teach_mode_finished != 0) {
 		teach_mode_finished = 0;
 
-		err = eep_uint8_write(EEP_TEACH_MODE_FINISHED, teach_mode_finished);
+		err = eep_uint8_write(EEP_TEACH_MODE_FINISHED,
+				      teach_mode_finished);
 		if (err) {
 			LOG_ERR("Could not write teach mode finished %i", err);
 		}
@@ -314,8 +320,7 @@ Mode calc_mode(void)
 			/** @todo Need to set to 0 when going from
 			 *  Fence -> Teach
 			 */
-			eep_uint8_write(EEP_TEACH_MODE_FINISHED,
-					teach_mode_finished);
+			eep_uint8_write(EEP_TEACH_MODE_FINISHED, teach_mode_finished);
 		}
 		break;
 	case Mode_Fence:

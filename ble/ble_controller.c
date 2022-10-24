@@ -24,6 +24,7 @@
 #include "ble_controller.h"
 #include "msg_data_event.h"
 #include "messaging_module_events.h"
+#include "fw_upgrade_events.h"
 
 #include "nf_version.h"
 #include "nf_settings.h"
@@ -78,7 +79,7 @@ typedef enum {
 static cross_type_t cross_type = CROSS_UNDEFINED;
 
 // Shaddow register. Should be initialized with data from EEPROM or FLASH
-static uint16_t current_fw_ver =  NF_X25_VERSION_NUMBER;
+static uint16_t current_fw_ver = NF_X25_VERSION_NUMBER;
 static uint32_t current_serial_number = CONFIG_NOFENCE_SERIAL_NUMBER;
 static uint8_t current_battery_level = 0;
 static uint8_t current_error_flags = 0;
@@ -172,6 +173,11 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	struct ble_conn_event *event = new_ble_conn_event();
 	event->conn_state = BLE_STATE_DISCONNECTED;
 	EVENT_SUBMIT(event);
+
+	/* Assume BLE fota is paused or aborted upon disconect. */
+	struct block_fota_event *ev = new_block_fota_event();
+	ev->block_lte_fota = false;
+	EVENT_SUBMIT(ev);
 }
 
 static struct bt_conn_cb conn_callbacks = {

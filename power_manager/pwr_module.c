@@ -39,6 +39,10 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BATTERY_LOG_LEVEL);
 
 static uint32_t extclk_request_flags = 0;
 
+/* Current reboot reason as read at boot, REBOOT_REASON_CNT is last entry in 
+ * reboot reason list and not a valid reboot reason. */
+static uint8_t m_my_reboot_reason = REBOOT_REASON_CNT;
+
 /**
  * @brief Enable/disable external clock for HFCLK.
  * 
@@ -279,14 +283,22 @@ int fetch_battery_percent(void)
 
 int pwr_module_reboot_reason(uint8_t *aReason)
 {
-	int err;
-	err = eep_uint8_read(EEP_RESET_REASON, aReason);
-	if (err != 0) {
-		LOG_ERR("Unable to read reboot reason from eeprom");
+	int err = 0;
+	if (m_my_reboot_reason == REBOOT_REASON_CNT)
+	{
+		err = eep_uint8_read(EEP_RESET_REASON, &m_my_reboot_reason);
+		if (err != 0) {
+			LOG_ERR("Unable to read reboot reason from eeprom");
+			m_my_reboot_reason = REBOOT_UNKNOWN;
+		}
+
+		/* Set reboot reason in eeprom to REBOOT_UNKNOWN after read in 
+		 * case of enexpected reboot */
+		if (eep_uint8_write(EEP_RESET_REASON, REBOOT_UNKNOWN) != 0) {
+			LOG_ERR("Unable to reset reboot reason in eeprom!");
+		}
 	}
-	if (eep_uint8_write(EEP_RESET_REASON, REBOOT_UNKNOWN) != 0) {
-		LOG_ERR("Unable to reset reboot reason in eeprom!");
-	}
+	*aReason = m_my_reboot_reason;
 	return err;
 }
 

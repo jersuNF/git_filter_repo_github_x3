@@ -244,17 +244,18 @@ void init_states_and_variables(void)
 	err = stg_config_u8_read(STG_U8_COLLAR_STATUS, &collar_status);
 	if (err) {
 		LOG_ERR("Could not read collar mode %i", err);
-		status_code = CollarStatus_CollarStatus_UNKNOWN;
+		collar_status = CollarStatus_CollarStatus_UNKNOWN;
 	}
 	current_collar_status = (CollarStatus)collar_status;
 
 	/* Read fence status from eeprom */
-	err = eep_uint8_read(EEP_FENCE_STATUS, &status_code);
+	uint8_t fence_status = 0;
+	err = stg_config_u8_read(STG_U8_FENCE_STATUS, &fence_status);
 	if (err) {
 		LOG_ERR("Could not read collar mode %i", err);
-		status_code = FenceStatus_FenceStatus_UNKNOWN;
+		fence_status = FenceStatus_FenceStatus_UNKNOWN;
 	}
-	current_fence_status = (FenceStatus)status_code;
+	current_fence_status = (FenceStatus)fence_status;
 
 	LOG_INF("Cached AMC states: Collarmode %i, collarstatus %i, fencestatus %i",
 		current_mode, current_fence_status, current_collar_status);

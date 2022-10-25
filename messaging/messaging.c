@@ -1142,11 +1142,6 @@ void build_poll_request(NofenceMessage *poll_req)
 	poll_req->m.poll_message_req.usBatteryVoltage = 
 				(uint16_t)atomic_get(&cached_batt);
 
-	uint8_t reboot_reason;
-	pwr_module_reboot_reason(&reboot_reason);
-	poll_req->m.poll_message_req.has_ucMCUSR = true;
-	poll_req->m.poll_message_req.ucMCUSR = reboot_reason;
-
 	poll_req->m.poll_message_req.has_xGsmInfo = true;
 
 	_GSM_INFO p_gsm_info;
@@ -1273,6 +1268,11 @@ void build_poll_request(NofenceMessage *poll_req)
 		eep_uint8_read(EEP_PRODUCT_RECORD_REV, &product_record_rev);
 		poll_req->m.poll_message_req.versionInfoBOM.ucProduct_record_rev = 
 					product_record_rev;
+
+		uint8_t reboot_reason;
+		pwr_module_reboot_reason(&reboot_reason);
+		poll_req->m.poll_message_req.has_ucMCUSR = true;
+		poll_req->m.poll_message_req.ucMCUSR = reboot_reason;
 
 		/** @todo Add information of SIM card */
 #if 0

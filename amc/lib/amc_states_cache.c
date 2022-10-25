@@ -42,7 +42,7 @@ static uint8_t pain_cnt_def_free = _PAIN_CNT_DEF_ESCAPED;
  *  ext flash on init.
  */
 static Mode current_mode = Mode_Mode_UNKNOWN;
-static FenceStatus current_fence_status = FenceStatus_NotStarted;
+static FenceStatus current_fence_status = FenceStatus_FenceStatus_UNKNOWN;
 static CollarStatus current_collar_status = CollarStatus_CollarStatus_UNKNOWN;
 static gnss_mode_t current_gnss_mode = GNSSMODE_NOMODE;
 
@@ -235,12 +235,26 @@ void init_states_and_variables(void)
 		collar_mode = Mode_Mode_UNKNOWN;
 	}
 	current_mode = (Mode)collar_mode;
-
-	/** @todo should remove STG_U8_FENCE_STATUS/STG_U8_COLLAR_STATUS from storage. */
-
 	if (current_mode == Mode_Teach) {
 		enter_teach_mode();
 	}
+
+	/* Read collar status from eeprom */
+	uint8_t collar_status = 0;
+	err = stg_config_u8_read(STG_U8_COLLAR_STATUS, &collar_status);
+	if (err) {
+		LOG_ERR("Could not read collar mode %i", err);
+		status_code = CollarStatus_CollarStatus_UNKNOWN;
+	}
+	current_collar_status = (CollarStatus)collar_status;
+
+	/* Read fence status from eeprom */
+	err = eep_uint8_read(EEP_FENCE_STATUS, &status_code);
+	if (err) {
+		LOG_ERR("Could not read collar mode %i", err);
+		status_code = FenceStatus_FenceStatus_UNKNOWN;
+	}
+	current_fence_status = (FenceStatus)status_code;
 
 	LOG_INF("Cached AMC states: Collarmode %i, collarstatus %i, fencestatus %i",
 		current_mode, current_fence_status, current_collar_status);
@@ -390,6 +404,7 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 				LOG_INF("FenceStatus:Unknown->NotStarted");
 			}
 			break;
+
 		}
 		case FenceStatus_NotStarted: {
 			if (beacon_status == BEACON_STATUS_REGION_NEAR) {
@@ -511,7 +526,7 @@ int force_fence_status(FenceStatus new_fence_status)
 	}
 
 	if (new_fence_status != current_fence_status) {
-		if ((new_fence_status == FenceStatus_NotStarted) && 
+		if ((new_fence_status == FenceStatus_NotStarted) &&
 			(fnc_valid_def() != true)) {
 			LOG_WRN("Unable to force fence status");
 			return -EACCES;

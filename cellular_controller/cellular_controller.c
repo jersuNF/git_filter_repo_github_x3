@@ -3,12 +3,12 @@
 #include "cellular_helpers_header.h"
 #include "messaging_module_events.h"
 #include <zephyr.h>
-#include "nf_settings.h"
 #include "error_event.h"
 #include <modem_nf.h>
 #include "fw_upgrade_events.h"
 #include "selftest.h"
 #include "pwr_event.h"
+#include "stg_config.h"
 
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define RCV_PRIORITY CONFIG_RECV_THREAD_PRIORITY
@@ -26,8 +26,8 @@ K_THREAD_DEFINE(send_tcp_from_q, CONFIG_SEND_THREAD_STACK_SIZE,
 		send_tcp_fn, NULL, NULL, NULL,
 		K_PRIO_COOP(CONFIG_SEND_THREAD_PRIORITY), 0, 0);
 
-char server_address[EEP_HOST_PORT_BUF_SIZE-1];
-char server_address_tmp[EEP_HOST_PORT_BUF_SIZE-1];
+char server_address[STG_CONFIG_HOST_PORT_BUF_LEN-1];
+char server_address_tmp[STG_CONFIG_HOST_PORT_BUF_LEN-1];
 static int server_port;
 static char server_ip[15];
 
@@ -216,34 +216,35 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return false;
 	}
 	else if (is_messaging_host_address_event(eh)) {
-		int ret = eep_read_host_port(&server_address_tmp[0], EEP_HOST_PORT_BUF_SIZE-1);
+		uint8_t port_length = 0;
+		int ret = stg_config_str_read(STG_STR_HOST_PORT, server_address_tmp, &port_length);
 		if (ret != 0){
-			LOG_ERR("Failed to read host address from eeprom!\n");
+			LOG_ERR("Failed to read host address from ext flash");
 		}
+
 		struct messaging_host_address_event *event =
 			cast_messaging_host_address_event(eh);
-		memcpy(&server_address[0], event->address,
-		       sizeof(event->address) - 1);
+		memcpy(&server_address[0], event->address, sizeof(event->address) - 1);
 		char *ptr_port;
 		ptr_port = strchr(server_address, ':') + 1;
 		server_port = atoi(ptr_port);
 		if (server_port <= 0) {
 			char *e_msg = "Failed to parse port number from new "
 				      "host address!";
-			nf_app_error(ERR_MESSAGING, -EILSEQ, e_msg,
-				     strlen(e_msg));
+			nf_app_error(ERR_MESSAGING, -EILSEQ, e_msg, strlen(e_msg));
 			return false;
 		}
 		uint8_t ip_len;
 		ip_len = ptr_port - 1 - &server_address[0];
 		memcpy(&server_ip[0], &server_address[0], ip_len);
-		ret = memcmp(server_address, server_address_tmp, EEP_HOST_PORT_BUF_SIZE-1);
+		ret = memcmp(server_address, server_address_tmp, 
+				STG_CONFIG_HOST_PORT_BUF_LEN-1);
 		if (ret != 0){
-			LOG_INF("New host address received!\n");
-			ret = eep_write_host_port(server_address);
+			LOG_INF("New host address received!");
+			ret = stg_config_str_write(STG_STR_HOST_PORT, server_address, 
+					STG_CONFIG_HOST_PORT_BUF_LEN-1);
 			if (ret != 0){
-				LOG_ERR("Failed to write new host address to "
-					"eeprom!\n");
+				LOG_ERR("Failed to write new host address to ext flash!");
 			}
 		}
 		return false;
@@ -321,14 +322,14 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 }
 
 /**
-	 * Read full server address from eeprom and cache the ip as char array
+	 * Read full server address from storage and cache the ip as char array
 	 * and the port as an unsigned int.
 	 * @return: 0 on success, -1 on failure
 	 */
 int8_t cache_server_address(void)
 {
-	int err =
-		eep_read_host_port(&server_address[0], sizeof(server_address));
+	uint8_t port_length = 0;
+	int err = stg_config_str_read(STG_STR_HOST_PORT, server_address, &port_length);
 	if (err != 0 || server_address[0] == '\0') {
 		return -1;
 	}
@@ -342,7 +343,7 @@ int8_t cache_server_address(void)
 	ip_len = ptr_port - 1 - &server_address[0];
 	memcpy(&server_ip[0], &server_address[0], ip_len);
 	if (server_ip[0] != '\0') {
-		LOG_INF("Host address read from eeprom: %s : %d", &server_ip[0],
+		LOG_INF("Host address read from storage: %s : %d", &server_ip[0],
 			server_port);
 		return 0;
 	} else {

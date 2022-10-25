@@ -27,7 +27,7 @@
 #include "fw_upgrade_events.h"
 
 #include "nf_version.h"
-#include "nf_settings.h"
+#include "stg_config.h"
 
 #include "beacon_processor.h"
 #include "ble_beacon_event.h"
@@ -711,11 +711,11 @@ static void disconnect_peer_work_fn()
 static void init_eeprom_variables(void)
 {
 	int err;
-	/* Init serial number */
+
 	uint32_t serial_id = 0;
-	err = eep_uint32_read(EEP_UID, &serial_id);
+	err = stg_config_u32_read(STG_U32_UID, &serial_id);
 	if (err != 0) {
-		char *e_msg = "Failed to read serial number from eeprom!";
+		char *e_msg = "Failed to read serial number from storage!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 	} else {
@@ -735,47 +735,47 @@ static void init_eeprom_variables(void)
 	}
 
 	/* Init collar mode */
-	uint8_t eep_collar_mode;
-	err = eep_uint8_read(EEP_COLLAR_MODE, &eep_collar_mode);
+	uint8_t collar_mode;
+	err = stg_config_u8_read(STG_U8_COLLAR_MODE, &collar_mode);
 	if (err != 0) {
 		char *e_msg = "Failed to read collar mode from eeprom!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 	} else {
-		current_collar_mode = eep_collar_mode;
+		current_collar_mode = collar_mode;
 	}
 
 	/* Init collar status */
-	uint8_t eep_collar_status;
-	err = eep_uint8_read(EEP_COLLAR_STATUS, &eep_collar_status);
+	uint8_t collar_status;
+	err = stg_config_u8_read(STG_U8_COLLAR_STATUS, &collar_status);
 	if (err != 0) {
 		char *e_msg = "Failed to read collar status from eeprom!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 	} else {
-		current_collar_status = eep_collar_status;
+		current_collar_status = collar_status;
 	}
 
 	/* Init fence status */
-	uint8_t eep_fence_status;
-	err = eep_uint8_read(EEP_FENCE_STATUS, &eep_fence_status);
+	uint8_t fence_status;
+	err = stg_config_u8_read(STG_U8_FENCE_STATUS, &fence_status);
 	if (err != 0) {
 		char *e_msg = "Failed to read fence status from eeprom!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 	} else {
-		current_fence_status = eep_fence_status;
+		current_fence_status = fence_status;
 	}
 
 	/* Init hw version */
-	uint8_t eep_hw_version;
-	err = eep_uint8_read(EEP_HW_VERSION, &eep_hw_version);
+	uint8_t hw_version;
+	err = stg_config_u8_read(STG_U8_HW_VERSION, &hw_version);
 	if (err != 0) {
 		char *e_msg = "Failed to read hw version from eeprom!";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
 	} else {
-		current_hw_ver = eep_hw_version;
+		current_hw_ver = hw_version;
 	}
 }
 

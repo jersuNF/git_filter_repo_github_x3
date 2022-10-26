@@ -249,39 +249,37 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return false;
 	}
 	else if (is_messaging_proto_out_event(eh)) {
-//		if (connected) {
-			sending_in_progress = true;
-			k_sem_reset(&close_main_socket_sem);
-			socket_idle_count = 0;
-			struct messaging_proto_out_event *event =
-				cast_messaging_proto_out_event(eh);
-			uint8_t *pCharMsgOut = event->buf;
-			size_t MsgOutLen = event->len;
+		sending_in_progress = true;
+		k_sem_reset(&close_main_socket_sem);
+		socket_idle_count = 0;
+		struct messaging_proto_out_event *event =
+			cast_messaging_proto_out_event(eh);
+		uint8_t *pCharMsgOut = event->buf;
+		size_t MsgOutLen = event->len;
 
-			if (CharMsgOut == NULL) {
-				/* make a local copy of the message to send.*/
-				CharMsgOut = (char *)k_malloc(MsgOutLen);
-				if (CharMsgOut ==
-				    memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
-					LOG_DBG("Publishing ack to messaging!\n");
-					struct cellular_ack_event *ack =
-						new_cellular_ack_event();
-					EVENT_SUBMIT(ack);
-				}
-				int err = send_tcp_q(CharMsgOut, MsgOutLen);
-				if (err != 0) {
-					char *sendq_err = "Couldn't push message to queue!";
-					nf_app_error(ERR_MESSAGING, -EAGAIN, sendq_err,
-						     strlen(sendq_err));
-					k_free(CharMsgOut);
-					CharMsgOut = NULL;
-					sending_in_progress = false;
-					return false;
-				}
-			} else {
-				LOG_WRN("Dropping message!");
+		if (CharMsgOut == NULL) {
+			/* make a local copy of the message to send.*/
+			CharMsgOut = (char *)k_malloc(MsgOutLen);
+			if (CharMsgOut ==
+			    memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
+				LOG_DBG("Publishing ack to messaging!\n");
+				struct cellular_ack_event *ack =
+					new_cellular_ack_event();
+				EVENT_SUBMIT(ack);
 			}
-//		}
+			int err = send_tcp_q(CharMsgOut, MsgOutLen);
+			if (err != 0) {
+				char *sendq_err = "Couldn't push message to queue!";
+				nf_app_error(ERR_MESSAGING, -EAGAIN, sendq_err,
+					     strlen(sendq_err));
+				k_free(CharMsgOut);
+				CharMsgOut = NULL;
+				sending_in_progress = false;
+				return false;
+			}
+		} else {
+			LOG_WRN("Dropping message!");
+		}
 		return false;
 	}
 	else if (is_check_connection(eh)) {

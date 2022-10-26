@@ -88,7 +88,11 @@ int stg_config_init(void)
         m_initialized = true;
 
 #if DT_NODE_HAS_STATUS(DT_ALIAS(eeprom), okay)
-	copy_eeprom_parameters_to_stg_flash();
+	err = copy_eeprom_parameters_to_stg_flash();
+	if (err != 0) {
+            LOG_ERR("STG Config, failed to copy from EEPROM");
+            return err;
+	}
 #endif /* DT_NODE_HAS_STATUS(DT_ALIAS(eeprom), okay) */
     }
     return 0;

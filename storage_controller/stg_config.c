@@ -620,6 +620,7 @@ int copy_eeprom_parameters_to_stg_flash()
 
 		/* Copy Host Port from the EEPROM to the flash */
 		char port[STG_CONFIG_HOST_PORT_BUF_LEN];
+		memset(port, 0, sizeof(port));
 
 		/* Read Host Port from EEPROM */
 		ret = eep_read_host_port(&port[0], 

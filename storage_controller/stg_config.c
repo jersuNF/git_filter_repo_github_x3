@@ -474,9 +474,18 @@ int copy_eeprom_parameters_to_stg_flash()
 		return ret;
 	}
 
+	uint32_t eep_serial_no = 0;
+	ret = eep_uint32_read(EEP_UID, &eep_serial_no);
+	if (ret != 0) {
+		LOG_ERR("EEP(u8) Failed to read id %d, err %d", EEP_UID, ret);
+		return ret;
+	}
+
 	/* Do a compare and copy if EEP_STG_COPY flag is 0 */
 	int success = 0;
-	if (eep_stg_copy_val == 0) {
+	if (((eep_stg_copy_val == 0) || (eep_stg_copy_val == UINT8_MAX)) &&
+		(eep_serial_no > 0) && (eep_serial_no != UINT32_MAX)) {
+
 		uint8_t eep_u8_val;
 		uint8_t stg_u8_val;
 		for (int i = 0; i < (EEP_RESET_REASON + 1); i++) {

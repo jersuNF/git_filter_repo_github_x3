@@ -1312,7 +1312,7 @@ void fence_download(uint8_t new_fframe)
 		first_frame = false;
 	} else if (new_fframe == 0 && !first_frame) { //something went bad
 		expected_fframe = 0;
-		new_fence_in_progress = 0;
+		new_fence_in_progress = current_state.fence_version;
 		return;
 	}
 	if (new_fframe >= 0) {
@@ -1327,7 +1327,6 @@ void fence_download(uint8_t new_fframe)
 				new_fence_in_progress);
 
 			expected_fframe = 0;
-			new_fence_in_progress = 0;
 			return;
 		}
 		if (new_fframe == expected_fframe) {
@@ -1339,7 +1338,7 @@ void fence_download(uint8_t new_fframe)
 				expected_fframe, new_fence_in_progress);
 			if (err != 0) {
 				expected_fframe = 0;
-				new_fence_in_progress = 0;
+				new_fence_in_progress = current_state.fence_version;
 			}
 		}
 	}
@@ -1431,7 +1430,7 @@ int send_binary_message(uint8_t *data, size_t len)
 		struct check_connection *ev = new_check_connection();
 		EVENT_SUBMIT(ev);
 		k_sem_reset(&connection_ready);
-		int ret = k_sem_take(&connection_ready, K_MINUTES(2));
+		int ret = k_sem_take(&connection_ready, K_FOREVER);
 		if (ret != 0) {
 			char *e_msg =
 				"Connection not ready, can't send message now!";
@@ -1709,6 +1708,7 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	int err = 0;
 
 	if (new_fence_in_progress != fenceResp->ulFenceDefVersion) {
+		new_fence_in_progress = current_state.fence_version;
 		/* Something went wrong, restart fence request. */
 		return 0;
 	}

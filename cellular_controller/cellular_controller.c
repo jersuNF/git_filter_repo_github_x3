@@ -211,8 +211,11 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return false;
 	}
 	else if (is_messaging_stop_connection_event(eh)) {
+		k_free(CharMsgOut);
+		CharMsgOut = NULL;
 		modem_is_ready = false;
-		connected = false;
+		sending_in_progress = false;
+		k_sem_give(&close_main_socket_sem);
 		return false;
 	}
 	else if (is_messaging_host_address_event(eh)) {

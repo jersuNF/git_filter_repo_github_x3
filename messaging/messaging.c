@@ -1645,15 +1645,14 @@ void process_poll_response(NofenceMessage *proto)
 			}
 		}
 	}
-	if (pResp->ulFenceDefVersion != current_state.fence_version &&
-	    new_fence_in_progress != pResp->ulFenceDefVersion) {
+	if (pResp->ulFenceDefVersion != current_state.fence_version) {
 		/* Request frame 0. */
-		first_frame = true;
 		LOG_INF("Requesting frame 0 for fence version %i.",
 			pResp->ulFenceDefVersion);
+		first_frame = true;
+		expected_fframe = 0;
 		int ret = request_fframe(pResp->ulFenceDefVersion, 0);
 		if (ret == 0) {
-			first_frame = true;
 			new_fence_in_progress = pResp->ulFenceDefVersion;
 		}
 		return;

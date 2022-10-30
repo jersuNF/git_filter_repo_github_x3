@@ -271,15 +271,15 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 				EVENT_SUBMIT(ack);
 			}
 			int err = send_tcp_q(CharMsgOut, MsgOutLen);
-			if (err != 0) {
-				char *sendq_err = "Couldn't push message to queue!";
-				nf_app_error(ERR_MESSAGING, -EAGAIN, sendq_err,
-					     strlen(sendq_err));
-				k_free(CharMsgOut);
-				CharMsgOut = NULL;
-				sending_in_progress = false;
-				return false;
-			}
+//			if (err != 0) {
+//				char *sendq_err = "Couldn't push message to queue!";
+//				nf_app_error(ERR_MESSAGING, -EAGAIN, sendq_err,
+//					     strlen(sendq_err));
+//				k_free(CharMsgOut);
+//				CharMsgOut = NULL;
+//				sending_in_progress = false;
+//				return false;
+//			}
 		} else {
 			LOG_WRN("Dropping message!");
 		}
@@ -465,6 +465,11 @@ static void cellular_controller_keep_alive(void *dev)
 						}
 					}
 				}
+			} else {
+				modem_nf_pwr_off();
+				connected = false;
+				sending_in_progress = false;
+				fota_in_progress = false;
 			}
 	update_connection_state:
 			announce_connection_state(connected);

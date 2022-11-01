@@ -20,6 +20,9 @@ LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 
 static const struct device *sensor;
 
+/* +∕- fullscale range [g] */
+static enum acc_scale{RANGE_2G=2, RANGE_4G=4, RANGE_8G=8, RANGE_16G=16};
+
 /** @todo Add to make configurable from messaging.c event. Also storage settings? */
 static uint16_t off_animal_time_limit_sec = OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT;
 static uint16_t acc_sigma_sleep_limit = ACC_SIGMA_SLEEP_LIMIT_DEFAULT;
@@ -349,7 +352,7 @@ static void sample_sensor_work_fn(struct k_work *work)
 	fetch_and_display(sensor);
 }
 
-int update_acc_odr(acc_mode_t mode_hz)
+static int update_acc_odr(acc_mode_t mode_hz)
 {
 	/* Setup interrupt triggers. */
 	struct sensor_trigger trig;
@@ -391,6 +394,20 @@ int update_acc_odr(acc_mode_t mode_hz)
 	return 0;
 }
 
+static int update_acc_range(enum acc_scale)
+{
+
+	struct sensor_value range;
+	sensor_g_to_ms2((uint8_t) acc_scale, &range);
+	int ret = sensor_attr_set(sensor, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_FULL_SCALE,
+			    &range);
+	if (ret != 0) {
+		LOG_ERR("Failed to set range: %d", ret);
+		return ret;
+	}
+	return 0;
+}
+
 int init_movement_controller(void)
 {
 	int err;
@@ -398,18 +415,24 @@ int init_movement_controller(void)
 	sensor = device_get_binding(DT_LABEL(DT_NODELABEL(movement_sensor)));
 
 	if (sensor == NULL) {
-		LOG_ERR("Could not find LIS2DW driver.");
+		LOG_ERR("Could not find LIS2DW12 driver.");
 		return -ENODEV;
 	}
 	if (!device_is_ready(sensor)) {
-		LOG_ERR("Failed to setup LIS2DW accelerometer driver.");
+		LOG_ERR("Failed to setup LIS2DW12 accelerometer driver.");
 		return -EFAULT;
 	} else {
-		LOG_INF("Setup LIS2DW accelerometer driver.");
+		LOG_INF("Setup LIS2DW12 accelerometer driver.");
 	}
 
 	/* Setup interrupt triggers. */
 	err = update_acc_odr(MODE_12_5_HZ);
+	if (err != 0) {
+		return err;
+	}
+
+	/* NB: This overwrites the default range set in boardfile */
+	err = update_acc_range(RANGE_2G);
 	if (err != 0) {
 		return err;
 	}

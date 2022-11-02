@@ -13,7 +13,7 @@
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define RCV_PRIORITY CONFIG_RECV_THREAD_PRIORITY
 #define SOCKET_POLL_INTERVAL 0.25
-#define SOCK_RECV_TIMEOUT 5
+#define SOCK_RECV_TIMEOUT 10
 #define MODULE cellular_controller
 #define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_MSEC
 
@@ -270,7 +270,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 					new_cellular_ack_event();
 				EVENT_SUBMIT(ack);
 			}
-			int err = send_tcp_q(CharMsgOut, MsgOutLen);
+			send_tcp_q(CharMsgOut, MsgOutLen);
 //			if (err != 0) {
 //				char *sendq_err = "Couldn't push message to queue!";
 //				nf_app_error(ERR_MESSAGING, -EAGAIN, sendq_err,

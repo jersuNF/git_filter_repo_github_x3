@@ -174,7 +174,7 @@ static int start_tcp(void)
 	}
 	if (!fota_in_progress) {
 		ret = check_ip();
-		if (ret != 0){
+		if (ret != 0) {
 			LOG_ERR("Failed to get ip address!");
 		char *e_msg = "Failed to get ip address!";
 		nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
@@ -271,15 +271,6 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 				EVENT_SUBMIT(ack);
 			}
 			send_tcp_q(CharMsgOut, MsgOutLen);
-//			if (err != 0) {
-//				char *sendq_err = "Couldn't push message to queue!";
-//				nf_app_error(ERR_MESSAGING, -EAGAIN, sendq_err,
-//					     strlen(sendq_err));
-//				k_free(CharMsgOut);
-//				CharMsgOut = NULL;
-//				sending_in_progress = false;
-//				return false;
-//			}
 		} else {
 			LOG_WRN("Dropping message!");
 		}

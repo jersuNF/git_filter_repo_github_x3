@@ -21,7 +21,7 @@ LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 static const struct device *sensor;
 
 /* +∕- fullscale range [g] */
-static enum acc_scale{RANGE_2G=2, RANGE_4G=4, RANGE_8G=8, RANGE_16G=16};
+typedef enum {RANGE_2G=2, RANGE_4G=4, RANGE_8G=8, RANGE_16G=16}acc_scale_t;
 
 /** @todo Add to make configurable from messaging.c event. Also storage settings? */
 static uint16_t off_animal_time_limit_sec = OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT;
@@ -394,11 +394,10 @@ static int update_acc_odr(acc_mode_t mode_hz)
 	return 0;
 }
 
-static int update_acc_range(enum acc_scale)
+static int update_acc_range(acc_scale_t scale)
 {
-
 	struct sensor_value range;
-	sensor_g_to_ms2((uint8_t) acc_scale, &range);
+	sensor_g_to_ms2((uint8_t) scale, &range);
 	int ret = sensor_attr_set(sensor, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_FULL_SCALE,
 			    &range);
 	if (ret != 0) {

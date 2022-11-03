@@ -17,7 +17,7 @@ LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 #define STEPS_TRIGGER 1
 #define ACC_FIFO_ELEMENTS 32
 #define SENSOR_SAMPLE_INTERVAL_MS 100
-
+#define GRAVITY 9.806650
 static const struct device *sensor;
 
 /* +∕- fullscale range [g] */
@@ -185,7 +185,6 @@ void process_acc_data(raw_acc_data_t *acc)
 			(acc_std_final * 2) /
 				(ACC_STD_EXP_MOVING_AVERAGE_N + 1);
 	}
-	acc_std_final = 16*acc_std_final;
 
 	/* Determine current activity level, the number below is based 
          * on 8 HW_F, HW_J collars placed outside on a flower-bed at 
@@ -332,12 +331,20 @@ void fetch_and_display(const struct device *sensor)
 		return;
 	}
 
-	raw_acc_data_t data;
-	data.x = (int16_t)(sensor_value_to_double(&accel[0]) * 1000);
-	data.y = (int16_t)(sensor_value_to_double(&accel[1]) * 1000);
-	data.z = (int16_t)(sensor_value_to_double(&accel[2]) * 1000);
+	/* Convert from m/s² to mg */
+	int32_t accel_mg[3];
+	accel_mg[0] = (int32_t)((sensor_value_to_double(&accel[0])/GRAVITY) * 1000);
+	accel_mg[1] = (int32_t)((sensor_value_to_double(&accel[1])/GRAVITY) * 1000);
+	accel_mg[2] = (int32_t)((sensor_value_to_double(&accel[2])/GRAVITY) * 1000);
 
-	LOG_DBG("Acc X: %d, Y: %d, Z: %d", data.x, data.y, data.z);
+	LOG_DBG("Acceleration [mg]: X: %d, Y: %d, Z: %d", accel_mg[0] , accel_mg[1] ,accel_mg[2]);
+	
+	raw_acc_data_t data;
+	data.x = (int16_t)(accel_mg[0] * 16); // Multiply with legacy constant
+	data.y = (int16_t)(accel_mg[1] * 16); // Multiply with legacy constant
+	data.z = (int16_t)(accel_mg[2] * 16); // Multiply with legacy constant
+
+	LOG_DBG("Raw values:  X: %d, Y: %d, Z: %d", data.x, data.y, data.z);
 
 	while (k_msgq_put(&acc_data_msgq, &data, K_NO_WAIT) != 0) {
 		/* Message queue is full: purge old data & try again */

@@ -14,16 +14,13 @@ LOG_MODULE_REGISTER(amc_states, CONFIG_AMC_LIB_LOG_LEVEL);
 #include "amc_gnss.h"
 #include "amc_const.h"
 #include "amc_correction.h"
-#include "nf_settings.h"
+#include "stg_config.h"
 #include "gnss.h"
 #include "gnss_controller_events.h"
 #include "messaging_module_events.h"
-
 #include "error_event.h"
-
 #include "ble_beacon_event.h"
 #include "movement_events.h"
-
 #include "movement_controller.h"
 #include "pwr_event.h"
 
@@ -35,17 +32,17 @@ static uint8_t teach_mode_finished = 0;
 static uint32_t teach_mode_saved_warn_cnt = 0;
 static uint32_t teach_mode_saved_zap_cnt = 0;
 
-static uint32_t total_warn_cnt;
-static uint16_t total_zap_cnt;
+static uint32_t total_warn_cnt = 0;
+static uint16_t total_zap_cnt = 0;
 
 /* Fence status related variables. */
 static uint8_t pain_cnt_def_free = _PAIN_CNT_DEF_ESCAPED;
 
 /** Runtime, cached variables. Some get their values come from
- *  eeprom on init.
+ *  ext flash on init.
  */
 static Mode current_mode = Mode_Mode_UNKNOWN;
-static FenceStatus current_fence_status = FenceStatus_NotStarted;
+static FenceStatus current_fence_status = FenceStatus_FenceStatus_UNKNOWN;
 static CollarStatus current_collar_status = CollarStatus_CollarStatus_UNKNOWN;
 static gnss_mode_t current_gnss_mode = GNSSMODE_NOMODE;
 
@@ -93,25 +90,29 @@ void reset_zap_pain_cnt(void)
 	zap_pain_cnt = 0;
 }
 
+uint16_t get_zap_pain_cnt(void)
+{
+	return zap_pain_cnt;
+}
+
 void increment_zap_count(void)
 {
+	int err;
 	teach_zap_cnt++;
 	zap_pain_cnt++;
 
 	total_zap_cnt++;
-	int err = eep_uint16_write(EEP_ZAP_CNT_TOT, total_zap_cnt);
-
-	if (err) {
-		LOG_ERR("Could not write zap count total %i", err);
+	err = stg_config_u16_write(STG_U16_ZAP_CNT_TOT, total_zap_cnt);
+	if (err != 0) {
+		LOG_ERR("Could not write zap count total, error %i", err);
 		return;
 	}
 
 	/** @todo Add reset for the day. */
 	zap_count_day++;
-	err = eep_uint16_write(EEP_ZAP_CNT_DAY, zap_count_day);
-
-	if (err) {
-		LOG_ERR("Could not write zap count day %i", err);
+	err = stg_config_u16_write(STG_U16_ZAP_CNT_DAY, zap_count_day);
+	if (err != 0) {
+		LOG_ERR("Could not write zap count day, error %i", err);
 		return;
 	}
 
@@ -125,31 +126,30 @@ void reset_zap_count_day()
 {
 	/** @todo Should it be 0xFF or 0? */
 	zap_count_day = 0;
-	int err = eep_uint16_write(EEP_ZAP_CNT_DAY, zap_count_day);
-
-	if (err) {
-		LOG_ERR("Could not reset zap count day %i", err);
+	int err = stg_config_u16_write(STG_U16_ZAP_CNT_DAY, zap_count_day);
+	if (err != 0) {
+		LOG_ERR("Could not reset zap count day, error %i", err);
 		return;
 	}
 }
 
-void cache_eeprom_variables(void)
+void cache_storage_variables(void)
 {
-	int err = eep_uint16_read(EEP_ZAP_CNT_TOT, &total_zap_cnt);
-	if (err) {
-		LOG_ERR("Could not read zap count total %i", err);
+	int err = stg_config_u16_read(STG_U16_ZAP_CNT_TOT, &total_zap_cnt);
+	if (err != 0) {
+		LOG_ERR("Could not read zap count total, error %i", err);
 		return;
 	}
 
-	err = eep_uint32_read(EEP_WARN_CNT_TOT, &total_warn_cnt);
-	if (err) {
-		LOG_ERR("Could not read warn count total %i", err);
+	err = stg_config_u32_read(STG_U32_WARN_CNT_TOT, &total_warn_cnt);
+	if (err != 0) {
+		LOG_ERR("Could not read warn count total, error %i", err);
 		return;
 	}
 
-	err = eep_uint16_read(EEP_ZAP_CNT_DAY, &zap_count_day);
-	if (err) {
-		LOG_ERR("Could not read zap count day %i", err);
+	err = stg_config_u16_read(STG_U16_ZAP_CNT_DAY, &zap_count_day);
+	if (err != 0) {
+		LOG_ERR("Could not read zap count day, error %i", err);
 		return;
 	}
 }
@@ -159,12 +159,13 @@ void increment_warn_count(void)
 	teach_warn_cnt++;
 	total_warn_cnt++;
 
-	/** @todo Periodic eeprom write ? 
+	/** @todo Periodic ext flash write ? 
 	  * Write everytime total_warn_cnt % n == true? 
 	  */
-	int err = eep_uint32_write(EEP_WARN_CNT_TOT, total_warn_cnt);
-	if (err) {
-		LOG_ERR("Could not write warn count total %i", err);
+
+	int err = stg_config_u32_write(STG_U32_WARN_CNT_TOT, total_warn_cnt);
+	if (err != 0) {
+		LOG_ERR("Could not write warn count total, error %i", err);
 		return;
 	}
 }
@@ -172,30 +173,30 @@ void increment_warn_count(void)
 static void enter_teach_mode()
 {
 	int err;
-
+	
 	uint32_t warn_cnt = 0;
+	err = stg_config_u32_read(STG_U32_WARN_CNT_TOT, &warn_cnt);
+	if (err != 0) {
+		LOG_ERR("Could not read warn count total, error %i", err);
+	}
+
 	uint16_t zap_cnt = 0;
-
-	err = eep_uint32_read(EEP_WARN_CNT_TOT, &warn_cnt);
-	if (err) {
-		LOG_ERR("Could not read warn count total %i", err);
+	err = stg_config_u16_read(STG_U16_ZAP_CNT_TOT, &zap_cnt);
+	if (err != 0) {
+		LOG_ERR("Could not read zap count total, error %i", err);
 	}
 
-	err = eep_uint16_read(EEP_ZAP_CNT_TOT, &zap_cnt);
-	if (err) {
-		LOG_ERR("Could not read zap count total %i", err);
-	}
-
-	err = eep_uint8_read(EEP_TEACH_MODE_FINISHED, &teach_mode_finished);
-	if (err) {
-		LOG_ERR("Could not read teach mode finished %i", err);
+	err = stg_config_u8_read(STG_U8_TEACH_MODE_FINISHED, &teach_mode_finished);
+	if (err != 0) {
+		LOG_ERR("Could not read teach mode finished, error %i", err);
 	}
 	if (teach_mode_finished != 0) {
 		teach_mode_finished = 0;
 
-		err = eep_uint8_write(EEP_TEACH_MODE_FINISHED, teach_mode_finished);
-		if (err) {
-			LOG_ERR("Could not write teach mode finished %i", err);
+		err = stg_config_u8_write(STG_U8_TEACH_MODE_FINISHED, 
+				teach_mode_finished);
+		if (err != 0) {
+			LOG_ERR("Could not write teach mode finished, error %i", err);
 		}
 	}
 	teach_mode_saved_warn_cnt = (uint16_t)warn_cnt;
@@ -204,12 +205,13 @@ static void enter_teach_mode()
 
 void force_teach_mode()
 {
+	int err;
 	if (current_mode != Mode_Teach) {
 		current_mode = Mode_Teach;
 		
-		int err = eep_uint8_write(EEP_COLLAR_MODE, (uint8_t)current_mode);
-		if (err) {
-			LOG_ERR("Could not write to collar mode %i ", err);
+		err = stg_config_u8_write(STG_U8_COLLAR_MODE, (uint8_t)current_mode);
+		if (err != 0) {
+			LOG_ERR("Could not write to collar mode, error %i ", err);
 		}
 
 		enter_teach_mode();
@@ -223,22 +225,37 @@ void force_teach_mode()
 
 void init_states_and_variables(void)
 {
-	cache_eeprom_variables();
-	uint8_t status_code = 0;
-
+	cache_storage_variables();
+	
 	/* Collar mode. */
-	int err = eep_uint8_read(EEP_COLLAR_MODE, &status_code);
+	uint8_t collar_mode = 0;
+	int err = stg_config_u8_read(STG_U8_COLLAR_MODE, &collar_mode);
 	if (err) {
 		LOG_ERR("Could not read collar mode %i", err);
-		status_code = Mode_Mode_UNKNOWN;
+		collar_mode = Mode_Mode_UNKNOWN;
 	}
-	current_mode = (Mode)status_code;
-
-	/** @todo should remove EEP_FENCE_STATUS/EEP_COLLAR_STATUS FROM EEPROM. */
-
+	current_mode = (Mode)collar_mode;
 	if (current_mode == Mode_Teach) {
 		enter_teach_mode();
 	}
+
+	/* Read collar status from eeprom */
+	uint8_t collar_status = 0;
+	err = stg_config_u8_read(STG_U8_COLLAR_STATUS, &collar_status);
+	if (err) {
+		LOG_ERR("Could not read collar mode %i", err);
+		collar_status = CollarStatus_CollarStatus_UNKNOWN;
+	}
+	current_collar_status = (CollarStatus)collar_status;
+
+	/* Read fence status from eeprom */
+	uint8_t fence_status = 0;
+	err = stg_config_u8_read(STG_U8_FENCE_STATUS, &fence_status);
+	if (err) {
+		LOG_ERR("Could not read collar mode %i", err);
+		fence_status = FenceStatus_FenceStatus_UNKNOWN;
+	}
+	current_fence_status = (FenceStatus)fence_status;
 
 	LOG_INF("Cached AMC states: Collarmode %i, collarstatus %i, fencestatus %i",
 		current_mode, current_fence_status, current_collar_status);
@@ -271,6 +288,7 @@ Mode get_mode(void)
 
 Mode calc_mode(void)
 {
+	int err;
 	uint32_t teach_zap_cnt = total_zap_cnt - teach_mode_saved_zap_cnt;
 	uint32_t teach_warn_cnt = total_warn_cnt - teach_mode_saved_warn_cnt;
 
@@ -302,8 +320,12 @@ Mode calc_mode(void)
 			/** @todo Need to set to 0 when going from
 			 *  Fence -> Teach
 			 */
-			eep_uint8_write(EEP_TEACH_MODE_FINISHED,
+			err = stg_config_u8_write(STG_U8_TEACH_MODE_FINISHED, 
 					teach_mode_finished);
+			if (err != 0) {
+				LOG_ERR("Failed to write to ext flash, id %d, error %d",
+					STG_U8_TEACH_MODE_FINISHED, err);
+			}
 		}
 		break;
 	case Mode_Fence:
@@ -329,13 +351,14 @@ Mode calc_mode(void)
 		break;
 	}
 
-	/* If new mode, write to EEPROM. */
+	/* If new mode, write to ext flash storage. */
 	if (current_mode != new_mode) {
 		current_mode = new_mode;
-		int err = eep_uint8_write(EEP_COLLAR_MODE, (uint8_t)new_mode);
 
-		if (err) {
-			LOG_ERR("Could not write to collar mode %i ", err);
+		err = stg_config_u8_write(STG_U8_COLLAR_MODE, (uint8_t)new_mode);
+		if (err != 0) {
+			LOG_ERR("Failed to write new collar mode to ext flash, error %i ", 
+				err);
 		}
 
 		/* Notify server about mode change. */
@@ -343,7 +366,6 @@ Mode calc_mode(void)
 		mode_ev->collar_mode = current_mode;
 		EVENT_SUBMIT(mode_ev);
 	}
-
 	return new_mode;
 }
 
@@ -383,6 +405,7 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 				LOG_INF("FenceStatus:Unknown->NotStarted");
 			}
 			break;
+
 		}
 		case FenceStatus_NotStarted: {
 			if (beacon_status == BEACON_STATUS_REGION_NEAR) {
@@ -469,13 +492,15 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 		}
 	}
 
-	/* If new status, write to EEPROM. */
+	/* If new status, write to ext flash storage */
 	if (current_fence_status != new_fence_status) {
 		current_fence_status = new_fence_status;
-		int err = eep_uint8_write(EEP_FENCE_STATUS, 
+
+		int err = stg_config_u8_write(STG_U8_FENCE_STATUS, 
 					(uint8_t)current_fence_status);
-		if (err) {
-			LOG_ERR("Could not write to fence status %i ", err);
+		if (err != 0) {
+			LOG_ERR("Failed to write new fence status to ext flash, error %i ", 
+				err);
 		}
 
 		/* Notify server about fence status change. */
@@ -494,7 +519,6 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence,
 
 int force_fence_status(FenceStatus new_fence_status)
 {
-	/* Only fence status "Unknown", "NotStarted" and "Invalid" can be forced */
 	if ((new_fence_status != FenceStatus_FenceStatus_UNKNOWN) && 
 		(new_fence_status != FenceStatus_NotStarted) &&
 		(new_fence_status != FenceStatus_FenceStatus_Invalid) &&
@@ -503,16 +527,17 @@ int force_fence_status(FenceStatus new_fence_status)
 	}
 
 	if (new_fence_status != current_fence_status) {
-		if ((new_fence_status == FenceStatus_NotStarted) && 
+		if ((new_fence_status == FenceStatus_NotStarted) &&
 			(fnc_valid_def() != true)) {
 			LOG_WRN("Unable to force fence status");
 			return -EACCES;
 		}
 
-		/* Write new fence status to eeprom */
-		int err = eep_uint8_write(EEP_FENCE_STATUS, (uint8_t)new_fence_status);
-		if (err) {
-			LOG_WRN("Unable to write fence status to eeprom, error:%d", err);
+		/* Write new fence status to ext flash storage */
+		int err = stg_config_u8_write(STG_U8_FENCE_STATUS, (uint8_t)new_fence_status);
+		if (err != 0) {
+			LOG_WRN("Failed to write new fence status to ext flash, error:%d", 
+				err);
 			return -EACCES;
 		}
 
@@ -530,7 +555,6 @@ int force_fence_status(FenceStatus new_fence_status)
 CollarStatus calc_collar_status(void)
 {
 	movement_state_t mov_state = atomic_get(&movement_state);
-
 	CollarStatus new_collar_status = current_collar_status;
 
 	switch (current_collar_status) {
@@ -601,20 +625,21 @@ CollarStatus calc_collar_status(void)
 	}
 
 	/* Added to enable power off mode without power switch. 
-	 * Trigged by low battery voltage.
-	 */
+	 * Trigged by low battery voltage. */
 	if (atomic_get(&power_state) == PWR_CRITICAL) {
 		new_collar_status = CollarStatus_PowerOff;
 		LOG_INF("CollarStatus:...->PowerOff");
 	}
 
-	/* If new status, write to EEPROM. */
+	/* If new status, write to ext flash storage. */
 	if (current_collar_status != new_collar_status) {
 		current_collar_status = new_collar_status;
-		int err = eep_uint8_write(EEP_COLLAR_STATUS, 
+
+		int err = stg_config_u8_write(STG_U8_COLLAR_STATUS, 
 					(uint8_t)current_collar_status);
-		if (err) {
-			LOG_ERR("Could not write to collar status %i ", err);
+		if (err != 0) {
+			LOG_ERR("Failed to write new collar status to ext flash, error %i ", 
+				err);
 		}
 
 		/* Notify server about collar status change. */

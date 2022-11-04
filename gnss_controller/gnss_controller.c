@@ -32,7 +32,7 @@ static int gnss_set_mode(gnss_mode_t mode);
 static uint16_t current_rate;
 
 static gnss_t gnss_data_buffer;
-gnss_mode_t current_mode = GNSSMODE_NOMODE;
+static gnss_mode_t current_mode = GNSSMODE_NOMODE;
 
 
 const struct device *gnss_dev = NULL;
@@ -101,11 +101,9 @@ int gnss_controller_init(void)
 {
 	gnss_reset_count = 0;
 
-	printk("Initializing gnss controller!\n");
 	gnss_dev = DEVICE_DT_GET(DT_ALIAS(gnss));
 	if (gnss_dev == NULL) {
 		char *msg = "Couldn't get instance of the GNSS device!";
-		printk("%s", msg);
 		nf_app_error(ERR_GNSS_CONTROLLER, -1, msg, sizeof(*msg));
 		return -1;
 	}
@@ -132,28 +130,6 @@ int gnss_controller_init(void)
 		pub_gnss_started = true;
 	}
 
-	/* power consumption crude test - begin
-	ret = gnss_set_rate(gnss_dev, MIN_GNSS_RATE);
-	if(ret != 0){
-		LOG_WRN("Switched to 4Hz!\n");
-	}
-	while (true){
-		LOG_WRN("Attempting GNSS stop!\n");
-		ret = gnss_reset(gnss_dev, GNSS_RESET_MASK_COLD,
-				 GNSS_RESET_MODE_GNSS_STOP);
-		if (ret != 0){
-			LOG_WRN("Finished GNSS stop!\n");
-		}
-
-		k_sleep(K_SECONDS(30));
-		LOG_WRN("Attempting GNSS start!\n");
-		ret = gnss_reset(gnss_dev, GNSS_RESET_MASK_COLD,
-				 GNSS_RESET_MODE_GNSS_START);
-		if (ret != 0){
-			LOG_WRN("Finished GNSS start!\n");
-		}
-	}
-power consumption crude test - end */
 	return 0;
 }
 
@@ -177,7 +153,9 @@ static _Noreturn void publish_gnss_data(void *ctx)
 			initialized = true;
 		} else {
 			last_time_stamp = 0;
-			if (initialized) gnss_timed_out();
+			if (initialized && current_mode != GNSSMODE_INACTIVE) {
+                gnss_timed_out();
+            }
 		}
 		if (gnss_data_buffer.lastfix.msss >= MS_IN_49_DAYS) {
 			gnss_reset_count = 10;
@@ -195,26 +173,25 @@ static int gnss_data_update_cb(const gnss_t *data)
 
 static int gnss_set_mode(gnss_mode_t mode)
 {
+    int ret;
+    ret = gnss_wakeup(gnss_dev);
+    if (ret != 0) {
+        LOG_ERR("gnss_wakeup failed %d",ret);
+        return ret;
+    }
 	/** @todo Add mode changes here. Should be in the gnss driver???? */
-	switch (mode) {
-	case GNSSMODE_INACTIVE:
-		/*GPS_SetPowerMode_Backup();*/
-		break;
-	case GNSSMODE_PSM:
-		/*GPS_SetPowerMode_PSM(PSM_DEFAULT_PACC_M);*/
-		break;
-	case GNSSMODE_CAUTION:
-		/*GPS_SetPowerMode_CAUTION();*/
-		break;
-	case GNSSMODE_MAX:
-		/*GPS_SetPowerMode_MAX();*/
-		break;
-	default:
-		break;
-	}
+	if (mode == GNSSMODE_INACTIVE) {
+        ret = gnss_set_backup_mode(gnss_dev);
+        if (ret != 0) {
+            char *msg = "Failed to set receiver backup mode!";
+            nf_app_error(ERR_GNSS_CONTROLLER, ret, msg,
+                         sizeof(*msg));
+        }
+    } else if (mode == GNSSMODE_PSM || mode == GNSSMODE_CAUTION || mode == GNSSMODE_MAX) {
+       /* @todo change mode according to these domain-specific modes */
+    }
 
-	/*GPS_UpdatePowerMode();*/
-	return 0;
+	return ret;
 }
 
 static bool gnss_controller_event_handler(const struct event_header *eh)
@@ -234,12 +211,7 @@ static bool gnss_controller_event_handler(const struct event_header *eh)
 		}
 		return false;
 	} else if (is_gnss_switch_off(eh)) {
-		int ret = 0; //gnss_switch_off(gnss_dev);
-		if (ret != 0) {
-			char *msg = "Failed to switch OFF GNSS receiver!";
-			nf_app_error(ERR_GNSS_CONTROLLER, ret, msg,
-				     sizeof(*msg));
-		}
+
 		return false;
 	} else if (is_gnss_switch_on(eh)) {
 		int ret = 0; //gnss_switch_on(gnss_dev);
@@ -251,9 +223,12 @@ static bool gnss_controller_event_handler(const struct event_header *eh)
 		return false;
 	} else if (is_gnss_set_mode_event(eh)) {
 		struct gnss_set_mode_event *ev = cast_gnss_set_mode_event(eh);
+        LOG_INF("MODE = %d old = %d ",ev->mode,current_mode);
 		if (ev->mode != current_mode) {
+            LOG_INF("setting mode");
 			int ret = gnss_set_mode(ev->mode);
 			if (ret != 0) {
+                LOG_ERR("Failed to set mode %d",ret);
 				char *msg = "Failed to set GNSS receiver mode";
 				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg,
 					     sizeof(*msg));
@@ -282,7 +257,6 @@ EVENT_SUBSCRIBE(MODULE, gnss_set_mode_event);
 static void gnss_timed_out(void)
 {
 	LOG_DBG("resets %d", gnss_reset_count);
-
 	if (gnss_reset_count < 1) {
 		gnss_reset_count++;
 		gnss_controller_reset_gnss(GNSS_RESET_MASK_HOT);

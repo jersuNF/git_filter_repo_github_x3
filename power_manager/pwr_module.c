@@ -7,7 +7,6 @@
 #include <device.h>
 #include <devicetree.h>
 #include <drivers/gpio.h>
-
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,7 +18,7 @@
 #include "ble_ctrl_event.h"
 #include "watchdog_event.h"
 #include "messaging_module_events.h"
-#include "nf_settings.h"
+#include "stg_config.h"
 
 #if CONFIG_CLOCK_CONTROL_NRF
 #include <drivers/clock_control.h>
@@ -286,16 +285,16 @@ int pwr_module_reboot_reason(uint8_t *aReason)
 	int err = 0;
 	if (m_my_reboot_reason == REBOOT_REASON_CNT)
 	{
-		err = eep_uint8_read(EEP_RESET_REASON, &m_my_reboot_reason);
+		err = stg_config_u8_read(STG_U8_RESET_REASON, &m_my_reboot_reason);
 		if (err != 0) {
-			LOG_ERR("Unable to read reboot reason from eeprom");
+			LOG_ERR("Unable to read reboot reason from stg flash");
 			m_my_reboot_reason = REBOOT_UNKNOWN;
 		}
 
 		/* Set reboot reason in eeprom to REBOOT_UNKNOWN after read in 
 		 * case of enexpected reboot */
-		if (eep_uint8_write(EEP_RESET_REASON, REBOOT_UNKNOWN) != 0) {
-			LOG_ERR("Unable to reset reboot reason in eeprom!");
+		if (stg_config_u8_write(STG_U8_RESET_REASON, REBOOT_UNKNOWN) != 0) {
+			LOG_ERR("Unable to reset reboot reason in stg flash!");
 		}
 	}
 	*aReason = m_my_reboot_reason;
@@ -318,23 +317,22 @@ static bool event_handler(const struct event_header *eh)
 
 		int err;
 		if ((evt->reason >= 0) && (evt->reason < REBOOT_REASON_CNT)) {
-			err = eep_uint8_write(EEP_RESET_REASON, evt->reason);
+			err = stg_config_u8_write(STG_U8_RESET_REASON, 
+					(uint8_t)evt->reason);
 		} else {
-			err = eep_uint8_write(EEP_RESET_REASON, REBOOT_UNKNOWN);
+			err = stg_config_u8_write(STG_U8_RESET_REASON, 
+					(uint8_t)REBOOT_UNKNOWN);
 		}
 		if (err != 0) {
-			LOG_ERR("Unable to write reboot reason to eeprom, err:%d",
-				err);
+			LOG_ERR("Failed to write reboot reason to ext flash, err:%d", err);
 		}
 		LOG_INF("Reboot event received, reason:%d", evt->reason);
 
-		k_work_reschedule(&power_reboot,
-				  K_SECONDS(CONFIG_SHUTDOWN_TIMER_SEC));
+		k_work_reschedule(&power_reboot, K_SECONDS(CONFIG_SHUTDOWN_TIMER_SEC));
 		return false;
 	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
-
 	return false;
 }
 

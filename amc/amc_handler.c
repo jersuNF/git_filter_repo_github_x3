@@ -25,6 +25,7 @@
 #include "ble_beacon_event.h"
 #include "movement_events.h"
 #include "storage.h"
+#include "stg_config.h"
 
 #define MODULE amc
 LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
@@ -132,13 +133,24 @@ void handle_gnss_data_fn(struct k_work *item);
  */
 static bool event_handler(const struct event_header *eh);
 
-
 static inline int update_pasture_from_stg(void)
 {
 	int err;
+	/* Add check for fence status, in case collar has rebooted after invalidation */
+	if (get_fence_status() == FenceStatus_TurnedOffByBLE) {
+		LOG_WRN("Fence is turned off by BLE");
+		/* Submit event that we have now begun to use the new fence. */
+		struct update_fence_version *ver = new_update_fence_version();
+		ver->fence_version = UINT32_MAX;
+		ver->total_fences = 0;
+		EVENT_SUBMIT(ver);
+		return 0;
+	}
+
 	err = stg_read_pasture_data(set_pasture_cache);
 	if (err == -ENODATA) {
 		char *err_msg = "No pasture found on external flash.";
+		LOG_WRN("%s (%d)", log_strdup(err_msg), err);
 		nf_app_warning(ERR_AMC, err, err_msg, strlen(err_msg));
 		/* Submit event that we have now begun to use the new fence. */
 		struct update_fence_version *ver = new_update_fence_version();
@@ -148,6 +160,7 @@ static inline int update_pasture_from_stg(void)
 		return 0;
 	} else if (err) {
 		char *err_msg = "Couldn't update pasture cache in AMC.";
+		LOG_ERR("%s (%d)", log_strdup(err_msg), err);
 		nf_app_fatal(ERR_AMC, err, err_msg, strlen(err_msg));
 
 		/* Set pasture/fence to invalid */
@@ -157,9 +170,9 @@ static inline int update_pasture_from_stg(void)
 
 	/* Success setting the pasture. set to teach mode if not keepmode active. */
 	uint8_t keep_mode;
-	err = eep_uint8_read(EEP_KEEP_MODE, &keep_mode);
-	if (err) {
-		char *e_msg = "Error reading keep mode from eeprom.";
+	err = stg_config_u8_read(STG_U8_KEEP_MODE, &keep_mode);
+	if (err != 0) {
+		char *e_msg = "Error reading keep mode from storage.";
 		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
 		nf_app_warning(ERR_AMC, err, e_msg, strlen(e_msg));
 
@@ -235,9 +248,18 @@ static inline int update_pasture_from_stg(void)
 
 void handle_new_fence_fn(struct k_work *item)
 {
+	int err;
 	m_fence_update_pending = true;
 	zone_set(NO_ZONE);
-	int err = update_pasture_from_stg();
+
+	if (get_fence_status() == FenceStatus_TurnedOffByBLE) {
+		err = force_fence_status(FenceStatus_FenceStatus_UNKNOWN);
+		if (err != 0) {
+			LOG_ERR("Set fence status to UNKNOWN failed %d", err);
+		}
+	}
+
+	err = update_pasture_from_stg();
 	if (err != 0) {
 		LOG_WRN("Fence update request denied, error:%d", err);
 	}
@@ -406,6 +428,7 @@ void handle_gnss_data_fn(struct k_work *item)
 				if (++fifo_avg_dist_elem_count >= FIFO_AVG_DISTANCE_ELEMENTS) {
 					fifo_avg_dist_elem_count = FIFO_AVG_DISTANCE_ELEMENTS;
 				}
+
 			}
 		} else {
 			LOG_INF("  Does not have accepted fix!");
@@ -421,7 +444,6 @@ void handle_gnss_data_fn(struct k_work *item)
 			dist_inc_count = fifo_inc_cnt(dist_array, FIFO_ELEMENTS);
 			acc_delta = fifo_delta(acc_array, FIFO_ELEMENTS);
 			height_delta = fifo_delta(height_avg_array, FIFO_ELEMENTS);
-
 			if (fifo_avg_dist_elem_count >= FIFO_AVG_DISTANCE_ELEMENTS) {
 				dist_avg_change = fifo_slope(dist_avg_array, 
 							FIFO_AVG_DISTANCE_ELEMENTS);
@@ -430,7 +452,7 @@ void handle_gnss_data_fn(struct k_work *item)
 		LOG_INF("  mean_dist: %d, dist_change: %d, dist_inc_count: %d, acc_delta: %d, height_delta: %d", 
 					mean_dist, dist_change, dist_inc_count, acc_delta, 
 					height_delta);
-
+		
 		int16_t dist_incr_slope_lim = 0;
 		uint8_t dist_incr_count = 0;
 
@@ -562,6 +584,13 @@ static bool event_handler(const struct event_header *eh)
 		if (err != 0) {
 			LOG_ERR("Turn off fence over BLE failed %d", err);
 		}
+		/* Update fence version to set valid fence advertised to false */
+		struct update_fence_version *ver = new_update_fence_version();
+		ver->fence_version = UINT32_MAX;
+		ver->total_fences = 0;
+		EVENT_SUBMIT(ver);
+
+		return false;
 	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);

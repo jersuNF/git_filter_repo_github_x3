@@ -112,11 +112,12 @@ int play_from_ms(const uint32_t period, const uint32_t sustain,
 			USEC_PER_SEC * CONFIG_BUZZER_LONGEST_NOTE_SUSTAIN - 1));
 	}
 
+	int pwm_idle_err;
 	if (k_sem_take(&abort_sound_sem, dur) == 0) {
 		err = -EINTR;
 	}
 
-	int pwm_idle_err = set_pwm_to_idle();
+	pwm_idle_err = set_pwm_to_idle();
 	if (pwm_idle_err) {
 		return pwm_idle_err;
 	}
@@ -207,6 +208,9 @@ void play_cattle(void)
 	}
 
 	err = play_hz(i, 500 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+	if (err) {
+		return;
+	}
 
 	for (; i > 250; i -= 3) {
 		err = play_hz(i, 4000, BUZZER_SOUND_VOLUME_PERCENT);

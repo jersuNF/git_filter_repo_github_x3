@@ -190,6 +190,10 @@ static inline int init_fcb_on_partition(flash_partition_t partition)
 		return err;
 	}
 
+	LOG_DBG("FCB Init: Partition(%d), AreaID(%d), FaID(%d), FaOff(%d), FaSize(%d)", 
+		partition, area_id, (uint8_t)area->fa_id, (int)area->fa_off, 
+		(int)area->fa_size);
+
 	/* Check if area has a flash device available. */
 	dev = device_get_binding(area->fa_dev_name);
 	flash_area_close(area);

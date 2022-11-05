@@ -277,10 +277,9 @@ int read_and_send_log_data_cb(uint8_t *data, size_t len)
 	uint16_t new_len = *(uint16_t*) &data[0];
 	memcpy(&encoded_msg[0], &data[0], new_len);
 	int err = send_binary_message(encoded_msg, new_len);
-	if (err) {
-		char *e_msg = "Error sending binary message for log data";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+	if (err != 0) {
+		return err;
+		LOG_ERR("Error sending binary message for log data");
 	}
 	k_yield();
 	return err;
@@ -1425,19 +1424,17 @@ int send_binary_message(uint8_t *data, size_t len)
 		return -EIO;
 	}
 	/* We can only send 1 message at a time, use mutex. */
-	if (k_mutex_lock(&send_binary_mutex,
-			 K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC * 2)) == 0) {
+	if (k_mutex_lock(&send_binary_mutex, K_SECONDS
+			 (CONFIG_CC_ACK_TIMEOUT_SEC*2)) == 0) {
 		struct check_connection *ev = new_check_connection();
 		EVENT_SUBMIT(ev);
-		k_sem_reset(&connection_ready);
+
 		int ret = k_sem_take(&connection_ready, K_FOREVER);
 		if (ret != 0) {
-			char *e_msg =
-				"Connection not ready, can't send message now!";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
-			nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
+			LOG_ERR("Connection not ready, can't send message "
+				"now!");
 			k_mutex_unlock(&send_binary_mutex);
-			return -ETIMEDOUT;
+			return ret;
 		}
 		uint16_t byteswap_size = BYTESWAP16(len - 2);
 		memcpy(&data[0], &byteswap_size, 2);
@@ -1448,17 +1445,19 @@ int send_binary_message(uint8_t *data, size_t len)
 		msg2send->len = len;
 		EVENT_SUBMIT(msg2send);
 
-		int err = k_sem_take(&send_out_ack,
+		ret = k_sem_take(&send_out_ack,
 				     K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC));
-		if (err != 0) {
+		if (ret != 0) {
 			char *e_msg = "Timed out waiting for cellular ack";
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 			k_mutex_unlock(&send_binary_mutex);
-			return -ETIMEDOUT;
+			return ret;
 		}
+		k_mutex_unlock(&send_binary_mutex);
+		return 0;
+	} else {
+		return -ETIMEDOUT;
 	}
-	k_mutex_unlock(&send_binary_mutex);
-	return 0;
 }
 
 int encode_and_send_message(NofenceMessage *msg_proto)

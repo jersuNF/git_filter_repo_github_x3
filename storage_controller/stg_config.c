@@ -14,6 +14,9 @@
 
 #include "stg_config.h"
 #include "storage.h"
+#include "nf_settings.h"
+
+#define COPY_FROM_EEPROM 1
 
 LOG_MODULE_REGISTER(stg_config, CONFIG_STG_CONFIG_LOG_LEVEL);
 
@@ -38,6 +41,14 @@ static bool m_initialized = false;
  * @return Returns the parameter type if the id is valid (See stg_param_type).
  */
 int is_valid_id(stg_config_param_id_t param_id);
+
+#if DT_NODE_HAS_STATUS(DT_ALIAS(eeprom), okay)
+/**
+ * @brief Copies all config parameters from EEPROM to flash storage.
+ * @return 0 if successful, otherwise a negative error code. 
+ */
+int copy_eeprom_parameters_to_stg_flash();
+#endif /* DT_NODE_HAS_STATUS(DT_ALIAS(eeprom), okay) */
 
 
 int stg_config_init(void)
@@ -75,6 +86,14 @@ int stg_config_init(void)
             return err;
         }
         m_initialized = true;
+
+#if DT_NODE_HAS_STATUS(DT_ALIAS(eeprom), okay)
+	err = copy_eeprom_parameters_to_stg_flash();
+	if (err != 0) {
+            LOG_ERR("STG Config, failed to copy from EEPROM");
+            return err;
+	}
+#endif /* DT_NODE_HAS_STATUS(DT_ALIAS(eeprom), okay) */
     }
     return 0;
 }
@@ -441,3 +460,257 @@ int is_valid_id(stg_config_param_id_t param_id)
     }
     return param_type;
 }
+
+#if DT_NODE_HAS_STATUS(DT_ALIAS(eeprom), okay)
+int copy_eeprom_parameters_to_stg_flash()
+{
+	int ret = 0;
+#ifdef COPY_FROM_EEPROM
+	uint8_t eep_stg_copy_val = 0;
+	ret = eep_uint8_read(EEP_STG_COPY, &eep_stg_copy_val);
+	if (ret != 0) {
+		LOG_ERR("EEP(u8) Failed to read id %d, err %d", EEP_STG_COPY, 
+			ret);
+		return ret;
+	}
+
+	uint32_t eep_serial_no = 0;
+	ret = eep_uint32_read(EEP_UID, &eep_serial_no);
+	if (ret != 0) {
+		LOG_ERR("EEP(u8) Failed to read id %d, err %d", EEP_UID, ret);
+		return ret;
+	}
+
+	/* Do a compare and copy if EEP_STG_COPY flag is 0 */
+	int success = 0;
+	if (((eep_stg_copy_val == 0) || (eep_stg_copy_val == UINT8_MAX)) &&
+		(eep_serial_no > 0) && (eep_serial_no != UINT32_MAX)) {
+
+		uint8_t eep_u8_val;
+		uint8_t stg_u8_val;
+		for (int i = 0; i < (EEP_RESET_REASON + 1); i++) {
+			/* Copy every uint8 parameter from the EEPROM to the 
+			 * flash, except the EEP_STG_COPY flag which only reside 
+			 * in the actual EEPROM */
+
+			/* Read uint8 EEP value */
+			eep_u8_val = 0;
+			ret = eep_uint8_read(i, &eep_u8_val);
+			if (ret != 0) {
+				success = -1;
+				LOG_ERR("EEP(u8) Failed to read id %d, err %d", 
+					i, ret);
+			}
+
+			/* Read uint8 STG value */
+			stg_u8_val = 0;
+			ret = stg_config_u8_read(i, &stg_u8_val);
+			if (ret != 0) {
+				success = -1;
+				LOG_ERR("STG(u8) Failed to read id %d, err %d", 
+					i, ret);
+			}
+			LOG_INF("EEPvsSTG(u8): Id = %d, EEP = %d, STG = %d", i, 
+				eep_u8_val, stg_u8_val);
+
+			/* Compare and copy if eeprom and stg flash values are
+			 * not identical */
+			if (eep_u8_val != stg_u8_val) {
+				ret = stg_config_u8_write(i, eep_u8_val);
+				if (ret != 0) {
+					success = -1;
+					LOG_ERR("STG(u8) Failed to write id %d, err %d", 
+						i, ret);
+				}
+
+				stg_u8_val = 0;
+				ret = stg_config_u8_read(i, &stg_u8_val);
+				if (ret != 0) {
+					success = -1;
+					LOG_ERR("STG(u8) Failed to read id %d, err %d", 
+						i, ret);
+				}
+				LOG_INF("EEPvsSTG(u8): Id = %d, EEP = %d, STG = %d", 
+					i, eep_u8_val, stg_u8_val);
+			}
+		}
+
+		uint16_t eep_u16_val;
+		uint16_t stg_u16_val;
+		for (int i = 0; i < (EEP_PRODUCT_TYPE + 1); i++) {
+			/* Copy every uint16 parameter from the EEPROM to the 
+			 * flash */
+
+			/* Read uint16 EEP value */
+			eep_u16_val = 0;
+			ret = eep_uint16_read(i, &eep_u16_val);
+			if (ret != 0) {
+				success = -1;
+				LOG_ERR("EEP(u16) Failed to read id %d, err %d", 
+					i, ret);
+			}
+
+			/* Read uint16 STG value */
+			stg_u16_val = 0;
+			ret = stg_config_u16_read(i+14, &stg_u16_val);
+			if (ret != 0) {
+				success = -1;
+				LOG_ERR("STG(u16) Failed to read id %d(+14), err %d", 
+					i, ret);
+			}
+			LOG_INF("EEPvsSTG(u16): Id = %d(+14), EEP = %d, STG = %d", 
+				i, eep_u16_val, stg_u16_val);
+
+			/* Compare and copy if eeprom and stg flash values are
+			 * not identical */
+			if (eep_u16_val != stg_u16_val) {
+				ret = stg_config_u16_write(i+14, eep_u16_val);
+				if (ret != 0) {
+					success = -1;
+					LOG_ERR("STG(u16) Failed to write id %d(+14), err %d", 
+						i, ret);
+				}
+
+				stg_u16_val = 0;
+				ret = stg_config_u16_read(i+14, &stg_u16_val);
+				if (ret != 0) {
+					success = -1;
+					LOG_ERR("STG(u16) Failed to read id %d(+14), err %d", 
+						i, ret);
+				}
+				LOG_INF("EEPvsSTG(u16): Id = %d(+14), EEP = %d, STG = %d", 
+					i, eep_u16_val, stg_u16_val);
+			}
+		}
+
+		uint32_t eep_u32_val;
+		uint32_t stg_u32_val;
+		for (int i = 0; i < (EEP_WARN_CNT_TOT + 1); i++) {
+			/* Copy every uint32 parameter from the EEPROM to the 
+			 * flash */
+
+			/* Read uint32 EEP value */
+			eep_u32_val = 0;
+			ret = eep_uint32_read(i, &eep_u32_val);
+			if (ret != 0) {
+				success = -1;
+				LOG_ERR("EEP(u32) Failed to read id %d, err %d", 
+					i, ret);
+			}
+
+			/* Read uint32 STG value */
+			stg_u32_val = 0;
+			ret = stg_config_u32_read(i+20, &stg_u32_val);
+			if (ret != 0) {
+				success = -1;
+				LOG_ERR("STG(u32) Failed to read id %d(+20), err %d", 
+					i, ret);
+			}
+			LOG_INF("EEPvsSTG(u32): Id = %d(+20), EEP = %d, STG = %d", 
+				i, eep_u32_val, stg_u32_val);
+
+			/* Compare and copy if eeprom and stg flash values are
+			 * not identical */
+			if (eep_u32_val != stg_u32_val) {
+				ret = stg_config_u32_write(i+20, eep_u32_val);
+				if (ret != 0) {
+					success = -1;
+					LOG_ERR("STG(u32) Failed to write id %d(+20), err %d", 
+						i, ret);
+				}
+
+				stg_u32_val = 0;
+				ret = stg_config_u32_read(i+20, &stg_u32_val);
+				if (ret != 0) {
+					success = -1;
+					LOG_ERR("STG(u32) Failed to read id %d(+20), err %d", 
+						i, ret);
+				}
+				LOG_INF("EEPvsSTG(u32): Id = %d(+20), EEP = %d, STG = %d", 
+					i, eep_u32_val, stg_u32_val);
+			}
+		}
+
+		/* Copy Host Port from the EEPROM to the flash */
+		char port[STG_CONFIG_HOST_PORT_BUF_LEN];
+		memset(port, 0, sizeof(port));
+
+		/* Read Host Port from EEPROM */
+		ret = eep_read_host_port(&port[0], 
+			STG_CONFIG_HOST_PORT_BUF_LEN);
+		if (ret != 0) {
+			success = -1;
+			LOG_ERR("EEP Failed to read host port");
+		}
+		LOG_INF("EEPvsSTG(Host port): EEP = %s", port);
+
+		ret = stg_config_str_write(STG_STR_HOST_PORT, port, 
+			STG_CONFIG_HOST_PORT_BUF_LEN);
+		if (ret != 0) {
+			success = -1;
+			LOG_ERR("STG Failed to write host port to ext flash!");
+		}
+
+		char port_read[STG_CONFIG_HOST_PORT_BUF_LEN];
+		uint8_t port_len = 0;
+		ret = stg_config_str_read(STG_STR_HOST_PORT, port_read, 
+			&port_len);
+		if (ret != 0) {
+			success = -1;
+			LOG_ERR("STG Failed to read host port");
+		}
+		LOG_INF("EEPvsSTG(Host port): STG(%d) = %s", port_len, 
+			port_read);
+
+
+		/* Copy BLE key from the EEPROM to the flash */
+		uint8_t ble_key[EEP_BLE_SEC_KEY_LEN];
+		memset(ble_key, 0, sizeof(ble_key));
+
+		/* Read BLE Security key from EEPROM */
+		ret = eep_read_ble_sec_key(ble_key, EEP_BLE_SEC_KEY_LEN);
+		if (ret != 0){
+			success = -1;
+			LOG_ERR("EEP Failed to read ble key from EEPROM");
+		}
+		LOG_INF("EEP(BLE key): EEP = 0x%X%X%X%X%X%X%X%X", ble_key[0], 
+			ble_key[1], ble_key[2], ble_key[3], ble_key[4], 
+			ble_key[5], ble_key[6], ble_key[7]);
+
+		/* Write BLE Security key to flash */
+		ret = stg_config_blob_write(STG_BLOB_BLE_KEY, ble_key, 
+			EEP_BLE_SEC_KEY_LEN);
+		if (ret != 0){
+			success = -1;
+			LOG_ERR("STG Failed to write ble key to ext flash");
+		}
+
+		uint8_t stg_ble_key[EEP_BLE_SEC_KEY_LEN];
+		memset(stg_ble_key, 0, sizeof(stg_ble_key));
+		uint8_t key1_len = 0;
+		ret = stg_config_blob_read(STG_BLOB_BLE_KEY, stg_ble_key, 
+			&key1_len);
+		if (ret != 0) {
+			success = -1;
+			LOG_ERR("STG Failed to host port");
+		}
+		LOG_INF("STG(BLE key): STG(%d) = 0x%X%X%X%X%X%X%X%X", key1_len, 
+			stg_ble_key[0], stg_ble_key[1], stg_ble_key[2], 
+			stg_ble_key[3], stg_ble_key[4], stg_ble_key[5], 
+			stg_ble_key[6], stg_ble_key[7]);
+
+		/* If every parameter was successfully copied from the eeprom
+		 * to flash storage write 1 to the EEP_STG_COPY flag in the 
+		 * EEPROM */
+		if (success == 0) {
+			ret = eep_uint8_write(EEP_STG_COPY, (uint8_t)1);
+			if (ret != 0) {
+				LOG_ERR("Failed to write to EEP_STG_COPY %i", 
+					ret);
+			}
+		}
+	}
+#endif /* COPY_FROM_EEPROM */
+	return ret;
+}
+#endif /* DT_NODE_HAS_STATUS(DT_ALIAS(eeprom), okay) */

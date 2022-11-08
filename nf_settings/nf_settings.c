@@ -221,6 +221,17 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		LOG_INF("Read EEP_RESET_REASON %i", *value);
 		break;
 	}
+	case EEP_STG_COPY: {
+		offset = offsetof(struct eemem, eep_stg_copy);
+
+		/* Check for default values, i.e value read is 0xFF,
+		 * set to defualt 0, not finished. 
+		 */
+		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? 0 : *value;
+		LOG_INF("Read EEP_STG_COPY, value = %i", *value);
+		break;
+	}
 	default: {
 		return -EINVAL;
 	}
@@ -288,6 +299,10 @@ int eep_uint8_write(eep_uint8_enum_t field, uint8_t value)
 	}
 	case EEP_RESET_REASON: {
 		offset = offsetof(struct eemem, eep_reset_reason);
+		break;
+	}
+	case EEP_STG_COPY: {
+		offset = offsetof(struct eemem, eep_stg_copy);
 		break;
 	}
 	default: {

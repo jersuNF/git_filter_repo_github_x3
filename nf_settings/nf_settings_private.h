@@ -95,6 +95,8 @@ __packed struct eemem {
 
 	/** Store reset reason */
 	uint8_t eep_reset_reason;
+
+	uint8_t eep_stg_copy;
 };
 
 #endif /* X3_FW_NF_SETTINGS_PRIVATE_H */

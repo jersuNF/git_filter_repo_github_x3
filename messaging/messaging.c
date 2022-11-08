@@ -14,7 +14,7 @@
 #include "nofence_service.h"
 #include "pwr_event.h"
 #include "env_sensor_event.h"
-
+#include "pwr_module.h"
 #include "watchdog_event.h"
 #include "cellular_controller_events.h"
 #include "gnss_controller_events.h"
@@ -1147,8 +1147,7 @@ void build_poll_request(NofenceMessage *poll_req)
 				current_state.fence_version;
 	poll_req->m.poll_message_req.usBatteryVoltage = 
 				(uint16_t)atomic_get(&cached_batt);
-	poll_req->m.poll_message_req.has_ucMCUSR = 0;
-	poll_req->m.poll_message_req.ucMCUSR = 0;
+
 	poll_req->m.poll_message_req.has_xGsmInfo = true;
 
 	_GSM_INFO p_gsm_info;
@@ -1280,6 +1279,11 @@ void build_poll_request(NofenceMessage *poll_req)
 		stg_config_u8_read(STG_U8_PRODUCT_RECORD_REV, &product_record_rev);
 		poll_req->m.poll_message_req.versionInfoBOM.ucProduct_record_rev = 
 			product_record_rev;
+
+		uint8_t reboot_reason;
+		pwr_module_reboot_reason(&reboot_reason);
+		poll_req->m.poll_message_req.has_ucMCUSR = true;
+		poll_req->m.poll_message_req.ucMCUSR = reboot_reason;
 
 		/** @todo Add information of SIM card */
 #if 0

@@ -137,7 +137,10 @@ static bool m_transfer_boot_params = true;
 static bool m_confirm_acc_limits, m_confirm_ble_key;
 
 K_MUTEX_DEFINE(send_binary_mutex);
+static bool send_binary_ready = true;
 K_MUTEX_DEFINE(read_flash_mutex);
+static bool read_flash_ready = true;
+
 static bool reboot_scheduled;
 #define MODULE messaging
 LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
@@ -278,26 +281,25 @@ int read_and_send_log_data_cb(uint8_t *data, size_t len)
 	memcpy(&encoded_msg[0], &data[0], new_len);
 	int err = send_binary_message(encoded_msg, new_len);
 	if (err != 0) {
-		return err;
 		LOG_ERR("Error sending binary message for log data");
 	}
-	k_yield();
 	return err;
 }
 
 static int send_all_stored_messages(void)
 {
 //	static bool force_poll_req = true;
-	if (k_mutex_lock(&read_flash_mutex, K_NO_WAIT) == 0) {
+	if (read_flash_ready) {
 //		if (force_poll_req) {
 //			k_work_reschedule_for_queue(&send_q, &modem_poll_work,
 //						    K_NO_WAIT);
 //			force_poll_req = false;
 //		}
 		/*Read and send out all the log data if any.*/
+		read_flash_ready = false;
 		int err = stg_read_log_data(read_and_send_log_data_cb, 0);
 		if (err && err != -ENODATA) {
-			k_mutex_unlock(&read_flash_mutex);
+			read_flash_ready = true;
 			LOG_ERR("stg_read_log_data error: %i", err);
 			return err;
 		} else if (err == -ENODATA) {
@@ -313,13 +315,13 @@ static int send_all_stored_messages(void)
 			if (err) {
 				LOG_ERR("Error clearing FCB storage for LOG %i",
 					err);
-				k_mutex_unlock(&read_flash_mutex);
+				read_flash_ready = true;
 				return err;
 			} else {
 				LOG_INF("Emptied LOG partition data as we have read everything.");
 			}
 		}
-		k_mutex_unlock(&read_flash_mutex);
+		read_flash_ready = true;
 		return 0;
 	} else {
 		return -ETIMEDOUT;
@@ -733,7 +735,12 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_cellular_ack_event(eh)) {
-		k_sem_give(&send_out_ack);
+		struct cellular_ack_event *ev = cast_cellular_ack_event(eh);
+		if (ev->message_sent) {
+			k_sem_give(&send_out_ack);
+		} else {
+			k_sem_reset(&send_out_ack);
+		}
 		return false;
 	}
 
@@ -1419,13 +1426,15 @@ void proto_InitHeader(NofenceMessage *msg)
  */
 int send_binary_message(uint8_t *data, size_t len)
 {
-	if (warning_active) { /*do not activate the modem until the warning
- * stops*/
-		return -EIO;
-	}
 	/* We can only send 1 message at a time, use mutex. */
-	if (k_mutex_lock(&send_binary_mutex, K_SECONDS
-			 (CONFIG_CC_ACK_TIMEOUT_SEC*2)) == 0) {
+	if (send_binary_ready) {
+		send_binary_ready = false;
+		if (warning_active) { /*do not activate the modem until the warning
+ * stops*/
+			send_binary_ready = true;
+			return -EIO;
+		}
+
 		struct check_connection *ev = new_check_connection();
 		EVENT_SUBMIT(ev);
 
@@ -1433,30 +1442,29 @@ int send_binary_message(uint8_t *data, size_t len)
 		if (ret != 0) {
 			LOG_ERR("Connection not ready, can't send message "
 				"now!");
-			k_mutex_unlock(&send_binary_mutex);
+			send_binary_ready = true;
 			return ret;
 		}
 		uint16_t byteswap_size = BYTESWAP16(len - 2);
 		memcpy(&data[0], &byteswap_size, 2);
-		k_sem_reset(&send_out_ack);
 		struct messaging_proto_out_event *msg2send =
 			new_messaging_proto_out_event();
 		msg2send->buf = data;
 		msg2send->len = len;
 		EVENT_SUBMIT(msg2send);
 
-		ret = k_sem_take(&send_out_ack,
-				     K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC));
+		ret = k_sem_take(&send_out_ack, K_FOREVER);
 		if (ret != 0) {
-			char *e_msg = "Timed out waiting for cellular ack";
-			nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
-			k_mutex_unlock(&send_binary_mutex);
+			LOG_WRN("Message not sent!");
+			nf_app_error(ERR_MESSAGING, ret, NULL, 0);
+			send_binary_ready = true;
 			return ret;
 		}
-		k_mutex_unlock(&send_binary_mutex);
+		LOG_WRN("Return gracefully!");
+		send_binary_ready = true;
 		return 0;
 	} else {
-		return -ETIMEDOUT;
+		return -EBUSY;
 	}
 }
 

@@ -207,7 +207,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		k_free(pMsgIn);
 		pMsgIn = NULL;
 		k_sem_give(&messaging_ack);
-		LOG_WRN("ACK received!\n");
+		LOG_WRN("ACK received!");
 		return false;
 	}
 	else if (is_messaging_stop_connection_event(eh)) {
@@ -216,12 +216,16 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		modem_is_ready = false;
 		sending_in_progress = false;
 		k_sem_give(&close_main_socket_sem);
+		struct cellular_ack_event *ack =
+			new_cellular_ack_event();
+		ack->message_sent = false;
+		EVENT_SUBMIT(ack);
 		return false;
 	}
 	else if (is_messaging_host_address_event(eh)) {
 		int ret = eep_read_host_port(&server_address_tmp[0], EEP_HOST_PORT_BUF_SIZE-1);
 		if (ret != 0){
-			LOG_ERR("Failed to read host address from eeprom!\n");
+			LOG_ERR("Failed to read host address from eeprom!");
 		}
 		struct messaging_host_address_event *event =
 			cast_messaging_host_address_event(eh);
@@ -242,11 +246,11 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		memcpy(&server_ip[0], &server_address[0], ip_len);
 		ret = memcmp(server_address, server_address_tmp, EEP_HOST_PORT_BUF_SIZE-1);
 		if (ret != 0){
-			LOG_INF("New host address received!\n");
+			LOG_INF("New host address received!");
 			ret = eep_write_host_port(server_address);
 			if (ret != 0){
 				LOG_ERR("Failed to write new host address to "
-					"eeprom!\n");
+					"eeprom!");
 			}
 		}
 		return false;
@@ -265,15 +269,14 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			CharMsgOut = (char *)k_malloc(MsgOutLen);
 			if (CharMsgOut ==
 			    memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
-				LOG_DBG("Publishing ack to messaging!\n");
-				struct cellular_ack_event *ack =
-					new_cellular_ack_event();
-				EVENT_SUBMIT(ack);
+				send_tcp_q(CharMsgOut, MsgOutLen);
+				return false;
 			}
-			send_tcp_q(CharMsgOut, MsgOutLen);
-		} else {
-			LOG_WRN("Dropping message!");
 		}
+		struct cellular_ack_event *ack = new_cellular_ack_event();
+		ack->message_sent = false;
+		EVENT_SUBMIT(ack);
+		LOG_WRN("Dropping message!");
 		return false;
 	}
 	else if (is_check_connection(eh)) {
@@ -285,6 +288,10 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		CharMsgOut = NULL;
 		sending_in_progress = false;
 		k_sem_give(&close_main_socket_sem);
+		struct cellular_ack_event *ack =
+			new_cellular_ack_event();
+		ack->message_sent = true;
+		EVENT_SUBMIT(ack);
 		return false;
 	}
 	else if (is_dfu_status_event(eh)) {
@@ -354,7 +361,7 @@ static int cellular_controller_connect(void *dev)
 		goto exit;
 	}
 
-	LOG_INF("Cellular network interface ready!\n");
+	LOG_INF("Cellular network interface ready!");
 
 	ret = cache_server_address();
 	if (ret != 0) { //172.31.36.11:4321

@@ -255,6 +255,7 @@ int send_tcp(char *msg, size_t len)
 	}
 	printk("\n");
 #endif
+	LOG_WRN("Attempting to send %d bytes!", len);
 	int ret;
 	ret = (int)sendall(conf.ipv4.tcp.sock, msg, len);
 	if (ret < 0) {
@@ -301,10 +302,11 @@ void send_tcp_fn(void)
 					struct messaging_stop_connection_event *end_connection =
 						new_messaging_stop_connection_event();
 					EVENT_SUBMIT(end_connection);
+				} else {
+					struct free_message_mem_event *ev =
+						new_free_message_mem_event();
+					EVENT_SUBMIT(ev);
 				}
-				struct free_message_mem_event *ev =
-					new_free_message_mem_event();
-				EVENT_SUBMIT(ev);
 			}
 			events[0].state = K_POLL_STATE_NOT_READY;
 		}

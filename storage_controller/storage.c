@@ -45,6 +45,7 @@ static struct flash_sector log_sectors[FLASH_LOG_NUM_SECTORS];
 static struct fcb_entry active_log_entry = { .fe_sector = NULL,
 					     .fe_elem_off = 0 };
 K_MUTEX_DEFINE(log_mutex);
+static bool log_ready = true;
 
 /* System diagnostic partition. */
 static struct fcb_entry active_system_diag_entry = { .fe_sector = NULL,
@@ -391,37 +392,43 @@ int stg_clear_partition(flash_partition_t partition)
 
 int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 {
-	if (k_mutex_lock(&log_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
-		return -ETIMEDOUT;
-	}
+//	if (k_mutex_lock(&log_mutex, K_NO_WAIT) != 0) {
+//		return -ETIMEDOUT;
+//	}
+	if (log_ready) {
+		log_ready = false;
 
-	if (fcb_is_empty(&log_fcb)) {
-		k_mutex_unlock(&log_mutex);
-		return -ENODATA;
-	}
+		if (fcb_is_empty(&log_fcb)) {
+			log_ready = true;
+			return -ENODATA;
+		}
 
-	struct fcb_entry start_entry;
+		struct fcb_entry start_entry;
 
-	memcpy(&start_entry, &active_log_entry, sizeof(struct fcb_entry));
+		memcpy(&start_entry, &active_log_entry, sizeof(struct fcb_entry));
 
-	int err = fcb_getnext(&log_fcb, &start_entry);
-	if (err) {
-		k_mutex_unlock(&log_mutex);
-		return -ENODATA;
-	}
+		int err = fcb_getnext(&log_fcb, &start_entry);
+		if (err) {
+			log_ready = true;
+			return -ENODATA;
+		}
 
-	err = fcb_walk_from_entry(cb, &log_fcb, &start_entry, num_entries);
-	if (err != 0) {
-		LOG_ERR("Error reading from log partition.");
-		k_mutex_unlock(&log_mutex);
+		err = fcb_walk_from_entry(cb, &log_fcb, &start_entry, num_entries);
+		if (err != 0) {
+			LOG_ERR("Error reading from log partition.");
+			log_ready = true;
+			return err;
+		}
+
+		/* Update the entry we're currently on. */
+		LOG_WRN("Shifting to next log message!");
+		memcpy(&active_log_entry, &start_entry, sizeof(struct fcb_entry));
+
+		log_ready = true;
 		return err;
 	}
 
-	/* Update the entry we're currently on. */
-	memcpy(&active_log_entry, &start_entry, sizeof(struct fcb_entry));
-
-	k_mutex_unlock(&log_mutex);
-	return err;
+	return -EBUSY;
 }
 
 bool ano_is_same_day_or_greater(UBX_MGA_ANO_RAW_t *ano_date)

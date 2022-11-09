@@ -392,14 +392,12 @@ int stg_clear_partition(flash_partition_t partition)
 
 int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 {
-//	if (k_mutex_lock(&log_mutex, K_NO_WAIT) != 0) {
-//		return -ETIMEDOUT;
-//	}
-	if (log_ready) {
-		log_ready = false;
+	if (k_mutex_lock(&log_mutex, K_NO_WAIT) == 0
+	    && log_mutex.lock_count <= 1) {
 
 		if (fcb_is_empty(&log_fcb)) {
 			log_ready = true;
+			k_mutex_unlock(&log_mutex);
 			return -ENODATA;
 		}
 
@@ -409,14 +407,14 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 
 		int err = fcb_getnext(&log_fcb, &start_entry);
 		if (err) {
-			log_ready = true;
+			k_mutex_unlock(&log_mutex);
 			return -ENODATA;
 		}
 
 		err = fcb_walk_from_entry(cb, &log_fcb, &start_entry, num_entries);
 		if (err != 0) {
 			LOG_ERR("Error reading from log partition.");
-			log_ready = true;
+			k_mutex_unlock(&log_mutex);
 			return err;
 		}
 
@@ -424,10 +422,10 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 		LOG_WRN("Shifting to next log message!");
 		memcpy(&active_log_entry, &start_entry, sizeof(struct fcb_entry));
 
-		log_ready = true;
+		k_mutex_unlock(&log_mutex);
 		return err;
 	}
-
+	k_mutex_unlock(&log_mutex);
 	return -EBUSY;
 }
 

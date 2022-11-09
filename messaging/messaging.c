@@ -137,10 +137,7 @@ static bool m_transfer_boot_params = true;
 static bool m_confirm_acc_limits, m_confirm_ble_key;
 
 K_MUTEX_DEFINE(send_binary_mutex);
-static bool send_binary_ready = true;
 K_MUTEX_DEFINE(read_flash_mutex);
-static bool read_flash_ready = true;
-
 static bool reboot_scheduled;
 #define MODULE messaging
 LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
@@ -289,17 +286,17 @@ int read_and_send_log_data_cb(uint8_t *data, size_t len)
 static int send_all_stored_messages(void)
 {
 //	static bool force_poll_req = true;
-	if (read_flash_ready) {
+	if (k_mutex_lock(&read_flash_mutex, K_NO_WAIT) == 0 &&
+    read_flash_mutex.lock_count <= 1) {
 //		if (force_poll_req) {
 //			k_work_reschedule_for_queue(&send_q, &modem_poll_work,
 //						    K_NO_WAIT);
 //			force_poll_req = false;
 //		}
 		/*Read and send out all the log data if any.*/
-		read_flash_ready = false;
 		int err = stg_read_log_data(read_and_send_log_data_cb, 0);
 		if (err && err != -ENODATA) {
-			read_flash_ready = true;
+			k_mutex_unlock(&read_flash_mutex);
 			LOG_ERR("stg_read_log_data error: %i", err);
 			return err;
 		} else if (err == -ENODATA) {
@@ -315,13 +312,13 @@ static int send_all_stored_messages(void)
 			if (err) {
 				LOG_ERR("Error clearing FCB storage for LOG %i",
 					err);
-				read_flash_ready = true;
+				k_mutex_unlock(&read_flash_mutex);
 				return err;
 			} else {
 				LOG_INF("Emptied LOG partition data as we have read everything.");
 			}
 		}
-		read_flash_ready = true;
+		k_mutex_unlock(&read_flash_mutex);
 		return 0;
 	} else {
 		return -ETIMEDOUT;
@@ -1427,11 +1424,11 @@ void proto_InitHeader(NofenceMessage *msg)
 int send_binary_message(uint8_t *data, size_t len)
 {
 	/* We can only send 1 message at a time, use mutex. */
-	if (send_binary_ready) {
-		send_binary_ready = false;
+	if (k_mutex_lock(&send_binary_mutex, K_NO_WAIT)
+	    && send_binary_mutex.lock_count <= 1) {
 		if (warning_active) { /*do not activate the modem until the warning
  * stops*/
-			send_binary_ready = true;
+			k_mutex_unlock(&send_binary_mutex);
 			return -EIO;
 		}
 
@@ -1442,7 +1439,7 @@ int send_binary_message(uint8_t *data, size_t len)
 		if (ret != 0) {
 			LOG_ERR("Connection not ready, can't send message "
 				"now!");
-			send_binary_ready = true;
+			k_mutex_unlock(&send_binary_mutex);
 			return ret;
 		}
 		uint16_t byteswap_size = BYTESWAP16(len - 2);
@@ -1457,13 +1454,14 @@ int send_binary_message(uint8_t *data, size_t len)
 		if (ret != 0) {
 			LOG_WRN("Message not sent!");
 			nf_app_error(ERR_MESSAGING, ret, NULL, 0);
-			send_binary_ready = true;
+			k_mutex_unlock(&send_binary_mutex);
 			return ret;
 		}
 		LOG_WRN("Return gracefully!");
-		send_binary_ready = true;
+		k_mutex_unlock(&send_binary_mutex);
 		return 0;
 	} else {
+		k_mutex_unlock(&send_binary_mutex);
 		return -EBUSY;
 	}
 }

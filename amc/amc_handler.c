@@ -271,18 +271,23 @@ void handle_states_fn()
 {
 	/* Fetch cached gnss data. */
 	gnss_t *gnss = NULL;
+	bool gnss_timeout = false;
 	int err = get_gnss_cache(&gnss);
-	if (err || gnss == NULL) {
+	if (err == -ETIMEDOUT) {
+		gnss_timeout = true;
+	} else if (err != 0){
 		LOG_ERR("Could not fetch GNSS cache %i", err);
 		return;
 	}
 
 	/* Update zone. */
 	amc_zone_t cur_zone = zone_get();
-	err = zone_update(instant_dist, gnss, &cur_zone);
-	if (err != 0) {
-		fifo_dist_elem_count = 0;
-		fifo_avg_dist_elem_count = 0;
+	if (gnss_timeout != true) {
+		err = zone_update(instant_dist, gnss, &cur_zone);
+		if (err != 0) {
+			fifo_dist_elem_count = 0;
+			fifo_avg_dist_elem_count = 0;
+		}
 	}
 
 	/* Get states, and recalculate if we have new state changes. */
@@ -317,7 +322,7 @@ void handle_corrections_fn()
 	LOG_INF("  handle_corrections_fn");
 	gnss_t *gnss = NULL;
 	int err = get_gnss_cache(&gnss);
-	if (err || gnss == NULL) {
+	if ((err != 0) && (err != -ETIMEDOUT)) {
 		LOG_ERR("Could not fetch GNSS cache %i", err);
 		return;
 	}
@@ -356,8 +361,12 @@ void handle_gnss_data_fn(struct k_work *item)
 
 	/* Fetch new, cached gnss data. */
 	gnss_t *gnss = NULL;
+	bool gnss_timeout = false;
 	err = get_gnss_cache(&gnss);
-	if (err || gnss == NULL) {
+	if (err == -ETIMEDOUT) {
+		LOG_WRN("GNSS data invalid, timed out");
+		gnss_timeout = true;
+	} else if (err != 0){
 		goto cleanup;
 	}
 
@@ -392,7 +401,8 @@ void handle_gnss_data_fn(struct k_work *item)
 	bool overflow_xy = err == -EOVERFLOW;
 
 	/* If any fence (pasture?) is valid and we have fix. */
-	if (gnss_has_fix() && fnc_valid_fence() && !overflow_xy) {
+	if (gnss_has_fix() && fnc_valid_fence() && !overflow_xy && 
+	    !gnss_timeout) {
 		/* Calculate distance to closest polygon. */
 		uint8_t fence_index = 0;
 		uint8_t vertex_index = 0;
@@ -475,6 +485,15 @@ void handle_gnss_data_fn(struct k_work *item)
 
 		k_work_submit_to_queue(&amc_work_q, &handle_states_work);
 		k_work_submit_to_queue(&amc_work_q, &handle_corrections_work);
+	} else if (gnss_timeout) {
+		/* GNSS timed out, set zone to NO_ZONE and schedule correction
+		 * work in order to stop correction if already running */
+		fifo_dist_elem_count = 0;
+		fifo_avg_dist_elem_count = 0;
+		zone_set(NO_ZONE);
+
+		k_work_submit_to_queue(&amc_work_q, &handle_states_work);
+		k_work_submit_to_queue(&amc_work_q, &handle_corrections_work);
 	} else {
 		fifo_dist_elem_count = 0;
 		fifo_avg_dist_elem_count = 0;
@@ -532,7 +551,7 @@ static bool event_handler(const struct event_header *eh)
 	if (is_gnss_data(eh)) {
 		struct gnss_data *event = cast_gnss_data(eh);
 
-		int err = set_gnss_cache(&event->gnss_data);
+		int err = set_gnss_cache(&event->gnss_data, event->timed_out);
 		if (err) {
 			char *msg = "Could not set gnss cahce.";
 			nf_app_error(ERR_AMC, err, msg, strlen(msg));

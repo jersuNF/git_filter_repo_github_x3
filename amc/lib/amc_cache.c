@@ -26,6 +26,7 @@ static gnss_t cached_gnssdata_area_1;
 static gnss_t cached_gnssdata_area_2;
 static gnss_t *current_gnssdata_area = &cached_gnssdata_area_1;
 atomic_t new_gnss_written = ATOMIC_INIT(false);
+static bool m_gnss_timeout = false;
 
 /* Cached fence data header and a max coordinate region. Links the coordinate
  * region to the header. Important! Is set to NULL everytime it's free'd
@@ -65,7 +66,7 @@ int set_pasture_cache(uint8_t *pasture, size_t len)
 	return 0;
 }
 
-int set_gnss_cache(gnss_t *gnss)
+int set_gnss_cache(gnss_t *gnss, bool timed_out)
 {
 	/* We only need to take semaphore if AMC have not yet consumed
          * the previous GNSS data, which means we have to wait until it
@@ -80,31 +81,39 @@ int set_gnss_cache(gnss_t *gnss)
 		return err;
 	}
 
-	if (current_gnssdata_area == &cached_gnssdata_area_1) {
-		memcpy(&cached_gnssdata_area_2, gnss, sizeof(gnss_t));
-	} else {
-		memcpy(&cached_gnssdata_area_1, gnss, sizeof(gnss_t));
-	}
+	m_gnss_timeout = timed_out;
+	if (m_gnss_timeout == false)
+	{
+		/* GNSS data is only updated if GNSS data is valid, i.e. the 
+		 * GNSS has NOT timed out (See gnss_controller) */
+		if (current_gnssdata_area == &cached_gnssdata_area_1) {
+			memcpy(&cached_gnssdata_area_2, gnss, sizeof(gnss_t));
+		} else {
+			memcpy(&cached_gnssdata_area_1, gnss, sizeof(gnss_t));
+		}
 
-	atomic_set(&new_gnss_written, true);
+		atomic_set(&new_gnss_written, true);
+	} 
 	k_sem_give(&gnss_data_sem);
 	return 0;
 }
 
 int get_gnss_cache(gnss_t **gnss)
 {
-	int err = k_sem_take(&gnss_data_sem,
-			     K_SECONDS(CONFIG_GNSS_CACHE_TIMEOUT_SEC));
+	int err = 0;
+	err = k_sem_take(&gnss_data_sem, 
+			 K_SECONDS(CONFIG_GNSS_CACHE_TIMEOUT_SEC));
 	if (err) {
 		LOG_ERR("Error semaphore for gnss cache %i", err);
 		return err;
 	}
 
-	/* Fetch GNSS data. Checks if we received new data, 
+	/* Fetch GNSS data. Checks if we received new valid data, 
          * swap the pointer to point at the newly written GNSS data 
          * area if we have. If not, just return the current location.
 	 */
-	if (atomic_get(&new_gnss_written)) {
+	if ((m_gnss_timeout == false) && 
+	    (atomic_get(&new_gnss_written) == true)) {
 		if (current_gnssdata_area == &cached_gnssdata_area_1) {
 			current_gnssdata_area = &cached_gnssdata_area_2;
 		} else {
@@ -114,13 +123,14 @@ int get_gnss_cache(gnss_t **gnss)
 	}
 
 	*gnss = current_gnssdata_area;
-
 	if (gnss == NULL) {
-		return -ENODATA;
+		err = -ENODATA;
 	}
-
+	if (m_gnss_timeout == true) {
+		err = -ETIMEDOUT;
+	}
 	k_sem_give(&gnss_data_sem);
-	return 0;
+	return err;
 }
 
 bool fnc_valid(fence_t *fence)

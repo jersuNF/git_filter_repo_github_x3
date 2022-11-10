@@ -115,8 +115,8 @@ static void battery_poll_work_fn()
 		break;
 	}
 
-	static uint8_t count = 0;
-	if (count++ % 10 == 0) {
+//	static uint8_t count = 0;
+//	if (count++ % 10 == 0 || count == 0) {
 		/* Publish battery event with averaged voltage */
 		struct pwr_status_event *event = new_pwr_status_event();
 		event->pwr_state = current_state;
@@ -124,7 +124,7 @@ static void battery_poll_work_fn()
 		event->battery_mv_min = battery_get_min();
 		event->battery_mv_max = battery_get_max();
 		EVENT_SUBMIT(event);
-	}
+//	}
 
 	k_work_reschedule(&battery_poll_work,
 			  K_MSEC(CONFIG_BATTERY_POLLER_WORK_MSEC));

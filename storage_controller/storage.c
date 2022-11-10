@@ -45,7 +45,6 @@ static struct flash_sector log_sectors[FLASH_LOG_NUM_SECTORS];
 static struct fcb_entry active_log_entry = { .fe_sector = NULL,
 					     .fe_elem_off = 0 };
 K_MUTEX_DEFINE(log_mutex);
-static bool log_ready = true;
 
 /* System diagnostic partition. */
 static struct fcb_entry active_system_diag_entry = { .fe_sector = NULL,
@@ -396,7 +395,6 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 	    && log_mutex.lock_count <= 1) {
 
 		if (fcb_is_empty(&log_fcb)) {
-			log_ready = true;
 			k_mutex_unlock(&log_mutex);
 			return -ENODATA;
 		}
@@ -609,7 +607,9 @@ int stg_read_pasture_data(fcb_read_cb cb)
 
 int stg_write_log_data(uint8_t *data, size_t len)
 {
-	if (k_mutex_lock(&log_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+	if (k_mutex_lock(&log_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))
+	 && log_mutex.lock_count <= 1) {
+		k_mutex_unlock(&log_mutex);
 		return -ETIMEDOUT;
 	}
 	int err = stg_write_to_partition(STG_PARTITION_LOG, data, len);

@@ -1425,7 +1425,7 @@ int send_binary_message(uint8_t *data, size_t len)
 {
 	/* We can only send 1 message at a time, use mutex. */
 	if (k_mutex_lock(&send_binary_mutex, K_NO_WAIT)
-	    && send_binary_mutex.lock_count <= 1) {
+	    /*&& send_binary_mutex.lock_count <= 1*/) {
 		if (warning_active) { /*do not activate the modem until the warning
  * stops*/
 			k_mutex_unlock(&send_binary_mutex);

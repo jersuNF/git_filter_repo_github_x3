@@ -66,7 +66,7 @@ int set_pasture_cache(uint8_t *pasture, size_t len)
 	return 0;
 }
 
-int set_gnss_cache(gnss_t *gnss, bool timed_out)
+int set_gnss_cache(gnss_t *gnss, const bool timed_out)
 {
 	/* We only need to take semaphore if AMC have not yet consumed
          * the previous GNSS data, which means we have to wait until it
@@ -125,8 +125,7 @@ int get_gnss_cache(gnss_t **gnss)
 	*gnss = current_gnssdata_area;
 	if (gnss == NULL) {
 		err = -ENODATA;
-	}
-	if (m_gnss_timeout == true) {
+	} else if (m_gnss_timeout == true) {
 		err = -ETIMEDOUT;
 	}
 	k_sem_give(&gnss_data_sem);

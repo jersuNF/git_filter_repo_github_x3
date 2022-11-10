@@ -86,6 +86,6 @@ int get_gnss_cache(gnss_t **gnss);
  * 
  * @return 0 on success, otherwise negative errno on semaphore error.
  */
-int set_gnss_cache(gnss_t *gnss, bool timed_out);
+int set_gnss_cache(gnss_t *gnss, const bool timed_out);
 
 #endif /* _AMC_CACHE_H_ */

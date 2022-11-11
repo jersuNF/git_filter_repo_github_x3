@@ -409,7 +409,8 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 			return -ENODATA;
 		}
 
-		err = fcb_walk_from_entry(cb, &log_fcb, &start_entry, num_entries);
+		err = fcb_walk_from_entry(cb, &log_fcb, &start_entry,
+					  num_entries, &log_mutex);
 		if (err != 0) {
 			LOG_ERR("Error reading from log partition.");
 			k_mutex_unlock(&log_mutex);
@@ -417,14 +418,14 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 		}
 
 		/* Update the entry we're currently on. */
-		LOG_WRN("Shifting to next log message!");
 		memcpy(&active_log_entry, &start_entry, sizeof(struct fcb_entry));
 
 		k_mutex_unlock(&log_mutex);
 		return err;
+	} else {
+		k_mutex_unlock(&log_mutex);
+		return -EBUSY;
 	}
-	k_mutex_unlock(&log_mutex);
-	return -EBUSY;
 }
 
 bool ano_is_same_day_or_greater(UBX_MGA_ANO_RAW_t *ano_date)
@@ -507,7 +508,7 @@ static inline void update_ano_active_entry(struct fcb_entry *entry)
 	}
 
 	int err = fcb_walk_from_entry(check_if_ano_valid_cb, &ano_fcb,
-				      &start_entry, 0);
+				      &start_entry, 0, &ano_mutex);
 
 	if (err == -EINTR) {
 		/* Found valid boot partition, copy the entry header. */
@@ -553,7 +554,8 @@ int stg_read_ano_data(fcb_read_cb cb, bool last_valid_ano, uint16_t num_entries)
 		return -ENODATA;
 	}
 
-	err = fcb_walk_from_entry(cb, &ano_fcb, &start_entry, num_entries);
+	err = fcb_walk_from_entry(cb, &ano_fcb, &start_entry, num_entries,
+				  &ano_mutex);
 
 	if (err && err != -EINTR) {
 		k_mutex_unlock(&ano_mutex);
@@ -608,18 +610,18 @@ int stg_read_pasture_data(fcb_read_cb cb)
 int stg_write_log_data(uint8_t *data, size_t len)
 {
 	if (k_mutex_lock(&log_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))
+	    == 0
 	 && log_mutex.lock_count <= 1) {
+		int err = stg_write_to_partition(STG_PARTITION_LOG, data, len);
+		if (err) {
+			LOG_ERR("Error writing to log partition.");
+		}
+		k_mutex_unlock(&log_mutex);
+		return err;
+	} else {
 		k_mutex_unlock(&log_mutex);
 		return -ETIMEDOUT;
 	}
-	int err = stg_write_to_partition(STG_PARTITION_LOG, data, len);
-
-	if (err) {
-		LOG_ERR("Error writing to log partition.");
-	}
-
-	k_mutex_unlock(&log_mutex);
-	return err;
 }
 
 int stg_write_ano_data(uint8_t *data, size_t len)
@@ -679,7 +681,7 @@ int stg_read_system_diagnostic_log(fcb_read_cb cb, uint16_t num_entries)
 	}
 
 	err = fcb_walk_from_entry(cb, &system_diag_fcb, &start_entry,
-				  num_entries);
+				  num_entries, &system_diag_mutex);
 	if (err && err != -EINTR) {
 		LOG_ERR("Error reading from system diagnostic partition.");
 	}

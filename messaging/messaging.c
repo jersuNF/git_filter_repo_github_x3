@@ -285,14 +285,8 @@ int read_and_send_log_data_cb(uint8_t *data, size_t len)
 
 static int send_all_stored_messages(void)
 {
-//	static bool force_poll_req = true;
-	if (k_mutex_lock(&read_flash_mutex, K_NO_WAIT) == 0 &&
-    read_flash_mutex.lock_count <= 1) {
-//		if (force_poll_req) {
-//			k_work_reschedule_for_queue(&send_q, &modem_poll_work,
-//						    K_NO_WAIT);
-//			force_poll_req = false;
-//		}
+	if ( k_mutex_lock(&read_flash_mutex, K_NO_WAIT) == 0 &&
+	    read_flash_mutex.lock_count <= 1) {
 		/*Read and send out all the log data if any.*/
 		int err = stg_read_log_data(read_and_send_log_data_cb, 0);
 		if (err && err != -ENODATA) {
@@ -307,7 +301,6 @@ static int send_all_stored_messages(void)
 	     * and we HAVE data on the partition.
 	     */
 		if (stg_log_pointing_to_last()) {
-//			force_poll_req = true;
 			err = stg_clear_partition(STG_PARTITION_LOG);
 			if (err) {
 				LOG_ERR("Error clearing FCB storage for LOG %i",
@@ -321,6 +314,7 @@ static int send_all_stored_messages(void)
 		k_mutex_unlock(&read_flash_mutex);
 		return 0;
 	} else {
+		k_mutex_unlock(&read_flash_mutex);
 		return -ETIMEDOUT;
 	}
 }
@@ -365,7 +359,10 @@ void modem_poll_work_fn()
 	if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
 		build_poll_request(&new_poll_msg);
 		k_sem_give(&cache_lock_sem);
-		encode_and_send_message(&new_poll_msg);
+		if (encode_and_send_message(&new_poll_msg) != 0) {
+			k_work_reschedule_for_queue(&send_q, &modem_poll_work,
+						    K_MINUTES(1));
+		}
 	} else {
 		LOG_ERR("Cached state semaphore hanged, retrying in 3 minutes.");
 		k_work_reschedule_for_queue(&send_q, &modem_poll_work,
@@ -1424,8 +1421,8 @@ void proto_InitHeader(NofenceMessage *msg)
 int send_binary_message(uint8_t *data, size_t len)
 {
 	/* We can only send 1 message at a time, use mutex. */
-	if (k_mutex_lock(&send_binary_mutex, K_NO_WAIT) == 0
-	    && send_binary_mutex.lock_count <= 1) {
+	if (k_mutex_lock(&send_binary_mutex, K_NO_WAIT) == 0 &&
+	    send_binary_mutex.lock_count <= 1) {
 		if (warning_active) { /*do not activate the modem until the warning
  * stops*/
 			k_mutex_unlock(&send_binary_mutex);
@@ -1457,7 +1454,6 @@ int send_binary_message(uint8_t *data, size_t len)
 			k_mutex_unlock(&send_binary_mutex);
 			return ret;
 		}
-		LOG_WRN("Return gracefully!");
 		k_mutex_unlock(&send_binary_mutex);
 		return 0;
 	} else {

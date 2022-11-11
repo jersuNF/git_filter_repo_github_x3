@@ -66,6 +66,13 @@ static struct k_work_delayable periodic_beacon_scanner_work;
 static struct k_work_delayable beacon_processor_work;
 static uint8_t m_shortest_dist2beacon = UINT8_MAX;
 static int64_t m_beacon_scan_start_timer = 0;
+
+typedef enum {
+	CROSS_UNDEFINED = 0,
+	CROSS_LOW_FROM_BELOW,
+	CROSS_HIGH_FROM_ABOVE
+} cross_type_t;
+
 /** @brief : Used for hysteresis calculation **/
 static cross_type_t m_cross_type = CROSS_UNDEFINED;
 static void scan_stop(void);
@@ -74,11 +81,6 @@ static struct k_work_delayable disconnect_peer_work;
 
 static char bt_device_name[DEVICE_NAME_LEN + 1];
 
-typedef enum {
-	CROSS_UNDEFINED = 0,
-	CROSS_LOW_FROM_BELOW,
-	CROSS_HIGH_FROM_ABOVE
-} cross_type_t;
 
 
 // Shaddow register. Should be initialized with data from EEPROM or FLASH

@@ -66,6 +66,9 @@ static struct k_work_delayable periodic_beacon_scanner_work;
 static struct k_work_delayable beacon_processor_work;
 static uint8_t m_shortest_dist2beacon = UINT8_MAX;
 static int64_t m_beacon_scan_start_timer = 0;
+/** @brief : Used for hysteresis calculation **/
+static cross_type_t m_cross_type = CROSS_UNDEFINED;
+static void scan_stop(void);
 #endif
 static struct k_work_delayable disconnect_peer_work;
 
@@ -77,8 +80,6 @@ typedef enum {
 	CROSS_HIGH_FROM_ABOVE
 } cross_type_t;
 
-/** @brief : Used for hysteresis calculation **/
-static cross_type_t m_cross_type = CROSS_UNDEFINED;
 
 // Shaddow register. Should be initialized with data from EEPROM or FLASH
 static uint16_t current_fw_ver = NF_X25_VERSION_NUMBER;
@@ -107,8 +108,6 @@ static const struct bt_data sd[] = {
 	BT_DATA(BT_DATA_NAME_COMPLETE, bt_device_name, DEVICE_NAME_LEN),
 
 };
-
-static void scan_stop(void);
 
 /**
  * @brief Function to fetch bluetooth mtu parameters. Will get maximum data
@@ -594,6 +593,7 @@ static void bt_ready(int err)
 	atomic_set(&atomic_bt_adv_active, true);
 }
 
+#if CONFIG_BEACON_SCAN_ENABLE
 /**
  * @brief Callback for bt data parser.
  *
@@ -625,6 +625,7 @@ static bool data_cb(struct bt_data *data, void *user_data)
 		return true;
 	}
 }
+
 
 /**
  * @brief Callback for reporting LE scan results.
@@ -671,7 +672,6 @@ static void scan_start(void)
 	/* Initialize the beacon list */
 	init_beacon_list();
 
-#if CONFIG_BEACON_SCAN_ENABLE
 	/* Start beacon scanner subsystem */
 	struct bt_le_scan_param scan_param = {
 		.type = BT_HCI_LE_SCAN_PASSIVE,
@@ -699,7 +699,6 @@ static void scan_start(void)
 
 		atomic_set(&atomic_bt_scan_active, true);
 	}
-#endif /* CONFIG_BEACON_SCAN_ENABLE */
 }
 
 static void scan_stop(void)
@@ -718,6 +717,7 @@ static void scan_stop(void)
 		atomic_set(&atomic_bt_scan_active, false);
 	}
 }
+#endif /* CONFIG_BEACON_SCAN_ENABLE */
 
 static void disconnect_peer_work_fn()
 {
@@ -932,12 +932,15 @@ static bool event_handler(const struct event_header *eh)
 		case BLE_CTRL_ERROR_FLAG_UPDATE:
 			error_flag_update(event->param.error_flags);
 			break;
+
+#if CONFIG_BEACON_SCAN_ENABLE
 		case BLE_CTRL_SCAN_START:
 			scan_start();
 			break;
 		case BLE_CTRL_SCAN_STOP:
 			scan_stop();
 			break;
+#endif
 		case BLE_CTRL_DISCONNECT_PEER:
 			if (current_conn != NULL) {
 				k_work_schedule(&disconnect_peer_work, 

@@ -8,7 +8,7 @@
 
 #include "movement_controller.h"
 #include "movement_events.h"
-#include "nf_settings.h"
+#include "stg_config.h"
 #include "nf_fifo.h"
 #include "trigonometry.h"
 
@@ -20,7 +20,7 @@ LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 
 static const struct device *sensor;
 
-/** @todo Add to make configurable from messaging.c event. Also eeprom settings? */
+/** @todo Add to make configurable from messaging.c event. Also storage settings? */
 static uint16_t off_animal_time_limit_sec = OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT;
 static uint16_t acc_sigma_sleep_limit = ACC_SIGMA_SLEEP_LIMIT_DEFAULT;
 static uint16_t acc_sigma_noactivity_limit = ACC_SIGMA_NOACTIVITY_LIMIT_DEFAULT;
@@ -410,7 +410,7 @@ int init_movement_controller(void)
 
 	/* Setup interrupt triggers. */
 	err = update_acc_odr(MODE_12_5_HZ);
-	if (err) {
+	if (err != 0) {
 		return err;
 	}
 
@@ -419,29 +419,27 @@ int init_movement_controller(void)
 	k_work_reschedule(&sample_sensor_work, K_MSEC(SENSOR_SAMPLE_INTERVAL_MS));
 
 	/* Start the timeout timer. This is reset everytime we have calculated
-	 * the activity successfully.
-	 */
-	k_timer_start(&movement_timeout_timer,
-		      K_SECONDS(CONFIG_MOVEMENT_TIMEOUT_SEC), K_NO_WAIT);
+	 * the activity successfully. */
+	k_timer_start(&movement_timeout_timer, 
+		K_SECONDS(CONFIG_MOVEMENT_TIMEOUT_SEC), K_NO_WAIT);
 
-	err = eep_uint16_read(EEP_ACC_SIGMA_SLEEP_LIMIT,
-			      &acc_sigma_sleep_limit);
-	if (err) {
+	err = stg_config_u16_read(STG_U16_ACC_SIGMA_SLEEP_LIMIT,
+			&acc_sigma_sleep_limit);
+	if (err != 0) {
 		return err;
 	}
 
-	err = eep_uint16_read(EEP_ACC_SIGMA_NOACTIVITY_LIMIT,
-			      &acc_sigma_noactivity_limit);
-	if (err) {
+	err = stg_config_u16_read(STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT,
+			&acc_sigma_noactivity_limit);
+	if (err != 0) {
 		return err;
 	}
 
-	err = eep_uint16_read(EEP_OFF_ANIMAL_TIME_LIMIT_SEC,
-			      &off_animal_time_limit_sec);
-	if (err) {
+	err = stg_config_u16_read(STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC,
+			&off_animal_time_limit_sec);
+	if (err != 0) {
 		return err;
 	}
-
 	return 0;
 }
 

@@ -18,23 +18,25 @@ zephyr_include_directories(
 	${CMAKE_CURRENT_SOURCE_DIR}/../../modules/storage_controller/
 	${CMAKE_CURRENT_SOURCE_DIR}/../../events/collar_stats/
 	${CMAKE_CURRENT_SOURCE_DIR}/../../events/power_manager/
+	${CMAKE_CURRENT_SOURCE_DIR}/../../modules/power_manager/
 	${CMAKE_CURRENT_SOURCE_DIR}/include/
 	${PROJECT_BINARY_DIR}/include/generated/)
 
 target_sources(app PRIVATE 
-${CMAKE_CURRENT_SOURCE_DIR}/messaging.c
-${CMAKE_CURRENT_SOURCE_DIR}/unixTime.c
-${CMAKE_CURRENT_SOURCE_DIR}/../../lib/crc/nf_crc16.c
-${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/ble_data_event.c
-${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/ble_cmd_event.c
-${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/ble_ctrl_event.c
-${CMAKE_CURRENT_SOURCE_DIR}/../../events/lte/lte_proto_event.c
-${CMAKE_CURRENT_SOURCE_DIR}/../../events/messaging/messaging_module_events.c
-${CMAKE_CURRENT_SOURCE_DIR}/../../events/cellular_controller/cellular_controller_events.c
-${CMAKE_CURRENT_SOURCE_DIR}/../../events/gnss_controller/gnss_controller_events.c
-${CMAKE_CURRENT_SOURCE_DIR}/../../events/error_handler/error_event.c
-${CMAKE_CURRENT_SOURCE_DIR}/../../events/storage/storage_event.c
-${CMAKE_CURRENT_SOURCE_DIR}/../../events/power_manager/pwr_event.c
+	${CMAKE_CURRENT_SOURCE_DIR}/messaging.c
+	${CMAKE_CURRENT_SOURCE_DIR}/unixTime.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../lib/crc/nf_crc16.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/ble_data_event.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/ble_cmd_event.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/ble_ctrl_event.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../events/lte/lte_proto_event.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../events/messaging/messaging_module_events.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../events/cellular_controller/cellular_controller_events.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../events/gnss_controller/gnss_controller_events.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../events/error_handler/error_event.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../events/storage/storage_event.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../events/power_manager/pwr_event.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../modules/power_manager/pwr_module.c
 )
 
 add_dependencies(${ZEPHYR_CURRENT_LIBRARY}

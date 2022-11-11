@@ -264,8 +264,7 @@ static void beacon_processor_work_fn()
 	 * as long as there is beacon contact, i.e. BEACON_STATUS_REGION_NEAR,
 	 * otherise stop beacon scanning */
 	int64_t delta_scan_uptime = k_uptime_get() - m_beacon_scan_start_timer;
-	if (((delta_scan_uptime + 
-	    (CONFIG_BEACON_PROCESSING_INTERVAL * MSEC_PER_SEC)) >= 
+	if ((delta_scan_uptime >= 
 	    (CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC)) && 
 	    (beacon_status != BEACON_STATUS_REGION_NEAR)) {
 		scan_stop();
@@ -696,7 +695,7 @@ static void scan_start(void)
 		 * given by m_beacon_scan_start_timer */
 		m_beacon_scan_start_timer = k_uptime_get();
 		k_work_reschedule(&beacon_processor_work, 
-			K_SECONDS(CONFIG_BEACON_PROCESSING_INTERVAL + 1));
+			K_SECONDS(CONFIG_BEACON_PROCESSING_INTERVAL));
 
 		atomic_set(&atomic_bt_scan_active, true);
 	}

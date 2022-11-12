@@ -1430,14 +1430,13 @@ void proto_InitHeader(NofenceMessage *msg)
  */
 int send_binary_message(uint8_t *data, size_t len)
 {
+	if (warning_active) { /*do not activate the modem until the warning
+ * stops*/
+		return -EIO;
+	}
 	/* We can only send 1 message at a time, use mutex. */
 	if (k_mutex_lock(&send_binary_mutex, K_NO_WAIT) == 0 &&
 	    send_binary_mutex.lock_count <= 1) {
-		if (warning_active) { /*do not activate the modem until the warning
- * stops*/
-			k_mutex_unlock(&send_binary_mutex);
-			return -EIO;
-		}
 
 		struct check_connection *ev = new_check_connection();
 		EVENT_SUBMIT(ev);

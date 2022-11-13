@@ -60,11 +60,7 @@ int fcb_walk_from_entry(fcb_read_cb cb, struct fcb *fcb,
 			return err;
 		}
 
-		/* Output the new entry we just read if user wants to use it. */
-		if (start_entry != NULL) {
-			memcpy(start_entry, &target_entry,
-			       sizeof(struct fcb_entry));
-		}
+
 
 		/* Check if we want to exit since caller 
                  * just requested last n entries. 
@@ -83,6 +79,11 @@ int fcb_walk_from_entry(fcb_read_cb cb, struct fcb *fcb,
 			 * and need to break out of the loop. 
 			 */
 			return 0;
+		}
+		/* Output the new entry we just read if user wants to use it. */
+		if (start_entry != NULL) {
+			memcpy(start_entry, &target_entry,
+			       sizeof(struct fcb_entry));
 		}
 	}
 	return 0;

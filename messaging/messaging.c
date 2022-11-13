@@ -1163,7 +1163,7 @@ void build_poll_request(NofenceMessage *poll_req)
 		poll_req->m.poll_message_req.usFlashEraseCount = 
 					current_state.flash_erase_count;
 	}
-	if (m_confirm_acc_limits) {
+	if (m_confirm_acc_limits || m_transfer_boot_params) {
 		/** @warning Assumes all the activity values are given with the
 		 *  m_confirm_acc_limits flag set in poll response from server.
 		 */
@@ -1435,8 +1435,8 @@ int send_binary_message(uint8_t *data, size_t len)
 		return -EIO;
 	}
 	/* We can only send 1 message at a time, use mutex. */
-	if (k_mutex_lock(&send_binary_mutex, K_NO_WAIT) == 0 &&
-	    send_binary_mutex.lock_count <= 1) {
+	k_mutex_lock(&send_binary_mutex, K_NO_WAIT);
+	if (send_binary_mutex.lock_count == 1) {
 
 		struct check_connection *ev = new_check_connection();
 		EVENT_SUBMIT(ev);

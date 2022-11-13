@@ -395,8 +395,8 @@ int stg_clear_partition(flash_partition_t partition)
 
 int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 {
-	if (k_mutex_lock(&log_mutex, K_NO_WAIT) == 0
-	    && log_mutex.lock_count <= 1) {
+	k_mutex_lock(&log_mutex, K_NO_WAIT);
+	if (log_mutex.lock_count == 1) {
 
 		if (fcb_is_empty(&log_fcb)) {
 			k_mutex_unlock(&log_mutex);

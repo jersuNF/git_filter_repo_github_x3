@@ -18,6 +18,10 @@ LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 #define ACC_FIFO_ELEMENTS 32
 #define SENSOR_SAMPLE_INTERVAL_MS 100
 
+#ifdef CONFIG_TEST
+uint32_t ztest_acc_std_final;
+#endif
+
 static const struct device *sensor;
 
 /** @todo Add to make configurable from messaging.c event. Also storage settings? */
@@ -115,6 +119,7 @@ void process_acc_data(raw_acc_data_t *acc)
 		return;
 	}
 
+	static uint32_t acc_std_final = 0;
 	/* Gets set to true when we fill up the fifo. */
 	static bool first_read = true;
 
@@ -163,7 +168,7 @@ void process_acc_data(raw_acc_data_t *acc)
 
 	/* Compute Standard Deviation. */
 	uint32_t acc_std = 0;
-	uint32_t acc_std_final = 0;
+
 	for (i = 0; i < ACC_FIFO_ELEMENTS; i++) {
 		int32_t x = (acc_norm[i] - acc_norm_mean);
 		acc_std += (uint32_t)(x * x);
@@ -291,6 +296,9 @@ void process_acc_data(raw_acc_data_t *acc)
 	/* Reset the timer since we just consumed the data successfully. */
 	k_timer_start(&movement_timeout_timer,
 		      K_SECONDS(CONFIG_MOVEMENT_TIMEOUT_SEC), K_NO_WAIT);
+#ifdef CONFIG_TEST
+	ztest_acc_std_final = acc_std_final;
+#endif
 }
 
 uint32_t get_active_delta(void)

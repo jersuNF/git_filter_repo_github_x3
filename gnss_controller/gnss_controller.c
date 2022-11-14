@@ -245,7 +245,7 @@ EVENT_LISTENER(MODULE, gnss_controller_event_handler);
 EVENT_SUBSCRIBE(MODULE, gnss_data_rate);
 EVENT_SUBSCRIBE(MODULE, gnss_switch_off);
 EVENT_SUBSCRIBE(MODULE, gnss_switch_on);
-EVENT_SUBSCRIBE(MODULE, gnss_set_mode_event);
+//EVENT_SUBSCRIBE(MODULE, gnss_set_mode_event);
 
 /**
  * @brief Handles GNSS timeouts when no messages has been received. 

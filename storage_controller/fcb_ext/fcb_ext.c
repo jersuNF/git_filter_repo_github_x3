@@ -82,8 +82,7 @@ int fcb_walk_from_entry(fcb_read_cb cb, struct fcb *fcb,
 		}
 		/* Output the new entry we just read if user wants to use it. */
 		if (start_entry != NULL) {
-			memcpy(start_entry, &target_entry,
-			       sizeof(struct fcb_entry));
+			memcpy(start_entry, &target_entry, sizeof(struct fcb_entry));
 		}
 	}
 	return 0;

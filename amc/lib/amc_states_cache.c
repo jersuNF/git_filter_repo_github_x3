@@ -638,8 +638,7 @@ CollarStatus calc_collar_status(void)
 		int err = stg_config_u8_write(STG_U8_COLLAR_STATUS, 
 					(uint8_t)current_collar_status);
 		if (err != 0) {
-			LOG_ERR("Failed to write new collar status to ext flash, error %i ", 
-				err);
+			LOG_ERR("Failed to write new collar status to ext flash, error %i ", err);
 		}
 
 		/* Notify server about collar status change. */

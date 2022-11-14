@@ -269,13 +269,10 @@ static void build_log_message()
 
 int read_and_send_log_data_cb(uint8_t *data, size_t len)
 {
-	uint8_t encoded_msg[NofenceMessage_size];
-	memset(encoded_msg, 0, sizeof(encoded_msg));
 	LOG_DBG("Send log message fetched from flash");
 	/* Fetch the length from the two first bytes */
 	uint16_t new_len = *(uint16_t*) &data[0];
-	memcpy(&encoded_msg[0], &data[0], new_len);
-	int err = send_binary_message(encoded_msg, new_len);
+	int err = send_binary_message(data, new_len);
 	if (err != 0) {
 		LOG_ERR("Error sending binary message for log data");
 	}

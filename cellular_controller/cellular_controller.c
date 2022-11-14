@@ -216,8 +216,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		modem_is_ready = false;
 		sending_in_progress = false;
 		k_sem_give(&close_main_socket_sem);
-		struct cellular_ack_event *ack =
-			new_cellular_ack_event();
+		struct cellular_ack_event *ack = new_cellular_ack_event();
 		ack->message_sent = false;
 		EVENT_SUBMIT(ack);
 		return false;
@@ -289,8 +288,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		CharMsgOut = NULL;
 		sending_in_progress = false;
 		k_sem_give(&close_main_socket_sem);
-		struct cellular_ack_event *ack =
-			new_cellular_ack_event();
+		struct cellular_ack_event *ack = new_cellular_ack_event();
 		ack->message_sent = true;
 		EVENT_SUBMIT(ack);
 		return false;

@@ -210,20 +210,20 @@ static inline int update_pasture_from_stg(void)
 		/* New pasture installed, force a new gnss fix. */
 		restart_force_gnss_to_fix();
 
-		/* Update fence status, this also notify listeners */
-		err = force_fence_status(FenceStatus_NotStarted);
-		if (err) {
-			char *e_msg = "Error when forcing fence status after update";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
-			break;
-		}
-
 		if (m_fence_update_pending) {
 			m_fence_update_pending = false;
-			if (pasture->m.ul_fence_def_version !=
+
+			/* Update fence status, this also notify listeners */
+			if (pasture->m.ul_fence_def_version != 
 			    m_new_fence_version) {
-				force_fence_status(FenceStatus_FenceStatus_Invalid);
+				force_fence_status(
+					FenceStatus_FenceStatus_Invalid);
+			} else {
+				err = force_fence_status(
+					FenceStatus_NotStarted);
+				if (err != 0) {
+					break;
+				}
 			}
 		}
 

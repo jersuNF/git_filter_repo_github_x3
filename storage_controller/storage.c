@@ -558,8 +558,7 @@ int stg_read_ano_data(fcb_read_cb cb, bool last_valid_ano, uint16_t num_entries)
 		return -ENODATA;
 	}
 
-	err = fcb_walk_from_entry(cb, &ano_fcb, &start_entry, num_entries,
-				  &ano_mutex);
+	err = fcb_walk_from_entry(cb, &ano_fcb, &start_entry, num_entries, &ano_mutex);
 
 	if (err && err != -EINTR) {
 		k_mutex_unlock(&ano_mutex);

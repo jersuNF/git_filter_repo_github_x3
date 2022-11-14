@@ -118,6 +118,8 @@ void process_acc_data(raw_acc_data_t *acc)
 		return;
 	}
 
+	/* Save the calculated standard deviation for later. */
+	static uint32_t acc_std_final = 0;
 	/* Gets set to true when we fill up the fifo. */
 	static bool first_read = true;
 
@@ -165,7 +167,6 @@ void process_acc_data(raw_acc_data_t *acc)
 
 	/* Compute Standard Deviation. */
 	uint32_t acc_std = 0;
-	uint32_t acc_std_final = 0;
 	for (i = 0; i < ACC_FIFO_ELEMENTS; i++) {
 		int32_t x = (acc_norm[i] - acc_norm_mean);
 		acc_std += (uint32_t)(x * x);

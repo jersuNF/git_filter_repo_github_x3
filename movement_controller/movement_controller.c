@@ -161,7 +161,6 @@ void process_acc_data(raw_acc_data_t *acc)
 		acc_norm_sum += acc_norm[i];
 		gravity += acc_fifo_y[i] / ACC_FIFO_ELEMENTS;
 	}
-
 	uint32_t acc_norm_mean = acc_norm_sum / ACC_FIFO_ELEMENTS;
 
 	/* Compute Standard Deviation. */
@@ -173,7 +172,6 @@ void process_acc_data(raw_acc_data_t *acc)
 	}
 	acc_std /= ACC_FIFO_ELEMENTS;
 	acc_std = g_u32_SquareRootRounded(acc_std);
-
 	/* Exponential moving average with alpha = 2/(N+1). */
 	if (first_read) {
 		first_read = false;
@@ -315,7 +313,7 @@ void movement_thread_fn()
 	}
 }
 
-void fetch_and_display(const struct device *sensor)
+void fetch_and_display(const struct device *sensor, raw_acc_data_t *raw_data)
 {
 	struct sensor_value accel[3];
 
@@ -330,7 +328,6 @@ void fetch_and_display(const struct device *sensor)
 		LOG_ERR("Error getting acc channel values %i", rc);
 		return;
 	}
-
 	/* Convert from m/s² to mg */
 	int32_t accel_mg[3];
 	accel_mg[0] = (int32_t)((sensor_value_to_double(&accel[0])/GRAVITY) * 1000);
@@ -351,12 +348,14 @@ void fetch_and_display(const struct device *sensor)
 		LOG_WRN("Message queue full, purging and retry");
 		k_msgq_purge(&acc_data_msgq);
 	}
+	/* Keep a copy of the raw data for testing */
+	memcpy(raw_data, &data, sizeof(data));
 }
 
 static void sample_sensor_work_fn(struct k_work *work)
 {
 	k_work_reschedule(&sample_sensor_work, K_MSEC(SENSOR_SAMPLE_INTERVAL_MS));
-	fetch_and_display(sensor);
+	fetch_and_display(sensor, NULL);
 }
 
 static int update_acc_odr(acc_mode_t mode_hz)

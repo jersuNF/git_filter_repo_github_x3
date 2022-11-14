@@ -17,7 +17,14 @@ LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 #define STEPS_TRIGGER 1
 #define ACC_FIFO_ELEMENTS 32
 #define SENSOR_SAMPLE_INTERVAL_MS 100
+
 #define GRAVITY 9.806650
+
+#ifdef CONFIG_TEST
+uint32_t ztest_acc_std_final;
+raw_acc_data_t raw_data;
+#endif
+
 static const struct device *sensor;
 
 /* +∕- fullscale range [g] */
@@ -120,6 +127,7 @@ void process_acc_data(raw_acc_data_t *acc)
 
 	/* Save the calculated standard deviation for later. */
 	static uint32_t acc_std_final = 0;
+	LOG_DBG("acc_std_final mov_controller: %d", acc_std_final);
 	/* Gets set to true when we fill up the fifo. */
 	static bool first_read = true;
 
@@ -167,6 +175,7 @@ void process_acc_data(raw_acc_data_t *acc)
 
 	/* Compute Standard Deviation. */
 	uint32_t acc_std = 0;
+
 	for (i = 0; i < ACC_FIFO_ELEMENTS; i++) {
 		int32_t x = (acc_norm[i] - acc_norm_mean);
 		acc_std += (uint32_t)(x * x);
@@ -292,6 +301,9 @@ void process_acc_data(raw_acc_data_t *acc)
 	/* Reset the timer since we just consumed the data successfully. */
 	k_timer_start(&movement_timeout_timer,
 		      K_SECONDS(CONFIG_MOVEMENT_TIMEOUT_SEC), K_NO_WAIT);
+#ifdef CONFIG_TEST
+	ztest_acc_std_final = acc_std_final;
+#endif
 }
 
 uint32_t get_active_delta(void)
@@ -314,7 +326,7 @@ void movement_thread_fn()
 	}
 }
 
-void fetch_and_display(const struct device *sensor, raw_acc_data_t *raw_data)
+void fetch_and_display(const struct device *sensor)
 {
 	struct sensor_value accel[3];
 
@@ -349,14 +361,17 @@ void fetch_and_display(const struct device *sensor, raw_acc_data_t *raw_data)
 		LOG_WRN("Message queue full, purging and retry");
 		k_msgq_purge(&acc_data_msgq);
 	}
+	
+#ifdef CONFIG_TEST
 	/* Keep a copy of the raw data for testing */
-	memcpy(raw_data, &data, sizeof(data));
+	memcpy(&raw_data, &data, sizeof(data));
+#endif
 }
 
 static void sample_sensor_work_fn(struct k_work *work)
 {
 	k_work_reschedule(&sample_sensor_work, K_MSEC(SENSOR_SAMPLE_INTERVAL_MS));
-	fetch_and_display(sensor, NULL);
+	fetch_and_display(sensor);
 }
 
 static int update_acc_odr(acc_mode_t mode_hz)

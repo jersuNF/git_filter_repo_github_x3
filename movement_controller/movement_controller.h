@@ -64,14 +64,4 @@ void reset_total_steps(void);
 /** @brief Used to get the delta of how long we've been in active state. */
 uint32_t get_active_delta(void);
 
-/** 
- * @brief Used to fetch the raw accelerometer values
- * @param[in] sensor pointer to acclerometer device handler
- * @param[out] raw_data pointer to accelerometer raw data
- */
-void fetch_and_display(const struct device *sensor, raw_acc_data_t *raw_data);
-
-/** @brief Function to process accelerometer data */
-void process_acc_data(raw_acc_data_t *acc);
-
 #endif /* _MOVEMENT_CONTROLLER_H_ */

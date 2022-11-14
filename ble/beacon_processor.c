@@ -8,18 +8,15 @@
 #include <float.h>
 #include <math.h>
 #include <sys/ring_buffer.h>
-
-#define MODULE beacon_processor
 #include <logging/log.h>
 
 #include "beacon_processor.h"
 
+#define MODULE beacon_processor
 LOG_MODULE_REGISTER(MODULE, CONFIG_BEACON_PROCESSOR_LOG_LEVEL);
-/** @brief : Contains the whole structure for the tracked beacons **/
-static struct beacon_list beacons;
 
-/** @brief : Save a copy of the shortest distance for hysteresis */
-static uint8_t m_beacon_min_distance = UINT8_MAX;
+/** @brief : Contains the whole structure for all the tracked beacons **/
+static struct beacon_list beacons;
 
 /**
  * @brief Function to converts an unsigned 16 bit RSSI value to a signed int8 
@@ -136,31 +133,31 @@ static inline void add_to_beacon_history(struct beacon_connection_info *info,
  */
 static int set_new_shortest_dist(struct beacon_info *beacon)
 {
-	/* Initialize to largest possible distance */
+	uint8_t shortest_dist = UINT8_MAX;
 	uint8_t entries = 0;
-	// printk("[ "); /* Uncomment for debug */
+
 	for (uint8_t i = 0; i < beacon->num_measurements; i++) {
 		struct beacon_connection_info *info = &beacon->history[i];
-		// printk("%d ", info->beacon_dist); /* Uncomment for debug */
 		int32_t delta_t = k_uptime_get_32() - info->time_diff;
 //		LOG_WRN("delta_t = %d", delta_t);
 		if (((delta_t >= 0) && (delta_t <
-		    CONFIG_BEACON_MAX_MEASUREMENT_AGE * MSEC_PER_SEC))||
-		    ((delta_t < 0) && ((uint32_t)(delta_t + UINT32_MAX)<
-				      CONFIG_BEACON_MAX_MEASUREMENT_AGE *
-					       MSEC_PER_SEC))) {
+		    CONFIG_BEACON_MAX_MEASUREMENT_AGE * MSEC_PER_SEC)) ||
+		    ((delta_t < 0) && ((uint32_t)(delta_t + UINT32_MAX) <
+				      (CONFIG_BEACON_MAX_MEASUREMENT_AGE *
+					       MSEC_PER_SEC)))) {
 
-			beacon->min_dist = MIN(beacon->min_dist,  info->beacon_dist);
-			entries++;
+			if ((info->beacon_dist >= 1) && 
+			    (info->beacon_dist < shortest_dist)) {
+				shortest_dist = info->beacon_dist;
+				entries++;
+			}
 		}
 	}
-	// printk("]\n"); /* Uncomment for debug */
 
-	if (entries == 0) {
-		beacon->min_dist = UINT8_MAX;
+	beacon->min_dist = shortest_dist;
+	if (beacon->min_dist == UINT8_MAX) {
 		return -ENODATA;
 	}
-
 	return 0;
 }
 #else
@@ -196,28 +193,19 @@ static int set_new_avg_dist(struct beacon_info *beacon)
 }
 #endif
 
-/**
- * @brief Function to get the shortest average distance.
- * 
- * @param[in] list struct of beacon_list
- * @param[out] dist Distance pointer
- */
-static inline void get_shortest_distance(struct beacon_list *list, uint8_t 
-									   *dist)
+int beacon_shortest_distance(uint8_t *dist)
 {
 	int err;
 	*dist = UINT8_MAX;
 
-	for (uint8_t i = 0; i < list->num_beacons; i++) {
-		/* After new connection entry has been added, 
-		 * we have a new average. 
-		 */
-		struct beacon_info *c_info = &list->beacon_array[i];
+	for (uint8_t i = 0; i < beacons.num_beacons; i++) {
+		struct beacon_info *c_info = &beacons.beacon_array[i];
 
 		/* Create string of beacon address */
 		char beacon_str[BT_ADDR_STR_LEN];
 		bt_addr_le_to_str(&(c_info->mac_address), beacon_str,
 				  sizeof(beacon_str));
+
 		/* Uncomment below for debug */
 		// printk("Beacon %s: ", log_strdup(beacon_str));
 #ifdef CONFIG_BEACON_SHORTEST_DISTANCE
@@ -245,6 +233,7 @@ static inline void get_shortest_distance(struct beacon_list *list, uint8_t
 			*dist = c_info->min_dist;
 		}
 	}
+	return 0;
 }
 
 /**
@@ -280,7 +269,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 
 	if (m > CONFIG_BEACON_DISTANCE_MAX) {
 		/* A beacon is seen, but out of desired range. Do not add to list */
-		return m_beacon_min_distance;
+		return -EIO;
 	}
 
 	if (m < 1.0) {
@@ -301,34 +290,30 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 	bt_addr_le_to_str(&beacon.mac_address, beacon_str, sizeof(beacon_str));
 
 	int target_beacon = get_beacon_index_by_mac(&beacons, &beacon);
-	/* If it doesn't exit, add it to list. */
+	/* If beacon doesn't exist (-1), add it to list. */
 	if (target_beacon == -1) {
-		LOG_DBG("New beacon detected %s, %d", log_strdup(beacon_str),
-			(uint8_t)m);
-		/* Populate 1 new history entry. */
+		LOG_DBG("New beacon detected %s, %d", 
+			log_strdup(beacon_str), (uint8_t)m);
+
+		/* Populate 1 new entry in beacon history. */
 		beacon.min_dist = (uint8_t)m;
 		beacon.num_measurements = 0;
 		beacon.conn_history_peeker = 0;
 		add_to_beacon_history(&info, &beacon);
+
+		/* Add beacon to beacons list */
 		add_to_beacon_list(&beacons, &beacon);
 	} else {
-		LOG_DBG("Add measurement from beacon %s to list",
-			log_strdup(beacon_str));
+		LOG_DBG("Add measurement (%d) from beacon %s to list",
+			(uint8_t)m, log_strdup(beacon_str));
 		add_to_beacon_history(&info,
-				      &beacons.beacon_array[target_beacon]);
+				&beacons.beacon_array[target_beacon]);
 	}
-//	if (beacons.beacon_array[target_beacon].num_measurements < 4) {
-//		/* Wait for at least four measurements to evaluate a beacon */
-//		return -EIO;
-//	}
-
-	get_shortest_distance(&beacons, &m_beacon_min_distance);
-	return m_beacon_min_distance;
+	return 0;
 }
 
 void init_beacon_list(void)
 {
+	/* Reset the beacons list at initialization */
 	memset(&beacons, 0, sizeof(beacons));
-	/* Set values to default on init */
-	m_beacon_min_distance = UINT8_MAX;
 }

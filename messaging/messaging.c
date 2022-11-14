@@ -171,8 +171,6 @@ struct k_work_delayable process_warning_correction_end_work;
 atomic_t poll_period_minutes = ATOMIC_INIT(15);
 atomic_t log_period_minutes = ATOMIC_INIT(30);
 
-static bool warning_active;
-
 K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE,
 		messaging_thread_fn, NULL, NULL, NULL,
 		K_PRIO_COOP(CONFIG_MESSAGING_THREAD_PRIORITY), 0, 0);
@@ -863,16 +861,6 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-	if (is_sound_status_event(eh)) {
-		struct sound_status_event *buzzer_state =
-			cast_sound_status_event(eh);
-		if (buzzer_state->status != SND_STATUS_IDLE) {
-			warning_active = true;
-		} else {
-			warning_active = false;
-		}
-		return false;
-	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -947,7 +935,6 @@ EVENT_SUBSCRIBE(MODULE, warn_correction_end_event);
 EVENT_SUBSCRIBE(MODULE, gsm_info_event);
 EVENT_SUBSCRIBE(MODULE, dfu_status_event);
 EVENT_SUBSCRIBE(MODULE, block_fota_event);
-EVENT_SUBSCRIBE(MODULE, sound_status_event);
 
 static inline void process_ble_cmd_event(void)
 {
@@ -1302,7 +1289,6 @@ int8_t request_fframe(uint32_t version, uint8_t frame)
 	fence_req.which_m = NofenceMessage_fence_definition_req_tag;
 	fence_req.m.fence_definition_req.ulFenceDefVersion = version;
 	fence_req.m.fence_definition_req.ucFrameNumber = frame;
-	warning_active = false;
 	int ret = encode_and_send_message(&fence_req);
 	if (ret) {
 		char *e_msg = "Failed to send request for fence frame";
@@ -1427,10 +1413,6 @@ void proto_InitHeader(NofenceMessage *msg)
  */
 int send_binary_message(uint8_t *data, size_t len)
 {
-	if (warning_active) { /*do not activate the modem until the warning
- * stops*/
-		return -EIO;
-	}
 	/* We can only send 1 message at a time, use mutex. */
 	k_mutex_lock(&send_binary_mutex, K_NO_WAIT);
 	if (send_binary_mutex.lock_count == 1) {
@@ -1484,11 +1466,6 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
 		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return ret;
-	}
-
-	if (msg_proto->which_m == NofenceMessage_poll_message_req_tag) {
-		/*force the poll request even if the buzzer is active*/
-		warning_active = false;
 	}
 	return send_binary_message(encoded_msg, encoded_size + header_size);
 }

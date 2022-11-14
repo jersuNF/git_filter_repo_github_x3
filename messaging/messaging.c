@@ -1160,7 +1160,7 @@ void build_poll_request(NofenceMessage *poll_req)
 		poll_req->m.poll_message_req.usFlashEraseCount = 
 					current_state.flash_erase_count;
 	}
-	if (m_confirm_acc_limits) {
+	if (m_confirm_acc_limits || m_transfer_boot_params) {
 		/** @warning Assumes all the activity values are given with the
 		 *  m_confirm_acc_limits flag set in poll response from server.
 		 */

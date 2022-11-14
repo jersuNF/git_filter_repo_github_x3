@@ -252,7 +252,7 @@ void init_states_and_variables(void)
 	uint8_t fence_status = 0;
 	err = stg_config_u8_read(STG_U8_FENCE_STATUS, &fence_status);
 	if (err) {
-		LOG_ERR("Could not read collar mode %i", err);
+		LOG_ERR("Could not read fence status, %i!", err);
 		fence_status = FenceStatus_FenceStatus_UNKNOWN;
 	}
 	current_fence_status = (FenceStatus)fence_status;

@@ -82,9 +82,10 @@ int get_gnss_cache(gnss_t **gnss);
  *        If consumer has not yet processed the previous GNSS entry.
  * 
  * @param[in] gnss gnss data to cache.
+ * @param[in] timed_out Flag indicating whether or not the GNSS timed out.
  * 
  * @return 0 on success, otherwise negative errno on semaphore error.
  */
-int set_gnss_cache(gnss_t *gnss);
+int set_gnss_cache(gnss_t *gnss, const bool timed_out);
 
 #endif /* _AMC_CACHE_H_ */

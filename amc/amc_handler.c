@@ -233,7 +233,7 @@ static inline int update_pasture_from_stg(void)
 		ver->total_fences = pasture->m.ul_total_fences;
 		EVENT_SUBMIT(ver);
 
-		LOG_INF("Pasture change:FenceVersion=%d,FenceStatus=%d", 
+		LOG_INF("Pasture loaded:FenceVersion=%d,FenceStatus=%d", 
 			pasture->m.ul_fence_def_version, 
 			get_fence_status());
 

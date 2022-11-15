@@ -279,8 +279,8 @@ int read_and_send_log_data_cb(uint8_t *data, size_t len)
 
 static int send_all_stored_messages(void)
 {
-	if ( k_mutex_lock(&read_flash_mutex, K_NO_WAIT) == 0 &&
-	    read_flash_mutex.lock_count <= 1) {
+	k_mutex_lock(&read_flash_mutex, K_NO_WAIT);
+	if (read_flash_mutex.lock_count == 1) {
 		/*Read and send out all the log data if any.*/
 		int err = stg_read_log_data(read_and_send_log_data_cb, 0);
 		if (err && err != -ENODATA) {
@@ -291,14 +291,12 @@ static int send_all_stored_messages(void)
 			LOG_INF("No log data available on flash for sending.");
 		}
 
-		/* If all entries has been consumed, empty storage
-	     * and we HAVE data on the partition.
-	     */
+		/* If all entries has been consumed, empty storage and we HAVE data on the
+		 * partition.*/
 		if (stg_log_pointing_to_last()) {
 			err = stg_clear_partition(STG_PARTITION_LOG);
 			if (err) {
-				LOG_ERR("Error clearing FCB storage for LOG %i",
-					err);
+				LOG_ERR("Error clearing FCB storage for LOG %i", err);
 				k_mutex_unlock(&read_flash_mutex);
 				return err;
 			} else {

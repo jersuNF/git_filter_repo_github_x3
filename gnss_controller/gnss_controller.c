@@ -245,7 +245,9 @@ EVENT_LISTENER(MODULE, gnss_controller_event_handler);
 EVENT_SUBSCRIBE(MODULE, gnss_data_rate);
 EVENT_SUBSCRIBE(MODULE, gnss_switch_off);
 EVENT_SUBSCRIBE(MODULE, gnss_switch_on);
-EVENT_SUBSCRIBE(MODULE, gnss_set_mode_event);
+
+/*EVENT_SUBSCRIBE(MODULE, gnss_set_mode_event);*/
+// commenting this out for release 1034 until we resolve XF-263
 
 /**
  * @brief Handles GNSS timeouts when no messages has been received. 

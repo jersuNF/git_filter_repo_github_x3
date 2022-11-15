@@ -234,7 +234,8 @@ static inline int update_pasture_from_stg(void)
 		EVENT_SUBMIT(ver);
 
 		LOG_INF("Pasture change:FenceVersion=%d,FenceStatus=%d", 
-					pasture->m.ul_fence_def_version, get_fence_status());
+			pasture->m.ul_fence_def_version, 
+			get_fence_status());
 
 		k_sem_give(&fence_data_sem);
 		return 0;

@@ -12,7 +12,8 @@
 #include "UBX.h"
 
 int fcb_walk_from_entry(fcb_read_cb cb, struct fcb *fcb,
-			struct fcb_entry *start_entry, uint16_t num_entries)
+			struct fcb_entry *start_entry, uint16_t num_entries,
+			struct k_mutex* flash_mutex)
 {
 	int err = 0;
 	int read_entry_counter = 0;
@@ -49,7 +50,8 @@ int fcb_walk_from_entry(fcb_read_cb cb, struct fcb *fcb,
 			k_free(data);
 			return err;
 		}
-
+		if (flash_mutex != NULL) k_mutex_unlock(flash_mutex); //shouldn't wait for the
+		// callback to return
 		err = cb(data, target_entry.fe_data_len);
 		k_free(data);
 
@@ -60,8 +62,7 @@ int fcb_walk_from_entry(fcb_read_cb cb, struct fcb *fcb,
 
 		/* Output the new entry we just read if user wants to use it. */
 		if (start_entry != NULL) {
-			memcpy(start_entry, &target_entry,
-			       sizeof(struct fcb_entry));
+			memcpy(start_entry, &target_entry, sizeof(struct fcb_entry));
 		}
 
 		/* Check if we want to exit since caller 

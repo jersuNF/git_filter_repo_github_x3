@@ -13,7 +13,7 @@
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define RCV_PRIORITY CONFIG_RECV_THREAD_PRIORITY
 #define SOCKET_POLL_INTERVAL 0.25
-#define SOCK_RECV_TIMEOUT 5
+#define SOCK_RECV_TIMEOUT 10
 #define MODULE cellular_controller
 #define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_MSEC
 
@@ -174,7 +174,7 @@ static int start_tcp(void)
 	}
 	if (!fota_in_progress) {
 		ret = check_ip();
-		if (ret != 0){
+		if (ret != 0) {
 			LOG_ERR("Failed to get ip address!");
 		char *e_msg = "Failed to get ip address!";
 		nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
@@ -207,12 +207,18 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		k_free(pMsgIn);
 		pMsgIn = NULL;
 		k_sem_give(&messaging_ack);
-		LOG_WRN("ACK received!\n");
+		LOG_WRN("ACK received!");
 		return false;
 	}
 	else if (is_messaging_stop_connection_event(eh)) {
+		k_free(CharMsgOut);
+		CharMsgOut = NULL;
 		modem_is_ready = false;
-		connected = false;
+		sending_in_progress = false;
+		k_sem_give(&close_main_socket_sem);
+		struct cellular_ack_event *ack = new_cellular_ack_event();
+		ack->message_sent = false;
+		EVENT_SUBMIT(ack);
 		return false;
 	}
 	else if (is_messaging_host_address_event(eh)) {
@@ -263,24 +269,14 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			CharMsgOut = (char *)k_malloc(MsgOutLen);
 			if (CharMsgOut ==
 			    memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
-				LOG_DBG("Publishing ack to messaging!\n");
-				struct cellular_ack_event *ack =
-					new_cellular_ack_event();
-				EVENT_SUBMIT(ack);
-			}
-			int err = send_tcp_q(CharMsgOut, MsgOutLen);
-			if (err != 0) {
-				char *sendq_err = "Couldn't push message to queue!";
-				nf_app_error(ERR_MESSAGING, -EAGAIN, sendq_err,
-					     strlen(sendq_err));
-				k_free(CharMsgOut);
-				CharMsgOut = NULL;
-				sending_in_progress = false;
+				send_tcp_q(CharMsgOut, MsgOutLen);
 				return false;
 			}
-		} else {
-			LOG_WRN("Dropping message!");
 		}
+		struct cellular_ack_event *ack = new_cellular_ack_event();
+		ack->message_sent = false;
+		EVENT_SUBMIT(ack);
+		LOG_WRN("Dropping message!");
 		return false;
 	}
 	else if (is_check_connection(eh)) {
@@ -292,6 +288,9 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		CharMsgOut = NULL;
 		sending_in_progress = false;
 		k_sem_give(&close_main_socket_sem);
+		struct cellular_ack_event *ack = new_cellular_ack_event();
+		ack->message_sent = true;
+		EVENT_SUBMIT(ack);
 		return false;
 	}
 	else if (is_dfu_status_event(eh)) {
@@ -361,7 +360,7 @@ static int cellular_controller_connect(void *dev)
 		goto exit;
 	}
 
-	LOG_INF("Cellular network interface ready!\n");
+	LOG_INF("Cellular network interface ready!");
 
 	ret = cache_server_address();
 	if (ret != 0) { //172.31.36.11:4321
@@ -463,6 +462,11 @@ static void cellular_controller_keep_alive(void *dev)
 						}
 					}
 				}
+			} else {
+				modem_nf_pwr_off();
+				connected = false;
+				sending_in_progress = false;
+				fota_in_progress = false;
 			}
 	update_connection_state:
 			announce_connection_state(connected);

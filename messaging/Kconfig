@@ -41,7 +41,7 @@ if MESSAGING
 
 	config CC_ACK_TIMEOUT_SEC
 	    int "Timeout when waiting for ack from cellular controller"
-	    default 1
+	    default 3
 
 	menu "Message Queues"
 		config MSGQ_BLE_CTRL_SIZE

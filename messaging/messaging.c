@@ -171,8 +171,6 @@ struct k_work_delayable process_warning_correction_end_work;
 atomic_t poll_period_minutes = ATOMIC_INIT(15);
 atomic_t log_period_minutes = ATOMIC_INIT(30);
 
-static bool warning_active;
-
 K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE,
 		messaging_thread_fn, NULL, NULL, NULL,
 		K_PRIO_COOP(CONFIG_MESSAGING_THREAD_PRIORITY), 0, 0);
@@ -269,31 +267,20 @@ static void build_log_message()
 
 int read_and_send_log_data_cb(uint8_t *data, size_t len)
 {
-	uint8_t encoded_msg[NofenceMessage_size];
-	memset(encoded_msg, 0, sizeof(encoded_msg));
 	LOG_DBG("Send log message fetched from flash");
 	/* Fetch the length from the two first bytes */
 	uint16_t new_len = *(uint16_t*) &data[0];
-	memcpy(&encoded_msg[0], &data[0], new_len);
-	int err = send_binary_message(encoded_msg, new_len);
-	if (err) {
-		char *e_msg = "Error sending binary message for log data";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+	int err = send_binary_message(data, new_len);
+	if (err != 0) {
+		LOG_ERR("Error sending binary message for log data");
 	}
-	k_yield();
 	return err;
 }
 
 static int send_all_stored_messages(void)
 {
-//	static bool force_poll_req = true;
-	if (k_mutex_lock(&read_flash_mutex, K_NO_WAIT) == 0) {
-//		if (force_poll_req) {
-//			k_work_reschedule_for_queue(&send_q, &modem_poll_work,
-//						    K_NO_WAIT);
-//			force_poll_req = false;
-//		}
+	k_mutex_lock(&read_flash_mutex, K_NO_WAIT);
+	if (read_flash_mutex.lock_count == 1) {
 		/*Read and send out all the log data if any.*/
 		int err = stg_read_log_data(read_and_send_log_data_cb, 0);
 		if (err && err != -ENODATA) {
@@ -304,15 +291,12 @@ static int send_all_stored_messages(void)
 			LOG_INF("No log data available on flash for sending.");
 		}
 
-		/* If all entries has been consumed, empty storage
-	     * and we HAVE data on the partition.
-	     */
+		/* If all entries has been consumed, empty storage and we HAVE data on the
+		 * partition.*/
 		if (stg_log_pointing_to_last()) {
-//			force_poll_req = true;
 			err = stg_clear_partition(STG_PARTITION_LOG);
 			if (err) {
-				LOG_ERR("Error clearing FCB storage for LOG %i",
-					err);
+				LOG_ERR("Error clearing FCB storage for LOG %i", err);
 				k_mutex_unlock(&read_flash_mutex);
 				return err;
 			} else {
@@ -322,6 +306,7 @@ static int send_all_stored_messages(void)
 		k_mutex_unlock(&read_flash_mutex);
 		return 0;
 	} else {
+		k_mutex_unlock(&read_flash_mutex);
 		return -ETIMEDOUT;
 	}
 }
@@ -366,7 +351,10 @@ void modem_poll_work_fn()
 	if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
 		build_poll_request(&new_poll_msg);
 		k_sem_give(&cache_lock_sem);
-		encode_and_send_message(&new_poll_msg);
+		if (encode_and_send_message(&new_poll_msg) != 0) {
+			k_work_reschedule_for_queue(&send_q, &modem_poll_work,
+						    K_MINUTES(1));
+		}
 	} else {
 		LOG_ERR("Cached state semaphore hanged, retrying in 3 minutes.");
 		k_work_reschedule_for_queue(&send_q, &modem_poll_work,
@@ -733,7 +721,12 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_cellular_ack_event(eh)) {
-		k_sem_give(&send_out_ack);
+		struct cellular_ack_event *ev = cast_cellular_ack_event(eh);
+		if (ev->message_sent) {
+			k_sem_give(&send_out_ack);
+		} else {
+			k_sem_reset(&send_out_ack);
+		}
 		return false;
 	}
 
@@ -866,16 +859,6 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-	if (is_sound_status_event(eh)) {
-		struct sound_status_event *buzzer_state =
-			cast_sound_status_event(eh);
-		if (buzzer_state->status != SND_STATUS_IDLE) {
-			warning_active = true;
-		} else {
-			warning_active = false;
-		}
-		return false;
-	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 
@@ -950,7 +933,6 @@ EVENT_SUBSCRIBE(MODULE, warn_correction_end_event);
 EVENT_SUBSCRIBE(MODULE, gsm_info_event);
 EVENT_SUBSCRIBE(MODULE, dfu_status_event);
 EVENT_SUBSCRIBE(MODULE, block_fota_event);
-EVENT_SUBSCRIBE(MODULE, sound_status_event);
 
 static inline void process_ble_cmd_event(void)
 {
@@ -1163,7 +1145,7 @@ void build_poll_request(NofenceMessage *poll_req)
 		poll_req->m.poll_message_req.usFlashEraseCount = 
 					current_state.flash_erase_count;
 	}
-	if (m_confirm_acc_limits) {
+	if (m_confirm_acc_limits || m_transfer_boot_params) {
 		/** @warning Assumes all the activity values are given with the
 		 *  m_confirm_acc_limits flag set in poll response from server.
 		 */
@@ -1305,7 +1287,6 @@ int8_t request_fframe(uint32_t version, uint8_t frame)
 	fence_req.which_m = NofenceMessage_fence_definition_req_tag;
 	fence_req.m.fence_definition_req.ulFenceDefVersion = version;
 	fence_req.m.fence_definition_req.ucFrameNumber = frame;
-	warning_active = false;
 	int ret = encode_and_send_message(&fence_req);
 	if (ret) {
 		char *e_msg = "Failed to send request for fence frame";
@@ -1322,7 +1303,7 @@ void fence_download(uint8_t new_fframe)
 		first_frame = false;
 	} else if (new_fframe == 0 && !first_frame) { //something went bad
 		expected_fframe = 0;
-		new_fence_in_progress = 0;
+		new_fence_in_progress = current_state.fence_version;
 		return;
 	}
 	if (new_fframe >= 0) {
@@ -1337,7 +1318,6 @@ void fence_download(uint8_t new_fframe)
 				new_fence_in_progress);
 
 			expected_fframe = 0;
-			new_fence_in_progress = 0;
 			return;
 		}
 		if (new_fframe == expected_fframe) {
@@ -1349,7 +1329,7 @@ void fence_download(uint8_t new_fframe)
 				expected_fframe, new_fence_in_progress);
 			if (err != 0) {
 				expected_fframe = 0;
-				new_fence_in_progress = 0;
+				new_fence_in_progress = current_state.fence_version;
 			}
 		}
 	}
@@ -1431,45 +1411,41 @@ void proto_InitHeader(NofenceMessage *msg)
  */
 int send_binary_message(uint8_t *data, size_t len)
 {
-	if (warning_active) { /*do not activate the modem until the warning
- * stops*/
-		return -EIO;
-	}
 	/* We can only send 1 message at a time, use mutex. */
-	if (k_mutex_lock(&send_binary_mutex,
-			 K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC * 2)) == 0) {
+	k_mutex_lock(&send_binary_mutex, K_NO_WAIT);
+	if (send_binary_mutex.lock_count == 1) {
+
 		struct check_connection *ev = new_check_connection();
 		EVENT_SUBMIT(ev);
-		k_sem_reset(&connection_ready);
-		int ret = k_sem_take(&connection_ready, K_MINUTES(2));
+
+		int ret = k_sem_take(&connection_ready, K_FOREVER);
 		if (ret != 0) {
-			char *e_msg =
-				"Connection not ready, can't send message now!";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
-			nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
+			LOG_ERR("Connection not ready, can't send message "
+				"now!");
 			k_mutex_unlock(&send_binary_mutex);
-			return -ETIMEDOUT;
+			return ret;
 		}
 		uint16_t byteswap_size = BYTESWAP16(len - 2);
 		memcpy(&data[0], &byteswap_size, 2);
-		k_sem_reset(&send_out_ack);
 		struct messaging_proto_out_event *msg2send =
 			new_messaging_proto_out_event();
 		msg2send->buf = data;
 		msg2send->len = len;
 		EVENT_SUBMIT(msg2send);
 
-		int err = k_sem_take(&send_out_ack,
-				     K_SECONDS(CONFIG_CC_ACK_TIMEOUT_SEC));
-		if (err != 0) {
-			char *e_msg = "Timed out waiting for cellular ack";
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		ret = k_sem_take(&send_out_ack, K_FOREVER);
+		if (ret != 0) {
+			LOG_WRN("Message not sent!");
+			nf_app_error(ERR_MESSAGING, ret, NULL, 0);
 			k_mutex_unlock(&send_binary_mutex);
-			return -ETIMEDOUT;
+			return ret;
 		}
+		k_mutex_unlock(&send_binary_mutex);
+		return 0;
+	} else {
+		k_mutex_unlock(&send_binary_mutex);
+		return -EBUSY;
 	}
-	k_mutex_unlock(&send_binary_mutex);
-	return 0;
 }
 
 int encode_and_send_message(NofenceMessage *msg_proto)
@@ -1488,11 +1464,6 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
 		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
 		return ret;
-	}
-
-	if (msg_proto->which_m == NofenceMessage_poll_message_req_tag) {
-		/*force the poll request even if the buzzer is active*/
-		warning_active = false;
 	}
 	return send_binary_message(encoded_msg, encoded_size + header_size);
 }
@@ -1656,15 +1627,14 @@ void process_poll_response(NofenceMessage *proto)
 			}
 		}
 	}
-	if (pResp->ulFenceDefVersion != current_state.fence_version &&
-	    new_fence_in_progress != pResp->ulFenceDefVersion) {
+	if (pResp->ulFenceDefVersion != current_state.fence_version) {
 		/* Request frame 0. */
-		first_frame = true;
 		LOG_INF("Requesting frame 0 for fence version %i.",
 			pResp->ulFenceDefVersion);
+		first_frame = true;
+		expected_fframe = 0;
 		int ret = request_fframe(pResp->ulFenceDefVersion, 0);
 		if (ret == 0) {
-			first_frame = true;
 			new_fence_in_progress = pResp->ulFenceDefVersion;
 		}
 		return;
@@ -1719,6 +1689,7 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	int err = 0;
 
 	if (new_fence_in_progress != fenceResp->ulFenceDefVersion) {
+		new_fence_in_progress = current_state.fence_version;
 		/* Something went wrong, restart fence request. */
 		return 0;
 	}

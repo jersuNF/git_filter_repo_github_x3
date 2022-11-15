@@ -18,11 +18,17 @@ LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 #define ACC_FIFO_ELEMENTS 32
 #define SENSOR_SAMPLE_INTERVAL_MS 100
 
+#define GRAVITY 9.806650
+
 #ifdef CONFIG_TEST
 uint32_t ztest_acc_std_final;
+raw_acc_data_t raw_data;
 #endif
 
 static const struct device *sensor;
+
+/* +∕- fullscale range [g] */
+typedef enum {RANGE_2G=2, RANGE_4G=4, RANGE_8G=8, RANGE_16G=16}acc_scale_t;
 
 /** @todo Add to make configurable from messaging.c event. Also storage settings? */
 static uint16_t off_animal_time_limit_sec = OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT;
@@ -119,7 +125,9 @@ void process_acc_data(raw_acc_data_t *acc)
 		return;
 	}
 
+	/* Save the calculated standard deviation for later. */
 	static uint32_t acc_std_final = 0;
+	LOG_DBG("acc_std_final mov_controller: %d", acc_std_final);
 	/* Gets set to true when we fill up the fifo. */
 	static bool first_read = true;
 
@@ -163,7 +171,6 @@ void process_acc_data(raw_acc_data_t *acc)
 		acc_norm_sum += acc_norm[i];
 		gravity += acc_fifo_y[i] / ACC_FIFO_ELEMENTS;
 	}
-
 	uint32_t acc_norm_mean = acc_norm_sum / ACC_FIFO_ELEMENTS;
 
 	/* Compute Standard Deviation. */
@@ -175,7 +182,6 @@ void process_acc_data(raw_acc_data_t *acc)
 	}
 	acc_std /= ACC_FIFO_ELEMENTS;
 	acc_std = g_u32_SquareRootRounded(acc_std);
-
 	/* Exponential moving average with alpha = 2/(N+1). */
 	if (first_read) {
 		first_read = false;
@@ -187,7 +193,6 @@ void process_acc_data(raw_acc_data_t *acc)
 			(acc_std_final * 2) /
 				(ACC_STD_EXP_MOVING_AVERAGE_N + 1);
 	}
-	acc_std_final = 16*acc_std_final;
 
 	/* Determine current activity level, the number below is based 
          * on 8 HW_F, HW_J collars placed outside on a flower-bed at 
@@ -336,19 +341,31 @@ void fetch_and_display(const struct device *sensor)
 		LOG_ERR("Error getting acc channel values %i", rc);
 		return;
 	}
+	/* Convert from m/s² to mg */
+	int32_t accel_mg[3];
+	accel_mg[0] = (int32_t)((sensor_value_to_double(&accel[0])/GRAVITY) * 1000);
+	accel_mg[1] = (int32_t)((sensor_value_to_double(&accel[1])/GRAVITY) * 1000);
+	accel_mg[2] = (int32_t)((sensor_value_to_double(&accel[2])/GRAVITY) * 1000);
 
+	LOG_DBG("Acceleration [mg]: X: %d, Y: %d, Z: %d", accel_mg[0] , accel_mg[1] ,accel_mg[2]);
+	
 	raw_acc_data_t data;
-	data.x = (int16_t)(sensor_value_to_double(&accel[0]) * 1000);
-	data.y = (int16_t)(sensor_value_to_double(&accel[1]) * 1000);
-	data.z = (int16_t)(sensor_value_to_double(&accel[2]) * 1000);
+	data.x = (int16_t)(accel_mg[0] * 16); // Multiply with legacy constant
+	data.y = (int16_t)(accel_mg[1] * 16); // Multiply with legacy constant
+	data.z = (int16_t)(accel_mg[2] * 16); // Multiply with legacy constant
 
-	LOG_DBG("Acc X: %d, Y: %d, Z: %d", data.x, data.y, data.z);
+	LOG_DBG("Raw values:  X: %d, Y: %d, Z: %d", data.x, data.y, data.z);
 
 	while (k_msgq_put(&acc_data_msgq, &data, K_NO_WAIT) != 0) {
 		/* Message queue is full: purge old data & try again */
 		LOG_WRN("Message queue full, purging and retry");
 		k_msgq_purge(&acc_data_msgq);
 	}
+	
+#ifdef CONFIG_TEST
+	/* Keep a copy of the raw data for testing */
+	memcpy(&raw_data, &data, sizeof(data));
+#endif
 }
 
 static void sample_sensor_work_fn(struct k_work *work)
@@ -357,7 +374,7 @@ static void sample_sensor_work_fn(struct k_work *work)
 	fetch_and_display(sensor);
 }
 
-int update_acc_odr(acc_mode_t mode_hz)
+static int update_acc_odr(acc_mode_t mode_hz)
 {
 	/* Setup interrupt triggers. */
 	struct sensor_trigger trig;
@@ -399,6 +416,19 @@ int update_acc_odr(acc_mode_t mode_hz)
 	return 0;
 }
 
+static int update_acc_range(acc_scale_t scale)
+{
+	struct sensor_value range;
+	sensor_g_to_ms2((uint8_t) scale, &range);
+	int ret = sensor_attr_set(sensor, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_FULL_SCALE,
+			    &range);
+	if (ret != 0) {
+		LOG_ERR("Failed to set range: %d", ret);
+		return ret;
+	}
+	return 0;
+}
+
 int init_movement_controller(void)
 {
 	int err;
@@ -406,18 +436,24 @@ int init_movement_controller(void)
 	sensor = device_get_binding(DT_LABEL(DT_NODELABEL(movement_sensor)));
 
 	if (sensor == NULL) {
-		LOG_ERR("Could not find LIS2DW driver.");
+		LOG_ERR("Could not find LIS2DW12 driver.");
 		return -ENODEV;
 	}
 	if (!device_is_ready(sensor)) {
-		LOG_ERR("Failed to setup LIS2DW accelerometer driver.");
+		LOG_ERR("Failed to setup LIS2DW12 accelerometer driver.");
 		return -EFAULT;
 	} else {
-		LOG_INF("Setup LIS2DW accelerometer driver.");
+		LOG_INF("Setup LIS2DW12 accelerometer driver.");
 	}
 
 	/* Setup interrupt triggers. */
 	err = update_acc_odr(MODE_12_5_HZ);
+	if (err != 0) {
+		return err;
+	}
+
+	/* NB: This overwrites the default range set in boardfile */
+	err = update_acc_range(RANGE_2G);
 	if (err != 0) {
 		return err;
 	}

@@ -7,6 +7,7 @@
 
 #include "pasture_structure.h"
 #include "amc_cache.h"
+#include "amc_states_cache.h"
 #include "embedded.pb.h"
 
 LOG_MODULE_REGISTER(amc_cache, CONFIG_AMC_LIB_LOG_LEVEL);
@@ -150,8 +151,8 @@ bool fnc_valid_fence(void)
 		return false;
 	}
 
-	if (pasture->m.status == FenceStatus_FenceStatus_Invalid ||
-	    pasture->m.status == FenceStatus_TurnedOffByBLE) {
+	if ((get_fence_status() == FenceStatus_FenceStatus_Invalid) ||
+	    (get_fence_status() == FenceStatus_TurnedOffByBLE)) {
 		return false;
 	}
 

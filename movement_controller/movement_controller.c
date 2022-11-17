@@ -20,10 +20,15 @@ LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 
 #define GRAVITY 9.806650
 
-#ifdef CONFIG_TEST
-uint32_t ztest_acc_std_final;
-raw_acc_data_t raw_data;
-#endif
+
+
+enum acc_reading_state {
+	FIRST_READ_DISREGARD_BUFFER = 0,
+	SECOND_READ_INIT_MOVING_AVERAGE,
+	NORMAL_READ
+};
+
+static enum acc_reading_state reading_state = FIRST_READ_DISREGARD_BUFFER;
 
 static const struct device *sensor;
 
@@ -38,6 +43,10 @@ static uint16_t acc_sigma_noactivity_limit = ACC_SIGMA_NOACTIVITY_LIMIT_DEFAULT;
 static int16_t acc_fifo_x[ACC_FIFO_ELEMENTS];
 static int16_t acc_fifo_y[ACC_FIFO_ELEMENTS];
 static int16_t acc_fifo_z[ACC_FIFO_ELEMENTS];
+
+
+/* Save the calculated standard deviation for later. */
+static uint32_t acc_std_final = 0;
 
 static uint32_t first_inactive_timestamp = 0;
 static uint32_t total_steps = 0;
@@ -60,6 +69,20 @@ K_THREAD_DEFINE(movement_thread, CONFIG_MOVEMENT_THREAD_STACK_SIZE,
 		CONFIG_MOVEMENT_THREAD_PRIORITY, 0, 0);
 
 K_MSGQ_DEFINE(acc_data_msgq, sizeof(raw_acc_data_t), CONFIG_ACC_MSGQ_SIZE, 4);
+
+/* Non-production code used to initialize persitstent variables to known state */
+#ifdef CONFIG_TEST
+raw_acc_data_t raw_data;
+void _movement_controller_reset_for_test(void)
+{
+	reading_state = FIRST_READ_DISREGARD_BUFFER;
+	acc_std_final = 0;
+}
+uint32_t _movement_controler_get_acc_std_final()
+{
+	return acc_std_final;
+}
+#endif
 
 /** @brief Times out after n seconds of not receiving new data. */
 void movement_timeout_fn(struct k_timer *dummy)
@@ -125,18 +148,15 @@ void process_acc_data(raw_acc_data_t *acc)
 		return;
 	}
 
-	/* Save the calculated standard deviation for later. */
-	static uint32_t acc_std_final = 0;
+
 	LOG_DBG("acc_std_final mov_controller: %d", acc_std_final);
-	/* Gets set to true when we fill up the fifo. */
-	static bool first_read = true;
 
-	/* Store newest value into FIFO. */
-	fifo_put(acc->x, acc_fifo_x, ACC_FIFO_ELEMENTS);
-	fifo_put(acc->y, acc_fifo_y, ACC_FIFO_ELEMENTS);
-	fifo_put(acc->z, acc_fifo_z, ACC_FIFO_ELEMENTS);
+	acc_fifo_x[num_acc_fifo_samples] = acc->x;
+	acc_fifo_y[num_acc_fifo_samples] = acc->y;
+	acc_fifo_z[num_acc_fifo_samples] = acc->z;
+	num_acc_fifo_samples ++;
 
-	if (++num_acc_fifo_samples < ACC_FIFO_ELEMENTS) {
+	if (num_acc_fifo_samples < ACC_FIFO_ELEMENTS) {
 		LOG_DBG("Filling data buffer, sample %d/%d", num_acc_fifo_samples, 
 				(ACC_FIFO_ELEMENTS - 1));
 		return;
@@ -144,9 +164,15 @@ void process_acc_data(raw_acc_data_t *acc)
 	LOG_DBG("Accel. data acquired (%d/%d samples), processing", 
 			num_acc_fifo_samples, ACC_FIFO_ELEMENTS);
 
-	num_acc_fifo_samples = 0; //Reset data sample counter
+	num_acc_fifo_samples = 0;
+	if (reading_state == FIRST_READ_DISREGARD_BUFFER) {
+		reading_state = SECOND_READ_INIT_MOVING_AVERAGE;
+		/* disregard the first 32 readings as they might contain MEMS garbage */
+		LOG_DBG("Disregards first accelermoter data");
+		return;
+	}
 
-	/* FIFO is filled, start algorithm. */
+	/* buffers are filled, start algorithm. */
 	bool is_active = true;
 	uint8_t cur_activity;
 	uint8_t stepcount;
@@ -183,8 +209,8 @@ void process_acc_data(raw_acc_data_t *acc)
 	acc_std /= ACC_FIFO_ELEMENTS;
 	acc_std = g_u32_SquareRootRounded(acc_std);
 	/* Exponential moving average with alpha = 2/(N+1). */
-	if (first_read) {
-		first_read = false;
+	if (reading_state == SECOND_READ_INIT_MOVING_AVERAGE) {
+		reading_state = NORMAL_READ;
 		acc_std_final = acc_std;
 	} else {
 		acc_std_final =
@@ -301,9 +327,6 @@ void process_acc_data(raw_acc_data_t *acc)
 	/* Reset the timer since we just consumed the data successfully. */
 	k_timer_start(&movement_timeout_timer,
 		      K_SECONDS(CONFIG_MOVEMENT_TIMEOUT_SEC), K_NO_WAIT);
-#ifdef CONFIG_TEST
-	ztest_acc_std_final = acc_std_final;
-#endif
 }
 
 uint32_t get_active_delta(void)

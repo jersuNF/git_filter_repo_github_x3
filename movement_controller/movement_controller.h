@@ -64,4 +64,9 @@ void reset_total_steps(void);
 /** @brief Used to get the delta of how long we've been in active state. */
 uint32_t get_active_delta(void);
 
+#ifdef CONFIG_TEST
+void _movement_controller_reset_for_test(void);
+uint32_t _movement_controler_get_acc_std_final(void);
+#endif
+
 #endif /* _MOVEMENT_CONTROLLER_H_ */

@@ -1192,14 +1192,16 @@ void build_poll_request(NofenceMessage *poll_req)
 		}
 	}
 	/* TODO pshustad, fill GNSSS parameters for MIA M10 */
-	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec = true;
+	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec = 
+		(cached_gnss_mode == GNSSMODE_NOMODE) ? false : true;
 	uint32_t timeSinceFixSec = (cached_msss - cached_fix.msss)/1000;
 	if (timeSinceFixSec > UINT16_MAX) {
 		timeSinceFixSec = UINT16_MAX;
 	}
 	poll_req->m.poll_message_req.usGnssOnFixAgeSec = timeSinceFixSec;
 
-	poll_req->m.poll_message_req.has_usGnssTTFFSec = true;
+	poll_req->m.poll_message_req.has_usGnssTTFFSec = 
+		(cached_gnss_mode == GNSSMODE_NOMODE) ? false : true;
 	uint32_t timeSinceFirstFixSec = cached_ttff/1000;
 	if (timeSinceFirstFixSec > UINT16_MAX) {
 		timeSinceFirstFixSec = UINT16_MAX;

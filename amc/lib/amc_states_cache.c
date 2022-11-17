@@ -62,6 +62,13 @@ static uint32_t teach_warn_cnt = 0;
 
 static uint16_t zap_pain_cnt = 0;
 
+#ifdef CONFIG_TEST
+  void _test_set_firs_time_since_start(bool v)
+  {
+	  first_time_since_start = v;
+  }
+#endif
+
 void update_movement_state(movement_state_t state)
 {
 	atomic_set(&movement_state, state);

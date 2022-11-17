@@ -597,6 +597,7 @@ static bool event_handler(const struct event_header *eh)
 	if (is_movement_out_event(eh)) {
 		const struct movement_out_event *ev = cast_movement_out_event(eh);
 		update_movement_state(ev->state);
+		k_work_submit_to_queue(&amc_work_q, &handle_states_work);
 		return false;
 	}
 	if (is_turn_off_fence_event(eh)) {

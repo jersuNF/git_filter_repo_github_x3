@@ -11,7 +11,17 @@ if GNSS_CONTROLLER
 	config GNSS_CONTROLLER_LOG_LEVEL
 		int "Log level for the gnss controller"
 		default 1
-    config MINIMUM_ALLOWED_GNSS_RATE
+    config GNSS_MINIMUM_ALLOWED_GNSS_RATE
         int "Minimum allowable rate for GNSS receiver (milliseconds)"
         default 250
+    config GNSS_TIMEOUTS_BEFORE_RESET
+            int "Number of timeout events before we try a GNSS reset"
+            default 3
+    config GNSS_DEFAULT_TIMEOUT_RATE_MS
+                int "Default rate to generate timeouts if GNSS receiver is missing dat (milliseconds)"
+                default 5000
+    config GNSS_TIMEOUT_SLACK_MS
+                    int "Extra milliseconds to add to the expected GNSS rate before generating a timeout event"
+                    default 100
+
 endif

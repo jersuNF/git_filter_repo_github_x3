@@ -841,7 +841,7 @@ static bool event_handler(const struct event_header *eh)
 		max_rssi = ev->gsm_info.max_rssi;
 		memcpy(ccid, ev->gsm_info.ccid, sizeof(ccid));
 		LOG_WRN("RSSI, rat: %d, %d, %d, %d, %s", rssi, min_rssi,
-			max_rssi, rat, ccid);
+			max_rssi, rat, log_strdup(ccid));
 		update_cache_reg(GSM_INFO);
 		return false;
 	}
@@ -1543,7 +1543,7 @@ void process_poll_response(NofenceMessage *proto)
 		} else {
 			/** @note This prints UTC. */
 			LOG_INF("Set timestamp to date_time library from modem: %s",
-				asctime(tm_time));
+				log_strdup(asctime(tm_time)));
 			atomic_set(&server_timestamp_sec,
 				   (atomic_val_t)(int32_t)(k_uptime_get_32() /
 							   1000));
@@ -1861,7 +1861,18 @@ static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix,
 		.usHeight = gpsLastFix->baro_Height,
 #endif
 		.has_ucGpsMode = true,
-		.ucGpsMode = gpsLastFix->mode
+		.ucGpsMode = gpsLastFix->mode,
+		.has_xNavPlExtra = true,
+		.xNavPlExtra = {
+			.ucTmirCoeff = gpsLastFix->pl.tmirCoeff,
+			.ucTmirExp = gpsLastFix->pl.tmirExp,
+			.ucPlPosValid = gpsLastFix->pl.plPosValid,
+			.ucPlPosFrame = gpsLastFix->pl.plPosFrame,
+			.ulPlPos1 = gpsLastFix->pl.plPos1,
+			.ulPlPos2 = gpsLastFix->pl.plPos2,
+			.ulPlPos3 = gpsLastFix->pl.plPos3
+		}
+
 	};
 	memcpy(pos, &a, sizeof(_DatePos));
 }

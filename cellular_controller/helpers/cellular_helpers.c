@@ -93,7 +93,7 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 			errno);
 		return -errno;
 	} else {
-		LOG_INF("Created TCP socket (%s): %d\n", data->proto,
+		LOG_INF("Created TCP socket (%s): %d\n", log_strdup(data->proto),
 			data->tcp.sock);
 		socket_id = data->tcp.sock;
 	}
@@ -262,7 +262,7 @@ int send_tcp(char *msg, size_t len)
 		LOG_ERR("%s TCP: Failed to send data, errno %d",
 			conf.ipv4.proto, ret);
 	} else {
-		LOG_DBG("%s TCP: Sent %d bytes", conf.ipv4.proto, ret);
+		LOG_DBG("%s TCP: Sent %d bytes", log_strdup(conf.ipv4.proto), ret);
 	}
 	/* TODO: how to handle partial sends? sendall() will keep retrying,
      * this should be handled here as well.*/

@@ -340,7 +340,7 @@ int8_t cache_server_address(void)
 	ip_len = ptr_port - 1 - &server_address[0];
 	memcpy(&server_ip[0], &server_address[0], ip_len);
 	if (server_ip[0] != '\0') {
-		LOG_INF("Host address read from storage: %s : %d", &server_ip[0],
+		LOG_INF("Host address read from storage: %s : %d", log_strdup(&server_ip[0]),
 			server_port);
 		return 0;
 	} else {

@@ -1,6 +1,9 @@
 # Copyright (c) 2021 Nofence AS
 
+if LOG
 
 module = EP_MODULE
 module-str = EP module
 source "subsys/logging/Kconfig.template.log_config"
+
+endif

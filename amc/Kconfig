@@ -8,9 +8,9 @@ menuconfig ANIMAL_MONITOR_CONTROL
 
 
 if ANIMAL_MONITOR_CONTROL
-	config AMC_LOG_LEVEL
-		int "Log level for the AMC module"
-		default 2
+	module = AMC
+        module-str = AMC controller
+        source "subsys/logging/Kconfig.template.log_config"
 	
 	config STATIC_GNSSDATA_SIZE
 		int "Data size of the cached GNSS data"

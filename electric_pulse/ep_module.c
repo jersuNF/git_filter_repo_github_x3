@@ -196,14 +196,12 @@ static bool event_handler(const struct event_header *eh)
 					g_trigger_ready = false;
 					err = ep_module_release(event->is_first_pulse);
 					if (err < 0) {
-						char *e_msg = "Error in ep release";
-						LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-						nf_app_error(ERR_EP_MODULE, err, e_msg, strlen(e_msg));
+						LOG_ERR("Error in ep release (%d)", err);
+						nf_app_error(ERR_EP_MODULE, err, NULL, 0);
 					}
 				} else {
-					char *e_msg = "Tried to give EP outside sound max event";
-					LOG_ERR("%s (%d)", log_strdup(e_msg), -EACCES);
-					nf_app_error(ERR_EP_MODULE, -EACCES, e_msg, strlen(e_msg));
+					LOG_ERR("Tried to give EP outside sound max event (%d)", -EACCES);
+					nf_app_error(ERR_EP_MODULE, -EACCES, NULL, 0);
 				}
 				break;
 			}

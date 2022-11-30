@@ -3,7 +3,6 @@
 
 menuconfig POWER_MANAGER
         bool "Enable Power Manager module"
-	select LOG
         default y
 
 if POWER_MANAGER

@@ -8,9 +8,9 @@ menuconfig GNSS_CONTROLLER
 
 
 if GNSS_CONTROLLER
-	config GNSS_CONTROLLER_LOG_LEVEL
-		int "Log level for the gnss controller"
-		default 1
+    module = GNSS_CONTROLLER
+        module-str = GNSS controller
+        source "subsys/logging/Kconfig.template.log_config"
     config GNSS_MINIMUM_ALLOWED_GNSS_RATE
         int "Minimum allowable rate for GNSS receiver (milliseconds)"
         default 250
@@ -23,5 +23,4 @@ if GNSS_CONTROLLER
     config GNSS_TIMEOUT_SLACK_MS
                     int "Extra milliseconds to add to the expected GNSS rate before generating a timeout event"
                     default 100
-
 endif

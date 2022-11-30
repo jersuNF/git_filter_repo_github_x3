@@ -352,11 +352,8 @@ static int cellular_controller_connect(void *dev)
 {
 	int ret = lte_init();
 	if (ret != 0) {
-		char *e_msg =
-			"Failed to start LTE connection. Check network interface!";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
-		nf_app_error(ERR_CELLULAR_CONTROLLER, ret, e_msg,
-			     strlen(e_msg));
+		LOG_ERR("Failed to start LTE connection. Check network interface! (%d)", ret);
+		nf_app_error(ERR_CELLULAR_CONTROLLER, ret, NULL, 0);
 		goto exit;
 	}
 
@@ -504,10 +501,8 @@ int8_t cellular_controller_init(void)
 	connected = false;
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {
-		char *e_msg = "GSM driver was not found!";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), -ENODEV);
-		nf_app_error(ERR_CELLULAR_CONTROLLER, -ENODEV, e_msg,
-			     strlen(e_msg));
+		LOG_ERR("GSM driver was not found! (%d)", -ENODEV);
+		nf_app_error(ERR_CELLULAR_CONTROLLER, -ENODEV, NULL, 0);
 		return -1;
 	}
 

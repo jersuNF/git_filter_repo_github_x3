@@ -189,9 +189,8 @@ static void build_log_message()
 	collar_histogram histogram;
 	int err = k_msgq_get(&histogram_msgq, &histogram, K_SECONDS(10));
 	if (err) {
-		char *e_msg = "Timeout on waiting for histogram";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		LOG_ERR("Timeout on waiting for histogram (%d)", err);
+		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		return;
 	}
 
@@ -227,9 +226,8 @@ static void build_log_message()
 
 	err = encode_and_store_message(&seq_1);
 	if (err) {
-		char *e_msg = "Failed to encode and save sequence message 1";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		LOG_ERR("Failed to encode and save sequence message 1 (%d)", err);
+		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		return;
 	}
 
@@ -258,8 +256,7 @@ static void build_log_message()
 
 	err = encode_and_store_message(&seq_2);
 	if (err) {
-		char *e_msg = "Failed to encode and save sequence message 2";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		LOG_ERR("Failed to encode and save sequence message 2 (%d)", err);
 		return;
 	}
 	LOG_INF("Store seq_1 and seq_2 to flash");
@@ -271,8 +268,9 @@ int read_and_send_log_data_cb(uint8_t *data, size_t len)
 	/* Fetch the length from the two first bytes */
 	uint16_t new_len = *(uint16_t*) &data[0];
 	int err = send_binary_message(data, new_len);
-	if (err != 0) {
-		LOG_ERR("Error sending binary message for log data");
+	if (err) {
+		LOG_ERR("Error sending binary message for log data (%d)", err);
+		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 	}
 	return err;
 }
@@ -377,8 +375,7 @@ static void log_zap_message_work_fn()
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		char *e_msg = "Failed to encode and save zap status msg";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		LOG_ERR("Failed to encode and save zap status msg (%d)", err);
 		return;
 	} else {
 		LOG_INF("Store zap message to flash");
@@ -405,8 +402,7 @@ static void log_animal_escaped_work_fn()
 	msg.m.status_msg.ucGpsMode = (uint8_t)cached_gnss_mode;
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		char *e_msg = "Failed to encode and save escaped status msg";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		LOG_ERR("Failed to encode and save escaped status msg (%d)", err);
 		return;
 	} else {
 		LOG_INF("Store escaped message to flash");
@@ -438,8 +434,7 @@ static void log_status_message_fn()
 	/* Store message to external flash */
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		char *e_msg = "Failed to encode and save fence status message";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		LOG_ERR("Failed to encode and save fence status message (%d)", err);
 		return;
 	} else {
 		LOG_DBG("Storing fence status message to external flash");
@@ -467,8 +462,7 @@ static void log_warning_work_fn()
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		char *e_msg = "Failed to encode and save warning msg";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		LOG_ERR("Failed to encode and save warning msg (%d)", err);
 		return;
 	} else {
 		LOG_INF("Store warning message to flash");
@@ -493,8 +487,7 @@ static void log_correction_start_work_fn()
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		char *e_msg = "Failed to encode and save correction start msg";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		LOG_ERR("Failed to encode and save correction start msg (%d)", err);
 		return;
 	} else {
 		LOG_INF("Store correction start message to flash");
@@ -519,8 +512,7 @@ static void log_correction_end_work_fn()
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		char *e_msg = "Failed to encode and save correction end msg";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
+		LOG_ERR("Failed to encode and save correction end msg (%d)", err);
 		return;
 	} else {
 		LOG_INF("Store correction end message to flash");
@@ -734,9 +726,8 @@ static bool event_handler(const struct event_header *eh)
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_escape_work, K_NO_WAIT);
 		if (err < 0) {
-			char *e_msg = "Error reschedule escape work";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			LOG_ERR("Error reschedule escape work (%d)", err);
+			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 		return false;
 	}
@@ -759,9 +750,8 @@ static bool event_handler(const struct event_header *eh)
 		int err = k_work_reschedule_for_queue(
 			&send_q, &process_warning_work, K_NO_WAIT);
 		if (err < 0) {
-			char *e_msg = "Error reschedule warning work";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			LOG_ERR("Error reschedule warning work (%d)", err);
+			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 
 		return false;
@@ -783,10 +773,8 @@ static bool event_handler(const struct event_header *eh)
 		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
 						      K_NO_WAIT);
 		if (err < 0) {
-			char *e_msg =
-				"Error starting modem poll worker in response to nudge on listening socket.";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			LOG_ERR("Error starting modem poll worker in response to nudge on listening socket. (%d)", err);
+			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 		return false;
 	}
@@ -809,10 +797,8 @@ static bool event_handler(const struct event_header *eh)
 			&send_q, &process_warning_correction_start_work,
 			K_NO_WAIT);
 		if (err < 0) {
-			char *e_msg =
-				"Error reschedule warning correction start work";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			LOG_ERR("Error reschedule warning correction start work (%d)", err);
+			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 		return false;
 	}
@@ -824,10 +810,8 @@ static bool event_handler(const struct event_header *eh)
 			&send_q, &process_warning_correction_end_work,
 			K_NO_WAIT);
 		if (err < 0) {
-			char *e_msg =
-				"Error reschedule warning correction end work";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			LOG_ERR("Error reschedule warning correction end work (%d)", err);
+			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 		return false;
 	}
@@ -940,9 +924,8 @@ static inline void process_ble_cmd_event(void)
 
 	int err = k_msgq_get(&ble_cmd_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		char *e_msg = "Error getting ble_cmd_event";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		LOG_ERR("Error getting ble_cmd_event (%d)", err);
+		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		return;
 	}
 
@@ -987,9 +970,8 @@ static void process_lte_proto_event(void)
 
 	int err = k_msgq_get(&lte_proto_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		char *e_msg = "Error getting lte_proto_event";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		LOG_ERR("Error getting lte_proto_event (%d)", err);
+		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		return;
 	}
 
@@ -1009,9 +991,8 @@ static void process_lte_proto_event(void)
 	struct messaging_ack_event *ack = new_messaging_ack_event();
 	EVENT_SUBMIT(ack);
 	if (err) {
-		char *e_msg = "Error decoding protobuf message";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		LOG_ERR("Error decoding protobuf message (%d)", err);
+		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		return;
 	}
 
@@ -1058,9 +1039,8 @@ int messaging_module_init(void)
 	LOG_INF("Initializing messaging module.");
 	int err = stg_config_u32_read(STG_U32_UID, &serial_id);
 	if (err != 0) {
-		char *e_msg = "Failed to read serial number from storage!";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		LOG_ERR("Failed to read serial number from storage! (%d)", err);
+		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		return err;
 	}
 	struct check_connection *ev = new_check_connection();
@@ -1156,25 +1136,22 @@ void build_poll_request(NofenceMessage *poll_req)
 		err = stg_config_u16_read(STG_U16_ACC_SIGMA_SLEEP_LIMIT, 
 				&poll_req->m.poll_message_req.usAccSigmaSleepLimit);
 		if (err != 0) {
-			char *e_msg = "Failed to read STG_U16_ACC_SIGMA_SLEEP_LIMIT";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			LOG_ERR("Failed to read STG_U16_ACC_SIGMA_SLEEP_LIMIT (%d)", err);
+			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 
 		err = stg_config_u16_read(STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT, 
 				&poll_req->m.poll_message_req.usAccSigmaNoActivityLimit);
 		if (err != 0) {
-			char *e_msg = "Failed to read STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			LOG_ERR("Failed to read STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT (%d)", err);
+			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 
 		err = stg_config_u16_read(STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC, 
 				&poll_req->m.poll_message_req.usOffAnimalTimeLimitSec);
 		if (err != 0) {
-			char *e_msg = "Failed to read STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			LOG_ERR("Failed to read STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC (%d)", err);
+			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 	}
 	if (m_confirm_ble_key || m_transfer_boot_params) {
@@ -1186,9 +1163,8 @@ void build_poll_request(NofenceMessage *poll_req)
 				poll_req->m.poll_message_req.rgubcBleKey.bytes, 
 				&key_length);		
 		if (err != 0) {
-			char *e_msg = "Failed to read ble_sec_key";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			LOG_ERR("Failed to read ble_sec_key (%d)", err);
+			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 	}
 	/* TODO pshustad, fill GNSSS parameters for MIA M10 */
@@ -1291,9 +1267,8 @@ int8_t request_fframe(uint32_t version, uint8_t frame)
 	fence_req.m.fence_definition_req.ucFrameNumber = frame;
 	int ret = encode_and_send_message(&fence_req);
 	if (ret) {
-		char *e_msg = "Failed to send request for fence frame";
-		LOG_ERR("%s %d (%d)", log_strdup(e_msg), frame, ret);
-		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
+		LOG_ERR("Failed to send request for fence frame %d (%d)", frame, ret);
+		nf_app_error(ERR_MESSAGING, ret, NULL, 0);
 		return -1;
 	}
 	return 0;
@@ -1346,9 +1321,8 @@ int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 	ano_req.m.ubx_ano_req.usStartAno = ano_start;
 	int ret = encode_and_send_message(&ano_req);
 	if (ret) {
-		char *e_msg = "Failed to send request for ano";
-		LOG_ERR("%s %d (%d)", log_strdup(e_msg), ano_start, ret);
-		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
+		LOG_ERR("Failed to send request for ano %d (%d)", ano_start, ret);
+		nf_app_error(ERR_MESSAGING, ret, NULL, 0);
 		return -1;
 	}
 	return 0;
@@ -1422,8 +1396,8 @@ int send_binary_message(uint8_t *data, size_t len)
 
 		int ret = k_sem_take(&connection_ready, K_FOREVER);
 		if (ret != 0) {
-			LOG_ERR("Connection not ready, can't send message "
-				"now!");
+			LOG_ERR("Connection not ready, can't send message now! (%d)", ret);
+			nf_app_error(ERR_MESSAGING, ret, NULL, 0);
 			k_mutex_unlock(&send_binary_mutex);
 			return ret;
 		}
@@ -1462,9 +1436,8 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 	int ret = collar_protocol_encode(msg_proto, &encoded_msg[2],
 					 NofenceMessage_size, &encoded_size);
 	if (ret) {
-		char *e_msg = "Error encoding nofence message";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
-		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
+		LOG_ERR("Error encoding nofence message (%d)", ret);
+		nf_app_error(ERR_MESSAGING, ret, NULL, 0);
 		return ret;
 	}
 	return send_binary_message(encoded_msg, encoded_size + header_size);
@@ -1482,9 +1455,8 @@ int encode_and_store_message(NofenceMessage *msg_proto)
 	int ret = collar_protocol_encode(msg_proto, &encoded_msg[2],
 					 NofenceMessage_size, &encoded_size);
 	if (ret) {
-		char *e_msg = "Error encoding nofence message";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
-		nf_app_error(ERR_MESSAGING, ret, e_msg, strlen(e_msg));
+		LOG_ERR("Error encoding nofence message (%d)", ret);
+		nf_app_error(ERR_MESSAGING, ret, NULL, 0);
 		return ret;
 	}
 	uint16_t total_size = encoded_size + header_size;
@@ -1537,9 +1509,8 @@ void process_poll_response(NofenceMessage *proto)
 		/* Update date_time library which storage uses for ANO data. */
 		err = date_time_set(tm_time);
 		if (err) {
-			char *e_msg = "Error updating time from server";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			LOG_ERR("Error updating time from server (%d)", err);
+			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		} else {
 			/** @note This prints UTC. */
 			LOG_INF("Set timestamp to date_time library from modem: %s",
@@ -1565,9 +1536,8 @@ void process_poll_response(NofenceMessage *proto)
 		err = stg_config_u16_write(STG_U16_ACC_SIGMA_SLEEP_LIMIT,
 				pResp->usAccSigmaSleepLimit);
 		if (err != 0) {
-			char *e_msg = "Error updating sleep sigma to ext flash";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			LOG_ERR("Error updating sleep sigma to ext flash (%d)", err);
+			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 
 		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
@@ -1580,9 +1550,8 @@ void process_poll_response(NofenceMessage *proto)
 		err = stg_config_u16_write(STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT,
 				pResp->usAccSigmaNoActivityLimit);
 		if (err != 0) {
-			char *e_msg = "Error updating no activity sigma to ext flash";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			LOG_ERR("Error updating no activity sigma to ext flash (%d)", err);
+			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 
 		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
@@ -1595,9 +1564,8 @@ void process_poll_response(NofenceMessage *proto)
 		err = stg_config_u16_write(STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC,
 				pResp->usOffAnimalTimeLimitSec);
 		if (err != 0) {
-			char *e_msg = "Error updating off animal sigma to ext flash";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+			LOG_ERR("Error updating off animal sigma to ext flash (%d)", err);
+			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 
 		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
@@ -1622,10 +1590,8 @@ void process_poll_response(NofenceMessage *proto)
 			ret = stg_config_blob_write(STG_BLOB_BLE_KEY, 
 					pResp->rgubcBleKey.bytes, pResp->rgubcBleKey.size);
 			if (ret < 0) {
-				char *e_msg = "Failed to write ble sec key to ext flash";
-				LOG_ERR("%s (%d)", log_strdup(e_msg), ret);
-				nf_app_error(ERR_MESSAGING, ret, e_msg,
-					     strlen(e_msg));
+				LOG_ERR("Failed to write ble sec key to ext flash (%d)", ret);
+				nf_app_error(ERR_MESSAGING, ret, NULL, 0);
 			}
 		}
 	}
@@ -1705,10 +1671,8 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	if (fenceResp->which_m == FenceDefinitionResponse_xHeader_tag) {
 		if (frame != 0) {
 			/* We always expect the header to be the first frame. */
-			char *e_msg =
-				"Unexpected frame count for pasture header.";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), -EIO);
-			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
+			LOG_ERR("Unexpected frame count for pasture header. (%d)", -EIO);
+			nf_app_error(ERR_MESSAGING, -EIO, NULL, 0);
 
 			return 0;
 		}
@@ -1723,9 +1687,8 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 					(uint8_t)fenceResp->m.xHeader.bKeepMode);
 			if (err != 0) {
 				/* We always expect the header to be the first frame. */
-				char *e_msg = "Error writing keep mode to storage.";
-				LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-				nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+				LOG_ERR("Error writing keep mode to storage. (%d)", err);
+				nf_app_error(ERR_MESSAGING, err, NULL, 0);
 			}
 		}
 
@@ -1768,8 +1731,7 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 			LOG_ERR("Cached %i frames, but expected %i.",
 				cached_fences_counter,
 				pasture_temp.m.ul_total_fences);
-			char *e_msg = "Fence frames out of sync";
-			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
+						nf_app_error(ERR_MESSAGING, -EIO, NULL, 0);
 
 			return 0;
 		}
@@ -1785,9 +1747,8 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 		}
 
 		if (!validate_pasture()) {
-			char *e_msg = "CRC was not correct for new pasture.";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), -EIO);
-			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
+			LOG_ERR("CRC was not correct for new pasture. (%d)", -EIO);
+			nf_app_error(ERR_MESSAGING, -EIO, NULL, 0);
 			return 0;
 		}
 
@@ -1819,16 +1780,14 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 				     anoResp->rgucBuf.size);
 
 	if (err) {
-		char *e_msg = "Error writing ano frame to storage controller";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		LOG_ERR("Error writing ano frame to storage controller (%d)", err);
+		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 	}
 	int64_t current_time_ms = 0;
 	err = date_time_now(&current_time_ms);
 	if (err) {
-		char *e_msg = "Error fetching date time";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_MESSAGING, err, e_msg, strlen(e_msg));
+		LOG_ERR("Error fetching date time (%d)", err);
+		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 	}
 	if (age > (current_time_ms / 1000) + SECONDS_IN_THREE_DAYS) {
 		return DOWNLOAD_COMPLETE;

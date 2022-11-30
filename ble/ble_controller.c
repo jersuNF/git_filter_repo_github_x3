@@ -45,6 +45,7 @@
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_CONTROLLER_LOG_LEVEL);
 
+#if CONFIG_BT_NUS
 static void bt_send_work_handler(struct k_work *work);
 
 K_MEM_SLAB_DEFINE(ble_rx_slab, BLE_RX_BLOCK_SIZE, BLE_RX_BUF_COUNT,
@@ -54,6 +55,7 @@ RING_BUF_DECLARE(ble_tx_ring_buf, BLE_TX_BUF_SIZE);
 static K_SEM_DEFINE(ble_tx_sem, 0, 1);
 
 static K_WORK_DEFINE(bt_send_work, bt_send_work_handler);
+#endif /* CONFIG_BT_NUS */
 
 static struct bt_conn *current_conn;
 static struct bt_gatt_exchange_params exchange_params;
@@ -106,7 +108,9 @@ static struct bt_data ad[] = {
 };
 
 static const struct bt_data sd[] = {
+#if CONFIG_BT_NUS
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_VAL),
+#endif /* CONFIG_BT_NUS */
 	BT_DATA(BT_DATA_NAME_COMPLETE, bt_device_name, DEVICE_NAME_LEN),
 
 };
@@ -151,9 +155,9 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	if (err) {
 		LOG_WRN("bt_gatt_exchange_mtu: %d", err);
 	}
-
+#if CONFIG_BT_NUS
 	ring_buf_reset(&ble_tx_ring_buf);
-
+#endif /* CONFIG_BT_NUS */
 	struct ble_conn_event *event = new_ble_conn_event();
 	event->conn_state = BLE_STATE_CONNECTED;
 	EVENT_SUBMIT(event);
@@ -274,8 +278,9 @@ static void beacon_processor_work_fn()
 				  K_SECONDS(CONFIG_BEACON_PROCESSING_INTERVAL));
 	}
 }
-#endif
+#endif /* CONFIG_BEACON_SCAN_ENABLE */
 
+#if CONFIG_BT_NUS
 /**
  * @brief Work function to send data from rx ring buffer with bt nus
  * @param[in] work work item
@@ -371,6 +376,8 @@ static struct bt_nus_cb nus_cb = {
 	.sent = bt_sent_cb,
 };
 
+#endif /* CONFIG_BT_NUS */
+
 /**
  * @brief Start bluetooth advertisement with configured parameters,
  * advertise response and scan response array.
@@ -390,9 +397,8 @@ static void adv_start(void)
 					      BT_GAP_ADV_SLOW_INT_MAX, NULL),
 			      ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 	if (err) {
-		char *e_msg = "Failed to start ble advertisement";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+		LOG_ERR("Failed to start ble advertisement (%d)", err);
+		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
 	} else {
 		LOG_INF("Starting BLE advertising");
 	}
@@ -407,9 +413,8 @@ static void adv_stop(void)
 
 	err = bt_le_adv_stop();
 	if (err) {
-		char *e_msg = "Failed to stop ble advertisement";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+		LOG_ERR("Failed to stop ble advertisement (%d)", err);
+		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
 	}
 }
 
@@ -555,14 +560,14 @@ static void bt_ready(int err)
 		return;
 	}
 
+	#if CONFIG_BT_NUS
 	err = bt_nus_init(&nus_cb);
 	if (err) {
-		char *e_msg = "Bluetooth Nordic Uart init service failed";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+		LOG_ERR("Bluetooth Nordic Uart init service failed (%d)", err);
+		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
 		return;
 	}
-
+	#endif /* CONFIG_BT_NUS */
 	/* Convert data to uint_8 ad array format */
 	mfg_data[BLE_MFG_IDX_COMPANY_ID] =
 		(NOFENCE_BLUETOOTH_SIG_COMPANY_ID & 0x00ff);
@@ -683,9 +688,9 @@ static void scan_start(void)
 	};
 	int err = bt_le_scan_start(&scan_param, scan_cb);
 	if (err) {
-		char *e_msg = "Start Beacon scanning failed";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_BEACON, err, e_msg, strlen(e_msg));
+		LOG_ERR("Start Beacon scanning failed (%d)", err);
+		nf_app_error(ERR_BEACON, err, NULL, 0);
+
 	} else {
 		LOG_INF("Start beacon scanning, Duration[s]:%d, Processing interval[s]:%d", 
 			CONFIG_BEACON_SCAN_DURATION, 
@@ -710,10 +715,9 @@ static void scan_stop(void)
 	}
 
 	int err = bt_le_scan_stop();
-	if (err != 0) {
-		char *e_msg = "Stop Beacon scanning failed";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+	if (err) {
+		LOG_ERR("Stop Beacon scanning failed (%d)", err);
+		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
 	} else {
 		LOG_INF("Stop scanning for Beacons");
 		atomic_set(&atomic_bt_scan_active, false);
@@ -745,9 +749,8 @@ static void init_eeprom_variables(void)
 	uint32_t serial_id = 0;
 	err = stg_config_u32_read(STG_U32_UID, &serial_id);
 	if (err != 0) {
-		char *e_msg = "Failed to read serial number from storage!";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+		LOG_ERR("Failed to read serial number from storage! (%d)", err);
+		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
 	} else {
 		if (serial_id > 999999) {
 			strncpy(bt_device_name, "NF??????", DEVICE_NAME_LEN + 1);
@@ -768,9 +771,8 @@ static void init_eeprom_variables(void)
 	uint8_t collar_mode;
 	err = stg_config_u8_read(STG_U8_COLLAR_MODE, &collar_mode);
 	if (err != 0) {
-		char *e_msg = "Failed to read collar mode from eeprom!";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+		LOG_ERR("Failed to read collar mode from eeprom! (%d)", err);
+		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
 	} else {
 		current_collar_mode = collar_mode;
 	}
@@ -779,9 +781,8 @@ static void init_eeprom_variables(void)
 	uint8_t collar_status;
 	err = stg_config_u8_read(STG_U8_COLLAR_STATUS, &collar_status);
 	if (err != 0) {
-		char *e_msg = "Failed to read collar status from eeprom!";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+		LOG_ERR("Failed to read collar status from eeprom! (%d)", err);
+		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
 	} else {
 		current_collar_status = collar_status;
 	}
@@ -790,9 +791,8 @@ static void init_eeprom_variables(void)
 	uint8_t fence_status;
 	err = stg_config_u8_read(STG_U8_FENCE_STATUS, &fence_status);
 	if (err != 0) {
-		char *e_msg = "Failed to read fence status from eeprom!";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+		LOG_ERR("Failed to read fence status from eeprom! (%d)", err);
+		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
 	} else {
 		current_fence_status = fence_status;
 	}
@@ -801,9 +801,8 @@ static void init_eeprom_variables(void)
 	uint8_t hw_version;
 	err = stg_config_u8_read(STG_U8_HW_VERSION, &hw_version);
 	if (err != 0) {
-		char *e_msg = "Failed to read hw version from eeprom!";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+		LOG_ERR("Failed to read hw version from eeprom! (%d)", err);
+		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
 	} else {
 		current_hw_ver = hw_version;
 	}
@@ -820,9 +819,8 @@ int ble_module_init()
 	/* Enable ble subsystem */
 	int err = bt_enable(bt_ready);
 	if (err) {
-		char *e_msg = "Failed to enable Bluetooth";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+		LOG_ERR("Failed to enable Bluetooth (%d)", err);
+		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
 		return err;
 	}
 	/* Set the ble device name in Generic Access Profile */
@@ -843,9 +841,8 @@ int ble_module_init()
 	defined(CONFIG_BOARD_NF_C25_25G_NRF52840)
 	err = bt_dfu_init();
 	if (err < 0) {
-		char *e_msg = "Failed to init ble dfu handler";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_BLE_MODULE, err, e_msg, strlen(e_msg));
+		LOG_ERR("Failed to init ble dfu handler (%d)", err);
+		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
 		return err;
 	}
 #elif CONFIG_BOARD_NATIVE_POSIX
@@ -873,6 +870,7 @@ int ble_module_init()
  */
 static bool event_handler(const struct event_header *eh)
 {
+	#if CONFIG_BT_NUS
 	/* Send debug data */
 	if (is_msg_data_event(eh)) {
 		const struct msg_data_event *event = cast_msg_data_event(eh);
@@ -912,6 +910,7 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	#endif /* CONFIG_BT_NUS */
 
 	/* Received ble control event */
 	if (is_ble_ctrl_event(eh)) {
@@ -1006,9 +1005,11 @@ static bool event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(MODULE, event_handler);
 EVENT_SUBSCRIBE(MODULE, ble_ctrl_event);
-EVENT_SUBSCRIBE(MODULE, msg_data_event);
 EVENT_SUBSCRIBE(MODULE, update_collar_mode);
 EVENT_SUBSCRIBE(MODULE, update_collar_status);
 EVENT_SUBSCRIBE(MODULE, update_fence_status);
 EVENT_SUBSCRIBE(MODULE, update_fence_version);
+#if CONFIG_BT_NUS
+EVENT_SUBSCRIBE(MODULE, msg_data_event);
 EVENT_SUBSCRIBE_FINAL(MODULE, ble_data_event);
+#endif /* CONFIG_BT_NUS */

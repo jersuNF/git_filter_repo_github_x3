@@ -9,9 +9,10 @@ menuconfig MESSAGING
 
 
 if MESSAGING
-	config MESSAGING_LOG_LEVEL
-		int "Log level for the messaging module"
-		default 4
+
+	module = MESSAGING
+        module-str = Messaging module
+        source "subsys/logging/Kconfig.template.log_config"
 
 	config MESSAGING_THREAD_STACK_SIZE
 		int "Size of the message processing thread"

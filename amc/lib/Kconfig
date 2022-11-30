@@ -1,6 +1,6 @@
-config AMC_LIB_LOG_LEVEL
-	int "Log level for the AMC LIB modules"
-	default 3
+module = AMC_LIB
+module-str = AMC lib
+source "subsys/logging/Kconfig.template.log_config"
 
 config AMC_USE_LEGACY_STEP
 	bool "Mimic the buzzer frequency steps in legacy code"

@@ -149,9 +149,8 @@ static inline int update_pasture_from_stg(void)
 
 	err = stg_read_pasture_data(set_pasture_cache);
 	if (err == -ENODATA) {
-		char *err_msg = "No pasture found on external flash.";
-		LOG_WRN("%s (%d)", log_strdup(err_msg), err);
-		nf_app_warning(ERR_AMC, err, err_msg, strlen(err_msg));
+		LOG_WRN("No pasture found on external flash. (%d)", err);
+		nf_app_warning(ERR_AMC, err, NULL, 0);
 		/* Submit event that we have now begun to use the new fence. */
 		struct update_fence_version *ver = new_update_fence_version();
 		ver->fence_version = UINT32_MAX;
@@ -159,9 +158,8 @@ static inline int update_pasture_from_stg(void)
 		EVENT_SUBMIT(ver);
 		return 0;
 	} else if (err) {
-		char *err_msg = "Couldn't update pasture cache in AMC.";
-		LOG_ERR("%s (%d)", log_strdup(err_msg), err);
-		nf_app_fatal(ERR_AMC, err, err_msg, strlen(err_msg));
+		LOG_ERR("Could not update pasture cache in AMC. (%d)", err);
+		nf_app_fatal(ERR_AMC, err, NULL, 0);
 
 		/* Set pasture/fence to invalid */
 		force_fence_status(FenceStatus_FenceStatus_Invalid);
@@ -172,9 +170,8 @@ static inline int update_pasture_from_stg(void)
 	uint8_t keep_mode;
 	err = stg_config_u8_read(STG_U8_KEEP_MODE, &keep_mode);
 	if (err != 0) {
-		char *e_msg = "Error reading keep mode from storage.";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_warning(ERR_AMC, err, e_msg, strlen(e_msg));
+		LOG_ERR("Error reading keep mode from storage. (%d)", err);
+		nf_app_warning(ERR_AMC, err, NULL, 0);
 
 		keep_mode = 0; //Defaults to 0 in case of read failure
 	}
@@ -185,9 +182,8 @@ static inline int update_pasture_from_stg(void)
 				K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	do {
 		if (err) {
-			char *e_msg = "Error taking pasture semaphore for version check.";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
+			LOG_ERR("Error taking pasture semaphore for version check (%d)", err);
+			nf_app_error(ERR_AMC, err, NULL, 0);
 			break;
 		}
 
@@ -195,9 +191,8 @@ static inline int update_pasture_from_stg(void)
 		pasture_t *pasture = NULL;
 		get_pasture_cache(&pasture);
 		if (pasture == NULL) {		
-			char *e_msg = "Pasture was not cached correctly.";
-			LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-			nf_app_error(ERR_AMC, -ENODATA, e_msg, strlen(e_msg));
+			LOG_ERR("Pasture was not cached correctly. (%d)", -ENODATA);
+			nf_app_error(ERR_AMC, -ENODATA, NULL, 0);
 			err = -ENODATA;
 			break;
 		}
@@ -347,9 +342,8 @@ void handle_gnss_data_fn(struct k_work *item)
 	int err = k_sem_take(&fence_data_sem, 
 				K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
-		char *e_msg = "Error waiting for fence data semaphore to release.";
-		LOG_ERR("%s (%d)", log_strdup(e_msg), err);
-		nf_app_error(ERR_AMC, err, e_msg, strlen(e_msg));
+		LOG_ERR("Error waiting for fence data semaphore to release. (%d)", err);
+		nf_app_error(ERR_AMC, err, NULL, 0);
 		goto cleanup;
 	}
 
@@ -554,8 +548,8 @@ static bool event_handler(const struct event_header *eh)
 
 		int err = set_gnss_cache(&event->gnss_data, event->timed_out);
 		if (err) {
-			char *msg = "Could not set gnss cahce.";
-			nf_app_error(ERR_AMC, err, msg, strlen(msg));
+			LOG_ERR("Could not set gnss cahce. (%d)",err);
+			nf_app_error(ERR_AMC, err, NULL, 0);
 			return false;
 		}
 

@@ -1250,7 +1250,7 @@ int messaging_module_init(void)
 	if (err != 0) {
 		LOG_ERR("Failed to read serial number from storage! (%d)", err);
 		nf_app_error(ERR_MESSAGING, err, NULL, 0);
-		return err;
+		serial_id = 1; /* Fallback if read from storage fails */
 	}
 
 	/* Startup the modem to get the gsm_info ready before the first poll request.*/

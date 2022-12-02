@@ -39,14 +39,15 @@
 #include <sys/sys_heap.h>
 #include "amc_const.h"
 
+#define MODULE messaging
+LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
+
 extern struct k_heap _system_heap;
+
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
 #define SECONDS_IN_THREE_DAYS 259200
 #define MSECCONDS_PER_HOUR 3600000
-#define TWO_DAYS_SEC SEC_DAY * 2
-
-#define CACHE_READY_TIMEOUT_SEC 60
 
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
 
@@ -74,6 +75,7 @@ K_SEM_DEFINE(cache_ready_sem, 0, 1);
 K_SEM_DEFINE(cache_lock_sem, 1, 1);
 K_SEM_DEFINE(send_out_ack, 0, 1);
 K_SEM_DEFINE(connection_ready, 0, 1);
+K_SEM_DEFINE(sem_release_tx_thread, 0, 1);
 
 static collar_state_struct_t current_state;
 static gnss_last_fix_struct_t cached_fix;
@@ -94,16 +96,14 @@ typedef enum {
 } cached_and_ready_enum;
 
 /* Used to check if we've cached what is requried before we perform the 
- * INITIAL, FIRST poll request to server.
- */
+ * INITIAL, FIRST poll request to server */
 static int cached_and_ready_reg[CACHED_READY_END_OF_LIST];
 
 static int rat, mnc, rssi, min_rssi, max_rssi;
 static uint8_t ccid[20] = "\0";
 
-static uint32_t new_fence_in_progress;
-static uint8_t expected_fframe, expected_ano_frame, new_ano_in_progress;
-static bool first_frame, first_ano_frame;
+static uint8_t expected_ano_frame, new_ano_in_progress;
+static bool first_ano_frame;
 
 /* Time since the server updated the date time in seconds. */
 static atomic_t server_timestamp_sec = ATOMIC_INIT(0);
@@ -111,7 +111,6 @@ static atomic_t server_timestamp_sec = ATOMIC_INIT(0);
 static uint32_t serial_id = 0;
 
 void build_poll_request(NofenceMessage *);
-int8_t request_fframe(uint32_t, uint8_t);
 void fence_download(uint8_t);
 int8_t request_ano_frame(uint16_t, uint16_t);
 void ano_download(uint16_t, uint16_t);
@@ -125,12 +124,13 @@ int encode_and_send_message(NofenceMessage *);
 int encode_and_store_message(NofenceMessage *);
 int send_binary_message(uint8_t *, size_t);
 static int send_all_stored_messages(void);
-void messaging_thread_fn(void);
 
-static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix,
-					  _DatePos *pos);
+static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix, _DatePos *pos);
 bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *);
 static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
+
+void messaging_rx_thread_fn(void);
+void messaging_tx_thread_fn(void);
 
 static bool m_transfer_boot_params = true;
 static bool m_confirm_acc_limits, m_confirm_ble_key;
@@ -138,28 +138,24 @@ static bool m_confirm_acc_limits, m_confirm_ble_key;
 K_MUTEX_DEFINE(send_binary_mutex);
 K_MUTEX_DEFINE(read_flash_mutex);
 static bool reboot_scheduled;
-#define MODULE messaging
-LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
 
-/* 4 means 4-byte alignment. */
-K_MSGQ_DEFINE(ble_cmd_msgq, sizeof(struct ble_cmd_event),
-	      CONFIG_MSGQ_BLE_CMD_SIZE, 4);
-K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct messaging_proto_out_event),
-	      CONFIG_MSGQ_LTE_PROTO_SIZE, 4);
+K_MSGQ_DEFINE(ble_cmd_msgq, sizeof(struct ble_cmd_event), CONFIG_MSGQ_BLE_CMD_SIZE, 
+	      4 /* Byte alignment */);
+K_MSGQ_DEFINE(lte_proto_msgq, sizeof(struct messaging_proto_out_event), CONFIG_MSGQ_LTE_PROTO_SIZE, 
+	      4 /* Byte alignment */);
 
 #define NUM_MSGQ_EVENTS 4
 struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
-					K_POLL_MODE_NOTIFY_ONLY, &ble_cmd_msgq,
-					0),
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
-					K_POLL_MODE_NOTIFY_ONLY,
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY, 
+					&ble_cmd_msgq, 0),
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY,
 					&lte_proto_msgq, 0),
 };
 
-static struct k_work_q send_q;
+/* Messaging work queue items */
+static struct k_work_q message_q;
 struct k_work_delayable modem_poll_work;
-struct k_work_delayable log_work;
+struct k_work_delayable log_periodic_work;
 struct k_work_delayable data_request_work;
 struct k_work_delayable log_status_message_work;
 struct k_work_delayable process_escape_work;
@@ -167,106 +163,142 @@ struct k_work_delayable process_zap_work;
 struct k_work_delayable process_warning_work;
 struct k_work_delayable process_warning_correction_start_work;
 struct k_work_delayable process_warning_correction_end_work;
+struct k_work_delayable log_send_work;
+
+struct fence_def_update {
+	struct k_work_delayable work;
+	int version;
+	int request_frame;
+}m_fence_update_req;
 
 atomic_t poll_period_minutes = ATOMIC_INIT(15);
 atomic_t log_period_minutes = ATOMIC_INIT(30);
 
-K_THREAD_DEFINE(messaging_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE,
-		messaging_thread_fn, NULL, NULL, NULL,
-		K_PRIO_COOP(CONFIG_MESSAGING_THREAD_PRIORITY), 0, 0);
+/* Messaging Rx thread */
+K_THREAD_DEFINE(messaging_rx_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE, messaging_rx_thread_fn, 
+		NULL, NULL, NULL, K_PRIO_COOP(CONFIG_MESSAGING_THREAD_PRIORITY), 0, 0);
 
-K_KERNEL_STACK_DEFINE(messaging_send_thread,
-		      CONFIG_MESSAGING_SEND_THREAD_STACK_SIZE);
+/* Messaging Tx thread */
+K_THREAD_DEFINE(messaging_tx_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE, messaging_tx_thread_fn, 
+		NULL, NULL, NULL, K_PRIO_COOP(CONFIG_MESSAGING_THREAD_PRIORITY), 0, 0);
+
+/* Messaging work queue */
+K_KERNEL_STACK_DEFINE(messaging_send_thread, CONFIG_MESSAGING_SEND_THREAD_STACK_SIZE);
+
+typedef enum {
+	IDLE = 0 /* Tx thread is idle */,
+	POLL_REQ /* Send periodic poll request */,
+	LOG_MSG /* Send stored log messages */,
+	FENCE_REQ /* Send a fence update request */
+	/* Add additional states here (ANO, diagnostic etc)... */
+}messaging_tx_type_t;
+
+atomic_t m_halt_data_transfer = ATOMIC_INIT(0);
+atomic_t m_message_tx_type = ATOMIC_INIT(0);
+
+static int set_tx_state_ready(messaging_tx_type_t tx_type);
+
 
 /**
- * @brief Build the log message with latest data.
+ * @brief Builds SEQ messages (1 and 2) with the latest data and store them to external storage.
  */
 static void build_log_message()
 {
+	int err;
+
 	/* Fetch histogram data */
 	struct save_histogram *histogram_snapshot = new_save_histogram();
 	EVENT_SUBMIT(histogram_snapshot);
+
 	collar_histogram histogram;
-	int err = k_msgq_get(&histogram_msgq, &histogram, K_SECONDS(10));
+	err = k_msgq_get(&histogram_msgq, &histogram, K_SECONDS(10));
 	if (err) {
 		LOG_ERR("Timeout on waiting for histogram (%d)", err);
 		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		return;
 	}
 
-	/* Fill in sequence message 1 */
-	NofenceMessage seq_1;
-	proto_InitHeader(&seq_1); /* fill up message header. */
-	seq_1.which_m = NofenceMessage_seq_msg_tag;
-	seq_1.m.seq_msg.has_xPOS_QC_MMM = true;
-	memcpy(&seq_1.m.seq_msg.xPOS_QC_MMM,
-	       &histogram.qc_baro_gps_max_mean_min,
-	       sizeof(histogram.qc_baro_gps_max_mean_min));
-	seq_1.m.seq_msg.has_usBatteryVoltage = true;
-	seq_1.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
-	seq_1.m.seq_msg.has_usChargeMah = true;
-	seq_1.m.seq_msg.usChargeMah =
-		(uint16_t)(cached_chrg*CONFIG_CHARGING_POLLER_WORK_MSEC
-			   /MSECCONDS_PER_HOUR);
-	/*TODO:
- * consider using a higher time resolution for more accurate integration*/
-	cached_chrg = 0;
-	seq_1.m.seq_msg.has_xGprsRssi = true;
-	seq_1.m.seq_msg.xGprsRssi.ucMaxRSSI = (uint8_t)max_rssi;
-	seq_1.m.seq_msg.xGprsRssi.ucMinRSSI = (uint8_t)min_rssi;
-	seq_1.m.seq_msg.has_xHistogramCurrentProfile = true;
-	seq_1.m.seq_msg.has_xHistogramZone = true;
-	seq_1.m.seq_msg.has_xHistogramAnimalBehave = true;
-	memcpy(&seq_1.m.seq_msg.xHistogramAnimalBehave,
-	       &histogram.animal_behave, sizeof(histogram.animal_behave));
-	memcpy(&seq_1.m.seq_msg.xHistogramCurrentProfile,
-	       &histogram.current_profile, sizeof(histogram.current_profile));
-	memcpy(&seq_1.m.seq_msg.xHistogramZone, &histogram.in_zone,
-	       sizeof(histogram.in_zone));
+	/* Initialize generic seq message */
+	NofenceMessage seq_msg;
+	proto_InitHeader(&seq_msg);
 
-	err = encode_and_store_message(&seq_1);
-	if (err) {
-		LOG_ERR("Failed to encode and save sequence message 1 (%d)", err);
+	/* Build seq 1 message */
+	seq_msg.which_m = NofenceMessage_seq_msg_tag;
+	seq_msg.m.seq_msg.has_xPOS_QC_MMM = true;
+	memcpy(&seq_msg.m.seq_msg.xPOS_QC_MMM, &histogram.qc_baro_gps_max_mean_min,
+	       sizeof(histogram.qc_baro_gps_max_mean_min));
+	seq_msg.m.seq_msg.has_usBatteryVoltage = true;
+	seq_msg.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
+	seq_msg.m.seq_msg.has_usChargeMah = true;
+	seq_msg.m.seq_msg.usChargeMah = (uint16_t)(cached_chrg * CONFIG_CHARGING_POLLER_WORK_MSEC / 
+						   MSECCONDS_PER_HOUR);
+	/* TODO: Consider using a higher time resolution for more accurate integration */
+	cached_chrg = 0;
+	seq_msg.m.seq_msg.has_xGprsRssi = true;
+	seq_msg.m.seq_msg.xGprsRssi.ucMaxRSSI = (uint8_t)max_rssi;
+	seq_msg.m.seq_msg.xGprsRssi.ucMinRSSI = (uint8_t)min_rssi;
+	seq_msg.m.seq_msg.has_xHistogramCurrentProfile = true;
+	seq_msg.m.seq_msg.has_xHistogramZone = true;
+	seq_msg.m.seq_msg.has_xHistogramAnimalBehave = true;
+	memcpy(&seq_msg.m.seq_msg.xHistogramAnimalBehave, &histogram.animal_behave, 
+	       sizeof(histogram.animal_behave));
+	memcpy(&seq_msg.m.seq_msg.xHistogramCurrentProfile, &histogram.current_profile, 
+	       sizeof(histogram.current_profile));
+	memcpy(&seq_msg.m.seq_msg.xHistogramZone, &histogram.in_zone, sizeof(histogram.in_zone));
+
+	/* Store Seq 1 message to non-volatile storage */
+	err = encode_and_store_message(&seq_msg);
+	if (err != 0) {
+		LOG_ERR("Failed to encode and save sequence message 1");
 		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		return;
 	}
 
-	/* Fill in sequence message 2 */
-	NofenceMessage seq_2;
-	proto_InitHeader(&seq_2); /* fill up message header. */
-	seq_2.which_m = NofenceMessage_seq_msg_2_tag;
-	seq_2.m.seq_msg_2.has_bme280 = true;
-	seq_2.m.seq_msg_2.bme280.ulPressure =
-		(uint32_t)atomic_get(&cached_press);
-	seq_2.m.seq_msg_2.bme280.ulTemperature =
-		(uint32_t)atomic_get(&cached_temp);
-	seq_2.m.seq_msg_2.bme280.ulHumidity = (uint32_t)atomic_get(&cached_hum);
-	seq_2.m.seq_msg_2.has_xBatteryQc = true;
-	seq_2.m.seq_msg_2.xBatteryQc.usVbattMax =
-		histogram.qc_battery.usVbattMax;
-	seq_2.m.seq_msg_2.xBatteryQc.usVbattMin =
-		histogram.qc_battery.usVbattMin;
-	seq_2.m.seq_msg_2.xBatteryQc.usTemperature =
-		(uint16_t)atomic_get(&cached_temp);
+	/* Build seq 2 message */
+	seq_msg.which_m = NofenceMessage_seq_msg_2_tag;
+	seq_msg.m.seq_msg_2.has_bme280 = true;
+	seq_msg.m.seq_msg_2.bme280.ulPressure = (uint32_t)atomic_get(&cached_press);
+	seq_msg.m.seq_msg_2.bme280.ulTemperature = (uint32_t)atomic_get(&cached_temp);
+	seq_msg.m.seq_msg_2.bme280.ulHumidity = (uint32_t)atomic_get(&cached_hum);
+	seq_msg.m.seq_msg_2.has_xBatteryQc = true;
+	seq_msg.m.seq_msg_2.xBatteryQc.usVbattMax = histogram.qc_battery.usVbattMax;
+	seq_msg.m.seq_msg_2.xBatteryQc.usVbattMin = histogram.qc_battery.usVbattMin;
+	seq_msg.m.seq_msg_2.xBatteryQc.usTemperature = (uint16_t)atomic_get(&cached_temp);
 	/** @todo Power modes in GNSS controller is not implemented. 
 	 *  The struct xGNSSModeCounts counts number of times each mode
 	 *  has been entered. Consider to add this in future.
 	 */
-	seq_2.m.seq_msg_2.has_xGnssModeCounts = false;
+	seq_msg.m.seq_msg_2.has_xGnssModeCounts = false;
 
-	err = encode_and_store_message(&seq_2);
-	if (err) {
-		LOG_ERR("Failed to encode and save sequence message 2 (%d)", err);
+	/* Store Seq 2 message to non-volatile storage */
+	err = encode_and_store_message(&seq_msg);
+	if (err != 0) {
+		LOG_ERR("Failed to encode and save sequence message 2");
+		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		return;
 	}
-	LOG_INF("Store seq_1 and seq_2 to flash");
 }
 
+/**
+ * @brief Callback passed to the storage controller to send log messages stored to external flash.
+ * @param data Encoded log messages read from storage.
+ * @param len Length of the encoded log message read from storage.
+ * @return Returns 0 if successfull, otherwise negative error code.
+ */
 int read_and_send_log_data_cb(uint8_t *data, size_t len)
 {
+	/* Only send log data stored to flash if not halted by some other process, e.g. a pending
+	 * FOTA. Retuning an error from this callback will abort the FCB walk in the storage 
+	 * controller untill log data trafic is reinstated. */
+	if (atomic_get(&m_halt_data_transfer) == true) {
+		LOG_DBG("Unable to send log data, data transfer is currently halted");
+		return -EBUSY;
+	}
 	LOG_DBG("Send log message fetched from flash");
+
 	/* Fetch the length from the two first bytes */
 	uint16_t new_len = *(uint16_t*) &data[0];
+
 	int err = send_binary_message(data, new_len);
 	if (err) {
 		LOG_ERR("Error sending binary message for log data (%d)", err);
@@ -275,6 +307,10 @@ int read_and_send_log_data_cb(uint8_t *data, size_t len)
 	return err;
 }
 
+/**
+ * @brief Sends all log messages stored to external flash, see read_and_send_log_data_cb.
+ * @return Returns 0 if successfull, otherwise negative error code.
+ */
 static int send_all_stored_messages(void)
 {
 	k_mutex_lock(&read_flash_mutex, K_NO_WAIT);
@@ -310,86 +346,117 @@ static int send_all_stored_messages(void)
 }
 
 /**
- * @brief Build, send a log request, and reschedule after
- *        "log_period_minutes" minutes.
+ * @brief Work item handler for "log_periodic_work". Builds seq messages and store them to
+ * external flash, and schedules an immediate send.
+ * Rescheduled at regular interval as set by "log_period_minutes".
  */
 void log_data_periodic_fn()
 {
-	/* Reschedule. */
-	k_work_reschedule_for_queue(&send_q, &log_work,
-				    K_MINUTES(atomic_get(&log_period_minutes)));
-	/* Construct log data and write to storage controller. */
-	if (!m_transfer_boot_params) build_log_message();
-	int ret = send_all_stored_messages();
-	if (ret != 0) { /*TODO: handle failure if needed*/
+	int ret;
+	ret = k_work_reschedule_for_queue(&message_q, &log_periodic_work, 
+					  K_MINUTES(atomic_get(&log_period_minutes)));
+	if (ret < 0) {
+		LOG_ERR("Failed to reschedule periodic seq messages!");
+	}
+
+	build_log_message();
+	LOG_DBG("SEQ messages stored to flash");
+
+	if (m_transfer_boot_params) {
+		/* Do not send SEQ message before startup poll request is sent to server */
+		return;	
+	}
+
+	/* Schedule work to send log messages immediately */
+	ret = k_work_reschedule_for_queue(&message_q, &log_send_work, K_NO_WAIT);
+	if (ret < 0) {
+		LOG_ERR("Failed to schedule a send of periodic seq messages!");
 	}
 }
 
 /**
- * @brief Build, send a poll request, and reschedule after
- * "poll_period_minutes".
+ * @brief Work item handler for "modem_poll_work". Builds a poll request and schedules an 
+ * immediate send.
+ * Rescheduled at regular interval as set by "poll_period_minutes".
  */
 void modem_poll_work_fn()
 {
-	/* Reschedule a periodic poll request */
-	k_work_reschedule_for_queue(&send_q, &modem_poll_work,
-		K_MINUTES(atomic_get(&poll_period_minutes)));
-	/* Add logic for the periodic protobuf modem poller. */
-	LOG_INF("Starting periodic poll work and building poll request.");
-	NofenceMessage new_poll_msg;
-
-	/* Only process the poll request if cache is ready. */
-	if (k_sem_take(&cache_ready_sem, K_SECONDS(CACHE_READY_TIMEOUT_SEC)) !=
-	    0) {
-		LOG_WRN("Timed out. Cached data not ready yet. Just sending the data that we have..");
+	/* Reschedule periodic poll request */
+	int ret = k_work_reschedule_for_queue(&message_q, &modem_poll_work, 
+					      K_MINUTES(atomic_get(&poll_period_minutes)));
+	if (ret < 0) {
+		LOG_ERR("Failed to reschedule periodic poll request!");
 	}
-	k_sem_give(&cache_ready_sem);
 
-	/* Semaphore for data protection, @todo use mutex in future. */
-	if (k_sem_take(&cache_lock_sem, K_SECONDS(1)) == 0) {
-		build_poll_request(&new_poll_msg);
-		k_sem_give(&cache_lock_sem);
-		if (encode_and_send_message(&new_poll_msg) != 0) {
-			k_work_reschedule_for_queue(&send_q, &modem_poll_work,
-						    K_MINUTES(1));
-		}
-	} else {
-		LOG_ERR("Cached state semaphore hanged, retrying in 3 minutes.");
-		k_work_reschedule_for_queue(&send_q, &modem_poll_work,
-					    K_MINUTES(3));
+	/* Attempt to send poll request immediately */
+	ret = set_tx_state_ready(POLL_REQ);
+	if (ret != 0) {
+		LOG_DBG("Periodic poll failed, reschedule, error %d", ret);
+		/* Tx Thread busy, reschedule in 1 minute */
+		k_work_reschedule_for_queue(&message_q, &modem_poll_work, K_SECONDS(15));
 	}
 }
 
+/**
+ * @brief Work item handler for "log_send_work". Initiate and sets Tx ready. Reschedules the
+ * sending of log data if Tx thread is busy.
+ */
+void log_send_work_fn()
+{
+	static uint8_t retry_cnt = 0;
+
+	int err = set_tx_state_ready(LOG_MSG);
+	if ((err != 0) && (err != -EACCES) && (retry_cnt < 2)) {
+		LOG_DBG("Unable to schedule log messages, Tx thread not ready- rescheduling");
+		err = k_work_reschedule_for_queue(&message_q, &log_send_work, K_SECONDS(15));
+		if (err < 0) {
+			LOG_ERR("Failed to reschedule work");
+		}
+		retry_cnt++;
+	} else if ((err != 0) && ((retry_cnt >= 2) || (err == -EACCES))) {
+		LOG_DBG("Unable to send log message, exhausted retry attempts or logs halted");
+		retry_cnt = 0;
+	}
+	return;
+}
+
+/**
+ * @brief Work item handler for "process_zap_work". Builds a zap status message and schedules 
+ * an immediate send.
+ */
 static void log_zap_message_work_fn()
 {
 	NofenceMessage msg;
-	proto_InitHeader(&msg); /* fill up message header. */
+	proto_InitHeader(&msg);
 	msg.which_m = NofenceMessage_client_zap_message_tag;
 	msg.m.client_zap_message.has_sFenceDist = true;
 	msg.m.client_zap_message.sFenceDist = (int16_t)atomic_get(&cached_dist_zap);
-
-	proto_get_last_known_date_pos(&cached_fix,
-				      &msg.m.client_zap_message.xDatePos);
+	proto_get_last_known_date_pos(&cached_fix, &msg.m.client_zap_message.xDatePos);
 	msg.m.client_zap_message.ucReaction = 0;
 	msg.m.client_zap_message.usReactionDuration = 0;
 
 	int err = encode_and_store_message(&msg);
-	if (err) {
-		LOG_ERR("Failed to encode and save zap status msg (%d)", err);
+	if (err != 0) {
+		LOG_ERR("Failed to encode and store AMC correction ZAP message");
 		return;
-	} else {
-		LOG_INF("Store zap message to flash");
 	}
-	int ret = send_all_stored_messages();
-	if (ret != 0) { /*TODO: handle failure if needed*/
-		return;
+	LOG_DBG("AMC Correction ZAP message stored to flash, scheduling immediate send");
+
+	/* Schedule work to send log messages immediately */
+	err = k_work_reschedule_for_queue(&message_q, &log_send_work, K_NO_WAIT);
+	if (err < 0) {
+		LOG_ERR("Failed to reschedule work");
 	}
 }
 
+/**
+ * @brief Work item handler for "process_escape_work". Builds an animal escaped status message 
+ * and schedules an immediate send.
+ */
 static void log_animal_escaped_work_fn()
 {
 	NofenceMessage msg;
-	proto_InitHeader(&msg); /* fill up message header. */
+	proto_InitHeader(&msg);
 	msg.which_m = NofenceMessage_status_msg_tag;
 	msg.m.status_msg.has_datePos = true;
 	proto_get_last_known_date_pos(&cached_fix, &msg.m.status_msg.datePos);
@@ -400,24 +467,28 @@ static void log_animal_escaped_work_fn()
 	msg.m.status_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	msg.m.status_msg.has_ucGpsMode = true;
 	msg.m.status_msg.ucGpsMode = (uint8_t)cached_gnss_mode;
+
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		LOG_ERR("Failed to encode and save escaped status msg (%d)", err);
+		LOG_ERR("Failed to encode and store AMC escaped message");
 		return;
-	} else {
-		LOG_INF("Store escaped message to flash");
 	}
+	LOG_DBG("AMC Escaped message stored to flash, scheduling immediate send");
 
-	/* Send data stored in external flash immediately */
-	int ret = send_all_stored_messages();
-	if (ret != 0) { /*TODO: handle failure if needed*/
-		return;
+	/* Schedule work to send log messages immediately */
+	err = k_work_reschedule_for_queue(&message_q, &log_send_work, K_NO_WAIT);
+	if (err < 0) {
+		LOG_ERR("Failed to reschedule work");
 	}
 }
 
+/**
+ * @brief Work item handler for "log_status_message_work". Builds a status message and stores it to 
+ * external flash, and schedules an immediate send. Status messages are sent for updates to collar 
+ * states such as Fence Status, Collar Mode and Collar Status.
+ */
 static void log_status_message_fn()
 {
-	/* Create status message */
 	NofenceMessage msg;
 	proto_InitHeader(&msg);
 	msg.which_m = NofenceMessage_status_msg_tag;
@@ -431,111 +502,257 @@ static void log_status_message_fn()
 	msg.m.status_msg.has_ucGpsMode = true;
 	msg.m.status_msg.ucGpsMode = (uint8_t)cached_gnss_mode;
 
-	/* Store message to external flash */
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		LOG_ERR("Failed to encode and save fence status message (%d)", err);
+		LOG_ERR("Failed to encode and store AMC status message");
 		return;
-	} else {
-		LOG_DBG("Storing fence status message to external flash");
-	}
+	} 
+	LOG_DBG("AMC Status message stored to flash, scheduling immediate send");
 
-	/* Send data stored in external flash immediately */
-	int ret = send_all_stored_messages();
-	if (ret != 0) {
-		return;
+	/* Schedule work to send log messages immediately */
+	err = k_work_reschedule_for_queue(&message_q, &log_send_work, K_NO_WAIT);
+	if (err < 0) {
+		LOG_ERR("Failed to reschedule work");
 	}
 }
 
+/**
+ * @brief Work item handler for "process_warning_work". Builds a correction warning message 
+ * and stores it to external flash.
+ */
 static void log_warning_work_fn()
 {
 	NofenceMessage msg;
-	proto_InitHeader(&msg); /* fill up message header. */
+	proto_InitHeader(&msg);
 	msg.which_m = NofenceMessage_client_warning_message_tag;
 	msg.m.client_warning_message.has_sFenceDist = true;
-	msg.m.client_warning_message.sFenceDist = (int16_t)atomic_get
-						   (&cached_dist_warn);
-	msg.m.client_warning_message.usDuration =
-		atomic_get(&cached_warning_duration);
-	proto_get_last_known_date_pos(&cached_fix,
-				      &msg.m.client_zap_message.xDatePos);
+	msg.m.client_warning_message.sFenceDist = (int16_t)atomic_get(&cached_dist_warn);
+	msg.m.client_warning_message.usDuration = atomic_get(&cached_warning_duration);
+	proto_get_last_known_date_pos(&cached_fix, &msg.m.client_zap_message.xDatePos);
 
 	int err = encode_and_store_message(&msg);
-	if (err) {
-		LOG_ERR("Failed to encode and save warning msg (%d)", err);
-		return;
-	} else {
-		LOG_INF("Store warning message to flash");
-	}
-	int ret = send_all_stored_messages();
-	if (ret != 0) { /*TODO: handle failure if needed*/
+	if (err != 0) {
+		LOG_ERR("Failed to encode and store AMC correction warning message");
 		return;
 	}
+	LOG_DBG("AMC Correction warning message stored to flash");
 }
 
+/**
+ * @brief Work item handler for "process_warning_correction_start_work". Builds a correction start 
+ * message and stores it to external flash.
+ */
 static void log_correction_start_work_fn()
 {
 	NofenceMessage msg;
-	proto_InitHeader(&msg); /* fill up message header. */
+	proto_InitHeader(&msg);
 	msg.which_m = NofenceMessage_client_correction_start_message_tag;
 	msg.m.client_correction_start_message.has_sFenceDist = true;
-	msg.m.client_correction_start_message.sFenceDist =
+	msg.m.client_correction_start_message.sFenceDist = 
 		(int16_t)atomic_get(&cached_dist_correction_start);
-
-	proto_get_last_known_date_pos(
-		&cached_fix, &msg.m.client_correction_start_message.xDatePos);
+	proto_get_last_known_date_pos(&cached_fix, &msg.m.client_correction_start_message.xDatePos);
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		LOG_ERR("Failed to encode and save correction start msg (%d)", err);
-		return;
-	} else {
-		LOG_INF("Store correction start message to flash");
-	}
-	int ret = send_all_stored_messages();
-	if (ret != 0) { /*TODO: handle failure if needed*/
+		LOG_ERR("Failed to encode and store AMC correction start message");
 		return;
 	}
+	LOG_DBG("AMC Correction start message stored to flash");
 }
 
+/**
+ * @brief Work item handler for "process_warning_correction_end_work". Builds a correction end 
+ * message and stores it to external flash.
+ */
 static void log_correction_end_work_fn()
 {
 	NofenceMessage msg;
-	proto_InitHeader(&msg); /* fill up message header. */
+	proto_InitHeader(&msg);
 	msg.which_m = NofenceMessage_client_correction_end_message_tag;
 	msg.m.client_correction_end_message.has_sFenceDist = true;
-	msg.m.client_correction_end_message.sFenceDist =
+	msg.m.client_correction_end_message.sFenceDist = 
 		(int16_t)atomic_get(&cached_dist_correction_end);
-
-	proto_get_last_known_date_pos(
-		&cached_fix, &msg.m.client_correction_end_message.xDatePos);
+	proto_get_last_known_date_pos(&cached_fix, &msg.m.client_correction_end_message.xDatePos);
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		LOG_ERR("Failed to encode and save correction end msg (%d)", err);
-		return;
-	} else {
-		LOG_INF("Store correction end message to flash");
-	}
-	int ret = send_all_stored_messages();
-	if (ret != 0) { /*TODO: handle failure if needed*/
+		LOG_ERR("Failed to encode and store AMC correction end message");
 		return;
 	}
+	LOG_DBG("AMC Correction end message stored to flash");
 }
+
 /**
- * @brief Work function to periodic request sensor data etc.
+ * @brief Work item handler for "m_fence_update_req.work". Schedules an immediate send of a fence
+ * update request message.
+ * @param item Pointer to work item (currently unused).
+ */
+void fence_update_req_fn(struct k_work *item)
+{
+	static int retry_cnt = 0;
+
+	int ret = set_tx_state_ready(FENCE_REQ);
+	if ((ret != 0) && (retry_cnt < 2)) {
+		LOG_WRN("Unable to schedule fence update req., Tx thread not ready, rescheduling");
+		ret = k_work_reschedule_for_queue(&message_q, &m_fence_update_req.work, 
+						  K_SECONDS(15));
+		if (ret < 0) {
+			LOG_ERR("Failed to reschedule work");
+		}
+		retry_cnt++;
+		return;
+	} else if ((ret != 0) && (retry_cnt >= 2)) {
+		LOG_ERR("Unable to schedule fence update req., exhausted retry attempts");
+		retry_cnt = 0;
+	}
+	return;
+}
+
+/**
+ * @brief Function that sets Tx type and starts the Tx sending sequence, if ready. Outgoing 
+ * messages from the messaging module are handled in a first come first serve manner- all though
+ * all log messages stored to flash are sent for each instance of LOG_MSG.
+ * @param tx_state Tx message type.
+ * @param send_now Flag indicating whether to send message now or not.
+ * @return Returns 0 if successfull, otherwise negative error code.
+ */
+static int set_tx_state_ready(messaging_tx_type_t tx_type)
+{
+	int state = atomic_get(&m_message_tx_type);
+	if (state != IDLE) {
+		/* Tx thread busy sending something else */
+		if ((tx_type == POLL_REQ) && (state == LOG_MSG)) {
+			/* Sending log messages always starts with a poll request- no need to send 
+			 * additional poll */
+			return 0;
+		}
+		return -EBUSY;
+	}
+	if ((tx_type != POLL_REQ) && (atomic_get(&m_halt_data_transfer) != false)) {
+		/* Unable to send log messages as log data transfer is currently halted */
+		return -EACCES;
+	}
+	state = (int)tx_type;
+	atomic_set(&m_message_tx_type, state);
+
+	/* Give semaphore to unblock messaging Tx thread and start sending sequence */
+	k_sem_give(&sem_release_tx_thread);
+	return 0;
+}
+
+/**
+ * @brief Messaging module Tx thread.
+ */
+void messaging_tx_thread_fn(void)
+{
+        static int err = 0;
+        static int64_t m_last_poll_req_timestamp_ms = 0;
+	while(true) {
+		/* Block Tx thread untill semaphore is given */
+		if (k_sem_take(&sem_release_tx_thread, K_FOREVER) == 0) {
+			err = 0;
+			messaging_tx_type_t tx_type = atomic_get(&m_message_tx_type);
+
+                        /* POLL REQUEST */
+			if ((tx_type == POLL_REQ) || (m_last_poll_req_timestamp_ms == 0) ||
+			    ((tx_type == LOG_MSG) && 
+			    ((k_uptime_get() - m_last_poll_req_timestamp_ms) >= 60000))) {
+				if (k_sem_take(&cache_ready_sem, K_SECONDS(60)) != 0) {
+					LOG_WRN("Cached semaphore not ready, Sending what we have");
+				}
+				k_sem_give(&cache_ready_sem);
+
+                                err = k_sem_take(&cache_lock_sem, K_SECONDS(1));
+                                if (err == 0) {
+					NofenceMessage poll_msg;
+					build_poll_request(&poll_msg);
+					k_sem_give(&cache_lock_sem);
+
+					err = encode_and_send_message(&poll_msg);
+					if (err == 0) {
+                                                /* Store poll req. timestamp to avoid sending an 
+                                                 * excessive amount of poll requests */
+                                                m_last_poll_req_timestamp_ms = k_uptime_get();
+					}  
+                                }
+                                /* Poll request error handler,
+                                 * Note! Consider notifying sender, leaving error handling to src */
+                                if (err != 0) {
+                                        LOG_WRN("Failed to send poll request, rescheduled");
+                                        if (tx_type == POLL_REQ) {
+                                                int ret = k_work_reschedule_for_queue(&message_q, 
+								&modem_poll_work, K_MINUTES(1));
+						if (ret < 0) {
+							LOG_ERR("Failed to reschedule work");
+						}
+                                        }
+                                }
+			}
+
+                        /* LOG MESSAGES */
+			if ((tx_type == LOG_MSG) && (err == 0) && 
+			    (atomic_get(&m_halt_data_transfer) == false)) {
+				/* Sending, all stored log messages are already proto encoded */
+				err = send_all_stored_messages(); 
+                                /* Log message error handler,
+                                 * Note! Consider notifying sender, leaving error handling to src */
+				if (err != 0) { 
+					LOG_WRN("Failed to send log messages");
+				}
+			}
+
+                        /* FENCE DEFINITION REQUEST */
+			if ((tx_type == FENCE_REQ) && 
+			    (atomic_get(&m_halt_data_transfer) == false)) {
+				NofenceMessage fence_req;
+				proto_InitHeader(&fence_req);
+				fence_req.which_m = NofenceMessage_fence_definition_req_tag;
+				fence_req.m.fence_definition_req.ulFenceDefVersion = 
+					m_fence_update_req.version;
+				fence_req.m.fence_definition_req.ucFrameNumber = 
+					m_fence_update_req.request_frame;
+
+				err = encode_and_send_message(&fence_req);
+                                /* Fence def. request error handler,
+                                 * Note! Consider notifying sender, leaving error handling to src */
+				if (err != 0) {
+					LOG_WRN("Failed to send fence update request");
+				} 
+			}
+
+			/* Add additional message types here (system diagnostics, ANO data etc).. */
+
+			/* Reset Tx thread */
+			atomic_set(&m_message_tx_type, IDLE);
+		} else {
+			LOG_WRN("Tx thread semaphore returned unexpectedly");
+			k_sem_reset(&sem_release_tx_thread);
+		}
+	}
+	LOG_ERR("Messaging Tx Thread exited unexpectedly");
+}
+
+/**
+ * @brief Work item handler for "data_request_work". Sends a request for environment data, such
+ * as temperatre, pressure and humidity. Rescheduled at a regular interval.
  */
 void data_request_work_fn()
 {
-	LOG_INF("Periodic request data");
-	k_work_reschedule_for_queue(&send_q, &data_request_work, K_MINUTES(1));
+	LOG_INF("Periodic request of environment data");
+	int err = k_work_reschedule_for_queue(&message_q, &data_request_work, K_MINUTES(1));
+	if (err < 0) {
+		LOG_ERR("Failed to reschedule work");
+	}
 
 	/* Request of temp, press, humidity */
-	struct request_env_sensor_event *ev_env =
-		new_request_env_sensor_event();
+	struct request_env_sensor_event *ev_env = new_request_env_sensor_event();
 	EVENT_SUBMIT(ev_env);
 }
 
+/**
+ * @brief Updates the cache registers.
+ * @param index The index of the cache register to update, see cached_and_ready_enum.
+ */
 static void update_cache_reg(cached_and_ready_enum index)
 {
 	cached_and_ready_reg[index] = 1;
@@ -544,17 +761,13 @@ static void update_cache_reg(cached_and_ready_enum index)
 			return;
 		}
 	}
-	/* All values are 1, give semaphore. */
 	k_sem_give(&cache_ready_sem);
 }
 
 /**
  * @brief Main event handler function.
- *
- * @param[in] eh Event_header for the if-chain to
- *               use to recognize which event triggered.
- *
- * @return True or false based on if we want to consume the event or not.
+ * @param[in] eh Event_header for the if-chain to use to recognize which event triggered.
+ * @return True if event is consumed, otherwise false.
  */
 static bool event_handler(const struct event_header *eh)
 {
@@ -607,25 +820,23 @@ static bool event_handler(const struct event_header *eh)
 		return true;
 	}
 	if (is_update_collar_mode(eh)) {
-		int err;
 		Mode prev_collar_mode = current_state.collar_mode;
 
 		struct update_collar_mode *ev = cast_update_collar_mode(eh);
 		current_state.collar_mode = ev->collar_mode;
 		update_cache_reg(COLLAR_MODE);
+
 		if (prev_collar_mode != current_state.collar_mode) {
 			/* Notify server by status message that collar mode has changed */
-			err = k_work_reschedule_for_queue(
-				&send_q, &log_status_message_work, K_NO_WAIT);
+			int err = k_work_reschedule_for_queue(&message_q, &log_status_message_work, 
+							      K_NO_WAIT);
 			if (err < 0) {
-				LOG_ERR("Failed to reschedule log status work (%d)",
-					err);
+				LOG_ERR("Failed to schedule log status work (%d)", err);
 			}
 		}
 		return false;
 	}
 	if (is_update_collar_status(eh)) {
-		int err;
 		CollarStatus prev_collar_status = current_state.collar_status;
 
 		struct update_collar_status *ev = cast_update_collar_status(eh);
@@ -633,22 +844,20 @@ static bool event_handler(const struct event_header *eh)
 		update_cache_reg(COLLAR_STATUS);
 
 		if ((prev_collar_status != current_state.collar_status) && 
-			((current_state.collar_status == CollarStatus_Stuck) || 
-			(prev_collar_status == CollarStatus_Stuck) || 
-			(current_state.collar_status == CollarStatus_OffAnimal) || 
-			(prev_collar_status == CollarStatus_OffAnimal))) {
-			
+		    ((current_state.collar_status == CollarStatus_Stuck) || 
+		    (prev_collar_status == CollarStatus_Stuck) || 
+		    (current_state.collar_status == CollarStatus_OffAnimal) || 
+		    (prev_collar_status == CollarStatus_OffAnimal))) {	
 			/* Notify server by status message that collar status has changed */
-			err = k_work_reschedule_for_queue(&send_q, &log_status_message_work, 
-					K_NO_WAIT);
+			int err = k_work_reschedule_for_queue(&message_q, &log_status_message_work, 
+							      K_NO_WAIT);
 			if (err < 0) {
-				LOG_ERR("Failed to reschedule log status work (%d)", err);
+				LOG_ERR("Failed to schedule log status work (%d)", err);
 			}
 		}
 		return false;
 	}
 	if (is_update_fence_status(eh)) {
-		int err;
 		FenceStatus prev_fence_status = current_state.fence_status;
 
 		struct update_fence_status *ev = cast_update_fence_status(eh);
@@ -656,19 +865,18 @@ static bool event_handler(const struct event_header *eh)
 		update_cache_reg(FENCE_STATUS);
 
 		if ((prev_fence_status != current_state.fence_status) && 
-			(((current_state.fence_status == FenceStatus_MaybeOutOfFence) || 
-				(prev_fence_status == FenceStatus_MaybeOutOfFence)) || 
-			(prev_fence_status == FenceStatus_Escaped) ||
-            ((current_state.fence_status == FenceStatus_FenceStatus_Normal)
-			      && (prev_fence_status == FenceStatus_NotStarted)) ||
-            ((current_state.fence_status == FenceStatus_TurnedOffByBLE) && 
-				(prev_fence_status == FenceStatus_TurnedOffByBLE)))) {
-
+		    (((current_state.fence_status == FenceStatus_MaybeOutOfFence) || 
+		    (prev_fence_status == FenceStatus_MaybeOutOfFence)) || 
+		    (prev_fence_status == FenceStatus_Escaped) || 
+		    ((current_state.fence_status == FenceStatus_FenceStatus_Normal) && 
+		    (prev_fence_status == FenceStatus_NotStarted)) || 
+		    ((current_state.fence_status == FenceStatus_TurnedOffByBLE) && 
+		    (prev_fence_status == FenceStatus_TurnedOffByBLE)))) {
 			/* Notify server by status message that fence status has changed */
-			err = k_work_reschedule_for_queue(&send_q, &log_status_message_work, 
-					K_NO_WAIT);
+			int err = k_work_reschedule_for_queue(&message_q, &log_status_message_work, 
+							      K_NO_WAIT);
 			if (err < 0) {
-				LOG_ERR("Failed to reschedule log status work (%d)", err);
+				LOG_ERR("Failed to schedule log status work (%d)", err);
 			}
 		}
 		return false;
@@ -680,10 +888,10 @@ static bool event_handler(const struct event_header *eh)
 		if (!m_transfer_boot_params) {
 			/* Notify server as soon as the new fence is activated. */
 			LOG_WRN("Schedule poll request: fence_version!");
-			int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
+			int err = k_work_reschedule_for_queue(&message_q, &modem_poll_work,
 							      K_NO_WAIT);
 			if (err < 0) {
-				LOG_ERR("Error reschedule modem poll work (%d)", err);
+				LOG_ERR("Error schedule poll request work (%d)", err);
 			}
 		}
 		return false;
@@ -705,10 +913,10 @@ static bool event_handler(const struct event_header *eh)
 	if (is_amc_zapped_now_event(eh)) {
 		struct amc_zapped_now_event *ev = cast_amc_zapped_now_event(eh);
 		atomic_set(&cached_dist_zap, ev->fence_dist);
-		int err = k_work_reschedule_for_queue(
-			&send_q, &process_zap_work, K_NO_WAIT);
+
+		int err = k_work_reschedule_for_queue(&message_q, &process_zap_work, K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Error reschedule zap work (%d)", err);
+			LOG_ERR("Error scheduling zap work (%d)", err);
 		}
 		return false;
 	}
@@ -723,18 +931,15 @@ static bool event_handler(const struct event_header *eh)
 	}
 
 	if (is_animal_escape_event(eh)) {
-		int err = k_work_reschedule_for_queue(
-			&send_q, &process_escape_work, K_NO_WAIT);
+		int err = k_work_reschedule_for_queue(&message_q, &process_escape_work, K_NO_WAIT);
 		if (err < 0) {
 			LOG_ERR("Error reschedule escape work (%d)", err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 		return false;
 	}
-
 	if (is_connection_state_event(eh)) {
-		struct connection_state_event *ev =
-			cast_connection_state_event(eh);
+		struct connection_state_event *ev = cast_connection_state_event(eh);
 		if (ev->state) {
 			k_sem_give(&connection_ready);
 		} else {
@@ -742,27 +947,22 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-
 	if (is_animal_warning_event(eh)) {
 		struct animal_warning_event *ev = cast_animal_warning_event(eh);
 		atomic_set(&cached_dist_warn, ev->fence_dist);
 
-		int err = k_work_reschedule_for_queue(
-			&send_q, &process_warning_work, K_NO_WAIT);
+		int err = k_work_reschedule_for_queue(&message_q, &process_warning_work, K_NO_WAIT);
 		if (err < 0) {
 			LOG_ERR("Error reschedule warning work (%d)", err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
-
 		return false;
 	}
 	if (is_pwr_status_event(eh)) {
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
-		/* Update shaddow register */
 		if (ev->pwr_state != PWR_CHARGING) {
 			/* We want battery voltage in deci volt */
-			atomic_set(&cached_batt,
-				   (uint16_t)(ev->battery_mv / 10));
+			atomic_set(&cached_batt, (uint16_t)(ev->battery_mv / 10));
 		} else {
 			cached_chrg += ev->charging_ma;
 		}
@@ -770,8 +970,9 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_send_poll_request_now(eh)) {
 		LOG_DBG("Received a nudge on listening socket!");
-		int err = k_work_reschedule_for_queue(&send_q, &modem_poll_work,
-						      K_NO_WAIT);
+		
+		int err;
+		err = k_work_reschedule_for_queue(&message_q, &modem_poll_work, K_NO_WAIT);
 		if (err < 0) {
 			LOG_ERR("Error starting modem poll worker in response to nudge on listening socket. (%d)", err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
@@ -780,22 +981,23 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_env_sensor_event(eh)) {
 		struct env_sensor_event *ev = cast_env_sensor_event(eh);
-		LOG_DBG("Event Temp: %.2f, humid %.3f, press %.3f", ev->temp,
-			ev->humidity, ev->press);
-		/* Update shaddow register. Multiply with scaling factor */
+
+		LOG_DBG("Event Temp: %.2f, humid %.3f, press %.3f", ev->temp, ev->humidity, 
+			ev->press);
+
+		/* Multiply sensor values with scaling factor and cache */
 		atomic_set(&cached_press, (uint32_t)(ev->press * 1000));
 		atomic_set(&cached_hum, (uint32_t)(ev->humidity * 1000));
 		atomic_set(&cached_temp, (uint32_t)(ev->temp * 100));
 		return false;
 	}
 	if (is_warn_correction_start_event(eh)) {
-		struct warn_correction_start_event *ev =
-			cast_warn_correction_start_event(eh);
+		struct warn_correction_start_event *ev = cast_warn_correction_start_event(eh);
 		atomic_set(&cached_dist_correction_start, ev->fence_dist);
 
-		int err = k_work_reschedule_for_queue(
-			&send_q, &process_warning_correction_start_work,
-			K_NO_WAIT);
+		int err = k_work_reschedule_for_queue(&message_q, 
+						      &process_warning_correction_start_work, 
+						      K_NO_WAIT);
 		if (err < 0) {
 			LOG_ERR("Error reschedule warning correction start work (%d)", err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
@@ -803,12 +1005,12 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_warn_correction_end_event(eh)) {
-		struct warn_correction_end_event *ev =
-			cast_warn_correction_end_event(eh);
+		struct warn_correction_end_event *ev = cast_warn_correction_end_event(eh);
 		atomic_set(&cached_dist_correction_end, ev->fence_dist);
-		int err = k_work_reschedule_for_queue(
-			&send_q, &process_warning_correction_end_work,
-			K_NO_WAIT);
+
+		int err;
+		err = k_work_reschedule_for_queue(&message_q, &process_warning_correction_end_work, 
+						  K_NO_WAIT);
 		if (err < 0) {
 			LOG_ERR("Error reschedule warning correction end work (%d)", err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
@@ -817,6 +1019,7 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_gsm_info_event(eh)) {
 		LOG_WRN("GSM info received!");
+
 		struct gsm_info_event *ev = cast_gsm_info_event(eh);
 		rat = ev->gsm_info.rat;
 		mnc = ev->gsm_info.mnc;
@@ -824,8 +1027,9 @@ static bool event_handler(const struct event_header *eh)
 		min_rssi = ev->gsm_info.min_rssi;
 		max_rssi = ev->gsm_info.max_rssi;
 		memcpy(ccid, ev->gsm_info.ccid, sizeof(ccid));
-		LOG_WRN("RSSI, rat: %d, %d, %d, %d, %s", rssi, min_rssi,
-			max_rssi, rat, log_strdup(ccid));
+
+		LOG_WRN("RSSI, rat: %d, %d, %d, %d, %s", rssi, min_rssi, max_rssi, rat, 
+			log_strdup(ccid));
 		update_cache_reg(GSM_INFO);
 		return false;
 	}
@@ -835,24 +1039,30 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_dfu_status_event(eh)) {
-		struct dfu_status_event *fw_upgrade_event =
-			cast_dfu_status_event(eh);
+		struct dfu_status_event *fw_upgrade_event = cast_dfu_status_event(eh);
+
 		if (fw_upgrade_event->dfu_status == DFU_STATUS_IDLE &&
 		    fw_upgrade_event->dfu_error != 0) {
 			fota_reset = true;
+
+			/* DFU/FOTA is canceled, release the halt on log data trafic in the
+			 * messaging tx thread */
+			atomic_set(&m_halt_data_transfer, false);
+		} else if (fw_upgrade_event->dfu_status != DFU_STATUS_IDLE) {
+			/* DFU/FOTA has started or is in progress, halt log data trafic in the
+			 * messaging tx thread */
+			atomic_set(&m_halt_data_transfer, true);
 		}
 		return false;
 	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
-
 	return false;
 }
 
 bool validate_pasture()
 {
 	uint16_t crc = 0xFFFF;
-
 	uint16_t pasture_value_16;
 	uint32_t pasture_value_32;
 
@@ -871,8 +1081,8 @@ bool validate_pasture()
 	pasture_value_16 = pasture_temp.m.us_k_lat;
 	crc = nf_crc16_uint16(pasture_value_16, &crc);
 
-	if (pasture_temp.m.ul_total_fences ==
-	    0) { /*Ignore CRC for No pasture.*/
+	if (pasture_temp.m.ul_total_fences == 0) { 
+		/* Ignore CRC for No pasture */
 		return crc == pasture_temp.m.us_pasture_crc;
 	}
 
@@ -886,15 +1096,11 @@ bool validate_pasture()
 			crc = nf_crc16_uint16(pasture_value_16, &crc);
 		}
 	}
-
 	return crc == pasture_temp.m.us_pasture_crc;
 }
 
 EVENT_LISTENER(MODULE, event_handler);
-
-/* Bluetooth events. */
 EVENT_SUBSCRIBE(MODULE, ble_cmd_event);
-
 EVENT_SUBSCRIBE(MODULE, cellular_ack_event);
 EVENT_SUBSCRIBE(MODULE, cellular_proto_in_event);
 EVENT_SUBSCRIBE(MODULE, update_collar_mode);
@@ -918,6 +1124,10 @@ EVENT_SUBSCRIBE(MODULE, gsm_info_event);
 EVENT_SUBSCRIBE(MODULE, dfu_status_event);
 EVENT_SUBSCRIBE(MODULE, block_fota_event);
 
+/**
+ * @brief Process commands recieved on the bluetooth interface, and performs the appropriate 
+ * actions accordingly.
+ */
 static inline void process_ble_cmd_event(void)
 {
 	struct ble_cmd_event ev;
@@ -928,42 +1138,45 @@ static inline void process_ble_cmd_event(void)
 		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		return;
 	}
-
 	enum command_char ble_command = ev.cmd;
 
 	switch (ble_command) {
-	case CMD_TURN_OFF_FENCE: {
-		/* Wait for final AMC integration. Should simply issue an event. */
-		struct turn_off_fence_event *ev = new_turn_off_fence_event();
-		EVENT_SUBMIT(ev);
-		break;
-	}
-	case CMD_REBOOT_AVR_MCU: {
-		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
-		r_ev->reason = REBOOT_BLE_RESET;
-		EVENT_SUBMIT(r_ev);
-		break;
-	}
-	case CMD_PLAY_SOUND: {
-		struct sound_event *s_ev = new_sound_event();
-		s_ev->type = SND_FIND_ME;
-		EVENT_SUBMIT(s_ev);
-		break;
-	}
-	case CMD_DOWNLOAD_FENCE: {
-		/* Downloads fence from bluetooth? */
-		break;
-	}
-	case CMD_FW_INSTALL: {
-		/* Deprecated as we have ble_dfu.c instead? */
-		break;
-	}
-	default: {
-		break;
-	}
+		case CMD_TURN_OFF_FENCE: {
+			/* Wait for final AMC integration. Should simply issue an event. */
+			struct turn_off_fence_event *ev = new_turn_off_fence_event();
+			EVENT_SUBMIT(ev);
+			break;
+		}
+		case CMD_REBOOT_AVR_MCU: {
+			struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
+			r_ev->reason = REBOOT_BLE_RESET;
+			EVENT_SUBMIT(r_ev);
+			break;
+		}
+		case CMD_PLAY_SOUND: {
+			struct sound_event *s_ev = new_sound_event();
+			s_ev->type = SND_FIND_ME;
+			EVENT_SUBMIT(s_ev);
+			break;
+		}
+		case CMD_DOWNLOAD_FENCE: {
+			/* Downloads fence from bluetooth? */
+			break;
+		}
+		case CMD_FW_INSTALL: {
+			/* Deprecated as we have ble_dfu.c instead? */
+			break;
+		}
+		default: {
+			break;
+		}
 	}
 }
 
+/**
+ * @brief Process Protobuf messages recieved on the LTE interface, and performs the appropriate 
+ * actions accordingly.
+ */
 static void process_lte_proto_event(void)
 {
 	struct cellular_proto_in_event ev;
@@ -978,16 +1191,6 @@ static void process_lte_proto_event(void)
 	NofenceMessage proto;
 	err = collar_protocol_decode(ev.buf + 2, ev.len - 2, &proto);
 
-	/** @note Bytes debug?
-	 *
-	 * LOG_INF("Number of received bytes = %d", ev.len);
- 	 * 
-	 * char *buf = ev.buf;
-	 * for (int i = 0; i < ev.len; i++) {
-	 * 	printk("\\x%02x", *buf);
-	 * 	buf++;
-	 * }
-	 */
 	struct messaging_ack_event *ack = new_messaging_ack_event();
 	EVENT_SUBMIT(ack);
 	if (err) {
@@ -996,26 +1199,32 @@ static void process_lte_proto_event(void)
 		return;
 	}
 
-	/* process poll response */
-	if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
-		LOG_INF("Process poll reponse");
-		process_poll_response(&proto);
-		return;
-	} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
-		uint8_t new_fframe =
-			process_fence_msg(&proto.m.fence_definition_resp);
-		fence_download(new_fframe);
-		return;
-	} else if (proto.which_m == NofenceMessage_ubx_ano_reply_tag) {
-		uint16_t new_ano_frame =
-			process_ano_msg(&proto.m.ubx_ano_reply);
-		ano_download(proto.m.ubx_ano_reply.usAnoId, new_ano_frame);
-		return;
-	} else {
-		return;
+	/* Process poll response if data transfer is not otherwie halted for some reason, e.g. a
+	 * pending or ongoing FOTA */
+	if (atomic_get(&m_halt_data_transfer) == 0)
+	{
+		if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
+			LOG_INF("Process poll reponse");
+			process_poll_response(&proto);
+			return;
+		} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
+			uint8_t received_frame = process_fence_msg(&proto.m.fence_definition_resp);
+			fence_download(received_frame);
+			return;
+		} else if (proto.which_m == NofenceMessage_ubx_ano_reply_tag) {
+			uint16_t new_ano_frame = process_ano_msg(&proto.m.ubx_ano_reply);
+			ano_download(proto.m.ubx_ano_reply.usAnoId, new_ano_frame);
+			return;
+		} else {
+			return;
+		}
 	}
 }
-void messaging_thread_fn()
+
+/**
+ * @brief Messaging module Rx thread.
+ */
+void messaging_rx_thread_fn()
 {
 	while (true) {
 		int rc = k_poll(msgq_events, NUM_MSGQ_EVENTS, K_FOREVER);
@@ -1043,28 +1252,29 @@ int messaging_module_init(void)
 		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		return err;
 	}
-	struct check_connection *ev = new_check_connection();
-	EVENT_SUBMIT(ev); /*startup the modem to get the gsm_info ready
- * before the first poll request.*/
 
-	k_work_queue_init(&send_q);
-	k_work_queue_start(&send_q, messaging_send_thread,
+	/* Startup the modem to get the gsm_info ready before the first poll request.*/
+	struct check_connection *ev = new_check_connection();
+	EVENT_SUBMIT(ev);
+
+	k_work_queue_init(&message_q);
+	k_work_queue_start(&message_q, messaging_send_thread,
 			   K_THREAD_STACK_SIZEOF(messaging_send_thread),
 			   K_PRIO_COOP(CONFIG_MESSAGING_SEND_THREAD_PRIORITY),
 			   NULL);
 
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
-	k_work_init_delayable(&log_work, log_data_periodic_fn);
-	k_work_init_delayable(&data_request_work, data_request_work_fn);
+	k_work_init_delayable(&log_periodic_work, log_data_periodic_fn);
+	k_work_init_delayable(&log_send_work, log_send_work_fn);
 	k_work_init_delayable(&log_status_message_work, log_status_message_fn);
 	k_work_init_delayable(&process_escape_work, log_animal_escaped_work_fn);
 	k_work_init_delayable(&process_zap_work, log_zap_message_work_fn);
 	k_work_init_delayable(&process_warning_work, log_warning_work_fn);
-	k_work_init_delayable(&process_warning_correction_start_work,
-			      log_correction_start_work_fn);
-	k_work_init_delayable(&process_warning_correction_end_work,
-			      log_correction_end_work_fn);
-
+	k_work_init_delayable(&process_warning_correction_start_work, log_correction_start_work_fn);
+	k_work_init_delayable(&process_warning_correction_end_work, log_correction_end_work_fn);
+	k_work_init_delayable(&data_request_work, data_request_work_fn);
+	k_work_init_delayable(&m_fence_update_req.work, fence_update_req_fn);
+	
 	memset(&pasture_temp, 0, sizeof(pasture_t));
 	cached_fences_counter = 0;
 	pasture_temp.m.us_pasture_crc = EMPTY_FENCE_CRC;
@@ -1073,43 +1283,40 @@ int messaging_module_init(void)
 	 *  we get connection to network with modem.
 	 */
 
-	err = k_work_schedule_for_queue(&send_q, &data_request_work, K_NO_WAIT);
+	err = k_work_schedule_for_queue(&message_q, &data_request_work, K_NO_WAIT);
 	if (err < 0) {
 		return err;
 	}
-	err = k_work_schedule_for_queue(&send_q, &modem_poll_work,
-					K_SECONDS(2));
+	err = k_work_schedule_for_queue(&message_q, &modem_poll_work, K_SECONDS(2));
 	if (err < 0) {
 		return err;
 	}
-	err = k_work_schedule_for_queue(&send_q, &log_work, K_SECONDS(25));
+	err = k_work_schedule_for_queue(&message_q, &log_periodic_work, 
+					K_MINUTES(atomic_get(&log_period_minutes)));
 	if (err < 0) {
 		return err;
 	}
-
 	return 0;
 }
 
+/**
+ * @brief Builds a poll request with the latest data.
+ * @param poll_req The poll request message.
+ */
 void build_poll_request(NofenceMessage *poll_req)
 {
 	int err;
 
-	proto_InitHeader(poll_req); /* fill up message header. */
-
+	proto_InitHeader(poll_req);
 	poll_req->which_m = NofenceMessage_poll_message_req_tag;
-	proto_get_last_known_date_pos(&cached_fix, 
-				&poll_req->m.poll_message_req.datePos);
-	poll_req->m.poll_message_req.has_datePos = 
-				proto_has_last_known_date_pos(&cached_fix);
+	proto_get_last_known_date_pos(&cached_fix, &poll_req->m.poll_message_req.datePos);
+	poll_req->m.poll_message_req.has_datePos = proto_has_last_known_date_pos(&cached_fix);
 	poll_req->m.poll_message_req.eMode = current_state.collar_mode;
 	poll_req->m.poll_message_req.usZapCount = current_state.zap_count;
 	poll_req->m.poll_message_req.eCollarStatus = current_state.collar_status;
 	poll_req->m.poll_message_req.eFenceStatus = current_state.fence_status;
-	poll_req->m.poll_message_req.ulFenceDefVersion = 
-				current_state.fence_version;
-	poll_req->m.poll_message_req.usBatteryVoltage = 
-				(uint16_t)atomic_get(&cached_batt);
-
+	poll_req->m.poll_message_req.ulFenceDefVersion = current_state.fence_version;
+	poll_req->m.poll_message_req.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	poll_req->m.poll_message_req.has_xGsmInfo = true;
 
 	_GSM_INFO p_gsm_info;
@@ -1122,8 +1329,7 @@ void build_poll_request(NofenceMessage *poll_req)
 	if (current_state.flash_erase_count) {
 		// m_flash_erase_count is reset when we receive a poll reply
 		poll_req->m.poll_message_req.has_usFlashEraseCount = true;
-		poll_req->m.poll_message_req.usFlashEraseCount = 
-					current_state.flash_erase_count;
+		poll_req->m.poll_message_req.usFlashEraseCount = current_state.flash_erase_count;
 	}
 	if (m_confirm_acc_limits || m_transfer_boot_params) {
 		/** @warning Assumes all the activity values are given with the
@@ -1134,21 +1340,21 @@ void build_poll_request(NofenceMessage *poll_req)
 		poll_req->m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
 
 		err = stg_config_u16_read(STG_U16_ACC_SIGMA_SLEEP_LIMIT, 
-				&poll_req->m.poll_message_req.usAccSigmaSleepLimit);
+					  &poll_req->m.poll_message_req.usAccSigmaSleepLimit);
 		if (err != 0) {
 			LOG_ERR("Failed to read STG_U16_ACC_SIGMA_SLEEP_LIMIT (%d)", err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 
 		err = stg_config_u16_read(STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT, 
-				&poll_req->m.poll_message_req.usAccSigmaNoActivityLimit);
+					  &poll_req->m.poll_message_req.usAccSigmaNoActivityLimit);
 		if (err != 0) {
 			LOG_ERR("Failed to read STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT (%d)", err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 
 		err = stg_config_u16_read(STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC, 
-				&poll_req->m.poll_message_req.usOffAnimalTimeLimitSec);
+					  &poll_req->m.poll_message_req.usOffAnimalTimeLimitSec);
 		if (err != 0) {
 			LOG_ERR("Failed to read STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC (%d)", err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
@@ -1156,12 +1362,11 @@ void build_poll_request(NofenceMessage *poll_req)
 	}
 	if (m_confirm_ble_key || m_transfer_boot_params) {
 		poll_req->m.poll_message_req.has_rgubcBleKey = true;
-		poll_req->m.poll_message_req.rgubcBleKey.size = 
-			STG_CONFIG_BLE_SEC_KEY_LEN;
+		poll_req->m.poll_message_req.rgubcBleKey.size = STG_CONFIG_BLE_SEC_KEY_LEN;
 		uint8_t key_length = 0;
 		err = stg_config_blob_read(STG_BLOB_BLE_KEY, 
-				poll_req->m.poll_message_req.rgubcBleKey.bytes, 
-				&key_length);		
+					   poll_req->m.poll_message_req.rgubcBleKey.bytes, 
+					   &key_length);		
 		if (err != 0) {
 			LOG_ERR("Failed to read ble_sec_key (%d)", err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
@@ -1186,14 +1391,13 @@ void build_poll_request(NofenceMessage *poll_req)
 
 	if (m_transfer_boot_params) {
 		poll_req->m.poll_message_req.has_versionInfo = true;
-		poll_req->m.poll_message_req.versionInfo
-			.has_ulApplicationVersion = true;
+		poll_req->m.poll_message_req.versionInfo.has_ulApplicationVersion = true;
 		poll_req->m.poll_message_req.versionInfo.ulApplicationVersion =
 			NF_X25_VERSION_NUMBER;
 		if (ccid[0] != '\0') {
 			poll_req->m.poll_message_req.has_xSimCardId = true;
 			memcpy(poll_req->m.poll_message_req.xSimCardId, ccid, 
-						sizeof(poll_req->m.poll_message_req.xSimCardId) - 1);
+			       sizeof(poll_req->m.poll_message_req.xSimCardId) - 1);
 		}
 
 		/* TODO pshustad, clean up and re-enable the commented code below */
@@ -1210,35 +1414,28 @@ void build_poll_request(NofenceMessage *poll_req)
 
 		uint8_t pcb_rf_version = 0;
 		stg_config_u8_read(STG_U8_HW_VERSION, &pcb_rf_version);
-		poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version = 
-			pcb_rf_version;
+		poll_req->m.poll_message_req.versionInfoHW.ucPCB_RF_Version = pcb_rf_version;
 
 		uint16_t pcb_product_type = 0;
 		stg_config_u16_read(STG_U16_PRODUCT_TYPE, &pcb_product_type);
-		poll_req->m.poll_message_req.versionInfoHW.usPCB_Product_Type = 
-			pcb_product_type;
-
-		poll_req->m.poll_message_req.has_versionInfoBOM = true;
+		poll_req->m.poll_message_req.versionInfoHW.usPCB_Product_Type = pcb_product_type;
 
 		uint8_t bom_mec_rev = 0;
 		stg_config_u8_read(STG_U8_BOM_MEC_REV, &bom_mec_rev);
-		poll_req->m.poll_message_req.versionInfoBOM.ucBom_mec_rev =
-			bom_mec_rev;
+		poll_req->m.poll_message_req.versionInfoBOM.ucBom_mec_rev = bom_mec_rev;
+		poll_req->m.poll_message_req.has_versionInfoBOM = true;
 
 		uint8_t bom_pcb_rev = 0;
 		stg_config_u8_read(STG_U8_BOM_PCB_REV, &bom_pcb_rev);
-		poll_req->m.poll_message_req.versionInfoBOM.ucBom_pcb_rev =
-			bom_pcb_rev;
+		poll_req->m.poll_message_req.versionInfoBOM.ucBom_pcb_rev = bom_pcb_rev;
 
 		uint8_t ems_provider = 0;
 		stg_config_u8_read(STG_U8_EMS_PROVIDER, &ems_provider);
-		poll_req->m.poll_message_req.versionInfoBOM.ucEms_provider =
-			ems_provider;
+		poll_req->m.poll_message_req.versionInfoBOM.ucEms_provider = ems_provider;
 
-		uint8_t product_record_rev = 0;
-		stg_config_u8_read(STG_U8_PRODUCT_RECORD_REV, &product_record_rev);
-		poll_req->m.poll_message_req.versionInfoBOM.ucProduct_record_rev = 
-			product_record_rev;
+		uint8_t record_rev = 0;
+		stg_config_u8_read(STG_U8_PRODUCT_RECORD_REV, &record_rev);
+		poll_req->m.poll_message_req.versionInfoBOM.ucProduct_record_rev = record_rev;
 
 		uint8_t reboot_reason;
 		pwr_module_reboot_reason(&reboot_reason);
@@ -1258,60 +1455,46 @@ void build_poll_request(NofenceMessage *poll_req)
 	}
 }
 
-int8_t request_fframe(uint32_t version, uint8_t frame)
+/**
+ * @brief Handler for a new fence definition download from the server.
+ * @param received_frame A received frame of the new fence defintion.
+ */
+void fence_download(uint8_t received_frame)
 {
-	NofenceMessage fence_req;
-	proto_InitHeader(&fence_req); /* fill up message header. */
-	fence_req.which_m = NofenceMessage_fence_definition_req_tag;
-	fence_req.m.fence_definition_req.ulFenceDefVersion = version;
-	fence_req.m.fence_definition_req.ucFrameNumber = frame;
-	int ret = encode_and_send_message(&fence_req);
-	if (ret) {
-		LOG_ERR("Failed to send request for fence frame %d (%d)", frame, ret);
-		nf_app_error(ERR_MESSAGING, ret, NULL, 0);
-		return -1;
-	}
-	return 0;
-}
+	if (received_frame == DOWNLOAD_COMPLETE) {
+		/* Notify AMC that a new fence is available. */
+		struct new_fence_available *fence_ready = new_new_fence_available();
+		fence_ready->new_fence_version = m_fence_update_req.version;
+		EVENT_SUBMIT(fence_ready);
 
-void fence_download(uint8_t new_fframe)
-{
-	if (new_fframe == 0 && first_frame) {
-		first_frame = false;
-	} else if (new_fframe == 0 && !first_frame) { //something went bad
-		expected_fframe = 0;
-		new_fence_in_progress = current_state.fence_version;
-		return;
-	}
-	if (new_fframe >= 0) {
-		if (new_fframe == DOWNLOAD_COMPLETE) {
-			/* Notify AMC that a new fence is available. */
-			struct new_fence_available *fence_ready =
-				new_new_fence_available();
-			fence_ready->new_fence_version = new_fence_in_progress;
-			EVENT_SUBMIT(fence_ready);
+		LOG_INF("Fence ver %d download complete and notified AMC.", 
+			m_fence_update_req.version);
+	} else if (received_frame == m_fence_update_req.request_frame) {
+		m_fence_update_req.request_frame++;
 
-			LOG_INF("Fence ver %d download complete and notified AMC.",
-				new_fence_in_progress);
+		LOG_INF("Requesting frame %d of new fence: %d", m_fence_update_req.request_frame, 
+			m_fence_update_req.version);
 
-			expected_fframe = 0;
-			return;
+		/* Submit a fence frame message request */
+		int err = k_work_reschedule_for_queue(&message_q, &m_fence_update_req.work, 
+						      K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Failed to reschedule work");
 		}
-		if (new_fframe == expected_fframe) {
-			expected_fframe++;
-			/* TODO: handle failure to send request!*/
-			int err = request_fframe(new_fence_in_progress,
-						 expected_fframe);
-			LOG_INF("Requesting frame %d of new fence: %d",
-				expected_fframe, new_fence_in_progress);
-			if (err != 0) {
-				expected_fframe = 0;
-				new_fence_in_progress = current_state.fence_version;
-			}
-		}
+	} else {
+		/* Received incorrect fence frame number, cancel download */
+		m_fence_update_req.version = current_state.fence_version;
+		m_fence_update_req.request_frame = 0;
 	}
 }
 
+/**
+ * @brief Builds and sends a ANO data request to the server.
+ * 
+ * @param ano_id The identifier of the ANO request.
+ * @param ano_start The start identifier for the ANO request.
+ * @return Returns 0 if successfull, otherwise a negative error code.
+ */
 int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 {
 	NofenceMessage ano_req;
@@ -1328,6 +1511,11 @@ int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 	return 0;
 }
 
+/**
+ * @brief Handler for ANO data download.
+ * @param ano_id The identifier of the ANO request.
+ * @param new_ano_frame A frame of the ANO data download.
+ */
 void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
 {
 	if (first_ano_frame) {
@@ -1341,8 +1529,7 @@ void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
 	}
 	if (new_ano_frame >= 0) {
 		if (new_ano_frame == DOWNLOAD_COMPLETE) {
-			LOG_INF("ANO %d download complete.",
-				new_ano_in_progress);
+			LOG_INF("ANO %d download complete.", new_ano_in_progress);
 			return;
 		}
 
@@ -1350,8 +1537,8 @@ void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
 		/* TODO: handle failure to send request!*/
 		int ret = request_ano_frame(ano_id, expected_ano_frame);
 
-		LOG_INF("Requesting frame %d of new ano: %d.",
-			expected_ano_frame, new_ano_in_progress);
+		LOG_INF("Requesting frame %d of new ano: %d.", expected_ano_frame, 
+			new_ano_in_progress);
 
 		if (ret != 0) {
 			/* TODO: reset ANO state and retry later.*/
@@ -1362,6 +1549,10 @@ void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
 	}
 }
 
+/**
+ * @brief Initialize a Nofence protobuf message (See NofenceMessage).
+ * @param msg The initialized Nofence protobuf message.
+ */
 void proto_InitHeader(NofenceMessage *msg)
 {
 	memset(msg, 0, sizeof(NofenceMessage));
@@ -1378,19 +1569,17 @@ void proto_InitHeader(NofenceMessage *msg)
 	}
 }
 
-/** @brief Sends a binary encoded message to the server through cellular
- *         controller.
- * @param data binary message. @note Assumes 2 first bytes are empty.
- * @param len length of the binary data including the 2 start bytes.
- * 
- * @return 0 on success, otherwise negative errno.
+/** 
+ * @brief Sends a binary encoded message to the server through cellular controller.
+ * @param data Binary message. @note Assumes 2 first bytes are empty.
+ * @param len Length of the binary data including the 2 start bytes.
+ * @return Returns 0 if successfull, otherwise negative error code.
  */
 int send_binary_message(uint8_t *data, size_t len)
 {
 	/* We can only send 1 message at a time, use mutex. */
 	k_mutex_lock(&send_binary_mutex, K_NO_WAIT);
 	if (send_binary_mutex.lock_count == 1) {
-
 		struct check_connection *ev = new_check_connection();
 		EVENT_SUBMIT(ev);
 
@@ -1403,8 +1592,8 @@ int send_binary_message(uint8_t *data, size_t len)
 		}
 		uint16_t byteswap_size = BYTESWAP16(len - 2);
 		memcpy(&data[0], &byteswap_size, 2);
-		struct messaging_proto_out_event *msg2send =
-			new_messaging_proto_out_event();
+
+		struct messaging_proto_out_event *msg2send = new_messaging_proto_out_event();
 		msg2send->buf = data;
 		msg2send->len = len;
 		EVENT_SUBMIT(msg2send);
@@ -1424,6 +1613,12 @@ int send_binary_message(uint8_t *data, size_t len)
 	}
 }
 
+/**
+ * @brief Encodes a message according to the Nofence protofuf protocol and sends the binary 
+ * message to the server through the cellular controller.
+ * @param msg_proto The message to encode and send.
+ * @return Returns 0 if successfull, otherwise a negative error code.
+ */
 int encode_and_send_message(NofenceMessage *msg_proto)
 {
 	uint8_t encoded_msg[NofenceMessage_size];
@@ -1431,8 +1626,8 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 	size_t encoded_size = 0;
 	size_t header_size = 2;
 
-	LOG_INF("Start message encoding, size: %d, version: %u",
-		sizeof(msg_proto), msg_proto->header.ulVersion);
+	LOG_INF("Start message encoding, tag: %u, version: %u",
+		msg_proto->which_m, msg_proto->header.ulVersion);
 	int ret = collar_protocol_encode(msg_proto, &encoded_msg[2],
 					 NofenceMessage_size, &encoded_size);
 	if (ret) {
@@ -1443,16 +1638,23 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 	return send_binary_message(encoded_msg, encoded_size + header_size);
 }
 
+/**
+ * @brief Encodes a message according to the Nofence protofuf protocol and stores the message to
+ * external storage.
+ * @param msg_proto The message to encode and store.
+ * @return Returns 0 if successfull, otherwise a negative error code.
+ */
 int encode_and_store_message(NofenceMessage *msg_proto)
 {
+	int ret;
 	size_t encoded_size = 0;
 	size_t header_size = 2;
 	uint8_t encoded_msg[NofenceMessage_size];
 	memset(encoded_msg, 0, sizeof(encoded_msg));
 
-	LOG_INF("Start message encoding, size: %d, version: %u",
-		sizeof(msg_proto), msg_proto->header.ulVersion);
-	int ret = collar_protocol_encode(msg_proto, &encoded_msg[2],
+	LOG_INF("Start message encoding, tag: %u, version: %u",
+		msg_proto->which_m, msg_proto->header.ulVersion);
+	ret = collar_protocol_encode(msg_proto, &encoded_msg[2],
 					 NofenceMessage_size, &encoded_size);
 	if (ret) {
 		LOG_ERR("Error encoding nofence message (%d)", ret);
@@ -1462,14 +1664,20 @@ int encode_and_store_message(NofenceMessage *msg_proto)
 	uint16_t total_size = encoded_size + header_size;
 
 	/* Store the length of the message in the two first bytes */
-	memcpy(&encoded_msg[0], &total_size,2);
+	memcpy(&encoded_msg[0], &total_size, 2);
+
 	ret = stg_write_log_data(encoded_msg, (size_t)total_size);
 	if (ret != 0) {
 		LOG_ERR("Failed to store message to flash!");
+		return ret;
 	}
 	return ret;
 }
 
+/**
+ * @brief Process an incoming poll response and performs the appropriate actions accordingly.
+ * @param proto The incoming protobuf message to process.
+ */
 void process_poll_response(NofenceMessage *proto)
 {
 	int err;
@@ -1480,14 +1688,13 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_xServerIp && strlen(pResp->xServerIp) > 0) {
 		struct messaging_host_address_event *host_add_event =
 			new_messaging_host_address_event();
-		strncpy(host_add_event->address, pResp->xServerIp,
-			sizeof(pResp->xServerIp));
+		strncpy(host_add_event->address, pResp->xServerIp, sizeof(pResp->xServerIp));
 		EVENT_SUBMIT(host_add_event); 
 		/*cellular controller writes it to ext flash if it is different from the 
 		 * previously stored address.*/
 	}
 	if (pResp->has_bEraseFlash && pResp->bEraseFlash) {
-		struct request_flash_erase_event *flash_erase_event =
+		struct request_flash_erase_event *flash_erase_event = 
 			new_request_flash_erase_event();
 		flash_erase_event->magic = STORAGE_ERASE_MAGIC;
 		EVENT_SUBMIT(flash_erase_event);
@@ -1516,25 +1723,29 @@ void process_poll_response(NofenceMessage *proto)
 			LOG_INF("Set timestamp to date_time library from modem: %s",
 				log_strdup(asctime(tm_time)));
 			atomic_set(&server_timestamp_sec,
-				   (atomic_val_t)(int32_t)(k_uptime_get_32() /
-							   1000));
+				   (atomic_val_t)(int32_t)(k_uptime_get_32() / 1000));
 		}
 	}
 	if (pResp->has_usPollConnectIntervalSec) {
-		atomic_set(&poll_period_minutes,
-			   pResp->usPollConnectIntervalSec / 60);
+		/* Update poll request interval if not equal to interval requested by server */
+		if (atomic_get(&poll_period_minutes) != (pResp->usPollConnectIntervalSec / 60)) {
+			atomic_set(&poll_period_minutes, pResp->usPollConnectIntervalSec / 60);
 
-		k_work_reschedule_for_queue(
-			&send_q, &modem_poll_work,
-			K_MINUTES(atomic_get(&poll_period_minutes)));
-		LOG_INF("Poll period of %d minutes will be used.",
-			atomic_get(&poll_period_minutes));
+			err = k_work_reschedule_for_queue(&message_q, &modem_poll_work, 
+						    K_MINUTES(atomic_get(&poll_period_minutes)));
+			if (err < 0) {
+				LOG_ERR("Failed to schedule work");
+			}
+
+			LOG_INF("Poll period of %d minutes will be used", 
+				atomic_get(&poll_period_minutes));
+		}
 	}
 	m_confirm_acc_limits = false;
 	if (pResp->has_usAccSigmaSleepLimit) {
 		m_confirm_acc_limits = true;
-		err = stg_config_u16_write(STG_U16_ACC_SIGMA_SLEEP_LIMIT,
-				pResp->usAccSigmaSleepLimit);
+		err = stg_config_u16_write(STG_U16_ACC_SIGMA_SLEEP_LIMIT, 
+					   pResp->usAccSigmaSleepLimit);
 		if (err != 0) {
 			LOG_ERR("Error updating sleep sigma to ext flash (%d)", err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
@@ -1548,7 +1759,7 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_usAccSigmaNoActivityLimit) {
 		m_confirm_acc_limits = true;
 		err = stg_config_u16_write(STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT,
-				pResp->usAccSigmaNoActivityLimit);
+					   pResp->usAccSigmaNoActivityLimit);
 		if (err != 0) {
 			LOG_ERR("Error updating no activity sigma to ext flash (%d)", err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
@@ -1562,7 +1773,7 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_usOffAnimalTimeLimitSec) {
 		m_confirm_acc_limits = true;
 		err = stg_config_u16_write(STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC,
-				pResp->usOffAnimalTimeLimitSec);
+					   pResp->usOffAnimalTimeLimitSec);
 		if (err != 0) {
 			LOG_ERR("Error updating off animal sigma to ext flash (%d)", err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
@@ -1570,8 +1781,7 @@ void process_poll_response(NofenceMessage *proto)
 
 		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
 		sigma_ev->type = OFF_ANIMAL_SIGMA;
-		sigma_ev->param.off_animal_value =
-			pResp->usOffAnimalTimeLimitSec;
+		sigma_ev->param.off_animal_value = pResp->usOffAnimalTimeLimitSec;
 		EVENT_SUBMIT(sigma_ev);
 	}
 
@@ -1587,8 +1797,8 @@ void process_poll_response(NofenceMessage *proto)
 				 pResp->rgubcBleKey.size);
 		if (ret != 0) {
 			LOG_INF("New ble sec key is different. Will update ext flash");
-			ret = stg_config_blob_write(STG_BLOB_BLE_KEY, 
-					pResp->rgubcBleKey.bytes, pResp->rgubcBleKey.size);
+			ret = stg_config_blob_write(STG_BLOB_BLE_KEY, pResp->rgubcBleKey.bytes, 
+						    pResp->rgubcBleKey.size);
 			if (ret < 0) {
 				LOG_ERR("Failed to write ble sec key to ext flash (%d)", ret);
 				nf_app_error(ERR_MESSAGING, ret, NULL, 0);
@@ -1596,14 +1806,14 @@ void process_poll_response(NofenceMessage *proto)
 		}
 	}
 	if (pResp->ulFenceDefVersion != current_state.fence_version) {
-		/* Request frame 0. */
-		LOG_INF("Requesting frame 0 for fence version %i.",
-			pResp->ulFenceDefVersion);
-		first_frame = true;
-		expected_fframe = 0;
-		int ret = request_fframe(pResp->ulFenceDefVersion, 0);
-		if (ret == 0) {
-			new_fence_in_progress = pResp->ulFenceDefVersion;
+		LOG_INF("Requesting frame 0 for fence version %i.", pResp->ulFenceDefVersion);
+		
+		/* Submit a fence frame message request */
+		m_fence_update_req.version = pResp->ulFenceDefVersion;
+		m_fence_update_req.request_frame = 0;
+		err = k_work_reschedule_for_queue(&message_q, &m_fence_update_req.work, K_NO_WAIT);
+		if (err < 0) {
+			LOG_ERR("Failed to schedule work");
 		}
 		return;
 	}
@@ -1614,7 +1824,11 @@ void process_poll_response(NofenceMessage *proto)
 	return;
 }
 
-/* @brief: starts a firmware download if a new version exists on the server. */
+/**
+ * @brief Process an incoming firmware upgrade request, and starts the firmware download if a new
+ * version is available on the server.
+ * @param fw_ver_from_server The firmware version available on the server.
+ */
 void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 {
 	if (fw_ver_from_server->has_ulApplicationVersion &&
@@ -1633,17 +1847,13 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 	}
 }
 
-/** @brief Process a fence frame and stores it into the cached pasture
- *         so we can validate if its valid when we're done to further
- *         store on external flash.
- * 
+/** @brief Process a fence frame and stores it into the cached pasture so we can validate if its 
+ * valid when we're done to further store on external flash.
  * @param fenceResp fence frame received from server.
- * 
  * @returns 0 = requests the first frame again, something happened.
- * @returns 1-254 = frame number processed. This is used
- *          to know which frame to request next.
- * @returns Do we need negative error code if error, I.e pasture
- *          is not valid, or just return 0 and retry forever?
+ * @returns 1-254 = frame number processed. This is used to know which frame to request next.
+ * @returns Do we need negative error code if error, I.e pasture is not valid, or just return 0 
+ * and retry forever?
  * @returns 255 if download is complete.
  */
 uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
@@ -1651,13 +1861,10 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	if (fenceResp == NULL) {
 		return 0;
 	}
-
 	uint8_t frame = fenceResp->ucFrameNumber;
 
 	int err = 0;
-
-	if (new_fence_in_progress != fenceResp->ulFenceDefVersion) {
-		new_fence_in_progress = current_state.fence_version;
+	if (m_fence_update_req.version != fenceResp->ulFenceDefVersion) {
 		/* Something went wrong, restart fence request. */
 		return 0;
 	}
@@ -1696,15 +1903,12 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 			pasture_temp.m.has_us_pasture_crc = true;
 			pasture_temp.m.us_pasture_crc = fenceResp->usFenceCRC;
 		}
-
 		pasture_temp.m.l_origin_lat = fenceResp->m.xHeader.lOriginLat;
 		pasture_temp.m.l_origin_lon = fenceResp->m.xHeader.lOriginLon;
 		pasture_temp.m.us_k_lat = fenceResp->m.xHeader.usK_LAT;
 		pasture_temp.m.us_k_lon = fenceResp->m.xHeader.usK_LON;
-		pasture_temp.m.ul_fence_def_version =
-			fenceResp->ulFenceDefVersion;
-		pasture_temp.m.ul_total_fences =
-			fenceResp->m.xHeader.ulTotalFences;
+		pasture_temp.m.ul_fence_def_version = fenceResp->ulFenceDefVersion;
+		pasture_temp.m.ul_total_fences = fenceResp->m.xHeader.ulTotalFences;
 
 	} else if (FenceDefinitionResponse_xFence_tag) {
 		/* Fence frame info to store into pasture's fence array. */
@@ -1728,8 +1932,7 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	if (frame == fenceResp->ucTotalFrames - 1) {
 		/* Validate pasture. */
 		if (cached_fences_counter != pasture_temp.m.ul_total_fences) {
-			LOG_ERR("Cached %i frames, but expected %i.",
-				cached_fences_counter,
+			LOG_ERR("Cached %i frames, but expected %i.", cached_fences_counter,
 				pasture_temp.m.ul_total_fences);
 						nf_app_error(ERR_MESSAGING, -EIO, NULL, 0);
 
@@ -1753,8 +1956,7 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 		}
 
 		LOG_INF("Validated CRC for pasture and will write it to flash.");
-		err = stg_write_pasture_data((uint8_t *)&pasture_temp,
-					     sizeof(pasture_temp));
+		err = stg_write_pasture_data((uint8_t *)&pasture_temp, sizeof(pasture_temp));
 		if (err) {
 			return err;
 		}
@@ -1764,16 +1966,20 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	return frame;
 }
 
+/**
+ * @brief Process an incomming ANO message, mainly stores it to external flash.
+ * @param anoResp The ANO message.
+ * @return Returns 0 if successfull, otherwise negative error code.
+ */
 uint8_t process_ano_msg(UbxAnoReply *anoResp)
 {
-	uint8_t rec_ano_frames =
-		anoResp->rgucBuf.size / sizeof(UBX_MGA_ANO_RAW_t);
-	UBX_MGA_ANO_RAW_t *temp = NULL;
-	temp = (UBX_MGA_ANO_RAW_t *)(anoResp->rgucBuf.bytes +
-				     sizeof(UBX_MGA_ANO_RAW_t));
+	uint8_t rec_ano_frames = anoResp->rgucBuf.size / sizeof(UBX_MGA_ANO_RAW_t);
 
-	uint32_t age = ano_date_to_unixtime_midday(
-		temp->mga_ano.year, temp->mga_ano.month, temp->mga_ano.day);
+	UBX_MGA_ANO_RAW_t *temp = NULL;
+	temp = (UBX_MGA_ANO_RAW_t *)(anoResp->rgucBuf.bytes + sizeof(UBX_MGA_ANO_RAW_t));
+
+	uint32_t age = ano_date_to_unixtime_midday(temp->mga_ano.year, temp->mga_ano.month, 
+						   temp->mga_ano.day);
 
 	/* Write to storage controller's ANO WRITE partition. */
 	int err = stg_write_ano_data((uint8_t *)&anoResp->rgucBuf,
@@ -1784,6 +1990,7 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 	}
 	int64_t current_time_ms = 0;
+
 	err = date_time_now(&current_time_ms);
 	if (err) {
 		LOG_ERR("Error fetching date time (%d)", err);
@@ -1795,11 +2002,14 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 	return rec_ano_frames;
 }
 
-static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix,
-					  _DatePos *pos)
+/**
+ * @brief Obtaines the last know date pos.
+ * @param gpsLastFix The latest GNSS fix.
+ * @param pos The resulting date pos.
+ */
+static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix, _DatePos *pos)
 {
-	bool valid_headVeh = (bool)(gpsLastFix->pvt_flags &
-				    GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK);
+	bool valid_headVeh = (bool)(gpsLastFix->pvt_flags & GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK);
 	_DatePos a = {
 		.lLat = gpsLastFix->lat,
 		.lLon = gpsLastFix->lon,
@@ -1836,13 +2046,24 @@ static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix,
 	memcpy(pos, &a, sizeof(_DatePos));
 }
 
+/**
+ * @brief Obtains whether or not there is a valid date pos.
+ * @param gps The latest GNSS fix.
+ * @return Returns true if there is a valid date pos, otherwise false.
+ */
 bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *gps)
 {
 	return gps->unix_timestamp != 0;
 }
 
-static uint32_t ano_date_to_unixtime_midday(uint8_t year, uint8_t month,
-					    uint8_t day)
+/**
+ * @brief Converts ANO datetime to unix time.
+ * @param year ANO data year.
+ * @param month ANO data month.
+ * @param day ANO data day.
+ * @return Returns the unit time.
+ */
+static uint32_t ano_date_to_unixtime_midday(uint8_t year, uint8_t month, uint8_t day)
 {
 	nf_time_t nf_time;
 	nf_time.day = day;

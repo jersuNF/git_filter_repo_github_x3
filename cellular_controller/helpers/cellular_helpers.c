@@ -89,12 +89,10 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 	data->tcp.sock = socket(addr->sa_family, SOCK_STREAM, IPPROTO_TCP);
 
 	if (data->tcp.sock < 0) {
-		LOG_ERR("Failed to create TCP socket (%s): %d", data->proto,
-			errno);
+		LOG_ERR("Failed to create TCP socket (%s): %d", log_strdup(data->proto), errno);
 		return -errno;
 	} else {
-		LOG_INF("Created TCP socket (%s): %d\n", log_strdup(data->proto),
-			data->tcp.sock);
+		LOG_INF("Created TCP socket (%s): %d", log_strdup(data->proto), data->tcp.sock);
 		socket_id = data->tcp.sock;
 	}
 

@@ -166,20 +166,8 @@ static inline int update_pasture_from_stg(void)
 		return err;
 	}
 
-	/* Success setting the pasture. set to teach mode if not keepmode active. */
-	uint8_t keep_mode;
-	err = stg_config_u8_read(STG_U8_KEEP_MODE, &keep_mode);
-	if (err != 0) {
-		LOG_ERR("Error reading keep mode from storage. (%d)", err);
-		nf_app_warning(ERR_AMC, err, NULL, 0);
-
-		keep_mode = 0; //Defaults to 0 in case of read failure
-	}
-
-	/* Take pasture sem, since we need to access the version to send to 
-	 * messaging module. */
-	err = k_sem_take(&fence_data_sem, 
-				K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
+	/* Take pasture sem, since we need to access the version to send to messaging module. */
+	err = k_sem_take(&fence_data_sem, K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	do {
 		if (err) {
 			LOG_ERR("Error taking pasture semaphore for version check (%d)", err);
@@ -197,16 +185,25 @@ static inline int update_pasture_from_stg(void)
 			break;
 		}
 
-		/* New pasture installed, set teach mode. */
-		if (!keep_mode) {
-			force_teach_mode();
-		}
-
 		/* New pasture installed, force a new gnss fix. */
 		restart_force_gnss_to_fix();
 
 		if (m_fence_update_pending) {
 			m_fence_update_pending = false;
+
+			/* Success setting the pasture. set to teach mode if not keepmode active. */
+			uint8_t keep_mode;
+			err = stg_config_u8_read(STG_U8_KEEP_MODE, &keep_mode);
+			if (err != 0) {
+				LOG_ERR("Error reading keep mode from storage. (%d)", err);
+				nf_app_warning(ERR_AMC, err, NULL, 0);
+
+				keep_mode = 0; //Defaults to 0 in case of read failure
+			}
+			/* New pasture installed, set teach mode. */
+			if (!keep_mode) {
+				force_teach_mode();
+			}
 
 			/* Update fence status, this also notify listeners */
 			if (pasture->m.ul_fence_def_version != 

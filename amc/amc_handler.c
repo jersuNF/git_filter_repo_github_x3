@@ -23,6 +23,7 @@
 #include "messaging_module_events.h"
 #include "gnss_controller_events.h"
 #include "ble_beacon_event.h"
+#include "ble_ctrl_event.h"
 #include "movement_events.h"
 #include "storage.h"
 #include "stg_config.h"
@@ -276,10 +277,20 @@ void handle_states_fn()
 	/* Update zone. */
 	amc_zone_t cur_zone = zone_get();
 	if (gnss_timeout != true) {
+		amc_zone_t old_zone = cur_zone;
 		err = zone_update(instant_dist, gnss, &cur_zone);
 		if (err != 0) {
 			fifo_dist_elem_count = 0;
 			fifo_avg_dist_elem_count = 0;
+		}
+		/* If the zone changes from NoZone, PSM or Caution to PreWarn or Warn, start beacon 
+		* scanning, to reduce the possiblity that an animal just entering the barn 
+		* (near the pasture border) get sound/pulse due to beacon scanning interval */
+		if ((old_zone != PREWARN_ZONE) && (old_zone != WARN_ZONE) && 
+		    ((cur_zone == PREWARN_ZONE) || (cur_zone == WARN_ZONE))) {
+			struct ble_ctrl_event *event = new_ble_ctrl_event();
+			event->cmd = BLE_CTRL_SCAN_START;
+			EVENT_SUBMIT(event);
 		}
 	}
 
@@ -287,8 +298,7 @@ void handle_states_fn()
 	Mode amc_mode = calc_mode();
 	FenceStatus fence_status = get_fence_status();
 
-	if (cur_zone != WARN_ZONE || buzzer_state ||
-	    fence_status == FenceStatus_NotStarted ||
+	if (cur_zone != WARN_ZONE || buzzer_state || fence_status == FenceStatus_NotStarted ||
 	    fence_status == FenceStatus_Escaped) {
 		/** @todo Based on uint32, we can only stay uptime for 1.6 months, 
 		 * (1193) hours before it wraps around. Issue? We have k_uptime_get_32 
@@ -296,17 +306,15 @@ void handle_states_fn()
 		maybe_out_of_fence_timestamp = k_uptime_get_32();
 	}
 
-	FenceStatus new_fence_status = 
-				calc_fence_status(maybe_out_of_fence_timestamp,
-				atomic_get(&current_beacon_status));
+	FenceStatus new_fence_status = calc_fence_status(maybe_out_of_fence_timestamp, 
+                                                         atomic_get(&current_beacon_status));
 
 	CollarStatus new_collar_status = calc_collar_status();
 
 	set_sensor_modes(amc_mode, new_fence_status, new_collar_status, cur_zone);
 
-	LOG_DBG("AMC states:CollarMode=%d,CollarStatus=%d,Zone=%d,FenceStatus=%d",
-				get_mode(), calc_collar_status(), zone_get(), 
-				get_fence_status());
+	LOG_DBG("AMC states:CollarMode=%d,CollarStatus=%d,Zone=%d,FenceStatus=%d", get_mode(), 
+                get_collar_status(), zone_get(), get_fence_status());
 }
 
 void handle_corrections_fn()

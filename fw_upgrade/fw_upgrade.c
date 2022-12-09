@@ -127,8 +127,10 @@ static bool event_handler(const struct event_header *eh)
 	if (is_start_fota_event(eh)) {
 		struct start_fota_event *ev = cast_start_fota_event(eh);
 
-		char host_tmp[CONFIG_FW_UPGRADE_HOST_LEN];
-		char path_tmp[CONFIG_FW_UPGRADE_PATH_LEN];
+		/* This variable MUST be static, as the FOTA subsystem stores a pointer to it */
+		static char host_tmp[CONFIG_FW_UPGRADE_HOST_LEN];
+		/* This variable MUST be static, as the FOTA subsystem stores a pointer to it */
+		static char path_tmp[CONFIG_FW_UPGRADE_PATH_LEN];
 
 		if (ev->override_default_host) {
 			memcpy(host_tmp, ev->host, CONFIG_FW_UPGRADE_HOST_LEN);

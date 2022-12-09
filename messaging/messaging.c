@@ -110,6 +110,19 @@ static atomic_t server_timestamp_sec = ATOMIC_INIT(0);
 
 static uint32_t serial_id = 0;
 
+/* Bitflags indicating whether collar states are initialized (See collar_state_flags, 
+ * set_initial_collar_state_flag and has_initial_collar_states) */
+static uint8_t m_initial_collar_state_flags = 0;
+enum collar_state_flags {
+    COLLAR_MODE_FLAG = 0,
+    COLLAR_STATUS_FLAG,
+    FENCE_STATUS_FLAG,
+    BATTERY_LVL_FLAG,
+    COLLAR_STATE_FLAG_CNT,
+};
+static inline void set_initial_collar_state_flag(uint8_t aFlag);
+static inline bool has_initial_collar_states();
+
 void build_poll_request(NofenceMessage *);
 void fence_download(uint8_t);
 int8_t request_ano_frame(uint16_t, uint16_t);
@@ -489,6 +502,10 @@ static void log_animal_escaped_work_fn()
  */
 static void log_status_message_fn()
 {
+	if (!has_initial_collar_states()) {
+		return;
+	}
+
 	NofenceMessage msg;
 	proto_InitHeader(&msg);
 	msg.which_m = NofenceMessage_status_msg_tag;
@@ -826,13 +843,17 @@ static bool event_handler(const struct event_header *eh)
 		current_state.collar_mode = ev->collar_mode;
 		update_cache_reg(COLLAR_MODE);
 
-		if (prev_collar_mode != current_state.collar_mode) {
-			/* Notify server by status message that collar mode has changed */
-			int err = k_work_reschedule_for_queue(&message_q, &log_status_message_work, 
-							      K_NO_WAIT);
-			if (err < 0) {
-				LOG_ERR("Failed to schedule log status work (%d)", err);
+		if (has_initial_collar_states()) {
+			if (prev_collar_mode != current_state.collar_mode) {
+				/* Notify server by status message that collar mode has changed */
+				int err = k_work_reschedule_for_queue(&message_q, 
+						&log_status_message_work, K_NO_WAIT);
+				if (err < 0) {
+					LOG_ERR("Failed to schedule log status work (%d)", err);
+				}
 			}
+		} else {
+			set_initial_collar_state_flag(COLLAR_MODE_FLAG);
 		}
 		return false;
 	}
@@ -843,17 +864,21 @@ static bool event_handler(const struct event_header *eh)
 		current_state.collar_status = ev->collar_status;
 		update_cache_reg(COLLAR_STATUS);
 
-		if ((prev_collar_status != current_state.collar_status) && 
-		    ((current_state.collar_status == CollarStatus_Stuck) || 
-		    (prev_collar_status == CollarStatus_Stuck) || 
-		    (current_state.collar_status == CollarStatus_OffAnimal) || 
-		    (prev_collar_status == CollarStatus_OffAnimal))) {	
-			/* Notify server by status message that collar status has changed */
-			int err = k_work_reschedule_for_queue(&message_q, &log_status_message_work, 
-							      K_NO_WAIT);
-			if (err < 0) {
-				LOG_ERR("Failed to schedule log status work (%d)", err);
+		if (has_initial_collar_states()) {
+			if ((prev_collar_status != current_state.collar_status) && 
+			    ((current_state.collar_status == CollarStatus_Stuck) || 
+			    (prev_collar_status == CollarStatus_Stuck) || 
+			    (current_state.collar_status == CollarStatus_OffAnimal) || 
+			    (prev_collar_status == CollarStatus_OffAnimal))) {	
+				/* Notify server by status message that collar status has changed */
+				int err = k_work_reschedule_for_queue(&message_q, 
+						&log_status_message_work, K_NO_WAIT);
+				if (err < 0) {
+					LOG_ERR("Failed to schedule log status work (%d)", err);
+				}
 			}
+		} else {
+			set_initial_collar_state_flag(COLLAR_STATUS_FLAG);
 		}
 		return false;
 	}
@@ -864,20 +889,24 @@ static bool event_handler(const struct event_header *eh)
 		current_state.fence_status = ev->fence_status;
 		update_cache_reg(FENCE_STATUS);
 
-		if ((prev_fence_status != current_state.fence_status) && 
-		    (((current_state.fence_status == FenceStatus_MaybeOutOfFence) || 
-		    (prev_fence_status == FenceStatus_MaybeOutOfFence)) || 
-		    (prev_fence_status == FenceStatus_Escaped) || 
-		    ((current_state.fence_status == FenceStatus_FenceStatus_Normal) && 
-		    (prev_fence_status == FenceStatus_NotStarted)) || 
-		    ((current_state.fence_status == FenceStatus_TurnedOffByBLE) && 
-		    (prev_fence_status == FenceStatus_TurnedOffByBLE)))) {
-			/* Notify server by status message that fence status has changed */
-			int err = k_work_reschedule_for_queue(&message_q, &log_status_message_work, 
-							      K_NO_WAIT);
-			if (err < 0) {
-				LOG_ERR("Failed to schedule log status work (%d)", err);
+		if (has_initial_collar_states()) {
+			if ((prev_fence_status != current_state.fence_status) && 
+			    (((current_state.fence_status == FenceStatus_MaybeOutOfFence) || 
+			    (prev_fence_status == FenceStatus_MaybeOutOfFence)) || 
+			    (prev_fence_status == FenceStatus_Escaped) || 
+			    ((current_state.fence_status == FenceStatus_FenceStatus_Normal) && 
+			    (prev_fence_status == FenceStatus_NotStarted)) || 
+			    ((current_state.fence_status == FenceStatus_TurnedOffByBLE) && 
+			    (prev_fence_status == FenceStatus_TurnedOffByBLE)))) {
+				/* Notify server by status message that fence status has changed */
+				int err = k_work_reschedule_for_queue(&message_q, 
+						&log_status_message_work, K_NO_WAIT);
+				if (err < 0) {
+					LOG_ERR("Failed to schedule log status work (%d)", err);
+				}
 			}
+		} else {
+			set_initial_collar_state_flag(FENCE_STATUS_FLAG);
 		}
 		return false;
 	}
@@ -963,6 +992,7 @@ static bool event_handler(const struct event_header *eh)
 		if (ev->pwr_state != PWR_CHARGING) {
 			/* We want battery voltage in deci volt */
 			atomic_set(&cached_batt, (uint16_t)(ev->battery_mv / 10));
+			set_initial_collar_state_flag(BATTERY_LVL_FLAG);
 		} else {
 			cached_chrg += ev->charging_ma;
 		}
@@ -2072,4 +2102,25 @@ static uint32_t ano_date_to_unixtime_midday(uint8_t year, uint8_t month, uint8_t
 	nf_time.hour = 12; //assumed per ANO specs
 	nf_time.minute = nf_time.second = 0;
 	return time2unix(&nf_time);
+}
+
+/**
+ * @brief Sets the initial collar state flag indicating that the module has recieved a collar state. 
+ * 		  The initial collar state flags are only set once for system startup sequence.
+ * @param[in] uint8_t A collar state flag indicator (see collar_state_flags).
+ */
+static inline void set_initial_collar_state_flag(uint8_t aFlag) {
+    if (aFlag >= COLLAR_STATE_FLAG_CNT) {
+        return;
+    }
+    m_initial_collar_state_flags |= (1 << aFlag);
+}
+
+/**
+ * @brief Checks whether the module has recieved all initial collar states (see collar_state_flags).
+ * @return Return true if all initial collar states has been received, otherwise false.
+ */
+static inline bool has_initial_collar_states() {
+    return (m_initial_collar_state_flags == ((1 << COLLAR_MODE_FLAG) | (1 << COLLAR_STATUS_FLAG) | 
+    		(1 << FENCE_STATUS_FLAG) | (1 << BATTERY_LVL_FLAG)) ? true : false);
 }

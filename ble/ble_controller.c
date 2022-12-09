@@ -77,13 +77,12 @@ typedef enum {
 
 /** @brief : Used for hysteresis calculation **/
 static cross_type_t m_cross_type = CROSS_UNDEFINED;
+static void scan_start(void);
 static void scan_stop(void);
 #endif
 static struct k_work_delayable disconnect_peer_work;
 
 static char bt_device_name[DEVICE_NAME_LEN + 1];
-
-
 
 // Shaddow register. Should be initialized with data from EEPROM or FLASH
 static uint16_t current_fw_ver = NF_X25_VERSION_NUMBER;
@@ -200,17 +199,23 @@ static struct bt_conn_cb conn_callbacks = {
  */
 static void periodic_beacon_scanner_work_fn()
 {
-	/* Reschedule worker to start again after given interval */
-	k_work_reschedule(&periodic_beacon_scanner_work,
-			  K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
+        int ret = k_work_reschedule(&periodic_beacon_scanner_work, 
+                                    K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
+        if (ret < 0) {
+                LOG_ERR("Unable to reschedule beacon scanner");
+        }
+
 #if defined(CONFIG_WATCHDOG_ENABLE)
-	/* Report alive */
-	watchdog_report_module_alive(WDG_BLE_SCAN);
+        /* Report alive */
+        watchdog_report_module_alive(WDG_BLE_SCAN);
 #endif
-	/* Start scanner again if not already running */
-	struct ble_ctrl_event *event = new_ble_ctrl_event();
-	event->cmd = BLE_CTRL_SCAN_START;
-	EVENT_SUBMIT(event);
+
+	if ((current_collar_status != CollarStatus_OffAnimal) && 
+	    (current_collar_status != CollarStatus_PowerOff) && 
+	    (current_collar_status != CollarStatus_Sleep)) {
+		/* Start scanner if not already running */
+                scan_start();
+	}
 }
 
 /**
@@ -265,20 +270,25 @@ static void beacon_processor_work_fn()
 
 	last_distance = m_shortest_dist2beacon;
 
-	/* Keep beacon scanning ON for the duration of BEACON_SCAN_DURATION, AND
-	 * as long as there is beacon contact, i.e. BEACON_STATUS_REGION_NEAR,
-	 * otherise stop beacon scanning */
+	/* Keep beacon scanning ON for the duration of BEACON_SCAN_DURATION, AND as long as there is 
+	 * beacon contact, i.e. BEACON_STATUS_REGION_NEAR, otherwise stop beacon scanning.
+	 * If Collar status is OffAnimal, PowerOff or Sleep stop beacon scanning. */
 	int64_t delta_scan_uptime = k_uptime_get() - m_beacon_scan_start_timer;
-	if ((delta_scan_uptime >= 
-	    (CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC)) && 
-	    (beacon_status != BEACON_STATUS_REGION_NEAR)) {
-		scan_stop();
-	} else {
-		k_work_reschedule(&beacon_processor_work, 
-				  K_SECONDS(CONFIG_BEACON_PROCESSING_INTERVAL));
-	}
+	if (delta_scan_uptime >= (CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC)) {
+	    if ((current_collar_status == CollarStatus_OffAnimal) || 
+	        (current_collar_status == CollarStatus_PowerOff) || 
+		(current_collar_status == CollarStatus_Sleep)) {
+			scan_stop();
+			return;
+		}
+		if (beacon_status != BEACON_STATUS_REGION_NEAR) {
+			scan_stop();
+			return;
+		}
+	} 
+	k_work_reschedule(&beacon_processor_work, K_SECONDS(CONFIG_BEACON_PROCESSING_INTERVAL));
 }
-#endif /* CONFIG_BEACON_SCAN_ENABLE */
+#endif
 
 #if CONFIG_BT_NUS
 /**
@@ -569,19 +579,14 @@ static void bt_ready(int err)
 	}
 	#endif /* CONFIG_BT_NUS */
 	/* Convert data to uint_8 ad array format */
-	mfg_data[BLE_MFG_IDX_COMPANY_ID] =
-		(NOFENCE_BLUETOOTH_SIG_COMPANY_ID & 0x00ff);
-	mfg_data[BLE_MFG_IDX_COMPANY_ID + 1] =
-		(NOFENCE_BLUETOOTH_SIG_COMPANY_ID & 0xff00) >> 8;
+	mfg_data[BLE_MFG_IDX_COMPANY_ID] = (NOFENCE_BLUETOOTH_SIG_COMPANY_ID & 0x00ff);
+	mfg_data[BLE_MFG_IDX_COMPANY_ID + 1] = (NOFENCE_BLUETOOTH_SIG_COMPANY_ID & 0xff00) >> 8;
 	mfg_data[BLE_MFG_IDX_NRF_FW_VER] = (current_fw_ver & 0x00ff);
 	mfg_data[BLE_MFG_IDX_NRF_FW_VER + 1] = (current_fw_ver & 0xff00) >> 8;
 	mfg_data[BLE_MFG_IDX_SERIAL_NR] = (current_serial_number & 0x000000ff);
-	mfg_data[BLE_MFG_IDX_SERIAL_NR + 1] =
-		(current_serial_number & 0x0000ff00) >> 8;
-	mfg_data[BLE_MFG_IDX_SERIAL_NR + 2] =
-		(current_serial_number & 0x00ff0000) >> 16;
-	mfg_data[BLE_MFG_IDX_SERIAL_NR + 3] =
-		(current_serial_number & 0xff000000) >> 24;
+	mfg_data[BLE_MFG_IDX_SERIAL_NR + 1] = (current_serial_number & 0x0000ff00) >> 8;
+	mfg_data[BLE_MFG_IDX_SERIAL_NR + 2] = (current_serial_number & 0x00ff0000) >> 16;
+	mfg_data[BLE_MFG_IDX_SERIAL_NR + 3] = (current_serial_number & 0xff000000) >> 24;
 	mfg_data[BLE_MFG_IDX_BATTERY] = current_battery_level;
 	mfg_data[BLE_MFG_IDX_ERROR] = current_error_flags;
 	mfg_data[BLE_MFG_IDX_COLLAR_MODE] = current_collar_mode;
@@ -589,14 +594,12 @@ static void bt_ready(int err)
 	mfg_data[BLE_MFG_IDX_FENCE_STATUS] = current_fence_status;
 	mfg_data[BLE_MFG_IDX_VALID_PASTURE] = current_valid_pasture;
 	mfg_data[BLE_MFG_IDX_FENCE_DEF_VER] = (current_fence_def_ver & 0x00ff);
-	mfg_data[BLE_MFG_IDX_FENCE_DEF_VER + 1] =
-		(current_fence_def_ver & 0xff00) >> 8;
+	mfg_data[BLE_MFG_IDX_FENCE_DEF_VER + 1] = (current_fence_def_ver & 0xff00) >> 8;
 	mfg_data[BLE_MFG_IDX_HW_VER] = current_hw_ver;
 	mfg_data[BLE_MFG_IDX_ATMEGA_VER] = (atmega_ver & 0x00ff);
 	mfg_data[BLE_MFG_IDX_ATMEGA_VER + 1] = (atmega_ver & 0xff00) >> 8;
 
 	atomic_set(&atomic_bt_ready, true);
-
 	atomic_set(&atomic_bt_adv_active, true);
 }
 
@@ -852,8 +855,7 @@ int ble_module_init()
 
 #if CONFIG_BEACON_SCAN_ENABLE
 	/* Init and start periodic scan work function */
-	k_work_init_delayable(&periodic_beacon_scanner_work,
-			      periodic_beacon_scanner_work_fn);
+	k_work_init_delayable(&periodic_beacon_scanner_work, periodic_beacon_scanner_work_fn);
 	k_work_reschedule(&periodic_beacon_scanner_work, K_NO_WAIT);
 
 	k_work_init_delayable(&beacon_processor_work, beacon_processor_work_fn);
@@ -916,6 +918,7 @@ static bool event_handler(const struct event_header *eh)
 	if (is_ble_ctrl_event(eh)) {
 		const struct ble_ctrl_event *event = cast_ble_ctrl_event(eh);
 
+                int ret = 0;
 		switch (event->cmd) {
 		case BLE_CTRL_ADV_ENABLE:
 			if (!atomic_set(&atomic_bt_adv_active, true)) {
@@ -933,19 +936,25 @@ static bool event_handler(const struct event_header *eh)
 		case BLE_CTRL_ERROR_FLAG_UPDATE:
 			error_flag_update(event->param.error_flags);
 			break;
-
-#if CONFIG_BEACON_SCAN_ENABLE
 		case BLE_CTRL_SCAN_START:
-			scan_start();
+#if CONFIG_BEACON_SCAN_ENABLE
+                        ret = k_work_reschedule(&periodic_beacon_scanner_work, K_NO_WAIT);
+                        if (ret < 0) {
+                                LOG_ERR("Failed to start beacon scan from a BLE_CTRL event");
+                        }
 			break;
+#endif /* CONFIG_BEACON_SCAN_ENABLE */
 		case BLE_CTRL_SCAN_STOP:
+#if CONFIG_BEACON_SCAN_ENABLE
 			scan_stop();
 			break;
-#endif
+#endif /* CONFIG_BEACON_SCAN_ENABLE */
 		case BLE_CTRL_DISCONNECT_PEER:
 			if (current_conn != NULL) {
-				k_work_schedule(&disconnect_peer_work, 
-						K_MSEC(500));
+				ret = k_work_schedule(&disconnect_peer_work, K_MSEC(500));
+                                if (ret < 0) {
+                                        LOG_ERR("Failed to schedule disconnect peer work");
+                                }
 			}
 			break;
 		default:
@@ -962,9 +971,24 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_update_collar_status(eh)) {
-		struct update_collar_status *evt =
-			cast_update_collar_status(eh);
+		struct update_collar_status *evt = cast_update_collar_status(eh);
+		CollarStatus prev_collar_status = current_collar_status;
 		collar_status_update(evt->collar_status);
+#if CONFIG_BEACON_SCAN_ENABLE
+		if ((prev_collar_status != current_collar_status) && 
+		    ((prev_collar_status == CollarStatus_OffAnimal) || 
+		    (prev_collar_status == CollarStatus_PowerOff) || 
+		    (prev_collar_status == CollarStatus_Sleep)) &&
+		    (current_collar_status != CollarStatus_OffAnimal) &&
+		    (current_collar_status != CollarStatus_PowerOff) &&
+		    (current_collar_status != CollarStatus_Sleep)) {
+			/* Schedule beacon scanning immediately when collar wakes up from sleep */
+			int ret = k_work_reschedule(&periodic_beacon_scanner_work, K_NO_WAIT);
+                        if (ret < 0) {
+                                LOG_ERR("Failed to restart beacon scan from collar status change");
+                        }
+		}
+#endif /* CONFIG_BEACON_SCAN_ENABLE */
 		return false;
 	}
 	if (is_update_fence_status(eh)) {
@@ -973,8 +997,7 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_update_fence_version(eh)) {
-		struct update_fence_version *evt = 
-			cast_update_fence_version(eh);
+		struct update_fence_version *evt = cast_update_fence_version(eh);
 		fence_def_ver_update((uint16_t)evt->fence_version);
 		if ((evt->fence_version != 0) && (evt->total_fences != 0)) {
 			pasture_update(VALID_PASTURE);
@@ -983,23 +1006,8 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-
-	/* Reveived module state event */
-	// TODO: This block could be reinitialized with a power manager module
-	// if (is_module_state_event(eh)) {
-	// 	const struct module_state_event *event =
-	// 		cast_module_state_event(eh);
-
-	// 	if (check_state(event, MODULE_ID(main), MODULE_STATE_READY)) {
-	// 		ble_module_init();
-	// 	}
-
-	// 	return false;
-	//}
-
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
-
 	return false;
 }
 

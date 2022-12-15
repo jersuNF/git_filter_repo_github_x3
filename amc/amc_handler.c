@@ -441,14 +441,6 @@ void handle_gnss_data_fn(struct k_work *item)
 			dist_incr_count = DIST_INCR_COUNT;
 		}
 
-		/* Set final accuracy flags based on previous calculations. */
-		err = gnss_update_dist_flags(dist_avg_change, dist_change, 
-					dist_incr_slope_lim, dist_inc_count, dist_incr_count,
-					height_delta, acc_delta, mean_dist, gnss->lastfix.h_acc_dm);
-		if (err) {
-			goto cleanup;
-		}
-
 		/* Evaluate and possibly change AMC Zone */
 		amc_zone_t cur_zone = zone_get();
 		amc_zone_t old_zone = cur_zone;
@@ -466,6 +458,14 @@ void handle_gnss_data_fn(struct k_work *item)
 			struct ble_ctrl_event *event = new_ble_ctrl_event();
 			event->cmd = BLE_CTRL_SCAN_START;
 			EVENT_SUBMIT(event);
+		}
+
+		/* Set final accuracy flags based on previous calculations. */
+		err = gnss_update_dist_flags(dist_avg_change, dist_change, 
+					dist_incr_slope_lim, dist_inc_count, dist_incr_count,
+					height_delta, acc_delta, mean_dist, gnss->lastfix.h_acc_dm);
+		if (err) {
+			goto cleanup;
 		}
 
 		k_work_submit_to_queue(&amc_work_q, &handle_states_work);

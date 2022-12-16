@@ -182,7 +182,7 @@ struct fence_def_update {
 	int request_frame;
 }m_fence_update_req;
 
-atomic_t poll_period_minutes = ATOMIC_INIT(15);
+atomic_t poll_period_seconds = ATOMIC_INIT(15*60);
 atomic_t log_period_minutes = ATOMIC_INIT(30);
 
 /* Messaging Rx thread */
@@ -392,7 +392,7 @@ void modem_poll_work_fn()
 {
 	/* Reschedule periodic poll request */
 	int ret = k_work_reschedule_for_queue(&message_q, &modem_poll_work,
-					      K_MINUTES(atomic_get(&poll_period_minutes)));
+					      K_SECONDS(atomic_get(&poll_period_seconds)));
 	if (ret < 0) {
 		LOG_ERR("Failed to reschedule periodic poll request!");
 	}
@@ -1754,17 +1754,17 @@ void process_poll_response(NofenceMessage *proto)
 	}
 	if (pResp->has_usPollConnectIntervalSec) {
 		/* Update poll request interval if not equal to interval requested by server */
-		if (atomic_get(&poll_period_minutes) != (pResp->usPollConnectIntervalSec / 60)) {
-			atomic_set(&poll_period_minutes, pResp->usPollConnectIntervalSec / 60);
+		if (atomic_get(&poll_period_seconds) != pResp->usPollConnectIntervalSec) {
+			atomic_set(&poll_period_seconds, pResp->usPollConnectIntervalSec);
 
 			err = k_work_reschedule_for_queue(&message_q, &modem_poll_work,
-						    K_MINUTES(atomic_get(&poll_period_minutes)));
+						    K_SECONDS(atomic_get(&poll_period_seconds)));
 			if (err < 0) {
 				LOG_ERR("Failed to schedule work");
 			}
 
-			LOG_INF("Poll period of %d minutes will be used",
-				atomic_get(&poll_period_minutes));
+			LOG_INF("Poll period of %d seconds will be used",
+				atomic_get(&poll_period_seconds));
 		}
 	}
 	m_confirm_acc_limits = false;

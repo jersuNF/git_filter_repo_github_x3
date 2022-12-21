@@ -11,8 +11,7 @@
 #define PRIORITY 7
 
 #define GNSS_1SEC 1000
-
-
+#define GNSS_INIT_MAX_COUNT 5
 K_SEM_DEFINE(new_data_sem, 0, 1);
 
 #define MODULE gnss_controller
@@ -109,39 +108,68 @@ static int gnss_controller_reset_and_setup_gnss(uint16_t mask)
 
 int gnss_controller_init(void)
 {
+	enum States {
+		ST_GNSS_FW_DRIVER_INIT,
+		ST_GNSS_FW_CB_INIT,
+		ST_GNSS_HW_INIT,
+		ST_GNSS_RUNNING
+	};
+	enum States current_state = ST_GNSS_FW_DRIVER_INIT;
+	int ret;
+	uint8_t gnss_init_count = 0;
 	gnss_reset_count = 0;
 	gnss_timeout_count = 0;
 	current_mode = GNSSMODE_NOMODE;
 
-	gnss_dev = DEVICE_DT_GET(DT_ALIAS(gnss));
-	if (gnss_dev == NULL) {
-		char *msg = "Couldn't get instance of the GNSS device!";
-		nf_app_error(ERR_GNSS_CONTROLLER, -1, msg, sizeof(*msg));
-		return -1;
-	}
-	int ret = gnss_set_data_cb(gnss_dev, gnss_data_update_cb);
-	if (ret != 0) {
-		char *msg = "Failed to register data CB!";
-		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
-		return ret;
-	}
-
-	ret = gnss_controller_setup();
-	if (ret != 0) {
-		char *msg = "Failed setup of GNSS!";
-		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
-		return ret;
-	}
-
+	while (gnss_init_count < GNSS_INIT_MAX_COUNT) {
+		LOG_INF("current state: %i", current_state);
+		switch (current_state) {
+		case ST_GNSS_FW_DRIVER_INIT:
+			gnss_init_count++;
+			gnss_dev = DEVICE_DT_GET(DT_ALIAS(gnss));
+			if (gnss_dev == NULL) {
+				char *msg = "Couldn't get instance of the GNSS device!";
+				nf_app_error(ERR_GNSS_CONTROLLER, -1, msg, sizeof(*msg));
+				//TODO: add hard reset here
+				gnss_reset_count++;
+			} else {
+				current_state++;
+			}
+			break;
+		case ST_GNSS_FW_CB_INIT:
+			ret = gnss_set_data_cb(gnss_dev, gnss_data_update_cb);
+			if (ret != 0) {
+				char *msg = "Failed to register data CB!";
+				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
+				current_state--;
+			} else {
+				current_state++;
+			}
+			break;
+		case ST_GNSS_HW_INIT:
+			ret = gnss_controller_setup();
+			if (ret != 0) {
+				char *msg = "Failed setup of GNSS!";
+				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
+				current_state--;
+			} else {
+				current_state++;
+			}
+			break;
+		case ST_GNSS_RUNNING:
 #if defined(CONFIG_TEST)
-	pub_gnss_thread_id =
+			pub_gnss_thread_id =
 #endif
-	k_thread_create(&pub_gnss_thread, pub_gnss_stack,
-			K_KERNEL_STACK_SIZEOF(pub_gnss_stack),
-			(k_thread_entry_t)publish_gnss_data, (void *)NULL, NULL, NULL,
-			PRIORITY, 0, K_NO_WAIT);
-
-	return 0;
+				k_thread_create(&pub_gnss_thread, pub_gnss_stack,
+						K_KERNEL_STACK_SIZEOF(pub_gnss_stack),
+						(k_thread_entry_t)publish_gnss_data, (void *)NULL,
+						NULL, NULL, PRIORITY, 0, K_NO_WAIT);
+			return 0;
+			break;
+		default:
+			break;
+		}
+	}
 }
 
 static _Noreturn void publish_gnss_data(void *ctx)
@@ -149,7 +177,8 @@ static _Noreturn void publish_gnss_data(void *ctx)
 	int ret;
 	int timeout_ms;
 	while (true) {
-		if (current_rate_ms == UINT16_MAX || current_rate_ms < CONFIG_GNSS_MINIMUM_ALLOWED_GNSS_RATE) {
+		if (current_rate_ms == UINT16_MAX ||
+		    current_rate_ms < CONFIG_GNSS_MINIMUM_ALLOWED_GNSS_RATE) {
 			timeout_ms = CONFIG_GNSS_DEFAULT_TIMEOUT_RATE_MS;
 		} else {
 			/* Allow some slack on GNSS solution */
@@ -222,15 +251,14 @@ static bool gnss_controller_event_handler(const struct event_header *eh)
 {
 	if (is_gnss_set_mode_event(eh)) {
 		struct gnss_set_mode_event *ev = cast_gnss_set_mode_event(eh);
-        	LOG_DBG("MODE = %d old = %d ",ev->mode,current_mode);
+		LOG_DBG("MODE = %d old = %d ", ev->mode, current_mode);
 		if (ev->mode != current_mode) {
-            		LOG_DBG("setting mode");
-			int ret = gnss_set_mode(ev->mode,true);
+			LOG_DBG("setting mode");
+			int ret = gnss_set_mode(ev->mode, true);
 			if (ret != 0) {
-                		LOG_ERR("Failed to set mode %d",ret);
+				LOG_ERR("Failed to set mode %d", ret);
 				char *msg = "Failed to set GNSS receiver mode";
-				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg,
-					     sizeof(*msg));
+				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
 				return false;
 			}
 			current_mode = ev->mode;
@@ -242,7 +270,6 @@ static bool gnss_controller_event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(MODULE, gnss_controller_event_handler);
 EVENT_SUBSCRIBE(MODULE, gnss_set_mode_event);
-
 
 /**
  * @brief Handles GNSS timeouts when no messages has been received. 

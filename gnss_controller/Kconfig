@@ -15,12 +15,15 @@ if GNSS_CONTROLLER
         int "Minimum allowable rate for GNSS receiver (milliseconds)"
         default 250
     config GNSS_TIMEOUTS_BEFORE_RESET
-            int "Number of timeout events before we try a GNSS reset"
-            default 3
+        int "Number of timeout events before we try a GNSS reset"
+        default 3
     config GNSS_DEFAULT_TIMEOUT_RATE_MS
-                int "Default rate to generate timeouts if GNSS receiver is missing dat (milliseconds)"
-                default 5000
+        int "Default rate to generate timeouts if GNSS receiver is missing dat (milliseconds)"
+        default 5000
     config GNSS_TIMEOUT_SLACK_MS
-                    int "Extra milliseconds to add to the expected GNSS rate before generating a timeout event"
-                    default 100
+        int "Extra milliseconds to add to the expected GNSS rate before generating a timeout event"
+        default 100
+    config GNSS_INIT_MAX_COUNT
+        int "number of tries before gnss init should return -1"
+        default 6
 endif

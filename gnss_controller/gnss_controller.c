@@ -129,7 +129,6 @@ int gnss_controller_init(void)
 			if (gnss_dev == NULL) {
 				char *msg = "Couldn't get instance of the GNSS device!";
 				nf_app_error(ERR_GNSS_CONTROLLER, -1, msg, sizeof(*msg));
-				//TODO: add hard reset here
 				gnss_failed_init_count++;
 			} else {
 				current_state++;
@@ -172,6 +171,7 @@ int gnss_controller_init(void)
 		}
 	}
 	LOG_ERR("GNSS init failed %i, after %i tries.", ret, gnss_failed_init_count);
+	//TODO: add hard reset
 	return -1;
 }
 

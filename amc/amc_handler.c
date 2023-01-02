@@ -263,40 +263,10 @@ void handle_new_fence_fn(struct k_work *item)
 
 void handle_states_fn()
 {
-	/* Fetch cached gnss data. */
-	gnss_t *gnss = NULL;
-	bool gnss_timeout = false;
-	int err = get_gnss_cache(&gnss);
-	if (err == -ETIMEDOUT) {
-		gnss_timeout = true;
-	} else if (err != 0){
-		LOG_ERR("Could not fetch GNSS cache %i", err);
-		return;
-	}
-
-	/* Update zone. */
-	amc_zone_t cur_zone = zone_get();
-	if (gnss_timeout != true) {
-		amc_zone_t old_zone = cur_zone;
-		err = zone_update(instant_dist, gnss, &cur_zone);
-		if (err != 0) {
-			fifo_dist_elem_count = 0;
-			fifo_avg_dist_elem_count = 0;
-		}
-		/* If the zone changes from NoZone, PSM or Caution to PreWarn or Warn, start beacon 
-		* scanning, to reduce the possiblity that an animal just entering the barn 
-		* (near the pasture border) get sound/pulse due to beacon scanning interval */
-		if ((old_zone != PREWARN_ZONE) && (old_zone != WARN_ZONE) && 
-		    ((cur_zone == PREWARN_ZONE) || (cur_zone == WARN_ZONE))) {
-			struct ble_ctrl_event *event = new_ble_ctrl_event();
-			event->cmd = BLE_CTRL_SCAN_START;
-			EVENT_SUBMIT(event);
-		}
-	}
-
 	/* Get states, and recalculate if we have new state changes. */
 	Mode amc_mode = calc_mode();
 	FenceStatus fence_status = get_fence_status();
+	amc_zone_t cur_zone = zone_get();
 
 	if (cur_zone != WARN_ZONE || buzzer_state || fence_status == FenceStatus_NotStarted ||
 	    fence_status == FenceStatus_Escaped) {
@@ -344,8 +314,7 @@ void handle_gnss_data_fn(struct k_work *item)
 	}
 
 	/* Take fence semaphore since we're going to use the cached area. */
-	int err = k_sem_take(&fence_data_sem, 
-				K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
+	int err = k_sem_take(&fence_data_sem, K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
 		LOG_ERR("Error waiting for fence data semaphore to release. (%d)", err);
 		nf_app_error(ERR_AMC, err, NULL, 0);
@@ -389,20 +358,17 @@ void handle_gnss_data_fn(struct k_work *item)
 
 	/* Fetch x and y position based on gnss data */
 	int16_t pos_x = 0, pos_y = 0;
-	err = gnss_calc_xy(gnss, &pos_x, &pos_y, pasture->m.l_origin_lon,
-				pasture->m.l_origin_lat, pasture->m.us_k_lon,
-				pasture->m.us_k_lat);
+	err = gnss_calc_xy(gnss, &pos_x, &pos_y, pasture->m.l_origin_lon, pasture->m.l_origin_lat, 
+			   pasture->m.us_k_lon, pasture->m.us_k_lat);
+	bool overflow_xy = (err == -EOVERFLOW);
 
 	struct xy_location *loc = new_xy_location();
 	loc->x = pos_x;
 	loc->y = pos_y;
 	EVENT_SUBMIT(loc);
 
-	bool overflow_xy = err == -EOVERFLOW;
-
 	/* If any fence (pasture?) is valid and we have fix. */
-	if (gnss_has_fix() && fnc_valid_fence() && !overflow_xy && 
-	    !gnss_timeout) {
+	if (gnss_has_fix() && fnc_valid_fence() && !overflow_xy && !gnss_timeout) {
 		/* Calculate distance to closest polygon. */
 		uint8_t fence_index = 0;
 		uint8_t vertex_index = 0;
@@ -473,6 +439,25 @@ void handle_gnss_data_fn(struct k_work *item)
 		} else {
 			dist_incr_slope_lim = DIST_INCR_SLOPE_LIM;
 			dist_incr_count = DIST_INCR_COUNT;
+		}
+
+		/* Evaluate and possibly change AMC Zone */
+		amc_zone_t cur_zone = zone_get();
+		amc_zone_t old_zone = cur_zone;
+		err = zone_update(instant_dist, gnss, &cur_zone);
+		if (err != 0) {
+			fifo_dist_elem_count = 0;
+			fifo_avg_dist_elem_count = 0;
+		}
+
+		/* If the zone changes from NoZone, PSM or Caution to PreWarn or Warn, start beacon 
+		* scanning, to reduce the possiblity that an animal just entering the barn 
+		* (near the pasture border) get sound/pulse due to beacon scanning interval */
+		if ((old_zone != PREWARN_ZONE) && (old_zone != WARN_ZONE) && 
+		    ((cur_zone == PREWARN_ZONE) || (cur_zone == WARN_ZONE))) {
+			struct ble_ctrl_event *event = new_ble_ctrl_event();
+			event->cmd = BLE_CTRL_SCAN_START;
+			EVENT_SUBMIT(event);
 		}
 
 		/* Set final accuracy flags based on previous calculations. */

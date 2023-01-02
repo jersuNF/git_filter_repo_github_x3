@@ -49,7 +49,6 @@ static int16_t acc_fifo_z[ACC_FIFO_ELEMENTS];
 static uint32_t acc_std_final = 0;
 
 static uint32_t first_inactive_timestamp = 0;
-static uint32_t total_steps = 0;
 static uint16_t activity_decrease_timestamp = 0;
 static uint32_t active_timestamp = 0;
 static movement_state_t prev_state = STATE_INACTIVE;
@@ -126,10 +125,6 @@ uint8_t acc_count_steps(int32_t gravity)
 	return step_counter;
 }
 
-void reset_total_steps(void)
-{
-	total_steps = 0;
-}
 
 /**
  * @brief Processing of accelerometer data to compute animal activity level.
@@ -243,23 +238,13 @@ void process_acc_data(raw_acc_data_t *acc)
 	animal_activity->level = cur_activity;
 	EVENT_SUBMIT(animal_activity);
 
-	/** @todo Use total steps? */
-	total_steps += stepcount;
 
-	LOG_DBG("Total steps = %d, Step count = %d", total_steps, stepcount);
+	LOG_DBG("Step count = %d", stepcount);
 
 	if (stepcount >= STEPS_TRIGGER) {
-		if (total_steps >= UINT16_MAX) {
-			total_steps = UINT16_MAX;
-			struct step_counter_event *steps = new_step_counter_event();
-			steps->steps = total_steps;
-			EVENT_SUBMIT(steps);
-			reset_total_steps();
-		} else {
-			struct step_counter_event *steps = new_step_counter_event();
-			steps->steps = total_steps;
-			EVENT_SUBMIT(steps);
-		}
+		struct step_counter_event *steps = new_step_counter_event();
+		steps->steps = stepcount;
+		EVENT_SUBMIT(steps);
 	}
 
 	/* Gradually increase or decrease of activity level. 
@@ -318,8 +303,7 @@ void process_acc_data(raw_acc_data_t *acc)
 		struct movement_out_event *event = new_movement_out_event();
 		event->state = m_state;
 
-		LOG_DBG("Total steps is %i, state is %i, activity is %i, acc_std_final %i",
-			total_steps, m_state, cur_activity, acc_std_final);
+		LOG_DBG("State is %i, activity is %i, acc_std_final %i",m_state, cur_activity, acc_std_final);
 		EVENT_SUBMIT(event);
 		prev_state = m_state;
 	}

@@ -4,6 +4,7 @@
 
 #include <zephyr.h>
 #include <logging/log.h>
+#include <amc_events.h>
 LOG_MODULE_REGISTER(amc_zone, CONFIG_AMC_LIB_LOG_LEVEL);
 
 #include "amc_zone.h"
@@ -80,11 +81,9 @@ int zone_update(int16_t instant_dist,
 
 		if ((zone_get_time_since_update() > CONFIG_ZONE_LEAST_TIME) &&
 		    (gnss_data->latest.msss > CONFIG_ZONE_MIN_TIME_SINCE_RESET) &&
-		    ((zone != PSM_ZONE) ||
-		     ((k_uptime_get_32() - gnss_data->latest.updated_at) > 
-				CONFIG_MAX_PSM_FIX_AGE))) {
-			
-			zone = NO_ZONE;
+		    ((zone != PSM_ZONE) || ((k_uptime_get_32() - gnss_data->latest.updated_at) > 
+		    			    CONFIG_MAX_PSM_FIX_AGE))) {
+			zone_set(NO_ZONE);
 		}
 	}
 
@@ -106,8 +105,11 @@ int zone_set(amc_zone_t new_zone)
 	if (zone != new_zone) {
 		zone = new_zone;
 		zone_updated_at = k_uptime_get();
-	}
 
+		struct zone_change *evt = new_zone_change();
+		evt->zone = zone;
+		EVENT_SUBMIT(evt);
+	}
 	return 0;
 }
 

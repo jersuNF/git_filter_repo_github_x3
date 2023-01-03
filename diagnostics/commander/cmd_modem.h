@@ -8,7 +8,7 @@
 #include "diagnostics_types.h"
 #include "commander_def.h"
 
-int commander_modem_handler(enum diagnostics_interface interface, 
-			    uint8_t cmd, uint8_t* data, uint32_t size);
+int commander_modem_handler(enum diagnostics_interface interface, uint8_t cmd, uint8_t *data,
+			    uint32_t size);
 
 #endif /* _CMD_MODEM_H_ */

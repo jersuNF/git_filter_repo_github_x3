@@ -179,7 +179,7 @@ static inline int update_pasture_from_stg(void)
 		/* Verify it has been cached correctly. */
 		pasture_t *pasture = NULL;
 		get_pasture_cache(&pasture);
-		if (pasture == NULL) {		
+		if (pasture == NULL) {
 			LOG_ERR("Pasture was not cached correctly. (%d)", -ENODATA);
 			nf_app_error(ERR_AMC, -ENODATA, NULL, 0);
 			err = -ENODATA;
@@ -207,13 +207,10 @@ static inline int update_pasture_from_stg(void)
 			}
 
 			/* Update fence status, this also notify listeners */
-			if (pasture->m.ul_fence_def_version != 
-			    m_new_fence_version) {
-				force_fence_status(
-					FenceStatus_FenceStatus_Invalid);
+			if (pasture->m.ul_fence_def_version != m_new_fence_version) {
+				force_fence_status(FenceStatus_FenceStatus_Invalid);
 			} else {
-				err = force_fence_status(
-					FenceStatus_NotStarted);
+				err = force_fence_status(FenceStatus_NotStarted);
 				if (err != 0) {
 					break;
 				}
@@ -226,13 +223,12 @@ static inline int update_pasture_from_stg(void)
 		ver->total_fences = pasture->m.ul_total_fences;
 		EVENT_SUBMIT(ver);
 
-		LOG_INF("Pasture loaded:FenceVersion=%d,FenceStatus=%d", 
-			pasture->m.ul_fence_def_version, 
-			get_fence_status());
+		LOG_INF("Pasture loaded:FenceVersion=%d,FenceStatus=%d",
+			pasture->m.ul_fence_def_version, get_fence_status());
 
 		k_sem_give(&fence_data_sem);
 		return 0;
-	}while(0);
+	} while (0);
 	LOG_WRN("Failed to update pasture!");
 	/* Update fence status to unknown in case of failure */
 	force_fence_status(FenceStatus_FenceStatus_Invalid);
@@ -276,15 +272,15 @@ void handle_states_fn()
 		maybe_out_of_fence_timestamp = k_uptime_get_32();
 	}
 
-	FenceStatus new_fence_status = calc_fence_status(maybe_out_of_fence_timestamp, 
-                                                         atomic_get(&current_beacon_status));
+	FenceStatus new_fence_status =
+		calc_fence_status(maybe_out_of_fence_timestamp, atomic_get(&current_beacon_status));
 
 	CollarStatus new_collar_status = calc_collar_status();
 
 	set_sensor_modes(amc_mode, new_fence_status, new_collar_status, cur_zone);
 
-	LOG_DBG("AMC states:CollarMode=%d,CollarStatus=%d,Zone=%d,FenceStatus=%d", get_mode(), 
-                get_collar_status(), zone_get(), get_fence_status());
+	LOG_DBG("AMC states:CollarMode=%d,CollarStatus=%d,Zone=%d,FenceStatus=%d", get_mode(),
+		get_collar_status(), zone_get(), get_fence_status());
 }
 
 void handle_corrections_fn()
@@ -302,8 +298,8 @@ void handle_corrections_fn()
 	FenceStatus fence_status = get_fence_status();
 	amc_zone_t current_zone = zone_get();
 
-	process_correction(collar_mode, &gnss->lastfix, fence_status, current_zone, 
-				mean_dist, dist_change);
+	process_correction(collar_mode, &gnss->lastfix, fence_status, current_zone, mean_dist,
+			   dist_change);
 }
 
 void handle_gnss_data_fn(struct k_work *item)
@@ -335,14 +331,13 @@ void handle_gnss_data_fn(struct k_work *item)
 	if (err == -ETIMEDOUT) {
 		LOG_WRN("GNSS data invalid, timed out");
 		gnss_timeout = true;
-	} else if (err != 0){
+	} else if (err != 0) {
 		goto cleanup;
 	}
 
 	LOG_DBG("\n\n--== START ==--");
-	LOG_DBG("  GNSS data: %d, %d, %d, %d, %d", gnss->latest.lon, 
-				gnss->latest.lat, gnss->latest.pvt_flags, gnss->latest.h_acc_dm,
-				gnss->latest.num_sv);
+	LOG_DBG("  GNSS data: %d, %d, %d, %d, %d", gnss->latest.lon, gnss->latest.lat,
+		gnss->latest.pvt_flags, gnss->latest.h_acc_dm, gnss->latest.num_sv);
 
 	/* Set local variables used in AMC logic. */
 	int16_t height_delta = INT16_MAX;
@@ -358,7 +353,7 @@ void handle_gnss_data_fn(struct k_work *item)
 
 	/* Fetch x and y position based on gnss data */
 	int16_t pos_x = 0, pos_y = 0;
-	err = gnss_calc_xy(gnss, &pos_x, &pos_y, pasture->m.l_origin_lon, pasture->m.l_origin_lat, 
+	err = gnss_calc_xy(gnss, &pos_x, &pos_y, pasture->m.l_origin_lon, pasture->m.l_origin_lat,
 			   pasture->m.us_k_lon, pasture->m.us_k_lat);
 	bool overflow_xy = (err == -EOVERFLOW);
 
@@ -399,12 +394,11 @@ void handle_gnss_data_fn(struct k_work *item)
 			if (++fifo_dist_elem_count >= FIFO_ELEMENTS) {
 				fifo_dist_elem_count = 0;
 				fifo_put(fifo_avg(dist_array, FIFO_ELEMENTS), dist_avg_array,
-							FIFO_AVG_DISTANCE_ELEMENTS);
+					 FIFO_AVG_DISTANCE_ELEMENTS);
 
 				if (++fifo_avg_dist_elem_count >= FIFO_AVG_DISTANCE_ELEMENTS) {
 					fifo_avg_dist_elem_count = FIFO_AVG_DISTANCE_ELEMENTS;
 				}
-
 			}
 		} else {
 			LOG_INF("  Does not have accepted fix!");
@@ -421,14 +415,13 @@ void handle_gnss_data_fn(struct k_work *item)
 			acc_delta = fifo_delta(acc_array, FIFO_ELEMENTS);
 			height_delta = fifo_delta(height_avg_array, FIFO_ELEMENTS);
 			if (fifo_avg_dist_elem_count >= FIFO_AVG_DISTANCE_ELEMENTS) {
-				dist_avg_change = fifo_slope(dist_avg_array, 
-							FIFO_AVG_DISTANCE_ELEMENTS);
+				dist_avg_change =
+					fifo_slope(dist_avg_array, FIFO_AVG_DISTANCE_ELEMENTS);
 			}
 		}
-		LOG_INF("  mean_dist: %d, dist_change: %d, dist_inc_count: %d, acc_delta: %d, height_delta: %d", 
-					mean_dist, dist_change, dist_inc_count, acc_delta, 
-					height_delta);
-		
+		LOG_INF("  mean_dist: %d, dist_change: %d, dist_inc_count: %d, acc_delta: %d, height_delta: %d",
+			mean_dist, dist_change, dist_inc_count, acc_delta, height_delta);
+
 		int16_t dist_incr_slope_lim = 0;
 		uint8_t dist_incr_count = 0;
 
@@ -453,7 +446,7 @@ void handle_gnss_data_fn(struct k_work *item)
 		/* If the zone changes from NoZone, PSM or Caution to PreWarn or Warn, start beacon 
 		* scanning, to reduce the possiblity that an animal just entering the barn 
 		* (near the pasture border) get sound/pulse due to beacon scanning interval */
-		if ((old_zone != PREWARN_ZONE) && (old_zone != WARN_ZONE) && 
+		if ((old_zone != PREWARN_ZONE) && (old_zone != WARN_ZONE) &&
 		    ((cur_zone == PREWARN_ZONE) || (cur_zone == WARN_ZONE))) {
 			struct ble_ctrl_event *event = new_ble_ctrl_event();
 			event->cmd = BLE_CTRL_SCAN_START;
@@ -461,9 +454,9 @@ void handle_gnss_data_fn(struct k_work *item)
 		}
 
 		/* Set final accuracy flags based on previous calculations. */
-		err = gnss_update_dist_flags(dist_avg_change, dist_change, 
-					dist_incr_slope_lim, dist_inc_count, dist_incr_count,
-					height_delta, acc_delta, mean_dist, gnss->lastfix.h_acc_dm);
+		err = gnss_update_dist_flags(dist_avg_change, dist_change, dist_incr_slope_lim,
+					     dist_inc_count, dist_incr_count, height_delta,
+					     acc_delta, mean_dist, gnss->lastfix.h_acc_dm);
 		if (err) {
 			goto cleanup;
 		}
@@ -538,7 +531,7 @@ static bool event_handler(const struct event_header *eh)
 
 		int err = set_gnss_cache(&event->gnss_data, event->timed_out);
 		if (err) {
-			LOG_ERR("Could not set gnss cahce. (%d)",err);
+			LOG_ERR("Could not set gnss cahce. (%d)", err);
 			nf_app_error(ERR_AMC, err, NULL, 0);
 			return false;
 		}

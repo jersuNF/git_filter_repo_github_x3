@@ -55,14 +55,13 @@ img_mgmt_dfu_callbacks_t dfu_callbacks = {
 	.dfu_confirmed_cb = NULL
 };
 
-static int software_update_confirmation_handler(uint32_t offset, uint32_t size,
-						void *arg)
+static int software_update_confirmation_handler(uint32_t offset, uint32_t size, void *arg)
 {
 	/* For now just print update progress and confirm data chunk without any additional
 	 * checks.
 	 */
-	LOG_INF("Device firmware upgrade progress %d / %d bytes (%d%%)", offset,
-		size, ((offset * 100) / size));
+	LOG_INF("Device firmware upgrade progress %d / %d bytes (%d%%)", offset, size,
+		((offset * 100) / size));
 
 	return 0;
 }

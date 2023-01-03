@@ -16,9 +16,9 @@
  * @brief Identifiers for configuration parameters.
  */
 typedef enum {
-    /* NB! Do NOT change or reorder the identifiers of NVS Id-data pairs without 
+	/* NB! Do NOT change or reorder the identifiers of NVS Id-data pairs without 
 	 * a sector erase of all NVS sectors */
-    STG_U8_WARN_MAX_DURATION = 0,
+	STG_U8_WARN_MAX_DURATION = 0,
 	STG_U8_WARN_MIN_DURATION,
 	STG_U8_PAIN_CNT_DEF_ESCAPED,
 	STG_U8_COLLAR_MODE,
@@ -38,12 +38,12 @@ typedef enum {
 	STG_U16_ZAP_CNT_TOT,
 	STG_U16_ZAP_CNT_DAY,
 	STG_U16_PRODUCT_TYPE,
-    STG_U32_UID, 
-    STG_U32_WARN_CNT_TOT,
-    STG_STR_HOST_PORT,
-    STG_BLOB_BLE_KEY,
+	STG_U32_UID,
+	STG_U32_WARN_CNT_TOT,
+	STG_STR_HOST_PORT,
+	STG_BLOB_BLE_KEY,
 	STG_PARAM_ID_CNT
-}stg_config_param_id_t;
+} stg_config_param_id_t;
 
 /**
  * @brief Initialization of the flash configuration storage. 
@@ -115,8 +115,7 @@ int stg_config_str_read(stg_config_param_id_t id, char *str, uint8_t *len);
  * @param len The length of the data.
  * @return 0 if successful, otherwise a negative error code. 
  */
-int stg_config_str_write(stg_config_param_id_t id, const char *str, 
-		const uint8_t len);
+int stg_config_str_write(stg_config_param_id_t id, const char *str, const uint8_t len);
 
 /**
  * @brief Reads the binary blob config parameter as specified by the identifier.
@@ -134,8 +133,7 @@ int stg_config_blob_read(stg_config_param_id_t id, uint8_t *arr, uint8_t *len);
  * @param len The length of the data.
  * @return 0 if successful, otherwise a negative error code. 
  */
-int stg_config_blob_write(stg_config_param_id_t id, const uint8_t *arr, 
-		const uint8_t len);
+int stg_config_blob_write(stg_config_param_id_t id, const uint8_t *arr, const uint8_t len);
 
 /**
  * @brief Erase all flash sectors associated with STG config.

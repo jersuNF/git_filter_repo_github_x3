@@ -33,7 +33,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_FW_UPGRADE_LOG_LEVEL);
 #error Unsupported boardfile for performing Nofence FOTA! (SG25/C25 only)
 #endif
 
-#define FOTA_RETRIES                                                           \
+#define FOTA_RETRIES                                                                               \
 	2 /* to ensure modem is switched back to PSV in case of
  * unhandled FOTA download errors */
 
@@ -138,34 +138,30 @@ static bool event_handler(const struct event_header *eh)
 		} else {
 			memset(host_tmp, 0, CONFIG_FW_UPGRADE_HOST_LEN);
 			memset(path_tmp, 0, CONFIG_FW_UPGRADE_PATH_LEN);
-			memcpy(host_tmp, CACHE_HOST_NAME,
-			       sizeof(CACHE_HOST_NAME));
-			snprintf(path_tmp, CONFIG_FW_UPGRADE_PATH_LEN,
-				 CACHE_PATH_NAME, ev->version);
+			memcpy(host_tmp, CACHE_HOST_NAME, sizeof(CACHE_HOST_NAME));
+			snprintf(path_tmp, CONFIG_FW_UPGRADE_PATH_LEN, CACHE_PATH_NAME,
+				 ev->version);
 		}
 
 		/* If no error, submit in progress event. */
 		int ret = fota_download_start(host_tmp, path_tmp, -1, 0, 0);
 		if (ret == 0) {
-			struct dfu_status_event *status =
-				new_dfu_status_event();
+			struct dfu_status_event *status = new_dfu_status_event();
 
 			status->dfu_status = DFU_STATUS_IN_PROGRESS;
 			status->dfu_error = 0;
 			EVENT_SUBMIT(status);
 		} else if (ret == -EALREADY) {
 			if (++fota_requests > FOTA_RETRIES) {
-				if (fota_requests == UINT32_MAX) fota_requests = FOTA_RETRIES;
-				struct dfu_status_event *status =
-					new_dfu_status_event();
+				if (fota_requests == UINT32_MAX)
+					fota_requests = FOTA_RETRIES;
+				struct dfu_status_event *status = new_dfu_status_event();
 				status->dfu_status = DFU_STATUS_IDLE;
 				status->dfu_error = -ENODATA;
 				EVENT_SUBMIT(status);
 			}
-		} 
-		else {
-			struct dfu_status_event *status =
-				new_dfu_status_event();
+		} else {
+			struct dfu_status_event *status = new_dfu_status_event();
 			status->dfu_status = DFU_STATUS_IDLE;
 			status->dfu_error = -ENODATA;
 			EVENT_SUBMIT(status);

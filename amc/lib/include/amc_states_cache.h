@@ -122,8 +122,7 @@ void reset_zap_count_day();
  * @param cs status of the collar (i.e animal sleeping etc...)
  * @param zone that we're currently in
  */
-void set_sensor_modes(Mode amc_mode, FenceStatus fs, CollarStatus cs,
-		      amc_zone_t zone);
+void set_sensor_modes(Mode amc_mode, FenceStatus fs, CollarStatus cs, amc_zone_t zone);
 
 /** @todo Should zap stuff be moved somewhere else? */
 void increment_zap_count(void);

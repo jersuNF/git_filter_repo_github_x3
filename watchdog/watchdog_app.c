@@ -49,16 +49,13 @@ static int watchdog_timeout_install(void)
 		.flags = WDT_FLAG_RESET_SOC
 	};
 
-	wdt_data.wdt_channel_id =
-		wdt_install_timeout(wdt_data.wdt_drv, &wdt_settings);
+	wdt_data.wdt_channel_id = wdt_install_timeout(wdt_data.wdt_drv, &wdt_settings);
 	if (wdt_data.wdt_channel_id < 0) {
-		LOG_ERR("Cannot install watchdog timer! Error code: %d",
-			wdt_data.wdt_channel_id);
+		LOG_ERR("Cannot install watchdog timer! Error code: %d", wdt_data.wdt_channel_id);
 		return -EFAULT;
 	}
 
-	LOG_INF("Watchdog timeout set. Timeout: %d seconds",
-		CONFIG_WATCHDOG_TIMEOUT_SEC);
+	LOG_INF("Watchdog timeout set. Timeout: %d seconds", CONFIG_WATCHDOG_TIMEOUT_SEC);
 	return 0;
 }
 
@@ -76,8 +73,7 @@ static int watchdog_start(void)
 
 static int watchdog_feed_enable(void)
 {
-	k_work_init_delayable(&wdt_data.system_workqueue_work,
-			      primary_feed_worker);
+	k_work_init_delayable(&wdt_data.system_workqueue_work, primary_feed_worker);
 
 	int err = wdt_feed(wdt_data.wdt_drv, wdt_data.wdt_channel_id);
 
@@ -145,14 +141,12 @@ static bool event_handler(const struct event_header *eh)
 		if (ev->magic == WATCHDOG_ALIVE_MAGIC) {
 			if (ev->module < WDG_END_OF_LIST) {
 				module_alive_array[ev->module] = 1;
-				ret = memcmp(module_alive_array, expected_array,
-					     WDG_END_OF_LIST);
+				ret = memcmp(module_alive_array, expected_array, WDG_END_OF_LIST);
 				if (ret == 0) {
 					if (init_and_start) {
 						LOG_DBG("Array is equal");
-						k_work_reschedule(
-							&wdt_data.system_workqueue_work,
-							K_NO_WAIT);
+						k_work_reschedule(&wdt_data.system_workqueue_work,
+								  K_NO_WAIT);
 						/* Clear alive array */
 						memset(module_alive_array, 0,
 						       sizeof(module_alive_array));

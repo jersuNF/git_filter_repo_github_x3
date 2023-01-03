@@ -50,8 +50,7 @@ int set_pasture_cache(uint8_t *pasture, size_t len)
 	if (len != sizeof(pasture_t)) {
 		return -EINVAL;
 	}
-	int err = k_sem_take(&fence_data_sem,
-			     K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
+	int err = k_sem_take(&fence_data_sem, K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
 		LOG_ERR("Error semaphore for fence cache %i", err);
 		return err;
@@ -83,8 +82,7 @@ int set_gnss_cache(gnss_t *gnss, const bool timed_out)
 	}
 
 	m_gnss_timeout = timed_out;
-	if (m_gnss_timeout == false)
-	{
+	if (m_gnss_timeout == false) {
 		/* GNSS data is only updated if GNSS data is valid, i.e. the 
 		 * GNSS has NOT timed out (See gnss_controller) */
 		if (current_gnssdata_area == &cached_gnssdata_area_1) {
@@ -94,7 +92,7 @@ int set_gnss_cache(gnss_t *gnss, const bool timed_out)
 		}
 
 		atomic_set(&new_gnss_written, true);
-	} 
+	}
 	k_sem_give(&gnss_data_sem);
 	return 0;
 }
@@ -102,8 +100,7 @@ int set_gnss_cache(gnss_t *gnss, const bool timed_out)
 int get_gnss_cache(gnss_t **gnss)
 {
 	int err = 0;
-	err = k_sem_take(&gnss_data_sem, 
-			 K_SECONDS(CONFIG_GNSS_CACHE_TIMEOUT_SEC));
+	err = k_sem_take(&gnss_data_sem, K_SECONDS(CONFIG_GNSS_CACHE_TIMEOUT_SEC));
 	if (err) {
 		LOG_ERR("Error semaphore for gnss cache %i", err);
 		return err;
@@ -113,8 +110,7 @@ int get_gnss_cache(gnss_t **gnss)
          * swap the pointer to point at the newly written GNSS data 
          * area if we have. If not, just return the current location.
 	 */
-	if ((m_gnss_timeout == false) && 
-	    (atomic_get(&new_gnss_written) == true)) {
+	if ((m_gnss_timeout == false) && (atomic_get(&new_gnss_written) == true)) {
 		if (current_gnssdata_area == &cached_gnssdata_area_1) {
 			current_gnssdata_area = &cached_gnssdata_area_2;
 		} else {
@@ -136,10 +132,8 @@ int get_gnss_cache(gnss_t **gnss)
 bool fnc_valid(fence_t *fence)
 {
 	return (fence->m.n_points > 2 && fence->m.n_points <= 40 &&
-		(fence->m.e_fence_type ==
-			 FenceDefinitionMessage_FenceType_Normal ||
-		 fence->m.e_fence_type ==
-			 FenceDefinitionMessage_FenceType_Inverted));
+		(fence->m.e_fence_type == FenceDefinitionMessage_FenceType_Normal ||
+		 fence->m.e_fence_type == FenceDefinitionMessage_FenceType_Inverted));
 	/** @todo: [LEGACY CODE] Also test timespan from storage fence definition here. */
 }
 

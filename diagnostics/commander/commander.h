@@ -12,8 +12,8 @@
 /** @brief Struct holding pointers to sending and passthrough enable actions.
  */
 struct commander_action {
-	void (*send_resp)(enum diagnostics_interface, const uint8_t*, uint32_t);
-	int (*thru_enable)(enum diagnostics_interface, const struct device*);
+	void (*send_resp)(enum diagnostics_interface, const uint8_t *, uint32_t);
+	int (*thru_enable)(enum diagnostics_interface, const struct device *);
 };
 
 /**
@@ -23,7 +23,7 @@ struct commander_action {
  * 
  * @return 0 on success, otherwise negative errno.
  */
-int commander_init(struct commander_action* actions);
+int commander_init(struct commander_action *actions);
 
 /**
  * @brief Commander handle function will parse provided data and call requested actions. 
@@ -34,6 +34,6 @@ int commander_init(struct commander_action* actions);
  * 
  * @return Number of bytes parsed in data buffer. 
  */
-uint32_t commander_handle(enum diagnostics_interface interface, uint8_t* data, uint32_t size);
+uint32_t commander_handle(enum diagnostics_interface interface, uint8_t *data, uint32_t size);
 
 #endif /* _COMMANDER_H_ */

@@ -29,8 +29,8 @@
  * @param	   offset Offset to start reading from
  * @return 	   Number of bytes read, or in case of an error BT_GATT_ERR() with a specific ATT error code.
  */
-ssize_t read_frame_char(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-			void *buf, uint16_t len, uint16_t offset);
+ssize_t read_frame_char(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+			uint16_t len, uint16_t offset);
 
 /**
  * @brief      Attribute read version_char callback
@@ -42,8 +42,8 @@ ssize_t read_frame_char(struct bt_conn *conn, const struct bt_gatt_attr *attr,
  * @param	   offset Offset to start reading from
  * @return 	   Number of bytes read, or in case of an error BT_GATT_ERR() with a specific ATT error code.
  */
-ssize_t read_version_char(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-			  void *buf, uint16_t len, uint16_t offset);
+ssize_t read_version_char(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+			  uint16_t len, uint16_t offset);
 
 /**
  * @brief      Attribute write pwd char callback
@@ -56,9 +56,8 @@ ssize_t read_version_char(struct bt_conn *conn, const struct bt_gatt_attr *attr,
  * @param	   flags Flags (BT_GATT_WRITE_*)
  * @return 	   Number of bytes written, or in case of an error BT_GATT_ERR() with a specific ATT error code. 
  */
-ssize_t write_pwd_char(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-		       const void *buf, uint16_t len, uint16_t offset,
-		       uint8_t flags);
+ssize_t write_pwd_char(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+		       uint16_t len, uint16_t offset, uint8_t flags);
 
 /**
  * @brief      Attribute write command char callback
@@ -71,8 +70,7 @@ ssize_t write_pwd_char(struct bt_conn *conn, const struct bt_gatt_attr *attr,
  * @param	   flags Flags (BT_GATT_WRITE_*)
  * @return 	   Number of bytes written, or in case of an error BT_GATT_ERR() with a specific ATT error code. 
  */
-ssize_t write_command_char(struct bt_conn *conn,
-			   const struct bt_gatt_attr *attr, const void *buf,
+ssize_t write_command_char(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
 			   uint16_t len, uint16_t offset, uint8_t flags);
 
 /**
@@ -86,10 +84,8 @@ ssize_t write_command_char(struct bt_conn *conn,
  * @param	   flags Flags (BT_GATT_WRITE_*)
  * @return 	   Number of bytes written, or in case of an error BT_GATT_ERR() with a specific ATT error code. 
  */
-ssize_t write_pb_response_pwd_char(struct bt_conn *conn,
-				   const struct bt_gatt_attr *attr,
-				   const void *buf, uint16_t len,
-				   uint16_t offset, uint8_t flags);
+ssize_t write_pb_response_pwd_char(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+				   const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
 
 enum command_char {
 	CMD_TURN_OFF_FENCE = 0x01,

@@ -50,9 +50,7 @@ int zone_set(amc_zone_t new_zone);
  * 
  * @returns 0 if ok, error code otherwise.
  */
-int zone_update(int16_t instant_dist, 
-		gnss_t *gnss_data, 
-		amc_zone_t* updated_zone);
+int zone_update(int16_t instant_dist, gnss_t *gnss_data, amc_zone_t *updated_zone);
 
 /** @brief Get the time since last zone change. 
  * 

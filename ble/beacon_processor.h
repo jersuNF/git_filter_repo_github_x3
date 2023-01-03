@@ -41,8 +41,8 @@ void init_beacon_list(void);
  * @param[in] p_adv_data Pointer to beacon advertise data
  * @return 0 if successful, -EIO if measurement is out of range.
  */
-int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
-			 int8_t scanner_rssi_measured, adv_data_t *p_adv_data);
+int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr, int8_t scanner_rssi_measured,
+			 adv_data_t *p_adv_data);
 
 /**
  * @brief Function called to get the shortest distance to a nearby beacon.

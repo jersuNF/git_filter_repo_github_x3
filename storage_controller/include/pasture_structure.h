@@ -43,9 +43,8 @@ typedef struct {
 	fence_coordinate_t coordinates[FENCE_MAX_TOTAL_COORDINATES];
 } fence_t;
 
-#define MAX_FENCE_DEFINITION_SIZE                                              \
-	sizeof(fence_t) +                                                      \
-		sizeof(fence_coordinate_t) * FENCE_MAX_TOTAL_COORDINATES
+#define MAX_FENCE_DEFINITION_SIZE                                                                  \
+	sizeof(fence_t) + sizeof(fence_coordinate_t) * FENCE_MAX_TOTAL_COORDINATES
 
 typedef struct {
 	struct {

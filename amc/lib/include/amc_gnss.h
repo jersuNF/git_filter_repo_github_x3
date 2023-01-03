@@ -58,9 +58,8 @@ int gnss_update(gnss_t *gnss_data);
  * 
  * @returns 0 on success, error code otherwise. 
  */
-int gnss_calc_xy(gnss_t *gnss_data, int16_t *x_dm, int16_t *y_dm,
-		 int32_t origin_lon, int32_t origin_lat, uint16_t k_lon,
-		 uint16_t k_lat);
+int gnss_calc_xy(gnss_t *gnss_data, int16_t *x_dm, int16_t *y_dm, int32_t origin_lon,
+		 int32_t origin_lat, uint16_t k_lon, uint16_t k_lat);
 
 /** @brief Validate that GNSS fix is as good as possible and update flags.
  * 
@@ -82,9 +81,8 @@ int gnss_calc_xy(gnss_t *gnss_data, int16_t *x_dm, int16_t *y_dm,
  */
 int gnss_update_dist_flags(int16_t dist_avg_change, int16_t dist_change,
 			   int16_t dist_incr_slope_lim, uint8_t dist_inc_count,
-			   uint8_t dist_incr_count, int16_t height_delta,
-			   int16_t acc_delta, int16_t mean_dist,
-			   uint16_t h_acc_dm);
+			   uint8_t dist_incr_count, int16_t height_delta, int16_t acc_delta,
+			   int16_t mean_dist, uint16_t h_acc_dm);
 
 /** @brief Check if GNSS has fix
  * 

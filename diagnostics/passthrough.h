@@ -25,8 +25,7 @@ int passthrough_init(void);
  * 
  * @return 0 on success, otherwise negative errno.
  */
-int passthrough_enable(enum diagnostics_interface intf, 
-			const struct device *dev);
+int passthrough_enable(enum diagnostics_interface intf, const struct device *dev);
 
 /**
  * @brief Disables passthrough. 
@@ -51,7 +50,7 @@ void passthrough_get_enabled_interface(enum diagnostics_interface *intf);
  * 
  * @return Number of bytes written. 
  */
-uint32_t passthrough_write_data(uint8_t* data, uint32_t size);
+uint32_t passthrough_write_data(uint8_t *data, uint32_t size);
 
 /**
  * @brief Claims data received from passthrough device. Data claimed 
@@ -61,7 +60,7 @@ uint32_t passthrough_write_data(uint8_t* data, uint32_t size);
  * 
  * @return Number of bytes available. 
  */
-uint32_t passthrough_claim_read_data(uint8_t** data);
+uint32_t passthrough_claim_read_data(uint8_t **data);
 
 /**
  * @brief Finishes data read and deletes specified size.

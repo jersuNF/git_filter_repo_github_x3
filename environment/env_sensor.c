@@ -85,8 +85,7 @@ static inline int sensor_sanity_check(enum sensor_channel sc, double value)
 			return -ERANGE;
 		} else {
 			char *msg = "Detected a sensor value warning range";
-			nf_app_warning(ERR_ENV_SENSOR, -ERANGE, msg,
-				       strlen(msg));
+			nf_app_warning(ERR_ENV_SENSOR, -ERANGE, msg, strlen(msg));
 			return 0;
 		}
 	}

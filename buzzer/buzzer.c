@@ -86,15 +86,13 @@ static inline uint32_t get_pulse_width(uint32_t period, uint8_t volume)
  * @return 0 on success, otherwise negative errno.
  * @return -EINTR if sound was aborted by another thread.
  */
-int play_from_ms(const uint32_t period, const uint32_t sustain,
-		 const uint8_t volume)
+int play_from_ms(const uint32_t period, const uint32_t sustain, const uint8_t volume)
 {
 	int err;
 
 	uint32_t pulse = get_pulse_width(period, volume);
 
-	err = pwm_pin_set_usec(buzzer_pwm, BUZZER_PWM_CHANNEL, period, pulse,
-			       0);
+	err = pwm_pin_set_usec(buzzer_pwm, BUZZER_PWM_CHANNEL, period, pulse, 0);
 	if (err) {
 		LOG_ERR("Error %d: failed to set pulse width", err);
 		return err;
@@ -107,9 +105,7 @@ int play_from_ms(const uint32_t period, const uint32_t sustain,
 	if (sustain == UINT32_MAX) {
 		dur = K_FOREVER;
 	} else {
-		dur = K_USEC(MIN(
-			sustain,
-			USEC_PER_SEC * CONFIG_BUZZER_LONGEST_NOTE_SUSTAIN - 1));
+		dur = K_USEC(MIN(sustain, USEC_PER_SEC * CONFIG_BUZZER_LONGEST_NOTE_SUSTAIN - 1));
 	}
 
 	int pwm_idle_err;
@@ -154,11 +150,9 @@ int play_hz(const uint32_t freq, const uint32_t sustain, const uint8_t volume)
  * @return 0 on success, otherwise negative errno.
  * @return -EINTR if sound was aborted by another thread.
  */
-int play_sweep(uint32_t start_freq, uint32_t end_freq, uint32_t duration,
-	       uint16_t step_count)
+int play_sweep(uint32_t start_freq, uint32_t end_freq, uint32_t duration, uint16_t step_count)
 {
-	if (step_count == 0 || start_freq == 0 || end_freq == 0 ||
-	    duration == 0) {
+	if (step_count == 0 || start_freq == 0 || end_freq == 0 || duration == 0) {
 		return -EINVAL;
 	}
 
@@ -166,8 +160,7 @@ int play_sweep(uint32_t start_freq, uint32_t end_freq, uint32_t duration,
 
 	for (uint16_t i = 0; i < step_count; i++) {
 		uint32_t freq = (uint32_t)(
-			start_freq + (int32_t)(i * (((int32_t)end_freq -
-						     (int32_t)start_freq) /
+			start_freq + (int32_t)(i * (((int32_t)end_freq - (int32_t)start_freq) /
 						    (int32_t)step_count)));
 
 		int err = play_hz(freq, sustain, BUZZER_SOUND_VOLUME_PERCENT);
@@ -182,8 +175,8 @@ int play_sweep(uint32_t start_freq, uint32_t end_freq, uint32_t duration,
 void play_song(const note_t *song, const size_t num_notes)
 {
 	for (int i = 0; i < num_notes; i++) {
-		int err = play_hz(song[i].t, song[i].s * USEC_PER_MSEC,
-				  BUZZER_SOUND_VOLUME_PERCENT);
+		int err =
+			play_hz(song[i].t, song[i].s * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
 		if (err) {
 			LOG_WRN("Song aborted.");
 			return;
@@ -228,8 +221,7 @@ void play_cattle(void)
 #define WELCOME_SPEED_MULTIPLE_HACK 3
 void play_welcome(void)
 {
-	int err =
-		play_hz(1000, 10 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
+	int err = play_hz(1000, 10 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
 
 	if (err) {
 		return;
@@ -300,8 +292,7 @@ void play_short_100(void)
 
 void play_solar_test(void)
 {
-	int err = play_hz(tone_c_6, 100 * USEC_PER_MSEC,
-			  BUZZER_SOUND_VOLUME_PERCENT);
+	int err = play_hz(tone_c_6, 100 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
 	if (err) {
 		return;
 	}
@@ -311,8 +302,7 @@ void play_solar_test(void)
 		return;
 	}
 
-	err = play_hz(tone_g_6, 300 * USEC_PER_MSEC,
-		      BUZZER_SOUND_VOLUME_PERCENT);
+	err = play_hz(tone_g_6, 300 * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
 	if (err) {
 		return;
 	}
@@ -476,8 +466,7 @@ void play()
 	enum sound_event_type type = atomic_get(&current_type_signal);
 
 	if (type != SND_OFF && type != SND_WARN) {
-		struct sound_status_event *ev_playing =
-			new_sound_status_event();
+		struct sound_status_event *ev_playing = new_sound_status_event();
 		ev_playing->status = SND_STATUS_PLAYING;
 		EVENT_SUBMIT(ev_playing);
 	}
@@ -558,9 +547,7 @@ int buzzer_module_init(void)
 	uint64_t cycles;
 	buzzer_pin_dev = device_get_binding("GPIO_0");
 	int ret = gpio_pin_configure(buzzer_pin_dev, BUZZER_PWM_CHANNEL,
-				     (GPIO_ACTIVE_HIGH |
-				      GPIO_DS_ALT_HIGH  |
-				      GPIO_DS_ALT_LOW));
+				     (GPIO_ACTIVE_HIGH | GPIO_DS_ALT_HIGH | GPIO_DS_ALT_LOW));
 	if (ret != 0) {
 		LOG_ERR("Failed to set GPIO parameters for the buzzer channel"
 			".");
@@ -568,8 +555,7 @@ int buzzer_module_init(void)
 	gpio_pin_set(buzzer_pin_dev, BUZZER_PWM_CHANNEL, 0);
 	buzzer_pwm = device_get_binding(PWM_BUZZER_LABEL);
 	if (!buzzer_pwm) {
-		LOG_ERR("Cannot find buzzer PWM device! %s",
-			log_strdup(PWM_BUZZER_LABEL));
+		LOG_ERR("Cannot find buzzer PWM device! %s", log_strdup(PWM_BUZZER_LABEL));
 		return -ENODEV;
 	}
 
@@ -580,8 +566,7 @@ int buzzer_module_init(void)
 	}
 
 	k_work_queue_init(&sound_q);
-	k_work_queue_start(&sound_q, sound_buzzer_area,
-			   K_THREAD_STACK_SIZEOF(sound_buzzer_area),
+	k_work_queue_start(&sound_q, sound_buzzer_area, K_THREAD_STACK_SIZEOF(sound_buzzer_area),
 			   CONFIG_BUZZER_THREAD_PRIORITY, NULL);
 	k_work_init(&sound_work, play);
 
@@ -618,15 +603,12 @@ static bool event_handler(const struct event_header *eh)
 				 * to start at minimum and wait for AMC to
 				 * update it.
 				 */
-				atomic_set(&current_warn_zone_freq,
-					   WARN_FREQ_INIT);
+				atomic_set(&current_warn_zone_freq, WARN_FREQ_INIT);
 				/* If current type is warn zone, start timeout timer
 			 	 * for getting a new frequency to play. */
-				k_timer_start(
-					&warn_zone_timeout_timer,
-					K_SECONDS(
-						CONFIG_BUZZER_UPDATE_WARN_FREQ_TIMEOUT),
-					K_NO_WAIT);
+				k_timer_start(&warn_zone_timeout_timer,
+					      K_SECONDS(CONFIG_BUZZER_UPDATE_WARN_FREQ_TIMEOUT),
+					      K_NO_WAIT);
 			} else {
 				/* Stop any existing timeout timers if we have
 				 * another event type than warn zone.
@@ -638,8 +620,7 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_sound_set_warn_freq_event(eh)) {
-		struct sound_set_warn_freq_event *ev =
-			cast_sound_set_warn_freq_event(eh);
+		struct sound_set_warn_freq_event *ev = cast_sound_set_warn_freq_event(eh);
 
 		/* Update the frequency played. */
 		atomic_set(&current_warn_zone_freq, ev->freq);
@@ -650,11 +631,8 @@ static bool event_handler(const struct event_header *eh)
 		 */
 		if (atomic_get(&current_type_signal) == SND_WARN) {
 			end_current_sound();
-			k_timer_start(
-				&warn_zone_timeout_timer,
-				K_SECONDS(
-					CONFIG_BUZZER_UPDATE_WARN_FREQ_TIMEOUT),
-				K_NO_WAIT);
+			k_timer_start(&warn_zone_timeout_timer,
+				      K_SECONDS(CONFIG_BUZZER_UPDATE_WARN_FREQ_TIMEOUT), K_NO_WAIT);
 		} else {
 			k_timer_stop(&warn_zone_timeout_timer);
 		}

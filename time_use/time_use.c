@@ -203,7 +203,7 @@ static bool event_handler_impl(const struct event_header *eh)
 
 	else if (is_xy_location(eh)) {
 		struct xy_location *ev = cast_xy_location(eh);
-		shared_state.pos_count ++;
+		shared_state.pos_count++;
 		shared_state.cur_fresh_pos[0] = ev->x;
 		shared_state.cur_fresh_pos[1] = ev->y;
 		return false;
@@ -311,9 +311,8 @@ static _Noreturn void collect_stats_fn(void)
 			heightsum += copied_state.cur_height_sum;
 
 			bool has_dist = copied_state.pos_count > 0 && has_way_pnt;
-			int16_t distance = has_dist ?
-				TimeuseDistance(way_pnt, copied_state.cur_fresh_pos) : 0;
-
+			int16_t distance =
+				has_dist ? TimeuseDistance(way_pnt, copied_state.cur_fresh_pos) : 0;
 
 			if (copied_state.cur_activity_level == ACTIVITY_LOW) {
 				animal_behave.has_usRestingTime = true;
@@ -321,23 +320,24 @@ static _Noreturn void collect_stats_fn(void)
 			} else if (copied_state.cur_activity_level == ACTIVITY_MED) {
 				animal_behave.has_usWalkingTime = true;
 				walking += elapsed_time_ms;
-				animal_behave.has_usWalkingDist = has_dist || animal_behave.has_usWalkingDist;
+				animal_behave.has_usWalkingDist =
+					has_dist || animal_behave.has_usWalkingDist;
 				animal_behave.usWalkingDist += distance;
 			} else if (copied_state.cur_activity_level == ACTIVITY_HIGH) {
 				animal_behave.has_usRunningTime = true;
 				running += elapsed_time_ms;
-				animal_behave.has_usRunningDist = has_dist || animal_behave.has_usRunningDist;
+				animal_behave.has_usRunningDist =
+					has_dist || animal_behave.has_usRunningDist;
 				animal_behave.usRunningDist += distance;
 			} else {
 				animal_behave.has_usUnknownTime = true;
 				unknown += elapsed_time_ms;
 			}
-			if (copied_state.pos_count > 0 ) {
+			if (copied_state.pos_count > 0) {
 				has_way_pnt = true;
 				way_pnt[0] = copied_state.cur_fresh_pos[0];
 				way_pnt[1] = copied_state.cur_fresh_pos[1];
 			}
-
 
 			/* Histogram to predict Current profile of the collar  */
 			uint8_t cur_psm_state = (copied_state.cur_gnss_pvt_flags >> 2) & 0x07;
@@ -406,7 +406,8 @@ static _Noreturn void collect_stats_fn(void)
 			save_and_reset = false;
 			collar_histogram histogram;
 			memset(&histogram, 0, sizeof(struct collar_histogram));
-			memcpy(&histogram.animal_behave,&animal_behave,sizeof(histogram.animal_behave));
+			memcpy(&histogram.animal_behave, &animal_behave,
+			       sizeof(histogram.animal_behave));
 
 			histogram.animal_behave.usRestingTime = resting / MSEC_PER_SEC;
 			histogram.animal_behave.usWalkingTime = walking / MSEC_PER_SEC;
@@ -492,7 +493,7 @@ static _Noreturn void collect_stats_fn(void)
 			v_bat_max = 0;
 			v_bat_min = UINT16_MAX;
 			has_way_pnt = false;
-			memset(&animal_behave,0,sizeof(animal_behave));
+			memset(&animal_behave, 0, sizeof(animal_behave));
 
 			/* write temporary variable to queue*/
 			while (k_msgq_put(&histogram_msgq, &histogram, K_NO_WAIT) != 0) {

@@ -22,12 +22,11 @@ LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 K_SEM_DEFINE(messaging_ack, 1, 1);
 K_SEM_DEFINE(fota_progress_update, 0, 1);
 
-K_THREAD_DEFINE(send_tcp_from_q, CONFIG_SEND_THREAD_STACK_SIZE,
-		send_tcp_fn, NULL, NULL, NULL,
+K_THREAD_DEFINE(send_tcp_from_q, CONFIG_SEND_THREAD_STACK_SIZE, send_tcp_fn, NULL, NULL, NULL,
 		K_PRIO_COOP(CONFIG_SEND_THREAD_PRIORITY), 0, 0);
 
-char server_address[STG_CONFIG_HOST_PORT_BUF_LEN-1];
-char server_address_tmp[STG_CONFIG_HOST_PORT_BUF_LEN-1];
+char server_address[STG_CONFIG_HOST_PORT_BUF_LEN - 1];
+char server_address_tmp[STG_CONFIG_HOST_PORT_BUF_LEN - 1];
 static int server_port;
 static char server_ip[15];
 
@@ -77,8 +76,8 @@ K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK, receive_tcp, &conf.ipv4, NULL, NULL,
 
 extern struct k_sem listen_sem;
 
-K_THREAD_DEFINE(listen_recv_tid, RCV_THREAD_STACK, listen_sock_poll, NULL, NULL,
-		NULL, K_PRIO_COOP(RCV_PRIORITY), 0, 0);
+K_THREAD_DEFINE(listen_recv_tid, RCV_THREAD_STACK, listen_sock_poll, NULL, NULL, NULL,
+		K_PRIO_COOP(RCV_PRIORITY), 0, 0);
 
 static APP_BMEM bool connected;
 static uint8_t *pMsgIn = NULL;
@@ -98,8 +97,8 @@ void receive_tcp(struct data *sock_data)
 				LOG_WRN("received %d bytes!", received);
 #endif
 				LOG_WRN("will take semaphore!");
-				if (k_sem_take(&messaging_ack,
-					       K_MSEC(MESSAGING_ACK_TIMEOUT)) == 0) {
+				if (k_sem_take(&messaging_ack, K_MSEC(MESSAGING_ACK_TIMEOUT)) ==
+				    0) {
 					pMsgIn = (uint8_t *)k_malloc(received);
 					memcpy(pMsgIn, buf, received);
 					struct cellular_proto_in_event *msgIn =
@@ -110,18 +109,15 @@ void receive_tcp(struct data *sock_data)
 					EVENT_SUBMIT(msgIn);
 				} else {
 					char *err_msg = "Missed messaging ack!";
-					nf_app_error(ERR_MESSAGING,
-						     -ETIMEDOUT, err_msg,
-						     strlen
-						(err_msg));
+					nf_app_error(ERR_MESSAGING, -ETIMEDOUT, err_msg,
+						     strlen(err_msg));
 				}
 			} else if (received == 0) {
 				socket_idle_count += SOCKET_POLL_INTERVAL;
 				if (socket_idle_count > SOCK_RECV_TIMEOUT) {
 					LOG_WRN("Socket receive timed out!");
 					if (!sending_in_progress) {
-						k_sem_take
-							(&close_main_socket_sem, K_FOREVER);
+						k_sem_take(&close_main_socket_sem, K_FOREVER);
 						/*fota_in_progress = false;
 						 * PSV does not interrupt
 						 * FOTA on 2G, consider
@@ -138,8 +134,7 @@ void receive_tcp(struct data *sock_data)
 				}
 			} else {
 				char *e_msg = "Socket receive error!";
-				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen
-					(e_msg));
+				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
 				if (!sending_in_progress) {
 					connected = false;
 					int ret = stop_tcp(fota_in_progress);
@@ -149,7 +144,7 @@ void receive_tcp(struct data *sock_data)
 				}
 			}
 		}
-//		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
+		//		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
 	}
 }
 
@@ -158,8 +153,7 @@ void listen_sock_poll(void)
 	while (1) {
 		if (k_sem_take(&listen_sem, K_FOREVER) == 0) {
 			LOG_WRN("Waking up!");
-			struct send_poll_request_now *wake_up =
-				new_send_poll_request_now();
+			struct send_poll_request_now *wake_up = new_send_poll_request_now();
 			EVENT_SUBMIT(wake_up);
 		}
 	}
@@ -176,9 +170,9 @@ static int start_tcp(void)
 		ret = check_ip();
 		if (ret != 0) {
 			LOG_ERR("Failed to get ip address!");
-		char *e_msg = "Failed to get ip address!";
-		nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
-		return ret;
+			char *e_msg = "Failed to get ip address!";
+			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
+			return ret;
 		}
 	}
 
@@ -188,12 +182,10 @@ static int start_tcp(void)
 		addr4.sin_port = htons(server_port);
 		inet_pton(AF_INET, server_ip, &addr4.sin_addr);
 
-		ret = socket_connect(&conf.ipv4, (struct sockaddr *)&addr4,
-				     sizeof(addr4));
+		ret = socket_connect(&conf.ipv4, (struct sockaddr *)&addr4, sizeof(addr4));
 		if (ret < 0) {
 			char *e_msg = "Socket connect error!";
-			nf_app_error(ERR_MESSAGING, -ECONNREFUSED, e_msg, strlen
-				(e_msg));
+			nf_app_error(ERR_MESSAGING, -ECONNREFUSED, e_msg, strlen(e_msg));
 			return ret;
 		}
 	}
@@ -209,8 +201,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		k_sem_give(&messaging_ack);
 		LOG_WRN("ACK received!");
 		return false;
-	}
-	else if (is_messaging_stop_connection_event(eh)) {
+	} else if (is_messaging_stop_connection_event(eh)) {
 		k_free(CharMsgOut);
 		CharMsgOut = NULL;
 		modem_is_ready = false;
@@ -220,16 +211,14 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		ack->message_sent = false;
 		EVENT_SUBMIT(ack);
 		return false;
-	}
-	else if (is_messaging_host_address_event(eh)) {
+	} else if (is_messaging_host_address_event(eh)) {
 		uint8_t port_length = 0;
 		int ret = stg_config_str_read(STG_STR_HOST_PORT, server_address_tmp, &port_length);
-		if (ret != 0){
+		if (ret != 0) {
 			LOG_ERR("Failed to read host address from ext flash");
 		}
 
-		struct messaging_host_address_event *event =
-			cast_messaging_host_address_event(eh);
+		struct messaging_host_address_event *event = cast_messaging_host_address_event(eh);
 		memcpy(&server_address[0], event->address, sizeof(event->address) - 1);
 		char *ptr_port;
 		ptr_port = strchr(server_address, ':') + 1;
@@ -243,32 +232,28 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		uint8_t ip_len;
 		ip_len = ptr_port - 1 - &server_address[0];
 		memcpy(&server_ip[0], &server_address[0], ip_len);
-		ret = memcmp(server_address, server_address_tmp, 
-				STG_CONFIG_HOST_PORT_BUF_LEN-1);
-		if (ret != 0){
+		ret = memcmp(server_address, server_address_tmp, STG_CONFIG_HOST_PORT_BUF_LEN - 1);
+		if (ret != 0) {
 			LOG_INF("New host address received!");
-			ret = stg_config_str_write(STG_STR_HOST_PORT, server_address, 
-					STG_CONFIG_HOST_PORT_BUF_LEN-1);
-			if (ret != 0){
+			ret = stg_config_str_write(STG_STR_HOST_PORT, server_address,
+						   STG_CONFIG_HOST_PORT_BUF_LEN - 1);
+			if (ret != 0) {
 				LOG_ERR("Failed to write new host address to ext flash!");
 			}
 		}
 		return false;
-	}
-	else if (is_messaging_proto_out_event(eh)) {
+	} else if (is_messaging_proto_out_event(eh)) {
 		sending_in_progress = true;
 		k_sem_reset(&close_main_socket_sem);
 		socket_idle_count = 0;
-		struct messaging_proto_out_event *event =
-			cast_messaging_proto_out_event(eh);
+		struct messaging_proto_out_event *event = cast_messaging_proto_out_event(eh);
 		uint8_t *pCharMsgOut = event->buf;
 		size_t MsgOutLen = event->len;
 
 		if (CharMsgOut == NULL) {
 			/* make a local copy of the message to send.*/
 			CharMsgOut = (char *)k_malloc(MsgOutLen);
-			if (CharMsgOut ==
-			    memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
+			if (CharMsgOut == memcpy(CharMsgOut, pCharMsgOut, MsgOutLen)) {
 				send_tcp_q(CharMsgOut, MsgOutLen);
 				return false;
 			}
@@ -278,12 +263,10 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		EVENT_SUBMIT(ack);
 		LOG_WRN("Dropping message!");
 		return false;
-	}
-	else if (is_check_connection(eh)) {
+	} else if (is_check_connection(eh)) {
 		k_sem_give(&connection_state_sem);
 		return false;
-	}
-	else if (is_free_message_mem_event(eh)) {
+	} else if (is_free_message_mem_event(eh)) {
 		k_free(CharMsgOut);
 		CharMsgOut = NULL;
 		sending_in_progress = false;
@@ -292,20 +275,18 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		ack->message_sent = true;
 		EVENT_SUBMIT(ack);
 		return false;
-	}
-	else if (is_dfu_status_event(eh)) {
-		struct dfu_status_event *fw_upgrade_event =
-			cast_dfu_status_event(eh);
+	} else if (is_dfu_status_event(eh)) {
+		struct dfu_status_event *fw_upgrade_event = cast_dfu_status_event(eh);
 		if (fw_upgrade_event->dfu_status == DFU_STATUS_IN_PROGRESS) {
-			if (fota_in_progress) k_sem_give(&fota_progress_update);
+			if (fota_in_progress)
+				k_sem_give(&fota_progress_update);
 			fota_in_progress = true;
 			stop_rssi();
 		} else {
 			fota_in_progress = false;
 		}
 		return false;
-	}
-	else if (is_pwr_status_event(eh)) {
+	} else if (is_pwr_status_event(eh)) {
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
 		if (ev->pwr_state < PWR_NORMAL && power_level_ok) {
 			LOG_WRN("Will power off the modem!");
@@ -379,8 +360,7 @@ static void publish_gsm_info(void)
 	struct gsm_info this_session_info;
 	if (get_gsm_info(&this_session_info) == 0) {
 		struct gsm_info_event *session_info = new_gsm_info_event();
-		memcpy(&session_info->gsm_info, &this_session_info,
-		       sizeof(struct gsm_info));
+		memcpy(&session_info->gsm_info, &this_session_info, sizeof(struct gsm_info));
 		EVENT_SUBMIT(session_info);
 	}
 }
@@ -389,8 +369,7 @@ static void cellular_controller_keep_alive(void *dev)
 {
 	int ret;
 	while (true) {
-		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0
-		    && !pending) {
+		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0 && !pending) {
 			pending = true;
 			if (!power_level_ok) {
 				connected = false;
@@ -408,7 +387,7 @@ static void cellular_controller_keep_alive(void *dev)
 				}
 				goto update_connection_state;
 			}
-		socket_idle_count = 0;
+			socket_idle_count = 0;
 			if (!cellular_controller_is_ready()) {
 				/* reset flags to avoid hanging the
 				 * communication with the
@@ -430,12 +409,9 @@ static void cellular_controller_keep_alive(void *dev)
 					// takes place in start_tcp() in this
 					// case.
 					if (fota_in_progress) {
-						k_sem_reset
-							(&fota_progress_update);
-						if (k_sem_take
-							(&fota_progress_update,
-							   K_SECONDS(10)) !=
-						    0) {
+						k_sem_reset(&fota_progress_update);
+						if (k_sem_take(&fota_progress_update,
+							       K_SECONDS(10)) != 0) {
 							LOG_WRN("FOTA prgress"
 								" missed!");
 						}
@@ -465,27 +441,24 @@ static void cellular_controller_keep_alive(void *dev)
 				sending_in_progress = false;
 				fota_in_progress = false;
 			}
-	update_connection_state:
+		update_connection_state:
 			announce_connection_state(connected);
 			pending = false;
 		}
 	}
 }
 
-void announce_connection_state(bool state) {
+void announce_connection_state(bool state)
+{
 	k_sem_reset(&connection_state_sem);
-	struct connection_state_event *ev
-		= new_connection_state_event();
+	struct connection_state_event *ev = new_connection_state_event();
 	ev->state = state;
 	EVENT_SUBMIT(ev);
 	if (state == true) {
 		k_sem_reset(&close_main_socket_sem);
 		socket_idle_count = 0;
-		struct modem_state
-			*modem_active =
-			new_modem_state();
-		modem_active->mode
-			= POWER_ON;
+		struct modem_state *modem_active = new_modem_state();
+		modem_active->mode = POWER_ON;
 		EVENT_SUBMIT(modem_active);
 	}
 	publish_gsm_info();
@@ -511,10 +484,9 @@ int8_t cellular_controller_init(void)
 	k_sem_init(&connection_state_sem, 0, 1);
 	k_thread_create(&keep_alive_thread, keep_alive_stack,
 			K_KERNEL_STACK_SIZEOF(keep_alive_stack),
-			(k_thread_entry_t)cellular_controller_keep_alive,
-			(void *)gsm_dev, NULL, NULL,
-			K_PRIO_COOP(CONFIG_CELLULAR_KEEP_ALIVE_THREAD_PRIORITY),
-			0, K_NO_WAIT);
+			(k_thread_entry_t)cellular_controller_keep_alive, (void *)gsm_dev, NULL,
+			NULL, K_PRIO_COOP(CONFIG_CELLULAR_KEEP_ALIVE_THREAD_PRIORITY), 0,
+			K_NO_WAIT);
 
 	return 0;
 }
@@ -528,4 +500,3 @@ EVENT_SUBSCRIBE(MODULE, check_connection);
 EVENT_SUBSCRIBE(MODULE, free_message_mem_event);
 EVENT_SUBSCRIBE(MODULE, dfu_status_event);
 EVENT_SUBSCRIBE(MODULE, pwr_status_event);
-

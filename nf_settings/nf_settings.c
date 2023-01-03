@@ -32,8 +32,8 @@ int eep_write_host_port(const char *host_port)
 		return -EOVERFLOW;
 	}
 	/* Note, write the string including null-terminator */
-	return eeprom_write(m_p_device, offsetof(struct eemem, eep_host_port),
-			    host_port, strlen(host_port) + 1);
+	return eeprom_write(m_p_device, offsetof(struct eemem, eep_host_port), host_port,
+			    strlen(host_port) + 1);
 }
 
 int eep_read_host_port(char *host_port, size_t bufsize)
@@ -41,8 +41,8 @@ int eep_read_host_port(char *host_port, size_t bufsize)
 	if (bufsize < EEP_HOST_PORT_BUF_SIZE) {
 		return -EOVERFLOW;
 	}
-	int ret = eeprom_read(m_p_device, offsetof(struct eemem, eep_host_port),
-			      host_port, EEP_HOST_PORT_BUF_SIZE);
+	int ret = eeprom_read(m_p_device, offsetof(struct eemem, eep_host_port), host_port,
+			      EEP_HOST_PORT_BUF_SIZE);
 	if (ret == 0) {
 		host_port[EEP_HOST_PORT_BUF_SIZE - 1] = '\0';
 	}
@@ -63,9 +63,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		 * set to defualt WARN_MAX value. 
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
-		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
-				 WARN_MAX_DURATION :
-				 *value;
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? WARN_MAX_DURATION : *value;
 		LOG_INF("Read EEP_WARN_MAX_DURATION %i", *value);
 		break;
 	}
@@ -76,9 +74,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		 * set to defualt WARN_MIN value. 
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
-		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
-				 WARN_MIN_DURATION :
-				 *value;
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? WARN_MIN_DURATION : *value;
 		LOG_INF("Read EEP_WARN_MIN_DURATION %i", *value);
 		break;
 	}
@@ -89,9 +85,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		 * set to default CNT_DEF_ESCAPED value. 
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
-		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
-				 PAIN_CNT_DEF_ESCAPED :
-				 *value;
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? PAIN_CNT_DEF_ESCAPED : *value;
 		LOG_INF("Read EEP_PAIN_CNT_DEF_ESCAPED %i", *value);
 		break;
 	}
@@ -102,9 +96,8 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		 * set to defualt FenceStatus_FenceStatus_UNKNOWN. 
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
-		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
-				 FenceStatus_FenceStatus_UNKNOWN :
-				 *value;
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? FenceStatus_FenceStatus_UNKNOWN :
+							      *value;
 		LOG_INF("Read EEP_FENCE_STATUS %i", *value);
 		break;
 	}
@@ -115,9 +108,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		 * set to defualt Mode_Mode_UNKNOWN. 
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
-		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
-				 Mode_Mode_UNKNOWN :
-				 *value;
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? Mode_Mode_UNKNOWN : *value;
 		LOG_INF("Read EEP_COLLAR_MODE %i", *value);
 		break;
 	}
@@ -128,9 +119,8 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		 * set to defualt CollarStatus_CollarStatus_UNKNOWN. 
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
-		*value = *value == EEPROM_DEFAULT_VALUE_8_T ?
-				 CollarStatus_CollarStatus_UNKNOWN :
-				 *value;
+		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? CollarStatus_CollarStatus_UNKNOWN :
+							      *value;
 		LOG_INF("Read EEP_COLLAR_STATUS %i", *value);
 		break;
 	}
@@ -326,9 +316,8 @@ int eep_uint16_read(eep_uint16_enum_t field, uint16_t *value)
 		 * set to defualt 0 total zaps. 
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
-		*value = *value == EEPROM_DEFAULT_VALUE_16_T ?
-				 ACC_SIGMA_NOACTIVITY_LIMIT_DEFAULT :
-				 *value;
+		*value = *value == EEPROM_DEFAULT_VALUE_16_T ? ACC_SIGMA_NOACTIVITY_LIMIT_DEFAULT :
+							       *value;
 		LOG_INF("Set EEP_ACC_SIGMA_NOACTIVITY_LIMIT to %i", *value);
 		break;
 	}
@@ -339,9 +328,8 @@ int eep_uint16_read(eep_uint16_enum_t field, uint16_t *value)
 		 * set to defualt 0 total zaps. 
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
-		*value = *value == EEPROM_DEFAULT_VALUE_16_T ?
-				 OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT :
-				 *value;
+		*value = *value == EEPROM_DEFAULT_VALUE_16_T ? OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT :
+							       *value;
 		LOG_INF("Set EEP_OFF_ANIMAL_TIME_LIMIT_SEC to %i", *value);
 		break;
 	}
@@ -352,9 +340,8 @@ int eep_uint16_read(eep_uint16_enum_t field, uint16_t *value)
 		 * set to defualt 0 total zaps. 
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
-		*value = *value == EEPROM_DEFAULT_VALUE_16_T ?
-				 ACC_SIGMA_SLEEP_LIMIT_DEFAULT :
-				 *value;
+		*value = *value == EEPROM_DEFAULT_VALUE_16_T ? ACC_SIGMA_SLEEP_LIMIT_DEFAULT :
+							       *value;
 		LOG_INF("Set EEP_ACC_SIGMA_SLEEP_LIMIT to %i", *value);
 		break;
 	}
@@ -493,8 +480,7 @@ int eep_write_ble_sec_key(uint8_t *ble_sec_key, size_t bufsize)
 		return -EOVERFLOW;
 	}
 	/* Note, write the string including null-terminator */
-	return eeprom_write(m_p_device, offsetof(struct eemem, ble_sec_key),
-			    ble_sec_key, bufsize);
+	return eeprom_write(m_p_device, offsetof(struct eemem, ble_sec_key), ble_sec_key, bufsize);
 }
 
 int eep_read_ble_sec_key(uint8_t *ble_sec_key, size_t bufsize)
@@ -502,7 +488,7 @@ int eep_read_ble_sec_key(uint8_t *ble_sec_key, size_t bufsize)
 	if (bufsize < EEP_BLE_SEC_KEY_LEN) {
 		return -EOVERFLOW;
 	}
-	int ret = eeprom_read(m_p_device, offsetof(struct eemem, ble_sec_key),
-			      ble_sec_key, EEP_BLE_SEC_KEY_LEN);
+	int ret = eeprom_read(m_p_device, offsetof(struct eemem, ble_sec_key), ble_sec_key,
+			      EEP_BLE_SEC_KEY_LEN);
 	return ret;
 }

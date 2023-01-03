@@ -77,8 +77,7 @@ static bool event_handler(const struct event_header *eh)
 			memcpy(err_c.msg, no_err_msg, strlen(no_err_msg));
 		}
 
-		while (k_msgq_put(&err_container_msgq, &err_c, K_NO_WAIT) !=
-		       0) {
+		while (k_msgq_put(&err_container_msgq, &err_c, K_NO_WAIT) != 0) {
 			/* Message queue is full: purge old data & try again */
 			k_msgq_purge(&err_container_msgq);
 		}
@@ -119,8 +118,7 @@ static int timestamp_print(char *output, uint32_t timestamp, size_t size)
 	ms = (remainder * 1000U) / freq;
 	us = (1000 * (remainder * 1000U - (ms * freq))) / freq;
 
-	length = sprintf(output, "[%02u:%02u:%02u.%03u,%03u]", hours, mins,
-			 seconds, ms, us);
+	length = sprintf(output, "[%02u:%02u:%02u.%03u,%03u]", hours, mins, seconds, ms, us);
 	if (length > size) {
 		return -EMSGSIZE;
 	}
@@ -132,8 +130,7 @@ void error_handler_thread_fn()
 {
 	while (true) {
 		struct error_container err_container;
-		int err = k_msgq_get(&err_container_msgq, &err_container,
-				     K_FOREVER);
+		int err = k_msgq_get(&err_container_msgq, &err_container, K_FOREVER);
 		if (err) {
 			LOG_ERR("Error: Retrieving err_message queue %i", err);
 			continue;
@@ -146,8 +143,7 @@ void error_handler_thread_fn()
 			process_error(err_container.sender, err_container.code);
 			break;
 		case ERR_SEVERITY_WARNING:
-			process_warning(err_container.sender,
-					err_container.code);
+			process_warning(err_container.sender, err_container.code);
 			break;
 		default:
 			LOG_ERR("Unknown error severity.");
@@ -163,17 +159,15 @@ void error_handler_thread_fn()
 #ifdef CONFIG_ERROR_BLE_UART_OUTPUT_ENABLE
 
 		char time_buf[50];
-		int len = timestamp_print(time_buf, current_uptime,
-					  sizeof(time_buf));
+		int len = timestamp_print(time_buf, current_uptime, sizeof(time_buf));
 		if (len < 0) {
 			LOG_ERR("Not allocated enough memory for time buffer");
 			continue;
 		}
 
 		char buf[250];
-		len = sprintf(buf, "%s %s, sender: %d, err: (%d)\r\n", time_buf,
-			      err_container.msg, err_container.sender,
-			      err_container.code);
+		len = sprintf(buf, "%s %s, sender: %d, err: (%d)\r\n", time_buf, err_container.msg,
+			      err_container.sender, err_container.code);
 		if (len > sizeof(buf)) {
 			LOG_ERR("Not allocated enough memory for error buffer");
 			continue;
@@ -194,22 +188,18 @@ void error_handler_thread_fn()
 			unix_time = 0;
 		}
 
-		system_diagnostic_t sys_diag = { .error_code =
-							 err_container.code,
+		system_diagnostic_t sys_diag = { .error_code = err_container.code,
 						 .sender = err_container.sender,
 						 .uptime = current_uptime,
 						 .unix_time = unix_time };
 
 		size_t sys_diag_len = sizeof(system_diagnostic_t);
-		err = stg_write_system_diagnostic_log((uint8_t *)&sys_diag,
-						      sys_diag_len);
+		err = stg_write_system_diagnostic_log((uint8_t *)&sys_diag, sys_diag_len);
 		if (err) {
-			LOG_ERR("Cannot write system diagnostic to external flash %i",
-				err);
+			LOG_ERR("Cannot write system diagnostic to external flash %i", err);
 		}
 	}
 }
 
-K_THREAD_DEFINE(error_thread, CONFIG_ERROR_THREAD_STACK_SIZE,
-		error_handler_thread_fn, NULL, NULL, NULL,
-		CONFIG_ERROR_THREAD_PRIORITY, 0, 0);
+K_THREAD_DEFINE(error_thread, CONFIG_ERROR_THREAD_STACK_SIZE, error_handler_thread_fn, NULL, NULL,
+		NULL, CONFIG_ERROR_THREAD_PRIORITY, 0, 0);

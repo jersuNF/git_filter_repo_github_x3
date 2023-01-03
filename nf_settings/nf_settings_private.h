@@ -71,13 +71,13 @@ __packed struct eemem {
 
 	/** Store the ble security key */
 	uint8_t ble_sec_key[EEP_BLE_SEC_KEY_LEN];
-	
+
 	/** EMS Provider. */
 	uint8_t eep_ems_provider;
 
 	/* Generation of product */
 	uint8_t eep_product_record_rev;
-	
+
 	/* Model of product */
 	uint8_t eep_bom_mec_rev;
 

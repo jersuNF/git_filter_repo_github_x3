@@ -82,8 +82,7 @@ static size_t sendall(int sock, const void *buf, size_t len)
 	return to_send;
 }
 
-int8_t socket_connect(struct data *data, struct sockaddr *addr,
-		      socklen_t addrlen)
+int8_t socket_connect(struct data *data, struct sockaddr *addr, socklen_t addrlen)
 {
 	int ret, socket_id;
 	data->tcp.sock = socket(addr->sa_family, SOCK_STREAM, IPPROTO_TCP);
@@ -101,28 +100,24 @@ int8_t socket_connect(struct data *data, struct sockaddr *addr,
 		socklen_t proxy_addrlen;
 
 		if (addr->sa_family == AF_INET) {
-			struct sockaddr_in *proxy4 =
-				(struct sockaddr_in *)&proxy_addr;
+			struct sockaddr_in *proxy4 = (struct sockaddr_in *)&proxy_addr;
 
 			proxy4->sin_family = AF_INET;
 			proxy4->sin_port = htons(SOCKS5_PROXY_PORT);
-			inet_pton(AF_INET, SOCKS5_PROXY_V4_ADDR,
-				  &proxy4->sin_addr);
+			inet_pton(AF_INET, SOCKS5_PROXY_V4_ADDR, &proxy4->sin_addr);
 			proxy_addrlen = sizeof(struct sockaddr_in);
 		} else {
 			return -EINVAL;
 		}
 
-		ret = setsockopt(data->tcp.sock, SOL_SOCKET, SO_SOCKS5,
-				 &proxy_addr, proxy_addrlen);
+		ret = setsockopt(data->tcp.sock, SOL_SOCKET, SO_SOCKS5, &proxy_addr, proxy_addrlen);
 		if (ret < 0) {
 			return ret;
 		}
 	}
 	ret = connect(socket_id, addr, addrlen);
 	if (ret < 0) {
-		LOG_ERR("Cannot connect to TCP remote (%s): %d", data->proto,
-			errno);
+		LOG_ERR("Cannot connect to TCP remote (%s): %d", data->proto, errno);
 		ret = -errno;
 		return ret;
 	}
@@ -136,18 +131,15 @@ int socket_listen(struct data *data)
 	data->tcp.sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
 	if (data->tcp.sock < 0) {
-		LOG_ERR("Failed to create TCP listening socket (%s): %d",
-			data->proto, errno);
+		LOG_ERR("Failed to create TCP listening socket (%s): %d", data->proto, errno);
 		return -errno;
 	} else {
-		LOG_INF("Created TCP listening socket (%s): %d\n", data->proto,
-			data->tcp.sock);
+		LOG_INF("Created TCP listening socket (%s): %d\n", data->proto, data->tcp.sock);
 	}
 
 	ret = listen(data->tcp.sock, 5);
 	if (ret < 0) {
-		LOG_ERR("Cannot start TCP listening socket (%s): %d",
-			data->proto, errno);
+		LOG_ERR("Cannot start TCP listening socket (%s): %d", data->proto, errno);
 		ret = -errno;
 	} else {
 		ret = 0;
@@ -257,8 +249,7 @@ int send_tcp(char *msg, size_t len)
 	int ret;
 	ret = (int)sendall(conf.ipv4.tcp.sock, msg, len);
 	if (ret < 0) {
-		LOG_ERR("%s TCP: Failed to send data, errno %d",
-			conf.ipv4.proto, ret);
+		LOG_ERR("%s TCP: Failed to send data, errno %d", conf.ipv4.proto, ret);
 	} else {
 		LOG_DBG("%s TCP: Sent %d bytes", log_strdup(conf.ipv4.proto), ret);
 	}

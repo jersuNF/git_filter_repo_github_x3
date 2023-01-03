@@ -85,14 +85,12 @@ static void buzzer_update_fn()
 {
 	/* Update frequency only if we're in WARN/MAX state off buzzer. */
 	if (queueZap || atomic_get(&can_update_buzzer)) {
-		k_work_schedule(&update_buzzer_work,
-				K_MSEC(WARN_BUZZER_UPDATE_RATE));
+		k_work_schedule(&update_buzzer_work, K_MSEC(WARN_BUZZER_UPDATE_RATE));
 
 		uint16_t freq = atomic_get(&last_warn_freq);
 
 		if (zap_eval_doing) {
-			uint32_t delta_zap_eval =
-				k_uptime_get_32() - zap_timestamp;
+			uint32_t delta_zap_eval = k_uptime_get_32() - zap_timestamp;
 
 			if (delta_zap_eval >= ZAP_EVALUATION_TIME_MS) {
 				zap_eval_doing = false;
@@ -100,13 +98,11 @@ static void buzzer_update_fn()
 		}
 
 		if (!zap_eval_doing) {
-			if (queueZap ||
-			    k_sem_take(&freq_update_sem, K_NO_WAIT) == 0) {
+			if (queueZap || k_sem_take(&freq_update_sem, K_NO_WAIT) == 0) {
 				/** Update buzzer frequency event. */
 				uint32_t set_frequency = freq;
 #ifdef CONFIG_AMC_USE_LEGACY_STEP
-				set_frequency = convert_to_legacy_frequency(
-					set_frequency);
+				set_frequency = convert_to_legacy_frequency(set_frequency);
 #endif
 				struct sound_set_warn_freq_event *freq_ev =
 					new_sound_set_warn_freq_event();
@@ -120,15 +116,13 @@ static void buzzer_update_fn()
 			 	 *  "escaped."
 			 	 */
 				if (queueZap) {
-					if (k_sem_take(&ep_trigger_ready,
-						   K_MSEC(EP_TIMEOUT_MS)) ==
+					if (k_sem_take(&ep_trigger_ready, K_MSEC(EP_TIMEOUT_MS)) ==
 					    0) {
 						queueZap = false;
 						struct ep_status_event *ep_ev =
 							new_ep_status_event();
 						ep_ev->ep_status = EP_RELEASE;
-						ep_ev->is_first_pulse =
-							get_zap_pain_cnt() == 0;
+						ep_ev->is_first_pulse = get_zap_pain_cnt() == 0;
 						EVENT_SUBMIT(ep_ev);
 						zap_eval_doing = true;
 						zap_timestamp = k_uptime_get_32();
@@ -137,8 +131,7 @@ static void buzzer_update_fn()
 
 						struct amc_zapped_now_event *ev =
 							new_amc_zapped_now_event();
-						ev->fence_dist = atomic_get(
-							&last_mean_dist);
+						ev->fence_dist = atomic_get(&last_mean_dist);
 						EVENT_SUBMIT(ev);
 					} else {
 						LOG_ERR("EP trigger "
@@ -146,15 +139,11 @@ static void buzzer_update_fn()
 					}
 				}
 				queueZap = false;
-				if (freq >= WARN_FREQ_MAX &&
-				    atomic_get(&sound_max_atomic)) {
-					correction_pause(
-						Reason_WARNPAUSEREASON_ZAP,
-						atomic_get(
-							&last_mean_dist));
+				if (freq >= WARN_FREQ_MAX && atomic_get(&sound_max_atomic)) {
+					correction_pause(Reason_WARNPAUSEREASON_ZAP,
+							 atomic_get(&last_mean_dist));
 					queueZap = true;
-					k_work_reschedule(&update_buzzer_work,
-							K_NO_WAIT);
+					k_work_reschedule(&update_buzzer_work, K_NO_WAIT);
 				}
 			}
 		}
@@ -196,16 +185,14 @@ static void start_buzzer_updates()
 
 static void correction_start(int16_t mean_dist)
 {
-	uint32_t delta_correction_pause =
-		(k_uptime_get_32() - correction_pause_timestamp) / 1000;
+	uint32_t delta_correction_pause = (k_uptime_get_32() - correction_pause_timestamp) / 1000;
 
 	if (delta_correction_pause > CORRECTION_PAUSE_MIN_TIME) {
 		if (!correction_started) {
 			atomic_set(&last_warn_freq, WARN_FREQ_INIT);
 			last_warn_dist = mean_dist;
 
-			struct warn_correction_start_event *ev =
-				new_warn_correction_start_event();
+			struct warn_correction_start_event *ev = new_warn_correction_start_event();
 
 			ev->fence_dist = atomic_get(&last_mean_dist);
 			EVENT_SUBMIT(ev);
@@ -228,8 +215,7 @@ static void correction_start(int16_t mean_dist)
 			 */
 			time_since_gnss_correction = k_uptime_get();
 
-			struct animal_warning_event *ev =
-				new_animal_warning_event();
+			struct animal_warning_event *ev = new_animal_warning_event();
 			ev->fence_dist = atomic_get(&last_mean_dist);
 			EVENT_SUBMIT(ev);
 
@@ -247,8 +233,7 @@ static void correction_end(void)
 		last_warn_dist = LIM_WARN_MIN_DM;
 		reset_zap_pain_cnt();
 
-		struct warn_correction_end_event *ev =
-			new_warn_correction_end_event();
+		struct warn_correction_end_event *ev = new_warn_correction_end_event();
 
 		ev->fence_dist = atomic_get(&last_mean_dist);
 		EVENT_SUBMIT(ev);
@@ -298,12 +283,10 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 	 * and therefore did not reset the zap counter.
 	 */
 	if (correction_warn_on) {
-		struct warn_correction_pause_event *ev =
-			new_warn_correction_pause_event();
+		struct warn_correction_pause_event *ev = new_warn_correction_pause_event();
 
 		ev->fence_dist = atomic_get(&last_mean_dist);
-		ev->warn_duration =
-			correction_pause_timestamp - k_uptime_get_32();
+		ev->warn_duration = correction_pause_timestamp - k_uptime_get_32();
 		ev->reason = reason;
 
 		EVENT_SUBMIT(ev);
@@ -390,12 +373,10 @@ static void correction(Mode amc_mode, int16_t mean_dist, int16_t dist_change)
 			 * by 9 increments using old dist_change, while
 			 * the last 1 uses new dist_change.
 			 */
-			uint16_t num_increments =
-				((current_uptime - time_since_gnss_correction) /
-				 NEW_WARN_TONE_SPEED_MS) -
-				1;
-			freq_gnss_multiple =
-				num_increments * WARN_TONE_SPEED_HZ;
+			uint16_t num_increments = ((current_uptime - time_since_gnss_correction) /
+						   NEW_WARN_TONE_SPEED_MS) -
+						  1;
+			freq_gnss_multiple = num_increments * WARN_TONE_SPEED_HZ;
 
 			time_since_gnss_correction = current_uptime;
 
@@ -439,9 +420,8 @@ uint8_t get_correction_status(void)
 	return correction_started + correction_warn_on;
 }
 
-void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
-			FenceStatus fs, amc_zone_t zone, int16_t mean_dist,
-			int16_t dist_change)
+void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss, FenceStatus fs,
+			amc_zone_t zone, int16_t mean_dist, int16_t dist_change)
 {
 	atomic_set(&last_mean_dist, mean_dist);
 
@@ -454,13 +434,11 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 				if (fs == FenceStatus_FenceStatus_Normal ||
 				    fs == FenceStatus_MaybeOutOfFence) {
 					LOG_INF("  Fs is normal or maybe");
-					if (get_active_delta() > 0 ||
-					    get_correction_status() > 0) {
+					if (get_active_delta() > 0 || get_correction_status() > 0) {
 						LOG_INF("  activedelta or correctionstat");
 						if (gnss_has_warn_fix()) {
 							LOG_INF("  has warn fix");
-							correction_start(
-								mean_dist);
+							correction_start(mean_dist);
 						}
 					}
 				}
@@ -475,25 +453,19 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 
 	/* Checks for pausing correction only if we have started it. */
 	if (correction_started || correction_warn_on) {
-		if ((amc_mode != Mode_Teach && amc_mode != Mode_Fence) ||
-		    zone == NO_ZONE) {
+		if ((amc_mode != Mode_Teach && amc_mode != Mode_Fence) || zone == NO_ZONE) {
 			correction_pause(Reason_WARNSTOPREASON_MODE, mean_dist);
 		} else if (fs == FenceStatus_Escaped) {
-			correction_pause(Reason_WARNSTOPREASON_ESCAPED,
-					 mean_dist);
+			correction_pause(Reason_WARNSTOPREASON_ESCAPED, mean_dist);
 		} else if (delta_gnss_fix > GNSS_1SEC) {
 			/* Warning pause as result of missing GNSS. */
-			correction_pause(Reason_WARNPAUSEREASON_MISSGPSDATA,
-					 mean_dist);
+			correction_pause(Reason_WARNPAUSEREASON_MISSGPSDATA, mean_dist);
 		} else if (!gnss_has_accepted_fix()) {
 			/* Warning pause as result of bad position accuracy. */
-			correction_pause(Reason_WARNPAUSEREASON_BADFIX,
-					 mean_dist);
+			correction_pause(Reason_WARNPAUSEREASON_BADFIX, mean_dist);
 		} else if (amc_mode == Mode_Fence) {
-			if (mean_dist - last_warn_dist <=
-			    CORRECTION_PAUSE_DIST) {
-				correction_pause(Reason_WARNPAUSEREASON_NODIST,
-						 mean_dist);
+			if (mean_dist - last_warn_dist <= CORRECTION_PAUSE_DIST) {
+				correction_pause(Reason_WARNPAUSEREASON_NODIST, mean_dist);
 			}
 		} else if (amc_mode == Mode_Teach) {
 			/* [LEGACY] see: https://youtrack.axbit.com/youtrack/issue/NOF-307
@@ -501,16 +473,12 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 		 * 			correction_pause(Reason_WARNPAUSEREASON_ACC);			// Warning pause as result of that the accelerometer values shows sound reaction
 		 * 		}
 		 */
-			if (mean_dist - last_warn_dist <=
-			    TEACHMODE_CORRECTION_PAUSE_DIST) {
-				correction_pause(Reason_WARNPAUSEREASON_NODIST,
-						 mean_dist);
+			if (mean_dist - last_warn_dist <= TEACHMODE_CORRECTION_PAUSE_DIST) {
+				correction_pause(Reason_WARNPAUSEREASON_NODIST, mean_dist);
 			}
 			if (dist_change <= TEACHMODE_DIST_DECR_SLOPE_OFF_LIM) {
 				/* Then animal has moved back, closer to fence. */
-				correction_pause(
-					Reason_WARNPAUSEREASON_MOVEBACK,
-					mean_dist);
+				correction_pause(Reason_WARNPAUSEREASON_MOVEBACK, mean_dist);
 			}
 		}
 		/* [LEGACY CODE] See http://youtrack.axbit.no/youtrack/issue/NOF-213. */
@@ -518,8 +486,7 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
 			/* Turn off warning only if it is already 
 		 * paused when inside the pasture. 
 		 */
-			correction_pause(Reason_WARNSTOPREASON_INSIDE,
-					 mean_dist);
+			correction_pause(Reason_WARNSTOPREASON_INSIDE, mean_dist);
 		}
 	}
 }

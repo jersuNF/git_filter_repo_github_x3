@@ -140,11 +140,9 @@ static int divider_setup(void)
 			LOG_ERR("Failed to get GPIO %s", gcp->label);
 			return -ENOENT;
 		}
-		err = gpio_pin_configure(ddp->gpio, gcp->pin,
-					 GPIO_OUTPUT_INACTIVE | gcp->flags);
+		err = gpio_pin_configure(ddp->gpio, gcp->pin, GPIO_OUTPUT_INACTIVE | gcp->flags);
 		if (err != 0) {
-			LOG_ERR("Failed to control feed %s.%u: %d", gcp->label,
-				gcp->pin, err);
+			LOG_ERR("Failed to control feed %s.%u: %d", gcp->label, gcp->pin, err);
 			return err;
 		}
 	}
@@ -165,8 +163,7 @@ static int divider_setup(void)
 	};
 
 	if (cfg->output_ohm != 0) {
-		accp->input_positive =
-			SAADC_CH_PSELP_PSELP_AnalogInput0 + iocp->channel;
+		accp->input_positive = SAADC_CH_PSELP_PSELP_AnalogInput0 + iocp->channel;
 	} else {
 		accp->input_positive = SAADC_CH_PSELP_PSELP_VDD;
 	}
@@ -223,13 +220,11 @@ int battery_sample(void)
 		if (rc == 0) {
 			int32_t val = ddp->raw;
 
-			adc_raw_to_millivolts(adc_ref_internal(ddp->adc),
-					      ddp->adc_cfg.gain, sp->resolution,
-					      &val);
+			adc_raw_to_millivolts(adc_ref_internal(ddp->adc), ddp->adc_cfg.gain,
+					      sp->resolution, &val);
 
 			if (dcp->output_ohm != 0) {
-				rc = val * (uint64_t)dcp->full_ohm /
-				     dcp->output_ohm;
+				rc = val * (uint64_t)dcp->full_ohm / dcp->output_ohm;
 
 			} else {
 				rc = val;
@@ -248,9 +243,8 @@ unsigned int battery_level_soc(unsigned int batt_mV)
 	} else if (batt_mV > CONFIG_BATTERY_FULL_MV) {
 		return 100;
 	}
-	batt_level_precentage = 100 * (batt_mV - CONFIG_BATTERY_EMPTY_MV)/
-				(CONFIG_BATTERY_FULL_MV -
-					  CONFIG_BATTERY_EMPTY_MV);
+	batt_level_precentage = 100 * (batt_mV - CONFIG_BATTERY_EMPTY_MV) /
+				(CONFIG_BATTERY_FULL_MV - CONFIG_BATTERY_EMPTY_MV);
 	return batt_level_precentage;
 }
 
@@ -284,8 +278,7 @@ int battery_sample_averaged(void)
 		atomic_set(&battery_max_mv, batt_mV);
 	}
 
-	uint16_t approx_batt_value =
-		approx_moving_average(&v_batt_mov_avg, batt_mV);
+	uint16_t approx_batt_value = approx_moving_average(&v_batt_mov_avg, batt_mV);
 	return approx_batt_value;
 }
 

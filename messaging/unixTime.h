@@ -24,7 +24,6 @@ typedef struct _nf_time_t {
 	uint8_t second;
 } nf_time_t;
 
-
 uint32_t time2unix(nf_time_t *time);
 uint8_t unix2time(nf_time_t *time, uint32_t unixTimestamp);
 // Calculates the weekday from 0 to 6, where 0 is Monday, and 6 is Sunday. Assuming 1.1.1975 was a Thursday

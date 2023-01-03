@@ -12,7 +12,6 @@
 
 #define GNSS_1SEC 1000
 
-
 K_SEM_DEFINE(new_data_sem, 0, 1);
 
 #define MODULE gnss_controller
@@ -136,10 +135,10 @@ int gnss_controller_init(void)
 #if defined(CONFIG_TEST)
 	pub_gnss_thread_id =
 #endif
-	k_thread_create(&pub_gnss_thread, pub_gnss_stack,
-			K_KERNEL_STACK_SIZEOF(pub_gnss_stack),
-			(k_thread_entry_t)publish_gnss_data, (void *)NULL, NULL, NULL,
-			PRIORITY, 0, K_NO_WAIT);
+		k_thread_create(&pub_gnss_thread, pub_gnss_stack,
+				K_KERNEL_STACK_SIZEOF(pub_gnss_stack),
+				(k_thread_entry_t)publish_gnss_data, (void *)NULL, NULL, NULL,
+				PRIORITY, 0, K_NO_WAIT);
 
 	return 0;
 }
@@ -149,7 +148,8 @@ static _Noreturn void publish_gnss_data(void *ctx)
 	int ret;
 	int timeout_ms;
 	while (true) {
-		if (current_rate_ms == UINT16_MAX || current_rate_ms < CONFIG_GNSS_MINIMUM_ALLOWED_GNSS_RATE) {
+		if (current_rate_ms == UINT16_MAX ||
+		    current_rate_ms < CONFIG_GNSS_MINIMUM_ALLOWED_GNSS_RATE) {
 			timeout_ms = CONFIG_GNSS_DEFAULT_TIMEOUT_RATE_MS;
 		} else {
 			/* Allow some slack on GNSS solution */
@@ -222,15 +222,14 @@ static bool gnss_controller_event_handler(const struct event_header *eh)
 {
 	if (is_gnss_set_mode_event(eh)) {
 		struct gnss_set_mode_event *ev = cast_gnss_set_mode_event(eh);
-        	LOG_DBG("MODE = %d old = %d ",ev->mode,current_mode);
+		LOG_DBG("MODE = %d old = %d ", ev->mode, current_mode);
 		if (ev->mode != current_mode) {
-            		LOG_DBG("setting mode");
-			int ret = gnss_set_mode(ev->mode,true);
+			LOG_DBG("setting mode");
+			int ret = gnss_set_mode(ev->mode, true);
 			if (ret != 0) {
-                		LOG_ERR("Failed to set mode %d",ret);
+				LOG_ERR("Failed to set mode %d", ret);
 				char *msg = "Failed to set GNSS receiver mode";
-				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg,
-					     sizeof(*msg));
+				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
 				return false;
 			}
 			current_mode = ev->mode;
@@ -242,7 +241,6 @@ static bool gnss_controller_event_handler(const struct event_header *eh)
 
 EVENT_LISTENER(MODULE, gnss_controller_event_handler);
 EVENT_SUBSCRIBE(MODULE, gnss_set_mode_event);
-
 
 /**
  * @brief Handles GNSS timeouts when no messages has been received. 

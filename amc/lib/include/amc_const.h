@@ -36,14 +36,12 @@
 #define WARN_TONE_SPEED_HZ 11
 
 /* Time between every tone update when tone increase/decrease [ms]. */
-#define WARN_TONE_SPEED_MS                                                     \
-	((WARN_FREQ_MAX - WARN_FREQ_INIT) / WARN_TONE_SPEED_HZ /               \
-	 (WARN_MIN_DURATION_MS / 1000))
+#define WARN_TONE_SPEED_MS                                                                         \
+	((WARN_FREQ_MAX - WARN_FREQ_INIT) / WARN_TONE_SPEED_HZ / (WARN_MIN_DURATION_MS / 1000))
 
 /* Time between every tone update when tone increase/decrease [ms]. */
-#define NEW_WARN_TONE_SPEED_MS                                                 \
-	(WARN_MIN_DURATION_MS /                                                \
-	 ((WARN_FREQ_MAX - WARN_FREQ_INIT) / WARN_TONE_SPEED_HZ))
+#define NEW_WARN_TONE_SPEED_MS                                                                     \
+	(WARN_MIN_DURATION_MS / ((WARN_FREQ_MAX - WARN_FREQ_INIT) / WARN_TONE_SPEED_HZ))
 
 /* Defined update rate (msec) on GPS at max "intensity" (5Hz). */
 #define GPS_RATE_MAX 250
@@ -129,9 +127,9 @@
 // Activity that defines reaction on both sound and shock
 // Values is only valid when accelerometer is running at 100Hz
 // range is 0-65
-#define ACC_STOP_AMPLITUDE                                                     \
+#define ACC_STOP_AMPLITUDE                                                                         \
 	50 // The accelerometer amplitude value has to be bigger than this for the sound warning to stop
-#define ACC_SHOCK_AMPLITUDE                                                    \
+#define ACC_SHOCK_AMPLITUDE                                                                        \
 	60 // The accelerometer amplitude value has to be more than this for the system to know that the animal felt the shock
 
 // Be certain that the animal don't reach fence limit within LogInterval time!

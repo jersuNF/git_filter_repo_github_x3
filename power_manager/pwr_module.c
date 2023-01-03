@@ -72,8 +72,7 @@ static void battery_poll_work_fn()
 	int batt_voltage = log_and_fetch_battery_voltage();
 	if (batt_voltage < 0) {
 		char *e_msg = "Error in fetching battery voltage";
-		nf_app_error(ERR_PWR_MODULE, batt_voltage, e_msg,
-			     strlen(e_msg));
+		nf_app_error(ERR_PWR_MODULE, batt_voltage, e_msg, strlen(e_msg));
 		return;
 	}
 	/* Keep old state as reference for later */
@@ -81,8 +80,7 @@ static void battery_poll_work_fn()
 
 	switch (old_state) {
 	case PWR_NORMAL:
-		if (batt_voltage <
-		    CONFIG_BATTERY_LOW - CONFIG_BATTERY_THRESHOLD) {
+		if (batt_voltage < CONFIG_BATTERY_LOW - CONFIG_BATTERY_THRESHOLD) {
 			current_state = PWR_LOW;
 		}
 #if CONFIG_ADC_NRFX_SAADC
@@ -99,17 +97,14 @@ static void battery_poll_work_fn()
 		break;
 
 	case PWR_LOW:
-		if (batt_voltage <
-		    CONFIG_BATTERY_CRITICAL - CONFIG_BATTERY_THRESHOLD) {
+		if (batt_voltage < CONFIG_BATTERY_CRITICAL - CONFIG_BATTERY_THRESHOLD) {
 			current_state = PWR_CRITICAL;
-		} else if (batt_voltage >
-			   CONFIG_BATTERY_LOW + CONFIG_BATTERY_THRESHOLD) {
+		} else if (batt_voltage > CONFIG_BATTERY_LOW + CONFIG_BATTERY_THRESHOLD) {
 			current_state = PWR_NORMAL;
 		}
 		break;
 	case PWR_CRITICAL:
-		if (batt_voltage >
-		    (CONFIG_BATTERY_CRITICAL + CONFIG_BATTERY_THRESHOLD)) {
+		if (batt_voltage > (CONFIG_BATTERY_CRITICAL + CONFIG_BATTERY_THRESHOLD)) {
 			current_state = PWR_LOW;
 		}
 		break;
@@ -126,8 +121,7 @@ static void battery_poll_work_fn()
 	event->battery_mv_max = battery_get_max();
 	EVENT_SUBMIT(event);
 
-	k_work_reschedule(&battery_poll_work,
-			  K_MSEC(CONFIG_BATTERY_POLLER_WORK_MSEC));
+	k_work_reschedule(&battery_poll_work, K_MSEC(CONFIG_BATTERY_POLLER_WORK_MSEC));
 }
 #if CONFIG_ADC_NRFX_SAADC
 /** @brief Periodic solar charging work function */
@@ -135,19 +129,16 @@ static void charging_poll_work_fn()
 {
 	int charging_current_avg = charging_current_sample_averaged();
 	if (charging_current_avg < 0) {
-		LOG_ERR("Failed to fetch charging data %d",
-			charging_current_avg);
+		LOG_ERR("Failed to fetch charging data %d", charging_current_avg);
 		char *msg = "Unable fetch charging data";
-		nf_app_error(ERR_PWR_MODULE, charging_current_avg, msg,
-			     strlen(msg));
+		nf_app_error(ERR_PWR_MODULE, charging_current_avg, msg, strlen(msg));
 		return;
 	}
 	struct pwr_status_event *event = new_pwr_status_event();
 	event->pwr_state = PWR_CHARGING;
 	event->charging_ma = charging_current_avg;
 	EVENT_SUBMIT(event);
-	k_work_reschedule(&charging_poll_work,
-			  K_MSEC(CONFIG_CHARGING_POLLER_WORK_MSEC));
+	k_work_reschedule(&charging_poll_work, K_MSEC(CONFIG_CHARGING_POLLER_WORK_MSEC));
 }
 #endif
 
@@ -236,8 +227,7 @@ int log_and_fetch_battery_voltage(void)
 	event->param.battery = batt_soc;
 	EVENT_SUBMIT(event);
 
-	LOG_DBG("Voltage: %d mV; State Of Charge: %u precent", batt_mV,
-		batt_soc);
+	LOG_DBG("Voltage: %d mV; State Of Charge: %u precent", batt_mV, batt_soc);
 
 	return batt_mV;
 }
@@ -283,8 +273,7 @@ int fetch_battery_percent(void)
 int pwr_module_reboot_reason(uint8_t *aReason)
 {
 	int err = 0;
-	if (m_my_reboot_reason == REBOOT_REASON_CNT)
-	{
+	if (m_my_reboot_reason == REBOOT_REASON_CNT) {
 		err = stg_config_u8_read(STG_U8_RESET_REASON, &m_my_reboot_reason);
 		if (err != 0) {
 			LOG_ERR("Unable to read reboot reason from stg flash");
@@ -317,11 +306,9 @@ static bool event_handler(const struct event_header *eh)
 
 		int err;
 		if ((evt->reason >= 0) && (evt->reason < REBOOT_REASON_CNT)) {
-			err = stg_config_u8_write(STG_U8_RESET_REASON, 
-					(uint8_t)evt->reason);
+			err = stg_config_u8_write(STG_U8_RESET_REASON, (uint8_t)evt->reason);
 		} else {
-			err = stg_config_u8_write(STG_U8_RESET_REASON, 
-					(uint8_t)REBOOT_UNKNOWN);
+			err = stg_config_u8_write(STG_U8_RESET_REASON, (uint8_t)REBOOT_UNKNOWN);
 		}
 		if (err != 0) {
 			LOG_ERR("Failed to write reboot reason to ext flash, err:%d", err);

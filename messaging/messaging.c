@@ -112,11 +112,11 @@ static uint32_t serial_id = 0;
  * set_initial_collar_state_flag and has_initial_collar_states) */
 static uint8_t m_initial_collar_state_flags = 0;
 enum collar_state_flags {
-    COLLAR_MODE_FLAG = 0,
-    COLLAR_STATUS_FLAG,
-    FENCE_STATUS_FLAG,
-    BATTERY_LVL_FLAG,
-    COLLAR_STATE_FLAG_CNT,
+	COLLAR_MODE_FLAG = 0,
+	COLLAR_STATUS_FLAG,
+	FENCE_STATUS_FLAG,
+	BATTERY_LVL_FLAG,
+	COLLAR_STATE_FLAG_CNT,
 };
 static inline void set_initial_collar_state_flag(uint8_t aFlag);
 static inline bool has_initial_collar_states();
@@ -180,9 +180,9 @@ struct fence_def_update {
 	struct k_work_delayable work;
 	int version;
 	int request_frame;
-}m_fence_update_req;
+} m_fence_update_req;
 
-atomic_t poll_period_seconds = ATOMIC_INIT(15*60);
+atomic_t poll_period_seconds = ATOMIC_INIT(15 * 60);
 atomic_t log_period_minutes = ATOMIC_INIT(30);
 
 /* Messaging Rx thread */
@@ -202,13 +202,12 @@ typedef enum {
 	LOG_MSG /* Send stored log messages */,
 	FENCE_REQ /* Send a fence update request */
 	/* Add additional states here (ANO, diagnostic etc)... */
-}messaging_tx_type_t;
+} messaging_tx_type_t;
 
 atomic_t m_halt_data_transfer = ATOMIC_INIT(0);
 atomic_t m_message_tx_type = ATOMIC_INIT(0);
 
 static int set_tx_state_ready(messaging_tx_type_t tx_type);
-
 
 /**
  * @brief Builds SEQ messages (1 and 2) with the latest data and store them to external storage.
@@ -241,8 +240,8 @@ static void build_log_message()
 	seq_msg.m.seq_msg.has_usBatteryVoltage = true;
 	seq_msg.m.seq_msg.usBatteryVoltage = (uint16_t)atomic_get(&cached_batt);
 	seq_msg.m.seq_msg.has_usChargeMah = true;
-	seq_msg.m.seq_msg.usChargeMah = (uint16_t)(cached_chrg * CONFIG_CHARGING_POLLER_WORK_MSEC /
-						   MSECCONDS_PER_HOUR);
+	seq_msg.m.seq_msg.usChargeMah =
+		(uint16_t)(cached_chrg * CONFIG_CHARGING_POLLER_WORK_MSEC / MSECCONDS_PER_HOUR);
 	/* TODO: Consider using a higher time resolution for more accurate integration */
 	cached_chrg = 0;
 	seq_msg.m.seq_msg.has_xGprsRssi = true;
@@ -276,8 +275,8 @@ static void build_log_message()
 	seq_msg.m.seq_msg_2.xBatteryQc.usVbattMin = histogram.qc_battery.usVbattMin;
 	seq_msg.m.seq_msg_2.xBatteryQc.usTemperature = (uint16_t)atomic_get(&cached_temp);
 	seq_msg.m.seq_msg_2.has_xGnssModeCounts = true;
-	memcpy(&seq_msg.m.seq_msg_2.xGnssModeCounts,&histogram.gnss_modes,sizeof(seq_msg.m.seq_msg_2.xGnssModeCounts));
-
+	memcpy(&seq_msg.m.seq_msg_2.xGnssModeCounts, &histogram.gnss_modes,
+	       sizeof(seq_msg.m.seq_msg_2.xGnssModeCounts));
 
 	/* Store Seq 2 message to non-volatile storage */
 	err = encode_and_store_message(&seq_msg);
@@ -306,7 +305,7 @@ int read_and_send_log_data_cb(uint8_t *data, size_t len)
 	LOG_DBG("Send log message fetched from flash");
 
 	/* Fetch the length from the two first bytes */
-	uint16_t new_len = *(uint16_t*) &data[0];
+	uint16_t new_len = *(uint16_t *)&data[0];
 
 	int err = send_binary_message(data, new_len);
 	if (err) {
@@ -658,63 +657,63 @@ static int set_tx_state_ready(messaging_tx_type_t tx_type)
  */
 void messaging_tx_thread_fn(void)
 {
-        static int err = 0;
-        static int64_t m_last_poll_req_timestamp_ms = 0;
-	while(true) {
+	static int err = 0;
+	static int64_t m_last_poll_req_timestamp_ms = 0;
+	while (true) {
 		/* Block Tx thread untill semaphore is given */
 		if (k_sem_take(&sem_release_tx_thread, K_FOREVER) == 0) {
 			err = 0;
 			messaging_tx_type_t tx_type = atomic_get(&m_message_tx_type);
 
-                        /* POLL REQUEST */
+			/* POLL REQUEST */
 			if ((tx_type == POLL_REQ) || (m_last_poll_req_timestamp_ms == 0) ||
 			    ((tx_type == LOG_MSG) &&
-			    ((k_uptime_get() - m_last_poll_req_timestamp_ms) >= 60000))) {
+			     ((k_uptime_get() - m_last_poll_req_timestamp_ms) >= 60000))) {
 				if (k_sem_take(&cache_ready_sem, K_SECONDS(60)) != 0) {
 					LOG_WRN("Cached semaphore not ready, Sending what we have");
 				}
 				k_sem_give(&cache_ready_sem);
 
-                                err = k_sem_take(&cache_lock_sem, K_SECONDS(1));
-                                if (err == 0) {
+				err = k_sem_take(&cache_lock_sem, K_SECONDS(1));
+				if (err == 0) {
 					NofenceMessage poll_msg;
 					build_poll_request(&poll_msg);
 					k_sem_give(&cache_lock_sem);
 
 					err = encode_and_send_message(&poll_msg);
 					if (err == 0) {
-                                                /* Store poll req. timestamp to avoid sending an
+						/* Store poll req. timestamp to avoid sending an
                                                  * excessive amount of poll requests */
-                                                m_last_poll_req_timestamp_ms = k_uptime_get();
+						m_last_poll_req_timestamp_ms = k_uptime_get();
 					}
-                                }
-                                /* Poll request error handler,
+				}
+				/* Poll request error handler,
                                  * Note! Consider notifying sender, leaving error handling to src */
-                                if (err != 0) {
-                                        LOG_WRN("Failed to send poll request, rescheduled");
-                                        if (tx_type == POLL_REQ) {
-                                                int ret = k_work_reschedule_for_queue(&message_q,
-								&modem_poll_work, K_MINUTES(1));
+				if (err != 0) {
+					LOG_WRN("Failed to send poll request, rescheduled");
+					if (tx_type == POLL_REQ) {
+						int ret = k_work_reschedule_for_queue(
+							&message_q, &modem_poll_work, K_MINUTES(1));
 						if (ret < 0) {
 							LOG_ERR("Failed to reschedule work");
 						}
-                                        }
-                                }
+					}
+				}
 			}
 
-                        /* LOG MESSAGES */
+			/* LOG MESSAGES */
 			if ((tx_type == LOG_MSG) && (err == 0) &&
 			    (atomic_get(&m_halt_data_transfer) == false)) {
 				/* Sending, all stored log messages are already proto encoded */
 				err = send_all_stored_messages();
-                                /* Log message error handler,
+				/* Log message error handler,
                                  * Note! Consider notifying sender, leaving error handling to src */
 				if (err != 0) {
 					LOG_WRN("Failed to send log messages");
 				}
 			}
 
-                        /* FENCE DEFINITION REQUEST */
+			/* FENCE DEFINITION REQUEST */
 			if ((tx_type == FENCE_REQ) &&
 			    (atomic_get(&m_halt_data_transfer) == false)) {
 				NofenceMessage fence_req;
@@ -726,7 +725,7 @@ void messaging_tx_thread_fn(void)
 					m_fence_update_req.request_frame;
 
 				err = encode_and_send_message(&fence_req);
-                                /* Fence def. request error handler,
+				/* Fence def. request error handler,
                                  * Note! Consider notifying sender, leaving error handling to src */
 				if (err != 0) {
 					LOG_WRN("Failed to send fence update request");
@@ -842,8 +841,8 @@ static bool event_handler(const struct event_header *eh)
 		if (has_initial_collar_states()) {
 			if (prev_collar_mode != current_state.collar_mode) {
 				/* Notify server by status message that collar mode has changed */
-				int err = k_work_reschedule_for_queue(&message_q,
-						&log_status_message_work, K_NO_WAIT);
+				int err = k_work_reschedule_for_queue(
+					&message_q, &log_status_message_work, K_NO_WAIT);
 				if (err < 0) {
 					LOG_ERR("Failed to schedule log status work (%d)", err);
 				}
@@ -863,12 +862,12 @@ static bool event_handler(const struct event_header *eh)
 		if (has_initial_collar_states()) {
 			if ((prev_collar_status != current_state.collar_status) &&
 			    ((current_state.collar_status == CollarStatus_Stuck) ||
-			    (prev_collar_status == CollarStatus_Stuck) ||
-			    (current_state.collar_status == CollarStatus_OffAnimal) ||
-			    (prev_collar_status == CollarStatus_OffAnimal))) {
+			     (prev_collar_status == CollarStatus_Stuck) ||
+			     (current_state.collar_status == CollarStatus_OffAnimal) ||
+			     (prev_collar_status == CollarStatus_OffAnimal))) {
 				/* Notify server by status message that collar status has changed */
-				int err = k_work_reschedule_for_queue(&message_q,
-						&log_status_message_work, K_NO_WAIT);
+				int err = k_work_reschedule_for_queue(
+					&message_q, &log_status_message_work, K_NO_WAIT);
 				if (err < 0) {
 					LOG_ERR("Failed to schedule log status work (%d)", err);
 				}
@@ -888,15 +887,15 @@ static bool event_handler(const struct event_header *eh)
 		if (has_initial_collar_states()) {
 			if ((prev_fence_status != current_state.fence_status) &&
 			    (((current_state.fence_status == FenceStatus_MaybeOutOfFence) ||
-			    (prev_fence_status == FenceStatus_MaybeOutOfFence)) ||
-			    (prev_fence_status == FenceStatus_Escaped) ||
-			    ((current_state.fence_status == FenceStatus_FenceStatus_Normal) &&
-			    (prev_fence_status == FenceStatus_NotStarted)) ||
-			    ((current_state.fence_status == FenceStatus_TurnedOffByBLE) &&
-			    (prev_fence_status == FenceStatus_TurnedOffByBLE)))) {
+			      (prev_fence_status == FenceStatus_MaybeOutOfFence)) ||
+			     (prev_fence_status == FenceStatus_Escaped) ||
+			     ((current_state.fence_status == FenceStatus_FenceStatus_Normal) &&
+			      (prev_fence_status == FenceStatus_NotStarted)) ||
+			     ((current_state.fence_status == FenceStatus_TurnedOffByBLE) &&
+			      (prev_fence_status == FenceStatus_TurnedOffByBLE)))) {
 				/* Notify server by status message that fence status has changed */
-				int err = k_work_reschedule_for_queue(&message_q,
-						&log_status_message_work, K_NO_WAIT);
+				int err = k_work_reschedule_for_queue(
+					&message_q, &log_status_message_work, K_NO_WAIT);
 				if (err < 0) {
 					LOG_ERR("Failed to schedule log status work (%d)", err);
 				}
@@ -1000,7 +999,8 @@ static bool event_handler(const struct event_header *eh)
 		int err;
 		err = k_work_reschedule_for_queue(&message_q, &modem_poll_work, K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Error starting modem poll worker in response to nudge on listening socket. (%d)", err);
+			LOG_ERR("Error starting modem poll worker in response to nudge on listening socket. (%d)",
+				err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 		return false;
@@ -1021,9 +1021,8 @@ static bool event_handler(const struct event_header *eh)
 		struct warn_correction_start_event *ev = cast_warn_correction_start_event(eh);
 		atomic_set(&cached_dist_correction_start, ev->fence_dist);
 
-		int err = k_work_reschedule_for_queue(&message_q,
-						      &process_warning_correction_start_work,
-						      K_NO_WAIT);
+		int err = k_work_reschedule_for_queue(
+			&message_q, &process_warning_correction_start_work, K_NO_WAIT);
 		if (err < 0) {
 			LOG_ERR("Error reschedule warning correction start work (%d)", err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
@@ -1167,35 +1166,35 @@ static inline void process_ble_cmd_event(void)
 	enum command_char ble_command = ev.cmd;
 
 	switch (ble_command) {
-		case CMD_TURN_OFF_FENCE: {
-			/* Wait for final AMC integration. Should simply issue an event. */
-			struct turn_off_fence_event *ev = new_turn_off_fence_event();
-			EVENT_SUBMIT(ev);
-			break;
-		}
-		case CMD_REBOOT_AVR_MCU: {
-			struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
-			r_ev->reason = REBOOT_BLE_RESET;
-			EVENT_SUBMIT(r_ev);
-			break;
-		}
-		case CMD_PLAY_SOUND: {
-			struct sound_event *s_ev = new_sound_event();
-			s_ev->type = SND_FIND_ME;
-			EVENT_SUBMIT(s_ev);
-			break;
-		}
-		case CMD_DOWNLOAD_FENCE: {
-			/* Downloads fence from bluetooth? */
-			break;
-		}
-		case CMD_FW_INSTALL: {
-			/* Deprecated as we have ble_dfu.c instead? */
-			break;
-		}
-		default: {
-			break;
-		}
+	case CMD_TURN_OFF_FENCE: {
+		/* Wait for final AMC integration. Should simply issue an event. */
+		struct turn_off_fence_event *ev = new_turn_off_fence_event();
+		EVENT_SUBMIT(ev);
+		break;
+	}
+	case CMD_REBOOT_AVR_MCU: {
+		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
+		r_ev->reason = REBOOT_BLE_RESET;
+		EVENT_SUBMIT(r_ev);
+		break;
+	}
+	case CMD_PLAY_SOUND: {
+		struct sound_event *s_ev = new_sound_event();
+		s_ev->type = SND_FIND_ME;
+		EVENT_SUBMIT(s_ev);
+		break;
+	}
+	case CMD_DOWNLOAD_FENCE: {
+		/* Downloads fence from bluetooth? */
+		break;
+	}
+	case CMD_FW_INSTALL: {
+		/* Deprecated as we have ble_dfu.c instead? */
+		break;
+	}
+	default: {
+		break;
+	}
 	}
 }
 
@@ -1227,8 +1226,7 @@ static void process_lte_proto_event(void)
 
 	/* Process poll response if data transfer is not otherwie halted for some reason, e.g. a
 	 * pending or ongoing FOTA */
-	if (atomic_get(&m_halt_data_transfer) == 0)
-	{
+	if (atomic_get(&m_halt_data_transfer) == 0) {
 		if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
 			LOG_INF("Process poll reponse");
 			process_poll_response(&proto);
@@ -1286,8 +1284,7 @@ int messaging_module_init(void)
 	k_work_queue_init(&message_q);
 	k_work_queue_start(&message_q, messaging_send_thread,
 			   K_THREAD_STACK_SIZEOF(messaging_send_thread),
-			   K_PRIO_COOP(CONFIG_MESSAGING_SEND_THREAD_PRIORITY),
-			   NULL);
+			   K_PRIO_COOP(CONFIG_MESSAGING_SEND_THREAD_PRIORITY), NULL);
 
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
 	k_work_init_delayable(&log_periodic_work, log_data_periodic_fn);
@@ -1365,21 +1362,21 @@ void build_poll_request(NofenceMessage *poll_req)
 		poll_req->m.poll_message_req.has_usAccSigmaNoActivityLimit = true;
 		poll_req->m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
 
-		err = stg_config_u16_read(STG_U16_ACC_SIGMA_SLEEP_LIMIT, 
+		err = stg_config_u16_read(STG_U16_ACC_SIGMA_SLEEP_LIMIT,
 					  &poll_req->m.poll_message_req.usAccSigmaSleepLimit);
 		if (err != 0) {
 			LOG_ERR("Failed to read STG_U16_ACC_SIGMA_SLEEP_LIMIT (%d)", err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 
-		err = stg_config_u16_read(STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT, 
+		err = stg_config_u16_read(STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT,
 					  &poll_req->m.poll_message_req.usAccSigmaNoActivityLimit);
 		if (err != 0) {
 			LOG_ERR("Failed to read STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT (%d)", err);
 			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 
-		err = stg_config_u16_read(STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC, 
+		err = stg_config_u16_read(STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC,
 					  &poll_req->m.poll_message_req.usOffAnimalTimeLimitSec);
 		if (err != 0) {
 			LOG_ERR("Failed to read STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC (%d)", err);
@@ -1390,7 +1387,7 @@ void build_poll_request(NofenceMessage *poll_req)
 		poll_req->m.poll_message_req.has_rgubcBleKey = true;
 		poll_req->m.poll_message_req.rgubcBleKey.size = STG_CONFIG_BLE_SEC_KEY_LEN;
 		uint8_t key_length = 0;
-		err = stg_config_blob_read(STG_BLOB_BLE_KEY, 
+		err = stg_config_blob_read(STG_BLOB_BLE_KEY,
 					   poll_req->m.poll_message_req.rgubcBleKey.bytes,
 					   &key_length);
 		if (err != 0) {
@@ -1399,17 +1396,17 @@ void build_poll_request(NofenceMessage *poll_req)
 		}
 	}
 	/* TODO pshustad, fill GNSSS parameters for MIA M10 */
-	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec = 
+	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec =
 		(cached_gnss_mode == GNSSMODE_NOMODE) ? false : true;
-	uint32_t timeSinceFixSec = (cached_msss - cached_fix.msss)/1000;
+	uint32_t timeSinceFixSec = (cached_msss - cached_fix.msss) / 1000;
 	if (timeSinceFixSec > UINT16_MAX) {
 		timeSinceFixSec = UINT16_MAX;
 	}
 	poll_req->m.poll_message_req.usGnssOnFixAgeSec = timeSinceFixSec;
 
-	poll_req->m.poll_message_req.has_usGnssTTFFSec = 
+	poll_req->m.poll_message_req.has_usGnssTTFFSec =
 		(cached_gnss_mode == GNSSMODE_NOMODE) ? false : true;
-	uint32_t timeSinceFirstFixSec = cached_ttff/1000;
+	uint32_t timeSinceFirstFixSec = cached_ttff / 1000;
 	if (timeSinceFirstFixSec > UINT16_MAX) {
 		timeSinceFirstFixSec = UINT16_MAX;
 	}
@@ -1422,7 +1419,7 @@ void build_poll_request(NofenceMessage *poll_req)
 			NF_X25_VERSION_NUMBER;
 		if (ccid[0] != '\0') {
 			poll_req->m.poll_message_req.has_xSimCardId = true;
-			memcpy(poll_req->m.poll_message_req.xSimCardId, ccid, 
+			memcpy(poll_req->m.poll_message_req.xSimCardId, ccid,
 			       sizeof(poll_req->m.poll_message_req.xSimCardId) - 1);
 		}
 
@@ -1652,10 +1649,10 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 	size_t encoded_size = 0;
 	size_t header_size = 2;
 
-	LOG_INF("Start message encoding, tag: %u, version: %u",
-		msg_proto->which_m, msg_proto->header.ulVersion);
-	int ret = collar_protocol_encode(msg_proto, &encoded_msg[2],
-					 NofenceMessage_size, &encoded_size);
+	LOG_INF("Start message encoding, tag: %u, version: %u", msg_proto->which_m,
+		msg_proto->header.ulVersion);
+	int ret = collar_protocol_encode(msg_proto, &encoded_msg[2], NofenceMessage_size,
+					 &encoded_size);
 	if (ret) {
 		LOG_ERR("Error encoding nofence message (%d)", ret);
 		nf_app_error(ERR_MESSAGING, ret, NULL, 0);
@@ -1678,10 +1675,10 @@ int encode_and_store_message(NofenceMessage *msg_proto)
 	uint8_t encoded_msg[NofenceMessage_size];
 	memset(encoded_msg, 0, sizeof(encoded_msg));
 
-	LOG_INF("Start message encoding, tag: %u, version: %u",
-		msg_proto->which_m, msg_proto->header.ulVersion);
-	ret = collar_protocol_encode(msg_proto, &encoded_msg[2],
-					 NofenceMessage_size, &encoded_size);
+	LOG_INF("Start message encoding, tag: %u, version: %u", msg_proto->which_m,
+		msg_proto->header.ulVersion);
+	ret = collar_protocol_encode(msg_proto, &encoded_msg[2], NofenceMessage_size,
+				     &encoded_size);
 	if (ret) {
 		LOG_ERR("Error encoding nofence message (%d)", ret);
 		nf_app_error(ERR_MESSAGING, ret, NULL, 0);
@@ -1715,7 +1712,7 @@ void process_poll_response(NofenceMessage *proto)
 		struct messaging_host_address_event *host_add_event =
 			new_messaging_host_address_event();
 		strncpy(host_add_event->address, pResp->xServerIp, sizeof(pResp->xServerIp));
-		EVENT_SUBMIT(host_add_event); 
+		EVENT_SUBMIT(host_add_event);
 		/*cellular controller writes it to ext flash if it is different from the 
 		 * previously stored address.*/
 	}
@@ -1757,8 +1754,9 @@ void process_poll_response(NofenceMessage *proto)
 		if (atomic_get(&poll_period_seconds) != pResp->usPollConnectIntervalSec) {
 			atomic_set(&poll_period_seconds, pResp->usPollConnectIntervalSec);
 
-			err = k_work_reschedule_for_queue(&message_q, &modem_poll_work,
-						    K_SECONDS(atomic_get(&poll_period_seconds)));
+			err = k_work_reschedule_for_queue(
+				&message_q, &modem_poll_work,
+				K_SECONDS(atomic_get(&poll_period_seconds)));
 			if (err < 0) {
 				LOG_ERR("Failed to schedule work");
 			}
@@ -1858,7 +1856,7 @@ void process_poll_response(NofenceMessage *proto)
 void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 {
 	if (fw_ver_from_server->has_ulApplicationVersion &&
-	    fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER && 
+	    fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER &&
 	    block_fota_request == false) {
 		LOG_INF("Received new app version from server %i",
 			fw_ver_from_server->ulApplicationVersion);
@@ -1916,8 +1914,8 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 			pasture_temp.m.keep_mode = fenceResp->m.xHeader.bKeepMode;
 
 			/* Write to ext flash storage. */
-			err = stg_config_u8_write(STG_U8_KEEP_MODE, 
-					(uint8_t)fenceResp->m.xHeader.bKeepMode);
+			err = stg_config_u8_write(STG_U8_KEEP_MODE,
+						  (uint8_t)fenceResp->m.xHeader.bKeepMode);
 			if (err != 0) {
 				/* We always expect the header to be the first frame. */
 				LOG_ERR("Error writing keep mode to storage. (%d)", err);
@@ -1960,7 +1958,7 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 		if (cached_fences_counter != pasture_temp.m.ul_total_fences) {
 			LOG_ERR("Cached %i frames, but expected %i.", cached_fences_counter,
 				pasture_temp.m.ul_total_fences);
-						nf_app_error(ERR_MESSAGING, -EIO, NULL, 0);
+			nf_app_error(ERR_MESSAGING, -EIO, NULL, 0);
 
 			return 0;
 		}
@@ -2008,8 +2006,7 @@ uint8_t process_ano_msg(UbxAnoReply *anoResp)
 						   temp->mga_ano.day);
 
 	/* Write to storage controller's ANO WRITE partition. */
-	int err = stg_write_ano_data((uint8_t *)&anoResp->rgucBuf,
-				     anoResp->rgucBuf.size);
+	int err = stg_write_ano_data((uint8_t *)&anoResp->rgucBuf, anoResp->rgucBuf.size);
 
 	if (err) {
 		LOG_ERR("Error writing ano frame to storage controller (%d)", err);
@@ -2058,15 +2055,13 @@ static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix, _D
 		.has_ucGpsMode = true,
 		.ucGpsMode = gpsLastFix->mode,
 		.has_xNavPlExtra = true,
-		.xNavPlExtra = {
-			.ucTmirCoeff = gpsLastFix->pl.tmirCoeff,
-			.ucTmirExp = gpsLastFix->pl.tmirExp,
-			.ucPlPosValid = gpsLastFix->pl.plPosValid,
-			.ucPlPosFrame = gpsLastFix->pl.plPosFrame,
-			.ulPlPos1 = gpsLastFix->pl.plPos1,
-			.ulPlPos2 = gpsLastFix->pl.plPos2,
-			.ulPlPos3 = gpsLastFix->pl.plPos3
-		}
+		.xNavPlExtra = { .ucTmirCoeff = gpsLastFix->pl.tmirCoeff,
+				 .ucTmirExp = gpsLastFix->pl.tmirExp,
+				 .ucPlPosValid = gpsLastFix->pl.plPosValid,
+				 .ucPlPosFrame = gpsLastFix->pl.plPosFrame,
+				 .ulPlPos1 = gpsLastFix->pl.plPos1,
+				 .ulPlPos2 = gpsLastFix->pl.plPos2,
+				 .ulPlPos3 = gpsLastFix->pl.plPos3 }
 
 	};
 	memcpy(pos, &a, sizeof(_DatePos));
@@ -2105,18 +2100,23 @@ static uint32_t ano_date_to_unixtime_midday(uint8_t year, uint8_t month, uint8_t
  * 		  The initial collar state flags are only set once for system startup sequence.
  * @param[in] uint8_t A collar state flag indicator (see collar_state_flags).
  */
-static inline void set_initial_collar_state_flag(uint8_t aFlag) {
-    if (aFlag >= COLLAR_STATE_FLAG_CNT) {
-        return;
-    }
-    m_initial_collar_state_flags |= (1 << aFlag);
+static inline void set_initial_collar_state_flag(uint8_t aFlag)
+{
+	if (aFlag >= COLLAR_STATE_FLAG_CNT) {
+		return;
+	}
+	m_initial_collar_state_flags |= (1 << aFlag);
 }
 
 /**
  * @brief Checks whether the module has recieved all initial collar states (see collar_state_flags).
  * @return Return true if all initial collar states has been received, otherwise false.
  */
-static inline bool has_initial_collar_states() {
-    return (m_initial_collar_state_flags == ((1 << COLLAR_MODE_FLAG) | (1 << COLLAR_STATUS_FLAG) |
-    		(1 << FENCE_STATUS_FLAG) | (1 << BATTERY_LVL_FLAG)) ? true : false);
+static inline bool has_initial_collar_states()
+{
+	return (m_initial_collar_state_flags ==
+				((1 << COLLAR_MODE_FLAG) | (1 << COLLAR_STATUS_FLAG) |
+				 (1 << FENCE_STATUS_FLAG) | (1 << BATTERY_LVL_FLAG)) ?
+			true :
+			false);
 }

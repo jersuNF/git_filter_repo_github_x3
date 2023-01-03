@@ -18,21 +18,17 @@ gnss_mode_t gnss_mode = GNSSMODE_NOMODE;
 #define GNSSFIXBIT_DISTANCE 8
 #define GNSSFIXBIT_HEIGHT 9
 
-#define GNSSFIX_ACCEPTED_MASK                                                  \
-	((1 << GNSSFIXBIT_FIX) | (1 << GNSSFIXBIT_NUMSV) |                     \
-	 (1 << GNSSFIXBIT_DOP) | (1 << GNSSFIXBIT_ACC) |                       \
-	 (1 << GNSSFIXBIT_HEIGHT))
+#define GNSSFIX_ACCEPTED_MASK                                                                      \
+	((1 << GNSSFIXBIT_FIX) | (1 << GNSSFIXBIT_NUMSV) | (1 << GNSSFIXBIT_DOP) |                 \
+	 (1 << GNSSFIXBIT_ACC) | (1 << GNSSFIXBIT_HEIGHT))
 
-#define GNSSFIX_EASY_MASK                                                      \
-	((1 << GNSSFIXBIT_FIX) | (1 << GNSSFIXBIT_NUMSV) |                     \
-	 (1 << GNSSFIXBIT_DOP))
+#define GNSSFIX_EASY_MASK ((1 << GNSSFIXBIT_FIX) | (1 << GNSSFIXBIT_NUMSV) | (1 << GNSSFIXBIT_DOP))
 
-#define GNSSFIX_WARN_MASK                                                      \
-	((1 << GNSSFIXBIT_FIX) | (1 << GNSSFIXBIT_NUMSV) |                     \
-	 (1 << GNSSFIXBIT_DOP) | (1 << GNSSFIXBIT_ACC) |                       \
-	 (1 << GNSSFIXBIT_HEIGHT) | (1 << GNSSFIXBIT_CACC) |                   \
-	 (1 << GNSSFIXBIT_SLOPE) | (1 << GNSSFIXBIT_STABILITY) |               \
-	 (1 << GNSSFIXBIT_DISTINC) | (1 << GNSSFIXBIT_DISTANCE))
+#define GNSSFIX_WARN_MASK                                                                          \
+	((1 << GNSSFIXBIT_FIX) | (1 << GNSSFIXBIT_NUMSV) | (1 << GNSSFIXBIT_DOP) |                 \
+	 (1 << GNSSFIXBIT_ACC) | (1 << GNSSFIXBIT_HEIGHT) | (1 << GNSSFIXBIT_CACC) |               \
+	 (1 << GNSSFIXBIT_SLOPE) | (1 << GNSSFIXBIT_STABILITY) | (1 << GNSSFIXBIT_DISTINC) |       \
+	 (1 << GNSSFIXBIT_DISTANCE))
 
 static uint32_t gnss_fix_accuracy = 0;
 static uint32_t gnss_fix_accuracy_with_timeout = 0;
@@ -63,8 +59,7 @@ int gnss_init(gnss_timeout_cb timeout_cb)
 	return 0;
 }
 
-static int16_t get_dyn_lim_for_warn_start(int16_t dist_fence_dm,
-					  uint16_t h_acc_dm)
+static int16_t get_dyn_lim_for_warn_start(int16_t dist_fence_dm, uint16_t h_acc_dm)
 {
 	if (h_acc_dm > GNSS_HACC_UPPER_LIM_DM) {
 		return INT16_MAX;
@@ -85,9 +80,8 @@ static int16_t get_dyn_lim_for_warn_start(int16_t dist_fence_dm,
 
 int gnss_update_dist_flags(int16_t dist_avg_change, int16_t dist_change,
 			   int16_t dist_incr_slope_lim, uint8_t dist_inc_count,
-			   uint8_t dist_incr_count, int16_t height_delta,
-			   int16_t acc_delta, int16_t mean_dist,
-			   uint16_t h_acc_dm)
+			   uint8_t dist_incr_count, int16_t height_delta, int16_t acc_delta,
+			   int16_t mean_dist, uint16_t h_acc_dm)
 {
 	int ret = 0;
 
@@ -103,12 +97,10 @@ int gnss_update_dist_flags(int16_t dist_avg_change, int16_t dist_change,
 				gnss_fix_accuracy |= (1 << GNSSFIXBIT_DISTINC);
 			}
 		}
-		if ((height_delta < DELTAHEIGHT_LIM) &&
-		    (acc_delta < ACCDELTA_LIM)) {
+		if ((height_delta < DELTAHEIGHT_LIM) && (acc_delta < ACCDELTA_LIM)) {
 			gnss_fix_accuracy |= (1 << GNSSFIXBIT_STABILITY);
 		}
-		int16_t dynamic_dist =
-			get_dyn_lim_for_warn_start(mean_dist, h_acc_dm);
+		int16_t dynamic_dist = get_dyn_lim_for_warn_start(mean_dist, h_acc_dm);
 		if (dynamic_dist != INT16_MAX && mean_dist > dynamic_dist) {
 			gnss_fix_accuracy |= (1 << GNSSFIXBIT_DISTANCE);
 		}
@@ -163,8 +155,7 @@ int gnss_update(gnss_t *gnss_data)
 	int ret = 0;
 
 	/* Reset timer if we have new data */
-	k_timer_start(&gnss_timeout_timer, K_MSEC(CONFIG_GNSS_TIMEOUT),
-			K_NO_WAIT);
+	k_timer_start(&gnss_timeout_timer, K_MSEC(CONFIG_GNSS_TIMEOUT), K_NO_WAIT);
 
 	ret = gnss_check_accuracy(gnss_data);
 	if (ret != 0) {
@@ -174,20 +165,15 @@ int gnss_update(gnss_t *gnss_data)
 	return 0;
 }
 
-int gnss_calc_xy(gnss_t *gnss_data, int16_t *x_dm, int16_t *y_dm,
-		 int32_t origin_lon, int32_t origin_lat, uint16_t k_lon,
-		 uint16_t k_lat)
+int gnss_calc_xy(gnss_t *gnss_data, int16_t *x_dm, int16_t *y_dm, int32_t origin_lon,
+		 int32_t origin_lat, uint16_t k_lon, uint16_t k_lat)
 {
 	int ret = 0;
 
 	int32_t x_dm_32, y_dm_32;
 
-	x_dm_32 = (int32_t)(
-		(k_lon * (int64_t)(gnss_data->latest.lon - origin_lon)) /
-		100000);
-	y_dm_32 = (int32_t)(
-		(k_lat * (int64_t)(gnss_data->latest.lat - origin_lat)) /
-		100000);
+	x_dm_32 = (int32_t)((k_lon * (int64_t)(gnss_data->latest.lon - origin_lon)) / 100000);
+	y_dm_32 = (int32_t)((k_lat * (int64_t)(gnss_data->latest.lat - origin_lat)) / 100000);
 
 	if ((x_dm_32 > (int32_t)INT16_MAX) || (y_dm_32 > (int32_t)INT16_MAX) ||
 	    (x_dm_32 < (int32_t)INT16_MIN) || (y_dm_32 < (int32_t)INT16_MIN)) {
@@ -225,8 +211,7 @@ bool gnss_has_fix(void)
 	bool has_fix = false;
 
 	if (k_mutex_lock(&gnss_fix_accuracy_mutex, K_MSEC(100)) == 0) {
-		has_fix = ((gnss_fix_accuracy & (1 << GNSSFIXBIT_FIX)) ==
-			   (1 << GNSSFIXBIT_FIX));
+		has_fix = ((gnss_fix_accuracy & (1 << GNSSFIXBIT_FIX)) == (1 << GNSSFIXBIT_FIX));
 
 		k_mutex_unlock(&gnss_fix_accuracy_mutex);
 	}
@@ -240,8 +225,7 @@ bool gnss_has_accepted_fix(void)
 
 	if (k_mutex_lock(&gnss_fix_accuracy_mutex, K_MSEC(100)) == 0) {
 		has_accepted_fix =
-			((gnss_fix_accuracy & GNSSFIX_ACCEPTED_MASK) ==
-			 GNSSFIX_ACCEPTED_MASK);
+			((gnss_fix_accuracy & GNSSFIX_ACCEPTED_MASK) == GNSSFIX_ACCEPTED_MASK);
 
 		k_mutex_unlock(&gnss_fix_accuracy_mutex);
 	}
@@ -254,8 +238,8 @@ bool gnss_has_easy_fix(void)
 	bool has_easy_fix = false;
 
 	if (k_mutex_lock(&gnss_fix_accuracy_mutex, K_MSEC(100)) == 0) {
-		has_easy_fix = ((gnss_fix_accuracy_with_timeout &
-				 GNSSFIX_EASY_MASK) == GNSSFIX_EASY_MASK);
+		has_easy_fix =
+			((gnss_fix_accuracy_with_timeout & GNSSFIX_EASY_MASK) == GNSSFIX_EASY_MASK);
 
 		k_mutex_unlock(&gnss_fix_accuracy_mutex);
 	}
@@ -268,8 +252,7 @@ bool gnss_has_warn_fix(void)
 	bool has_warn_fix = false;
 
 	if (k_mutex_lock(&gnss_fix_accuracy_mutex, K_MSEC(100)) == 0) {
-		has_warn_fix = ((gnss_fix_accuracy & GNSSFIX_WARN_MASK) ==
-				GNSSFIX_WARN_MASK);
+		has_warn_fix = ((gnss_fix_accuracy & GNSSFIX_WARN_MASK) == GNSSFIX_WARN_MASK);
 
 		k_mutex_unlock(&gnss_fix_accuracy_mutex);
 	}

@@ -59,8 +59,7 @@ int stg_fcb_reset_and_init();
  * 
  * @return 0 on success, otherwise negative errno.
  */
-int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
-			   size_t len);
+int stg_write_to_partition(flash_partition_t partition, uint8_t *data, size_t len);
 
 /** 
  * @brief Reads all the new available log data and calls the callback function
@@ -89,8 +88,7 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries);
  * @return 0 on success 
  * @return -ENODATA if no data available, Otherwise negative errno.
  */
-int stg_read_ano_data(fcb_read_cb cb, bool last_valid_ano,
-		      uint16_t num_entries);
+int stg_read_ano_data(fcb_read_cb cb, bool last_valid_ano, uint16_t num_entries);
 
 /** 
  * @brief Reads the newest pasture and callbacks the data.
@@ -173,9 +171,7 @@ int stg_read_system_diagnostic_log(fcb_read_cb cb, uint16_t num_entries);
  */
 int stg_write_system_diagnostic_log(uint8_t *data, size_t len);
 
-#define SECTOR_SIZE                                                            \
-	MAX(CONFIG_NORDIC_QSPI_NOR_FLASH_LAYOUT_PAGE_SIZE,                     \
-	    CONFIG_STORAGE_SECTOR_SIZE)
+#define SECTOR_SIZE MAX(CONFIG_NORDIC_QSPI_NOR_FLASH_LAYOUT_PAGE_SIZE, CONFIG_STORAGE_SECTOR_SIZE)
 
 #define FLASH_LOG_NUM_SECTORS PM_LOG_PARTITION_SIZE / SECTOR_SIZE
 

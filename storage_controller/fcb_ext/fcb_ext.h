@@ -41,8 +41,7 @@ typedef int (*fcb_read_cb)(uint8_t *data, size_t len);
  * @return 0 on success, otherwise negative errno.
  * @return -EINTR if caller aborted walk process.
  */
-int fcb_walk_from_entry(fcb_read_cb cb, struct fcb *fcb,
-			struct fcb_entry *start_entry, uint16_t num_entries,
-			struct k_mutex* flash_mutex);
+int fcb_walk_from_entry(fcb_read_cb cb, struct fcb *fcb, struct fcb_entry *start_entry,
+			uint16_t num_entries, struct k_mutex *flash_mutex);
 
 #endif /* _FCB_EXT_H_ */

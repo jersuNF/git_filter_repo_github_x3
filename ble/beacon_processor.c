@@ -37,8 +37,7 @@ static inline int8_t signed2(uint16_t x)
  * @param[in] p2 Pointer to bt_addr_le_t address to compare
  * @return True if addresses are equal, otherwise false
  */
-static inline bool is_equal_mac_addr(const bt_addr_le_t *p1,
-				     const bt_addr_le_t *p2)
+static inline bool is_equal_mac_addr(const bt_addr_le_t *p1, const bt_addr_le_t *p2)
 {
 	return (bt_addr_le_cmp(p1, p2) == 0);
 }
@@ -49,12 +48,10 @@ static inline bool is_equal_mac_addr(const bt_addr_le_t *p1,
  * @param[in] src Pointer to beacon_info struct
  * @return index to beacon in beacon list, -1 if Beacon is not found
  */
-static inline int get_beacon_index_by_mac(struct beacon_list *list,
-					  struct beacon_info *info)
+static inline int get_beacon_index_by_mac(struct beacon_list *list, struct beacon_info *info)
 {
 	for (uint8_t i = 0; i < list->num_beacons; i++) {
-		if (is_equal_mac_addr(&list->beacon_array[i].mac_address,
-				      &info->mac_address)) {
+		if (is_equal_mac_addr(&list->beacon_array[i].mac_address, &info->mac_address)) {
 			return i;
 		}
 	}
@@ -67,8 +64,7 @@ static inline int get_beacon_index_by_mac(struct beacon_list *list,
  * @param[in] src Pointer to beacon_info struct
  * @param[in] m Measured distance to the beacon we want to add
  */
-static inline void add_to_beacon_list(struct beacon_list *list,
-				      struct beacon_info *src)
+static inline void add_to_beacon_list(struct beacon_list *list, struct beacon_info *src)
 {
 	int index = -1;
 
@@ -96,8 +92,7 @@ static inline void add_to_beacon_list(struct beacon_list *list,
 
 	} else {
 		/* Space available. Add beacon to list */
-		struct beacon_info *dst =
-			&list->beacon_array[list->num_beacons];
+		struct beacon_info *dst = &list->beacon_array[list->num_beacons];
 		memset(dst, 0, sizeof(struct beacon_info));
 		memcpy(dst, src, sizeof(struct beacon_info));
 		/* Increment to next available slot */
@@ -112,10 +107,8 @@ static inline void add_to_beacon_list(struct beacon_list *list,
 static inline void add_to_beacon_history(struct beacon_connection_info *info,
 					 struct beacon_info *beacon)
 {
-	beacon->history[beacon->conn_history_peeker].beacon_dist =
-		info->beacon_dist;
-	beacon->history[beacon->conn_history_peeker].time_diff =
-		info->time_diff;
+	beacon->history[beacon->conn_history_peeker].beacon_dist = info->beacon_dist;
+	beacon->history[beacon->conn_history_peeker].time_diff = info->time_diff;
 	beacon->conn_history_peeker++;
 	if (beacon->conn_history_peeker >= CONFIG_BEACON_MAX_MEASUREMENTS) {
 		beacon->conn_history_peeker = 0;
@@ -139,15 +132,12 @@ static int set_new_shortest_dist(struct beacon_info *beacon)
 	for (uint8_t i = 0; i < beacon->num_measurements; i++) {
 		struct beacon_connection_info *info = &beacon->history[i];
 		int32_t delta_t = k_uptime_get_32() - info->time_diff;
-//		LOG_WRN("delta_t = %d", delta_t);
-		if (((delta_t >= 0) && (delta_t <
-		    CONFIG_BEACON_MAX_MEASUREMENT_AGE * MSEC_PER_SEC)) ||
+		//		LOG_WRN("delta_t = %d", delta_t);
+		if (((delta_t >= 0) &&
+		     (delta_t < CONFIG_BEACON_MAX_MEASUREMENT_AGE * MSEC_PER_SEC)) ||
 		    ((delta_t < 0) && ((uint32_t)(delta_t + UINT32_MAX) <
-				      (CONFIG_BEACON_MAX_MEASUREMENT_AGE *
-					       MSEC_PER_SEC)))) {
-
-			if ((info->beacon_dist >= 1) && 
-			    (info->beacon_dist < shortest_dist)) {
+				       (CONFIG_BEACON_MAX_MEASUREMENT_AGE * MSEC_PER_SEC)))) {
+			if ((info->beacon_dist >= 1) && (info->beacon_dist < shortest_dist)) {
 				shortest_dist = info->beacon_dist;
 				entries++;
 			}
@@ -203,8 +193,7 @@ int beacon_shortest_distance(uint8_t *dist)
 
 		/* Create string of beacon address */
 		char beacon_str[BT_ADDR_STR_LEN];
-		bt_addr_le_to_str(&(c_info->mac_address), beacon_str,
-				  sizeof(beacon_str));
+		bt_addr_le_to_str(&(c_info->mac_address), beacon_str, sizeof(beacon_str));
 
 		/* Uncomment below for debug */
 		// printk("Beacon %s: ", log_strdup(beacon_str));
@@ -260,8 +249,8 @@ static double calculate_accuracy(int8_t tx_power, int8_t rssi)
 	}
 }
 
-int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
-			 int8_t scanner_rssi_measured, adv_data_t *p_adv_data)
+int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr, int8_t scanner_rssi_measured,
+			 adv_data_t *p_adv_data)
 {
 	int8_t beacon_adv_rssi = signed2(p_adv_data->rssi);
 	int8_t rssi_sample_value = -1 * scanner_rssi_measured;
@@ -292,8 +281,7 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 	int target_beacon = get_beacon_index_by_mac(&beacons, &beacon);
 	/* If beacon doesn't exist (-1), add it to list. */
 	if (target_beacon == -1) {
-		LOG_DBG("New beacon detected %s, %d", 
-			log_strdup(beacon_str), (uint8_t)m);
+		LOG_DBG("New beacon detected %s, %d", log_strdup(beacon_str), (uint8_t)m);
 
 		/* Populate 1 new entry in beacon history. */
 		beacon.min_dist = (uint8_t)m;
@@ -304,10 +292,9 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr,
 		/* Add beacon to beacons list */
 		add_to_beacon_list(&beacons, &beacon);
 	} else {
-		LOG_DBG("Add measurement (%d) from beacon %s to list",
-			(uint8_t)m, log_strdup(beacon_str));
-		add_to_beacon_history(&info,
-				&beacons.beacon_array[target_beacon]);
+		LOG_DBG("Add measurement (%d) from beacon %s to list", (uint8_t)m,
+			log_strdup(beacon_str));
+		add_to_beacon_history(&info, &beacons.beacon_array[target_beacon]);
 	}
 	return 0;
 }

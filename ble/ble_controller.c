@@ -33,8 +33,7 @@
 #include "ble_beacon_event.h"
 #include "watchdog_event.h"
 #include "error_event.h"
-#if defined(CONFIG_BOARD_NF_SG25_27O_NRF52840) ||                              \
-	defined(CONFIG_BOARD_NF_C25_25G_NRF52840)
+#if defined(CONFIG_BOARD_NF_SG25_27O_NRF52840) || defined(CONFIG_BOARD_NF_C25_25G_NRF52840)
 #include "ble_dfu.h"
 #elif CONFIG_BOARD_NATIVE_POSIX
 #else
@@ -48,8 +47,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BLE_CONTROLLER_LOG_LEVEL);
 #if CONFIG_BT_NUS
 static void bt_send_work_handler(struct k_work *work);
 
-K_MEM_SLAB_DEFINE(ble_rx_slab, BLE_RX_BLOCK_SIZE, BLE_RX_BUF_COUNT,
-		  BLE_SLAB_ALIGNMENT);
+K_MEM_SLAB_DEFINE(ble_rx_slab, BLE_RX_BLOCK_SIZE, BLE_RX_BUF_COUNT, BLE_SLAB_ALIGNMENT);
 RING_BUF_DECLARE(ble_tx_ring_buf, BLE_TX_BUF_SIZE);
 
 static K_SEM_DEFINE(ble_tx_sem, 0, 1);
@@ -69,11 +67,7 @@ static struct k_work_delayable beacon_processor_work;
 static uint8_t m_shortest_dist2beacon = UINT8_MAX;
 static int64_t m_beacon_scan_start_timer = 0;
 
-typedef enum {
-	CROSS_UNDEFINED = 0,
-	CROSS_LOW_FROM_BELOW,
-	CROSS_HIGH_FROM_ABOVE
-} cross_type_t;
+typedef enum { CROSS_UNDEFINED = 0, CROSS_LOW_FROM_BELOW, CROSS_HIGH_FROM_ABOVE } cross_type_t;
 
 /** @brief : Used for hysteresis calculation **/
 static cross_type_t m_cross_type = CROSS_UNDEFINED;
@@ -100,10 +94,8 @@ static uint16_t atmega_ver = 0xFFFF; // NB: Not in use, needed for App to work.
 static uint8_t mfg_data[BLE_MFG_ARR_SIZE];
 
 static struct bt_data ad[] = {
-	[BLE_AD_IDX_FLAGS] = BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL |
-							   BT_LE_AD_NO_BREDR)),
-	[BLE_AD_IDX_MANUFACTURER] =
-		BT_DATA(BT_DATA_MANUFACTURER_DATA, mfg_data, sizeof(mfg_data)),
+	[BLE_AD_IDX_FLAGS] = BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+	[BLE_AD_IDX_MANUFACTURER] = BT_DATA(BT_DATA_MANUFACTURER_DATA, mfg_data, sizeof(mfg_data)),
 };
 
 static const struct bt_data sd[] = {
@@ -123,8 +115,7 @@ static const struct bt_data sd[] = {
  * @param[in] params Pointer to GATT Exchange MTU parameters
  *
  */
-static void exchange_func(struct bt_conn *conn, uint8_t err,
-			  struct bt_gatt_exchange_params *params)
+static void exchange_func(struct bt_conn *conn, uint8_t err, struct bt_gatt_exchange_params *params)
 {
 	if (!err) {
 		nus_max_send_len = bt_nus_get_mtu(conn);
@@ -199,22 +190,22 @@ static struct bt_conn_cb conn_callbacks = {
  */
 static void periodic_beacon_scanner_work_fn()
 {
-        int ret = k_work_reschedule(&periodic_beacon_scanner_work, 
-                                    K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
-        if (ret < 0) {
-                LOG_ERR("Unable to reschedule beacon scanner");
-        }
+	int ret = k_work_reschedule(&periodic_beacon_scanner_work,
+				    K_SECONDS(CONFIG_BEACON_SCAN_PERIODIC_INTERVAL));
+	if (ret < 0) {
+		LOG_ERR("Unable to reschedule beacon scanner");
+	}
 
 #if defined(CONFIG_WATCHDOG_ENABLE)
-        /* Report alive */
-        watchdog_report_module_alive(WDG_BLE_SCAN);
+	/* Report alive */
+	watchdog_report_module_alive(WDG_BLE_SCAN);
 #endif
 
-	if ((current_collar_status != CollarStatus_OffAnimal) && 
-	    (current_collar_status != CollarStatus_PowerOff) && 
+	if ((current_collar_status != CollarStatus_OffAnimal) &&
+	    (current_collar_status != CollarStatus_PowerOff) &&
 	    (current_collar_status != CollarStatus_Sleep)) {
 		/* Start scanner if not already running */
-                scan_start();
+		scan_start();
 	}
 }
 
@@ -245,12 +236,12 @@ static void beacon_processor_work_fn()
 		beacon_status = BEACON_STATUS_REGION_NEAR;
 		LOG_DBG("3: Status: BEACON_STATUS_REGION_NEAR, Type: CROSS_UNDEFINED");
 	} else if (last_distance <= CONFIG_BEACON_LOW_LIMIT &&
-		m_shortest_dist2beacon > CONFIG_BEACON_LOW_LIMIT) {
+		   m_shortest_dist2beacon > CONFIG_BEACON_LOW_LIMIT) {
 		m_cross_type = CROSS_LOW_FROM_BELOW;
 		beacon_status = BEACON_STATUS_REGION_NEAR;
 		LOG_DBG("4: Status: BEACON_STATUS_REGION_NEAR, Type: CROSS_LOW_FROM_BELOW");
 	} else if (last_distance > CONFIG_BEACON_HIGH_LIMIT &&
-		m_shortest_dist2beacon <= CONFIG_BEACON_HIGH_LIMIT) {
+		   m_shortest_dist2beacon <= CONFIG_BEACON_HIGH_LIMIT) {
 		m_cross_type = CROSS_HIGH_FROM_ABOVE;
 		beacon_status = BEACON_STATUS_REGION_FAR;
 		LOG_DBG("5: Status: BEACON_STATUS_REGION_FAR, Type: CROSS_HIGH_FROM_ABOVE");
@@ -275,9 +266,9 @@ static void beacon_processor_work_fn()
 	 * If Collar status is OffAnimal, PowerOff or Sleep stop beacon scanning. */
 	int64_t delta_scan_uptime = k_uptime_get() - m_beacon_scan_start_timer;
 	if (delta_scan_uptime >= (CONFIG_BEACON_SCAN_DURATION * MSEC_PER_SEC)) {
-	    if ((current_collar_status == CollarStatus_OffAnimal) || 
-	        (current_collar_status == CollarStatus_PowerOff) || 
-		(current_collar_status == CollarStatus_Sleep)) {
+		if ((current_collar_status == CollarStatus_OffAnimal) ||
+		    (current_collar_status == CollarStatus_PowerOff) ||
+		    (current_collar_status == CollarStatus_Sleep)) {
 			scan_stop();
 			return;
 		}
@@ -285,7 +276,7 @@ static void beacon_processor_work_fn()
 			scan_stop();
 			return;
 		}
-	} 
+	}
 	k_work_reschedule(&beacon_processor_work, K_SECONDS(CONFIG_BEACON_PROCESSING_INTERVAL));
 }
 #endif
@@ -304,8 +295,7 @@ static void bt_send_work_handler(struct k_work *work)
 	bool notif_disabled = false;
 
 	do {
-		len = ring_buf_get_claim(&ble_tx_ring_buf, &buf,
-					 nus_max_send_len);
+		len = ring_buf_get_claim(&ble_tx_ring_buf, &buf, nus_max_send_len);
 
 		err = bt_nus_send(current_conn, buf, len);
 		if (err == -EINVAL) {
@@ -335,8 +325,7 @@ static void bt_send_work_handler(struct k_work *work)
  * @param[in] len length of data received
  *
  */
-static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data,
-			  uint16_t len)
+static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data, uint16_t len)
 {
 	void *buf;
 	uint16_t remainder;
@@ -353,8 +342,7 @@ static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data,
 			break;
 		}
 
-		copy_len = remainder > BLE_RX_BLOCK_SIZE ? BLE_RX_BLOCK_SIZE :
-							   remainder;
+		copy_len = remainder > BLE_RX_BLOCK_SIZE ? BLE_RX_BLOCK_SIZE : remainder;
 		remainder -= copy_len;
 		memcpy(buf, data, copy_len);
 
@@ -402,8 +390,7 @@ static void adv_start(void)
 		return;
 	}
 
-	err = bt_le_adv_start(BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONNECTABLE,
-					      BT_GAP_ADV_SLOW_INT_MIN,
+	err = bt_le_adv_start(BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONNECTABLE, BT_GAP_ADV_SLOW_INT_MIN,
 					      BT_GAP_ADV_SLOW_INT_MAX, NULL),
 			      ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 	if (err) {
@@ -570,14 +557,14 @@ static void bt_ready(int err)
 		return;
 	}
 
-	#if CONFIG_BT_NUS
+#if CONFIG_BT_NUS
 	err = bt_nus_init(&nus_cb);
 	if (err) {
 		LOG_ERR("Bluetooth Nordic Uart init service failed (%d)", err);
 		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
 		return;
 	}
-	#endif /* CONFIG_BT_NUS */
+#endif /* CONFIG_BT_NUS */
 	/* Convert data to uint_8 ad array format */
 	mfg_data[BLE_MFG_IDX_COMPANY_ID] = (NOFENCE_BLUETOOTH_SIG_COMPANY_ID & 0x00ff);
 	mfg_data[BLE_MFG_IDX_COMPANY_ID + 1] = (NOFENCE_BLUETOOTH_SIG_COMPANY_ID & 0xff00) >> 8;
@@ -616,14 +603,12 @@ static bool data_cb(struct bt_data *data, void *user_data)
 	memset(adv_data, 0, sizeof(adv_data_t));
 	struct net_buf_simple net_buf;
 	if (data->type == BT_DATA_MANUFACTURER_DATA) {
-		net_buf_simple_init_with_data(&net_buf, (void *)data->data,
-					      data->data_len);
+		net_buf_simple_init_with_data(&net_buf, (void *)data->data, data->data_len);
 		adv_data->manuf_id = net_buf_simple_pull_be16(&net_buf);
 		adv_data->beacon_dev_type = net_buf_simple_pull_u8(&net_buf);
 		uint8_t data_len = net_buf_simple_pull_u8(&net_buf);
 		if (data_len == BEACON_DATA_LEN) {
-			memcpy(&adv_data->uuid.val,
-			       net_buf_simple_pull_mem(&net_buf, 16), 16);
+			memcpy(&adv_data->uuid.val, net_buf_simple_pull_mem(&net_buf, 16), 16);
 			adv_data->major = net_buf_simple_pull_be16(&net_buf);
 			adv_data->minor = net_buf_simple_pull_be16(&net_buf);
 			adv_data->rssi = net_buf_simple_pull_u8(&net_buf); //197
@@ -635,7 +620,6 @@ static bool data_cb(struct bt_data *data, void *user_data)
 		return true;
 	}
 }
-
 
 /**
  * @brief Callback for reporting LE scan results.
@@ -653,10 +637,9 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 
 	/* Extract major_id, minor_id, tx rssi and uuid */
 	bt_data_parse(buf, data_cb, (void *)&adv_data);
-	if (adv_data.major == BEACON_MAJOR_ID && 
-	    adv_data.minor == BEACON_MINOR_ID) {
+	if (adv_data.major == BEACON_MAJOR_ID && adv_data.minor == BEACON_MINOR_ID) {
 		LOG_DBG("Nofence beacon detected");
-		
+
 		const uint32_t now = k_uptime_get_32();
 		ret = beacon_process_event(now, addr, rssi, &adv_data);
 		if (ret == -EIO) {
@@ -695,17 +678,16 @@ static void scan_start(void)
 		nf_app_error(ERR_BEACON, err, NULL, 0);
 
 	} else {
-		LOG_INF("Start beacon scanning, Duration[s]:%d, Processing interval[s]:%d", 
-			CONFIG_BEACON_SCAN_DURATION, 
-			CONFIG_BEACON_PROCESSING_INTERVAL);
+		LOG_INF("Start beacon scanning, Duration[s]:%d, Processing interval[s]:%d",
+			CONFIG_BEACON_SCAN_DURATION, CONFIG_BEACON_PROCESSING_INTERVAL);
 
 		/* Start beacon scanning by scheduling the beacon processor work
 		 * item. The beacon processor work stops beacon scanning after
 		 * the scan duration, BEACON_SCAN_DURATION, from the start time
 		 * given by m_beacon_scan_start_timer */
 		m_beacon_scan_start_timer = k_uptime_get();
-		k_work_reschedule(&beacon_processor_work, 
-			K_SECONDS(CONFIG_BEACON_PROCESSING_INTERVAL));
+		k_work_reschedule(&beacon_processor_work,
+				  K_SECONDS(CONFIG_BEACON_PROCESSING_INTERVAL));
 
 		atomic_set(&atomic_bt_scan_active, true);
 	}
@@ -840,8 +822,7 @@ int ble_module_init()
 
 	/* Callback to monitor connected/disconnected state */
 	bt_conn_cb_register(&conn_callbacks);
-#if defined(CONFIG_BOARD_NF_SG25_27O_NRF52840) ||                                        \
-	defined(CONFIG_BOARD_NF_C25_25G_NRF52840)
+#if defined(CONFIG_BOARD_NF_SG25_27O_NRF52840) || defined(CONFIG_BOARD_NF_C25_25G_NRF52840)
 	err = bt_dfu_init();
 	if (err < 0) {
 		LOG_ERR("Failed to init ble dfu handler (%d)", err);
@@ -872,7 +853,7 @@ int ble_module_init()
  */
 static bool event_handler(const struct event_header *eh)
 {
-	#if CONFIG_BT_NUS
+#if CONFIG_BT_NUS
 	/* Send debug data */
 	if (is_msg_data_event(eh)) {
 		const struct msg_data_event *event = cast_msg_data_event(eh);
@@ -881,15 +862,13 @@ static bool event_handler(const struct event_header *eh)
 		}
 
 		uint32_t written =
-			ring_buf_put(&ble_tx_ring_buf, event->dyndata.data,
-				     event->dyndata.size);
+			ring_buf_put(&ble_tx_ring_buf, event->dyndata.data, event->dyndata.size);
 		if (written != event->dyndata.size) {
 			LOG_WRN("MSG -> BLE overflow");
 		}
 
-		uint32_t buf_utilization =
-			(ring_buf_capacity_get(&ble_tx_ring_buf) -
-			 ring_buf_space_get(&ble_tx_ring_buf));
+		uint32_t buf_utilization = (ring_buf_capacity_get(&ble_tx_ring_buf) -
+					    ring_buf_space_get(&ble_tx_ring_buf));
 
 		/* Simple check to start transmission. */
 		/* If bt_send_work is already running, this has no effect */
@@ -912,13 +891,13 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-	#endif /* CONFIG_BT_NUS */
+#endif /* CONFIG_BT_NUS */
 
 	/* Received ble control event */
 	if (is_ble_ctrl_event(eh)) {
 		const struct ble_ctrl_event *event = cast_ble_ctrl_event(eh);
 
-                int ret = 0;
+		int ret = 0;
 		switch (event->cmd) {
 		case BLE_CTRL_ADV_ENABLE:
 			if (!atomic_set(&atomic_bt_adv_active, true)) {
@@ -938,10 +917,10 @@ static bool event_handler(const struct event_header *eh)
 			break;
 		case BLE_CTRL_SCAN_START:
 #if CONFIG_BEACON_SCAN_ENABLE
-                        ret = k_work_reschedule(&periodic_beacon_scanner_work, K_NO_WAIT);
-                        if (ret < 0) {
-                                LOG_ERR("Failed to start beacon scan from a BLE_CTRL event");
-                        }
+			ret = k_work_reschedule(&periodic_beacon_scanner_work, K_NO_WAIT);
+			if (ret < 0) {
+				LOG_ERR("Failed to start beacon scan from a BLE_CTRL event");
+			}
 			break;
 #endif /* CONFIG_BEACON_SCAN_ENABLE */
 		case BLE_CTRL_SCAN_STOP:
@@ -952,9 +931,9 @@ static bool event_handler(const struct event_header *eh)
 		case BLE_CTRL_DISCONNECT_PEER:
 			if (current_conn != NULL) {
 				ret = k_work_schedule(&disconnect_peer_work, K_MSEC(500));
-                                if (ret < 0) {
-                                        LOG_ERR("Failed to schedule disconnect peer work");
-                                }
+				if (ret < 0) {
+					LOG_ERR("Failed to schedule disconnect peer work");
+				}
 			}
 			break;
 		default:
@@ -975,18 +954,18 @@ static bool event_handler(const struct event_header *eh)
 		CollarStatus prev_collar_status = current_collar_status;
 		collar_status_update(evt->collar_status);
 #if CONFIG_BEACON_SCAN_ENABLE
-		if ((prev_collar_status != current_collar_status) && 
-		    ((prev_collar_status == CollarStatus_OffAnimal) || 
-		    (prev_collar_status == CollarStatus_PowerOff) || 
-		    (prev_collar_status == CollarStatus_Sleep)) &&
+		if ((prev_collar_status != current_collar_status) &&
+		    ((prev_collar_status == CollarStatus_OffAnimal) ||
+		     (prev_collar_status == CollarStatus_PowerOff) ||
+		     (prev_collar_status == CollarStatus_Sleep)) &&
 		    (current_collar_status != CollarStatus_OffAnimal) &&
 		    (current_collar_status != CollarStatus_PowerOff) &&
 		    (current_collar_status != CollarStatus_Sleep)) {
 			/* Schedule beacon scanning immediately when collar wakes up from sleep */
 			int ret = k_work_reschedule(&periodic_beacon_scanner_work, K_NO_WAIT);
-                        if (ret < 0) {
-                                LOG_ERR("Failed to restart beacon scan from collar status change");
-                        }
+			if (ret < 0) {
+				LOG_ERR("Failed to restart beacon scan from collar status change");
+			}
 		}
 #endif /* CONFIG_BEACON_SCAN_ENABLE */
 		return false;

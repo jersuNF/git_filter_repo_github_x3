@@ -23,8 +23,7 @@ LOG_MODULE_REGISTER(amc_dist, CONFIG_AMC_LIB_LOG_LEVEL);
  * 
  * @returns True if inside.
  */
-static uint8_t fnc_pt_in_closed_polyline(fence_t *fence, int16_t testx,
-					 int16_t testy)
+static uint8_t fnc_pt_in_closed_polyline(fence_t *fence, int16_t testx, int16_t testy)
 {
 	uint8_t i, j;
 	uint8_t c = 0;
@@ -36,16 +35,14 @@ static uint8_t fnc_pt_in_closed_polyline(fence_t *fence, int16_t testx,
 	mytestx = testx;
 	mytesty = testy;
 
-	for (i = 0, j = (fence->m.n_points - 1); i < fence->m.n_points;
-	     j = i++) {
+	for (i = 0, j = (fence->m.n_points - 1); i < fence->m.n_points; j = i++) {
 		myX[0] = fence->coordinates[i].s_x_dm;
 		myX[1] = fence->coordinates[j].s_x_dm;
 		myY[0] = fence->coordinates[i].s_y_dm;
 		myY[1] = fence->coordinates[j].s_y_dm;
 		if (((myY[0] > mytesty) != (myY[1] > mytesty)) &&
-		    (mytestx < ((myX[1] - myX[0]) * (mytesty - myY[0])) /
-					       (myY[1] - myY[0]) +
-				       myX[0])) {
+		    (mytestx <
+		     ((myX[1] - myX[0]) * (mytesty - myY[0])) / (myY[1] - myY[0]) + myX[0])) {
 			/* Toggle each time the test results in "cutting a fenceline". */
 			c = !c;
 		}
@@ -101,8 +98,8 @@ static int32_t fnc_dot(vec32_t *a, vec32_t *b)
  * 
  * @return The computed distance to actual vertex in polygon.
 */
-static uint16_t fnc_ln_pt_dist(int16_t A_X, int16_t A_Y, int16_t B_X,
-			       int16_t B_Y, int16_t C_X, int16_t C_Y)
+static uint16_t fnc_ln_pt_dist(int16_t A_X, int16_t A_Y, int16_t B_X, int16_t B_Y, int16_t C_X,
+			       int16_t C_Y)
 {
 	uint16_t d;
 	vec32_t v, w;
@@ -113,9 +110,8 @@ static uint16_t fnc_ln_pt_dist(int16_t A_X, int16_t A_Y, int16_t B_X,
 	w.Y = (int32_t)C_Y - A_Y;
 
 	/* Check overflow. */
-	if (v.X < INT16_MIN || v.X > INT16_MAX || v.Y < INT16_MIN ||
-	    v.Y > INT16_MAX || w.X < INT16_MIN || w.X > INT16_MAX ||
-	    w.Y < INT16_MIN || w.Y > INT16_MAX) {
+	if (v.X < INT16_MIN || v.X > INT16_MAX || v.Y < INT16_MIN || v.Y > INT16_MAX ||
+	    w.X < INT16_MIN || w.X > INT16_MAX || w.Y < INT16_MIN || w.Y > INT16_MAX) {
 		v.X /= 2;
 		v.Y /= 2;
 		w.X /= 2;
@@ -143,8 +139,7 @@ static uint16_t fnc_ln_pt_dist(int16_t A_X, int16_t A_Y, int16_t B_X,
 	return d;
 }
 
-int16_t fnc_calc_dist(int16_t pos_x, int16_t pos_y, uint8_t *p_fence_index,
-		      uint8_t *p_vertex_index)
+int16_t fnc_calc_dist(int16_t pos_x, int16_t pos_y, uint8_t *p_fence_index, uint8_t *p_vertex_index)
 {
 	/* Fetch pasture from cache. */
 	pasture_t *pasture = NULL;
@@ -167,12 +162,11 @@ int16_t fnc_calc_dist(int16_t pos_x, int16_t pos_y, uint8_t *p_fence_index,
 
 		if (fnc_valid(cur_fence)) {
 			for (i = 1; i < cur_fence->m.n_points; i++) {
-				my_tmp = fnc_ln_pt_dist(
-					cur_fence->coordinates[i].s_x_dm,
-					cur_fence->coordinates[i].s_y_dm,
-					cur_fence->coordinates[i - 1].s_x_dm,
-					cur_fence->coordinates[i - 1].s_y_dm,
-					pos_x, pos_y);
+				my_tmp = fnc_ln_pt_dist(cur_fence->coordinates[i].s_x_dm,
+							cur_fence->coordinates[i].s_y_dm,
+							cur_fence->coordinates[i - 1].s_x_dm,
+							cur_fence->coordinates[i - 1].s_y_dm, pos_x,
+							pos_y);
 
 				if (my_tmp < my_dist[fence_index]) {
 					/* Save the shortest distance discovered. */
@@ -186,8 +180,7 @@ int16_t fnc_calc_dist(int16_t pos_x, int16_t pos_y, uint8_t *p_fence_index,
 			 */
 			if (my_dist[fence_index] < INT16_MAX) {
 				bool is_in_closed_polyline =
-					fnc_pt_in_closed_polyline(cur_fence,
-								  pos_x, pos_y);
+					fnc_pt_in_closed_polyline(cur_fence, pos_x, pos_y);
 
 				if ((cur_fence->m.e_fence_type ==
 					     FenceDefinitionMessage_FenceType_Normal &&
@@ -195,8 +188,7 @@ int16_t fnc_calc_dist(int16_t pos_x, int16_t pos_y, uint8_t *p_fence_index,
 				    (cur_fence->m.e_fence_type ==
 					     FenceDefinitionMessage_FenceType_Inverted &&
 				     !is_in_closed_polyline)) {
-					my_dist[fence_index] =
-						-my_dist[fence_index];
+					my_dist[fence_index] = -my_dist[fence_index];
 				}
 			}
 		}
@@ -223,13 +215,11 @@ int16_t fnc_calc_dist(int16_t pos_x, int16_t pos_y, uint8_t *p_fence_index,
 		}
 	}
 
-	if (my_dist_outside_result != INT16_MAX &&
-	    my_dist_outside_result_ind != -1) {
+	if (my_dist_outside_result != INT16_MAX && my_dist_outside_result_ind != -1) {
 		*p_fence_index = my_dist_outside_result_ind;
 		*p_vertex_index = vertex_index[my_dist_outside_result_ind];
 		return my_dist_outside_result;
-	} else if (my_dist_inside_result != INT16_MIN &&
-		   my_dist_inside_result_ind != -1) {
+	} else if (my_dist_inside_result != INT16_MIN && my_dist_inside_result_ind != -1) {
 		*p_fence_index = my_dist_inside_result_ind;
 		*p_vertex_index = vertex_index[my_dist_inside_result_ind];
 		return my_dist_inside_result;

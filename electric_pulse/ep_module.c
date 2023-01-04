@@ -14,7 +14,6 @@
 #include "error_event.h"
 #include "messaging_module_events.h"
 
-
 #define MODULE ep_module
 LOG_MODULE_REGISTER(MODULE, CONFIG_EP_MODULE_LOG_LEVEL);
 
@@ -79,8 +78,9 @@ int ep_module_init(void)
 			ret = -ENODEV;
 			break;
 		}
-		ret = gpio_pin_configure(ep_ctrl_dev, EP_CTRL_PIN, (GPIO_OUTPUT_ACTIVE | 
-			EP_CTRL_FLAGS | GPIO_DS_ALT_HIGH  | GPIO_DS_ALT_LOW));
+		ret = gpio_pin_configure(ep_ctrl_dev, EP_CTRL_PIN,
+					 (GPIO_OUTPUT_ACTIVE | EP_CTRL_FLAGS | GPIO_DS_ALT_HIGH |
+					  GPIO_DS_ALT_LOW));
 		if (ret != 0) {
 			LOG_WRN("Failed to configure EP control pin");
 			break;
@@ -103,12 +103,13 @@ int ep_module_init(void)
 			LOG_WRN("Failed to read product type from flash");
 			break;
 		}
-		if ((g_product_type != PRODUCT_TYPE_SHEEP) && (g_product_type != PRODUCT_TYPE_CATTLE)) {
+		if ((g_product_type != PRODUCT_TYPE_SHEEP) &&
+		    (g_product_type != PRODUCT_TYPE_CATTLE)) {
 			LOG_WRN("Unknown product type, EP module set to sheep configuration");
 			g_product_type = PRODUCT_TYPE_SHEEP;
 		}
 		return 0;
-	}while(0);
+	} while (0);
 	LOG_ERR("Failed to initializing EP module!");
 	return ret;
 }
@@ -140,35 +141,30 @@ static int ep_module_release(bool first_pulse)
 		}
 	} else {
 		if (first_pulse) {
-			ep_duration_us =
-				(uint32_t)EP_DURATION_SHEEP_US_FIRST_PULSE_US;
+			ep_duration_us = (uint32_t)EP_DURATION_SHEEP_US_FIRST_PULSE_US;
 		} else {
 			ep_duration_us = (uint32_t)EP_DURATION_SHEEP_US;
 		}
 	}
 
-	LOG_INF("Triggering electric pulse now (Period[us]:%d, Pulse width[us]:%d, Duration[us]:%d)", 
-			(EP_ON_TIME_US + EP_OFF_TIME_US), 
-			EP_ON_TIME_US, 
-			ep_duration_us);
-
+	LOG_INF("Triggering electric pulse now (Period[us]:%d, Pulse width[us]:%d, Duration[us]:%d)",
+		(EP_ON_TIME_US + EP_OFF_TIME_US), EP_ON_TIME_US, ep_duration_us);
 
 	int ret;
 	/* Turn ON electric pulse signal (PWM) */
-	ret = pwm_pin_set_usec(ep_ctrl_pwm_dev, PWM_EP_CHANNEL, 
-							(EP_ON_TIME_US + EP_OFF_TIME_US), EP_ON_TIME_US, 0);
+	ret = pwm_pin_set_usec(ep_ctrl_pwm_dev, PWM_EP_CHANNEL, (EP_ON_TIME_US + EP_OFF_TIME_US),
+			       EP_ON_TIME_US, 0);
 	if (ret != 0) {
 		LOG_WRN("Unable to set electic pulse PWM signal!");
-	}
-	else {
+	} else {
 		k_busy_wait(ep_duration_us);
 		g_last_pulse_time = current_time;
 	}
-		
+
 	/* Turn OFF electric pulse signal (PWM) */
 	ret = pwm_pin_set_usec(ep_ctrl_pwm_dev, PWM_EP_CHANNEL, 0, 0, 0);
-	if (ret != 0) { 
-		LOG_WRN("Unable to disable electic pulse PWM signal!"); 
+	if (ret != 0) {
+		LOG_WRN("Unable to disable electic pulse PWM signal!");
 	}
 	ret = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_LOW);
 	if (ret != 0) {
@@ -191,33 +187,33 @@ static bool event_handler(const struct event_header *eh)
 		int err;
 		const struct ep_status_event *event = cast_ep_status_event(eh);
 		switch (event->ep_status) {
-			case EP_RELEASE: {
-				if (g_trigger_ready) {
-					g_trigger_ready = false;
-					err = ep_module_release(event->is_first_pulse);
-					if (err < 0) {
-						LOG_ERR("Error in ep release (%d)", err);
-						nf_app_error(ERR_EP_MODULE, err, NULL, 0);
-					}
-				} else {
-					LOG_ERR("Tried to give EP outside sound max event (%d)", -EACCES);
-					nf_app_error(ERR_EP_MODULE, -EACCES, NULL, 0);
+		case EP_RELEASE: {
+			if (g_trigger_ready) {
+				g_trigger_ready = false;
+				err = ep_module_release(event->is_first_pulse);
+				if (err < 0) {
+					LOG_ERR("Error in ep release (%d)", err);
+					nf_app_error(ERR_EP_MODULE, err, NULL, 0);
 				}
-				break;
+			} else {
+				LOG_ERR("Tried to give EP outside sound max event (%d)", -EACCES);
+				nf_app_error(ERR_EP_MODULE, -EACCES, NULL, 0);
 			}
-			default: {
-				/* Unhandled control message */
-				__ASSERT_NO_MSG(false);
-				break;
-			}
+			break;
+		}
+		default: {
+			/* Unhandled control message */
+			__ASSERT_NO_MSG(false);
+			break;
+		}
 		}
 		return false;
 	}
 	if (is_warn_correction_pause_event(eh)) {
 		/* Open up window for zapping since we recieved that
 		 * the sound controller is playing MAX warn freq. */
-		const struct warn_correction_pause_event *event
-			= cast_warn_correction_pause_event(eh);
+		const struct warn_correction_pause_event *event =
+			cast_warn_correction_pause_event(eh);
 		if (event->reason == Reason_WARNPAUSEREASON_ZAP) {
 			g_trigger_ready = true;
 			k_sem_give(&ep_trigger_ready);

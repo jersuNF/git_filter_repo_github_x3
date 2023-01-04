@@ -20,8 +20,6 @@ LOG_MODULE_REGISTER(move_controller, CONFIG_MOVE_CONTROLLER_LOG_LEVEL);
 
 #define GRAVITY 9.806650
 
-
-
 enum acc_reading_state {
 	FIRST_READ_DISREGARD_BUFFER = 0,
 	SECOND_READ_INIT_MOVING_AVERAGE,
@@ -33,7 +31,7 @@ static enum acc_reading_state reading_state = FIRST_READ_DISREGARD_BUFFER;
 static const struct device *sensor;
 
 /* +∕- fullscale range [g] */
-typedef enum {RANGE_2G=2, RANGE_4G=4, RANGE_8G=8, RANGE_16G=16}acc_scale_t;
+typedef enum { RANGE_2G = 2, RANGE_4G = 4, RANGE_8G = 8, RANGE_16G = 16 } acc_scale_t;
 
 /** @todo Add to make configurable from messaging.c event. Also storage settings? */
 static uint16_t off_animal_time_limit_sec = OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT;
@@ -43,7 +41,6 @@ static uint16_t acc_sigma_noactivity_limit = ACC_SIGMA_NOACTIVITY_LIMIT_DEFAULT;
 static int16_t acc_fifo_x[ACC_FIFO_ELEMENTS];
 static int16_t acc_fifo_y[ACC_FIFO_ELEMENTS];
 static int16_t acc_fifo_z[ACC_FIFO_ELEMENTS];
-
 
 /* Save the calculated standard deviation for later. */
 static uint32_t acc_std_final = 0;
@@ -56,16 +53,15 @@ static uint8_t num_acc_fifo_samples = 0;
 static acc_activity_t last_activity = ACTIVITY_NO;
 
 /* Work queue item for triggering a read from the sensor */
-static struct k_work_delayable sample_sensor_work; 
+static struct k_work_delayable sample_sensor_work;
 
 /* Variable used to check if we time out regarding new accelerometer data. */
 void movement_timeout_fn(struct k_timer *dummy);
 K_TIMER_DEFINE(movement_timeout_timer, movement_timeout_fn, NULL);
 
 void movement_thread_fn();
-K_THREAD_DEFINE(movement_thread, CONFIG_MOVEMENT_THREAD_STACK_SIZE,
-		movement_thread_fn, NULL, NULL, NULL,
-		CONFIG_MOVEMENT_THREAD_PRIORITY, 0, 0);
+K_THREAD_DEFINE(movement_thread, CONFIG_MOVEMENT_THREAD_STACK_SIZE, movement_thread_fn, NULL, NULL,
+		NULL, CONFIG_MOVEMENT_THREAD_PRIORITY, 0, 0);
 
 K_MSGQ_DEFINE(acc_data_msgq, sizeof(raw_acc_data_t), CONFIG_ACC_MSGQ_SIZE, 4);
 
@@ -125,7 +121,6 @@ uint8_t acc_count_steps(int32_t gravity)
 	return step_counter;
 }
 
-
 /**
  * @brief Processing of accelerometer data to compute animal activity level.
  *  
@@ -143,21 +138,20 @@ void process_acc_data(raw_acc_data_t *acc)
 		return;
 	}
 
-
 	LOG_DBG("acc_std_final mov_controller: %d", acc_std_final);
 
 	acc_fifo_x[num_acc_fifo_samples] = acc->x;
 	acc_fifo_y[num_acc_fifo_samples] = acc->y;
 	acc_fifo_z[num_acc_fifo_samples] = acc->z;
-	num_acc_fifo_samples ++;
+	num_acc_fifo_samples++;
 
 	if (num_acc_fifo_samples < ACC_FIFO_ELEMENTS) {
-		LOG_DBG("Filling data buffer, sample %d/%d", num_acc_fifo_samples, 
-				(ACC_FIFO_ELEMENTS - 1));
+		LOG_DBG("Filling data buffer, sample %d/%d", num_acc_fifo_samples,
+			(ACC_FIFO_ELEMENTS - 1));
 		return;
 	}
-	LOG_DBG("Accel. data acquired (%d/%d samples), processing", 
-			num_acc_fifo_samples, ACC_FIFO_ELEMENTS);
+	LOG_DBG("Accel. data acquired (%d/%d samples), processing", num_acc_fifo_samples,
+		ACC_FIFO_ELEMENTS);
 
 	num_acc_fifo_samples = 0;
 	if (reading_state == FIRST_READ_DISREGARD_BUFFER) {
@@ -208,11 +202,8 @@ void process_acc_data(raw_acc_data_t *acc)
 		reading_state = NORMAL_READ;
 		acc_std_final = acc_std;
 	} else {
-		acc_std_final =
-			(acc_std * 2) / (ACC_STD_EXP_MOVING_AVERAGE_N + 1) +
-			acc_std_final -
-			(acc_std_final * 2) /
-				(ACC_STD_EXP_MOVING_AVERAGE_N + 1);
+		acc_std_final = (acc_std * 2) / (ACC_STD_EXP_MOVING_AVERAGE_N + 1) + acc_std_final -
+				(acc_std_final * 2) / (ACC_STD_EXP_MOVING_AVERAGE_N + 1);
 	}
 
 	/* Determine current activity level, the number below is based 
@@ -238,7 +229,6 @@ void process_acc_data(raw_acc_data_t *acc)
 	animal_activity->level = cur_activity;
 	EVENT_SUBMIT(animal_activity);
 
-
 	LOG_DBG("Step count = %d", stepcount);
 
 	if (stepcount >= STEPS_TRIGGER) {
@@ -255,12 +245,9 @@ void process_acc_data(raw_acc_data_t *acc)
 		cur_activity = last_activity + 1;
 		activity_decrease_timestamp = k_uptime_get_32();
 	} else if (cur_activity < last_activity) {
-		if ((last_activity == ACTIVITY_LOW &&
-		     a_delta > A_DEC_THRESHOLD_NO) ||
-		    (last_activity == ACTIVITY_MED &&
-		     a_delta > A_DEC_THRESHOLD_LOW) ||
-		    (last_activity == ACTIVITY_HIGH &&
-		     a_delta > A_DEC_THRESHOLD_MED)) {
+		if ((last_activity == ACTIVITY_LOW && a_delta > A_DEC_THRESHOLD_NO) ||
+		    (last_activity == ACTIVITY_MED && a_delta > A_DEC_THRESHOLD_LOW) ||
+		    (last_activity == ACTIVITY_HIGH && a_delta > A_DEC_THRESHOLD_MED)) {
 			cur_activity = last_activity - 1;
 			activity_decrease_timestamp = k_uptime_get_32();
 		} else {
@@ -277,8 +264,7 @@ void process_acc_data(raw_acc_data_t *acc)
 
 	if (cur_activity == ACTIVITY_NO) {
 		uint32_t inactive_for_sec =
-			(uint32_t)((k_uptime_get_32() -
-				    first_inactive_timestamp)/1000);
+			(uint32_t)((k_uptime_get_32() - first_inactive_timestamp) / 1000);
 		if (inactive_for_sec >= off_animal_time_limit_sec) {
 			is_active = false;
 		}
@@ -303,21 +289,19 @@ void process_acc_data(raw_acc_data_t *acc)
 		struct movement_out_event *event = new_movement_out_event();
 		event->state = m_state;
 
-		LOG_DBG("State is %i, activity is %i, acc_std_final %i",m_state, cur_activity, acc_std_final);
+		LOG_DBG("State is %i, activity is %i, acc_std_final %i", m_state, cur_activity,
+			acc_std_final);
 		EVENT_SUBMIT(event);
 		prev_state = m_state;
 	}
 
 	/* Reset the timer since we just consumed the data successfully. */
-	k_timer_start(&movement_timeout_timer,
-		      K_SECONDS(CONFIG_MOVEMENT_TIMEOUT_SEC), K_NO_WAIT);
+	k_timer_start(&movement_timeout_timer, K_SECONDS(CONFIG_MOVEMENT_TIMEOUT_SEC), K_NO_WAIT);
 }
 
 uint32_t get_active_delta(void)
 {
-	return prev_state == STATE_INACTIVE ?
-		       0 :
-		       k_uptime_get_32() - active_timestamp;
+	return prev_state == STATE_INACTIVE ? 0 : k_uptime_get_32() - active_timestamp;
 }
 
 void movement_thread_fn()
@@ -350,12 +334,12 @@ void fetch_and_display(const struct device *sensor)
 	}
 	/* Convert from m/s² to mg */
 	int32_t accel_mg[3];
-	accel_mg[0] = (int32_t)((sensor_value_to_double(&accel[0])/GRAVITY) * 1000);
-	accel_mg[1] = (int32_t)((sensor_value_to_double(&accel[1])/GRAVITY) * 1000);
-	accel_mg[2] = (int32_t)((sensor_value_to_double(&accel[2])/GRAVITY) * 1000);
+	accel_mg[0] = (int32_t)((sensor_value_to_double(&accel[0]) / GRAVITY) * 1000);
+	accel_mg[1] = (int32_t)((sensor_value_to_double(&accel[1]) / GRAVITY) * 1000);
+	accel_mg[2] = (int32_t)((sensor_value_to_double(&accel[2]) / GRAVITY) * 1000);
 
-	LOG_DBG("Acceleration [mg]: X: %d, Y: %d, Z: %d", accel_mg[0] , accel_mg[1] ,accel_mg[2]);
-	
+	LOG_DBG("Acceleration [mg]: X: %d, Y: %d, Z: %d", accel_mg[0], accel_mg[1], accel_mg[2]);
+
 	raw_acc_data_t data;
 	data.x = (int16_t)(accel_mg[0] * 16); // Multiply with legacy constant
 	data.y = (int16_t)(accel_mg[1] * 16); // Multiply with legacy constant
@@ -368,7 +352,7 @@ void fetch_and_display(const struct device *sensor)
 		LOG_WRN("Message queue full, purging and retry");
 		k_msgq_purge(&acc_data_msgq);
 	}
-	
+
 #ifdef CONFIG_TEST
 	/* Keep a copy of the raw data for testing */
 	memcpy(&raw_data, &data, sizeof(data));
@@ -390,32 +374,31 @@ static int update_acc_odr(acc_mode_t mode_hz)
 
 	uint32_t hz = 0;
 	switch (mode_hz) {
-		case MODE_OFF: {
-			hz = 0;
-			break;
-		}
-		case MODE_1_6_HZ: {
-			hz = 1;
-			break;
-		}
-		case MODE_12_5_HZ: {
-	#if CONFIG_LIS2DH
-			hz = 10;
-	#else
-			hz = 12;
-	#endif
-			break;
-		}
-		default: {
-			return -EINVAL;
-		}
+	case MODE_OFF: {
+		hz = 0;
+		break;
+	}
+	case MODE_1_6_HZ: {
+		hz = 1;
+		break;
+	}
+	case MODE_12_5_HZ: {
+#if CONFIG_LIS2DH
+		hz = 10;
+#else
+		hz = 12;
+#endif
+		break;
+	}
+	default: {
+		return -EINVAL;
+	}
 	}
 	struct sensor_value odr = {
 		.val1 = hz,
 	};
 
-	int ret = sensor_attr_set(sensor, trig.chan, SENSOR_ATTR_SAMPLING_FREQUENCY,
-			    &odr);
+	int ret = sensor_attr_set(sensor, trig.chan, SENSOR_ATTR_SAMPLING_FREQUENCY, &odr);
 	if (ret != 0) {
 		LOG_ERR("Failed to set odr: %d", ret);
 		return ret;
@@ -426,9 +409,8 @@ static int update_acc_odr(acc_mode_t mode_hz)
 static int update_acc_range(acc_scale_t scale)
 {
 	struct sensor_value range;
-	sensor_g_to_ms2((uint8_t) scale, &range);
-	int ret = sensor_attr_set(sensor, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_FULL_SCALE,
-			    &range);
+	sensor_g_to_ms2((uint8_t)scale, &range);
+	int ret = sensor_attr_set(sensor, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_FULL_SCALE, &range);
 	if (ret != 0) {
 		LOG_ERR("Failed to set range: %d", ret);
 		return ret;
@@ -471,23 +453,19 @@ int init_movement_controller(void)
 
 	/* Start the timeout timer. This is reset everytime we have calculated
 	 * the activity successfully. */
-	k_timer_start(&movement_timeout_timer, 
-		K_SECONDS(CONFIG_MOVEMENT_TIMEOUT_SEC), K_NO_WAIT);
+	k_timer_start(&movement_timeout_timer, K_SECONDS(CONFIG_MOVEMENT_TIMEOUT_SEC), K_NO_WAIT);
 
-	err = stg_config_u16_read(STG_U16_ACC_SIGMA_SLEEP_LIMIT,
-			&acc_sigma_sleep_limit);
+	err = stg_config_u16_read(STG_U16_ACC_SIGMA_SLEEP_LIMIT, &acc_sigma_sleep_limit);
 	if (err != 0) {
 		return err;
 	}
 
-	err = stg_config_u16_read(STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT,
-			&acc_sigma_noactivity_limit);
+	err = stg_config_u16_read(STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT, &acc_sigma_noactivity_limit);
 	if (err != 0) {
 		return err;
 	}
 
-	err = stg_config_u16_read(STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC,
-			&off_animal_time_limit_sec);
+	err = stg_config_u16_read(STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC, &off_animal_time_limit_sec);
 	if (err != 0) {
 		return err;
 	}
@@ -506,8 +484,7 @@ static bool event_handler(const struct event_header *eh)
 {
 	int err;
 	if (is_movement_set_mode_event(eh)) {
-		struct movement_set_mode_event *ev =
-			cast_movement_set_mode_event(eh);
+		struct movement_set_mode_event *ev = cast_movement_set_mode_event(eh);
 		err = update_acc_odr(ev->acc_mode);
 		if (err) {
 			return false;
@@ -522,8 +499,7 @@ static bool event_handler(const struct event_header *eh)
 			break;
 		}
 		case NO_ACTIVITY_SIGMA: {
-			acc_sigma_noactivity_limit =
-				ev->param.no_activity_sigma;
+			acc_sigma_noactivity_limit = ev->param.no_activity_sigma;
 			break;
 		}
 		case OFF_ANIMAL_SIGMA: {

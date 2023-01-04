@@ -41,8 +41,7 @@ static atomic_t charging_active = false;
 #define CHARGING_ADC_RESOLUTION 14
 #define CHARGING_ADC_GAIN ADC_GAIN_1
 #define CHARGING_ADC_REFERENCE ADC_REF_INTERNAL
-#define CHARGING_ADC_ACQUISITION_TIME                                          \
-	ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)
+#define CHARGING_ADC_ACQUISITION_TIME ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)
 #define CHARGING_ADC_CHANNEL 4
 
 #define CURRENT_SENSE_RESISTOR 0.039f // In Ohm
@@ -74,14 +73,11 @@ static int charging_init_adc(void)
 		charging_channel_cfg.channel_id = CHARGING_ADC_CHANNEL;
 #if CONFIG_ADC_CONFIGURABLE_INPUTS
 		charging_channel_cfg.input_positive =
-			SAADC_CH_PSELP_PSELP_AnalogInput0 +
-			CHARGING_ADC_CHANNEL;
+			SAADC_CH_PSELP_PSELP_AnalogInput0 + CHARGING_ADC_CHANNEL;
 #endif
-		ret = adc_channel_setup(charging_adc_dev,
-					&charging_channel_cfg);
+		ret = adc_channel_setup(charging_adc_dev, &charging_channel_cfg);
 		if (ret != 0) {
-			LOG_ERR("Setup of charging adc channel failed with code %d",
-				ret);
+			LOG_ERR("Setup of charging adc channel failed with code %d", ret);
 			return -ENODEV;
 		}
 	}
@@ -127,13 +123,11 @@ int charging_read_analog_channel(void)
 		sequence.calibrate = false;
 		if (ret == 0) {
 			sample_value = raw_data;
-			adc_raw_to_millivolts(
-				adc_ref_internal(charging_adc_dev),
-				charging_channel_cfg.gain, sequence.resolution,
-				&sample_value);
+			adc_raw_to_millivolts(adc_ref_internal(charging_adc_dev),
+					      charging_channel_cfg.gain, sequence.resolution,
+					      &sample_value);
 			result = ((float)sample_value /
-				  (CURRENT_SENSE_GAIN *
-				   CURRENT_SENSE_RESISTOR)) -
+				  (CURRENT_SENSE_GAIN * CURRENT_SENSE_RESISTOR)) -
 				 CURRENT_OFFSET;
 			if (result < 0) {
 				return 0;
@@ -246,12 +240,10 @@ int charging_current_sample_averaged(void)
 {
 	int current_ma = charging_read_analog_channel();
 	if (current_ma < 0) {
-		LOG_ERR("Failed to read solar charging current: %d",
-			current_ma);
+		LOG_ERR("Failed to read solar charging current: %d", current_ma);
 		return -ENOENT;
 	}
-	uint16_t avg_current_value =
-		approx_moving_average(&i_charg_mov_avg, current_ma);
+	uint16_t avg_current_value = approx_moving_average(&i_charg_mov_avg, current_ma);
 	return avg_current_value;
 }
 

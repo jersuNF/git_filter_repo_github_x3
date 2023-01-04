@@ -23,9 +23,8 @@
  * 
  * @returns 0 on success, otherwise negative errno.
  */
-void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss,
-			FenceStatus fs, amc_zone_t zone, int16_t mean_dist,
-			int16_t dist_change);
+void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss, FenceStatus fs,
+			amc_zone_t zone, int16_t mean_dist, int16_t dist_change);
 
 /** @brief Gets the correction status.
  * 

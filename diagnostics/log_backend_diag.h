@@ -12,8 +12,8 @@
 /** @brief Struct holding pointers to sending and passthrough enable actions.
  */
 struct log_backend_diag_action {
-	void (*send_resp)(enum diagnostics_interface, const uint8_t*, uint32_t);
-	int (*thru_enable)(enum diagnostics_interface, const struct device*);
+	void (*send_resp)(enum diagnostics_interface, const uint8_t *, uint32_t);
+	int (*thru_enable)(enum diagnostics_interface, const struct device *);
 };
 
 /**
@@ -23,7 +23,7 @@ struct log_backend_diag_action {
  * 
  * @return 0 on success, otherwise negative errno.
  */
-int log_backend_diag_init(struct log_backend_diag_action* actions);
+int log_backend_diag_init(struct log_backend_diag_action *actions);
 
 /**
  * @brief Enables log backen for diagnostics. 

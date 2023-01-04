@@ -11,6 +11,7 @@
 #define PRIORITY 7
 
 #define GNSS_1SEC 1000
+
 K_SEM_DEFINE(new_data_sem, 0, 1);
 
 #define MODULE gnss_controller

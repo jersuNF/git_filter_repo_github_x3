@@ -9,97 +9,87 @@
 
 static void commander_gnss_data_received(void)
 {
-	
 }
 
-int commander_stimulator_handler(enum diagnostics_interface interface, 
-				 uint8_t cmd, uint8_t* data, uint32_t size)
+int commander_stimulator_handler(enum diagnostics_interface interface, uint8_t cmd, uint8_t *data,
+				 uint32_t size)
 {
 	int err = 0;
-	
+
 	uint8_t resp = ACK;
 
 	switch (cmd) {
-		case GNSS_HUB:
-		{
-			if (size != 1) {
-				resp = ERROR;
-				break;
-			}
+	case GNSS_HUB: {
+		if (size != 1) {
+			resp = ERROR;
+			break;
+		}
 
-			uint8_t hub_mode = data[0];
-			if ((hub_mode == GNSS_HUB_MODE_SNIFFER) ||
-			    (hub_mode == GNSS_HUB_MODE_SIMULATOR)) {
-				gnss_hub_set_diagnostics_callback(
-						commander_gnss_data_received);
-			} else {
-				gnss_hub_set_diagnostics_callback(NULL);
-			}
-			if (gnss_hub_configure(hub_mode) != 0) {
-				resp = ERROR;
-			}
-			
-			break;
+		uint8_t hub_mode = data[0];
+		if ((hub_mode == GNSS_HUB_MODE_SNIFFER) || (hub_mode == GNSS_HUB_MODE_SIMULATOR)) {
+			gnss_hub_set_diagnostics_callback(commander_gnss_data_received);
+		} else {
+			gnss_hub_set_diagnostics_callback(NULL);
 		}
-		case GNSS_SEND:
-		{
-			if (gnss_hub_send(GNSS_HUB_ID_DIAGNOSTICS, data, size) != 0) {
-				resp = ERROR;
-			}
-			break;
+		if (gnss_hub_configure(hub_mode) != 0) {
+			resp = ERROR;
 		}
-		case GNSS_RECEIVE:
-		{
-			uint8_t* buffer;
-			uint32_t size = 0;
-			if (gnss_hub_rx_get_data(GNSS_HUB_ID_DIAGNOSTICS, &buffer, &size) == 0)
-			{
-				/* Create and send data response */
-				resp = DATA;
-				size = MIN(size, 100);
 
-				commander_send_resp(interface, STIMULATOR, cmd, resp, buffer, size);
-				gnss_hub_rx_consume(GNSS_HUB_ID_DIAGNOSTICS, size);
-			} else {
-				resp = ERROR;
-			}
-			break;
+		break;
+	}
+	case GNSS_SEND: {
+		if (gnss_hub_send(GNSS_HUB_ID_DIAGNOSTICS, data, size) != 0) {
+			resp = ERROR;
 		}
-		case BUZZER_WARN:
-		{
-			/** @todo Warning frequency as argument? */
+		break;
+	}
+	case GNSS_RECEIVE: {
+		uint8_t *buffer;
+		uint32_t size = 0;
+		if (gnss_hub_rx_get_data(GNSS_HUB_ID_DIAGNOSTICS, &buffer, &size) == 0) {
+			/* Create and send data response */
+			resp = DATA;
+			size = MIN(size, 100);
 
-			/* Simulate the highest tone event */
-			struct sound_event *sound_event_warn = new_sound_event();
-			sound_event_warn->type = SND_WARN;
-			EVENT_SUBMIT(sound_event_warn);
-			
-			struct sound_set_warn_freq_event *sound_warn_freq = new_sound_set_warn_freq_event();
-			sound_warn_freq->freq = WARN_FREQ_MAX;
-			EVENT_SUBMIT(sound_warn_freq);
+			commander_send_resp(interface, STIMULATOR, cmd, resp, buffer, size);
+			gnss_hub_rx_consume(GNSS_HUB_ID_DIAGNOSTICS, size);
+		} else {
+			resp = ERROR;
+		}
+		break;
+	}
+	case BUZZER_WARN: {
+		/** @todo Warning frequency as argument? */
 
-			break;
-		}
-		case ELECTRICAL_PULSE:
-		{
-			struct sound_status_event *ev_test_release_zap =
-				new_sound_status_event();
-			ev_test_release_zap->status = SND_STATUS_PLAYING_MAX;
-			EVENT_SUBMIT(ev_test_release_zap);
-			k_sleep(K_MSEC(200));
-			/* Send electric pulse */
-			struct ep_status_event *ready_ep_event = new_ep_status_event();
-			ready_ep_event->ep_status = EP_RELEASE;
-			EVENT_SUBMIT(ready_ep_event);
-			k_sleep(K_SECONDS(2));
-			struct sound_status_event *ev_idle = new_sound_status_event();
-			ev_idle->status = SND_STATUS_IDLE;
-			EVENT_SUBMIT(ev_idle);
-			break;
-		}
-		default:
-			resp = UNKNOWN_CMD;
-			break;
+		/* Simulate the highest tone event */
+		struct sound_event *sound_event_warn = new_sound_event();
+		sound_event_warn->type = SND_WARN;
+		EVENT_SUBMIT(sound_event_warn);
+
+		struct sound_set_warn_freq_event *sound_warn_freq = new_sound_set_warn_freq_event();
+		sound_warn_freq->freq = WARN_FREQ_MAX;
+		EVENT_SUBMIT(sound_warn_freq);
+
+		break;
+	}
+	case ELECTRICAL_PULSE: {
+		struct sound_status_event *ev_test_release_zap = new_sound_status_event();
+		ev_test_release_zap->status = SND_STATUS_PLAYING_MAX;
+		EVENT_SUBMIT(ev_test_release_zap);
+		k_sleep(K_MSEC(200));
+		/* Send electric pulse */
+		struct ep_status_event *ready_ep_event = new_ep_status_event();
+		ready_ep_event->ep_status = EP_RELEASE;
+		EVENT_SUBMIT(ready_ep_event);
+		k_sleep(K_SECONDS(2));
+		struct sound_status_event *ev_idle = new_sound_status_event();
+		ev_idle->status = SND_STATUS_IDLE;
+		EVENT_SUBMIT(ev_idle);
+		break;
+	}
+	default:
+		resp = UNKNOWN_CMD;
+		break;
 	}
 
 	/* Send all non-data responses here, data has been sent earlier */

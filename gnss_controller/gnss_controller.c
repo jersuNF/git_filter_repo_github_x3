@@ -110,7 +110,7 @@ static int gnss_controller_reset_and_setup_gnss(uint16_t mask)
 int gnss_controller_init(void)
 {
 	enum States {
-		ST_GNSS_FW_DRIVER_INIT,
+		ST_GNSS_FW_DRIVER_INIT = 0,
 		ST_GNSS_FW_CB_INIT,
 		ST_GNSS_HW_INIT,
 		ST_GNSS_RUNNING
@@ -132,7 +132,7 @@ int gnss_controller_init(void)
 				nf_app_error(ERR_GNSS_CONTROLLER, -1, msg, sizeof(*msg));
 				gnss_failed_init_count++;
 			} else {
-				current_state++;
+				current_state = ST_GNSS_FW_CB_INIT;
 			}
 		} break;
 		case ST_GNSS_FW_CB_INIT: {
@@ -140,10 +140,10 @@ int gnss_controller_init(void)
 			if (ret != 0) {
 				char *msg = "Failed to register data CB!";
 				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
-				current_state--;
+				current_state = ST_GNSS_FW_DRIVER_INIT;
 				gnss_failed_init_count++;
 			} else {
-				current_state++;
+				current_state = ST_GNSS_HW_INIT;
 			}
 		} break;
 		case ST_GNSS_HW_INIT: {
@@ -151,10 +151,10 @@ int gnss_controller_init(void)
 			if (ret != 0) {
 				char *msg = "Failed setup of GNSS!";
 				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
-				current_state--;
+				current_state = ST_GNSS_FW_CB_INIT;
 				gnss_failed_init_count++;
 			} else {
-				current_state++;
+				current_state = ST_GNSS_RUNNING;
 			}
 		} break;
 		case ST_GNSS_RUNNING: {

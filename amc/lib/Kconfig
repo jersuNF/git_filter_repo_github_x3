@@ -81,3 +81,7 @@ config GNSS_HACC_LIMIT
 config GNSS_CACC_LIMIT
 	int "Maximum course heading accuracy in centidegrees, deg*100"
 	default 36000
+
+config GNSS_UPDATE_MODE_RETRIES
+	int "Number of GNSS command retries"
+	default 2

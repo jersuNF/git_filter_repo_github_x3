@@ -193,12 +193,20 @@ int gnss_update_mode(gnss_mode_t mode)
 		return -EINVAL;
 	}
 
-	gnss_mode = mode;
+	struct k_sem sync_sem;
+	int gnss_ret = -1;
+	k_sem_init(&sync_sem, 0, 1);
 	struct gnss_set_mode_event *ev = new_gnss_set_mode_event();
-	ev->mode = gnss_mode;
+	ev->mode = mode;
+	ev->retries = CONFIG_GNSS_UPDATE_MODE_RETRIES;
+	ev->sync_sem = &sync_sem;
+	ev->ret = &gnss_ret;
 	EVENT_SUBMIT(ev);
-
-	return 0;
+	k_sem_take(&sync_sem, K_FOREVER);
+	if (*ev->ret != 0) {
+		gnss_mode = mode;
+	}
+	return *ev->ret;
 }
 
 gnss_mode_t gnss_get_mode(void)

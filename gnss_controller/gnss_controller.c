@@ -22,7 +22,6 @@ static _Noreturn void publish_gnss_data(void *ctx);
 static int gnss_data_update_cb(const gnss_t *);
 static void gnss_timed_out(void);
 static int gnss_set_mode(gnss_mode_t mode, bool wakeup);
-static void gnss_thread_fn(void);
 
 static gnss_t gnss_data_buffer;
 static gnss_mode_t current_mode = GNSSMODE_NOMODE;
@@ -34,61 +33,6 @@ static uint8_t gnss_timeout_count;
 static uint8_t gnss_failed_init_count;
 
 K_THREAD_STACK_DEFINE(pub_gnss_stack, STACK_SIZE);
-
-K_THREAD_DEFINE(send_to_gnss, CONFIG_GNSS_STACK_SIZE, gnss_thread_fn, NULL, NULL, NULL,
-		K_PRIO_COOP(CONFIG_GNSS_THREAD_PRIORITY), 0, 0);
-
-enum gnss_action_e { GNSS_ACTION_NUL = 0, GNSS_ACTION_SET_MODE };
-
-typedef struct gnss_set_mode_arg_t {
-	gnss_mode_t mode;
-	int retries;
-	int *ret;
-	struct k_sem *sync_sem;
-} gnss_set_mode_arg_t;
-
-typedef struct gnss_msgq_t {
-	enum gnss_action_e action;
-	void *arg;
-} gnss_msgq_t;
-
-K_MEM_SLAB_DEFINE(gnss_send_slab, sizeof(gnss_set_mode_arg_t), 1, 4);
-
-K_MSGQ_DEFINE(gnss_msgq, sizeof(gnss_msgq_t), 1, 4);
-
-static void gnss_thread_fn(void)
-{
-	while (true) {
-		gnss_msgq_t msg;
-		k_msgq_get(&gnss_msgq, &msg, K_FOREVER);
-		switch (msg.action) {
-		case GNSS_ACTION_SET_MODE: {
-			LOG_DBG("setting mode");
-			gnss_set_mode_arg_t *arg = (gnss_set_mode_arg_t *)msg.arg;
-			int rc = 0;
-			int retries = arg->retries;
-			do {
-				rc = gnss_set_mode(arg->mode, true);
-			} while ((retries-- > 0) && (rc != 0));
-			*arg->ret = rc;
-			if (rc == 0) {
-				current_mode = arg->mode;
-			} else {
-				LOG_ERR("Failed to set mode %d with %d retries", rc, arg->retries);
-				char *msg = "Failed to set GNSS receiver mode";
-				nf_app_error(ERR_GNSS_CONTROLLER, rc, msg, sizeof(*msg));
-			}
-			k_sem_give(arg->sync_sem);
-			LOG_DBG("MODE = %d old = %d ", arg->mode, current_mode);
-			k_mem_slab_free(&gnss_send_slab, (void **)(&arg));
-			break;
-		}
-		default:
-			LOG_ERR("Unrecognized action %d", msg.action);
-		}
-	}
-}
-
 struct k_thread pub_gnss_thread;
 static bool initialized = false;
 
@@ -311,24 +255,17 @@ static bool gnss_controller_event_handler(const struct event_header *eh)
 {
 	if (is_gnss_set_mode_event(eh)) {
 		struct gnss_set_mode_event *ev = cast_gnss_set_mode_event(eh);
+		LOG_DBG("MODE = %d old = %d ", ev->mode, current_mode);
 		if (ev->mode != current_mode) {
-			gnss_msgq_t msg;
-			msg.action = GNSS_ACTION_SET_MODE;
-			gnss_set_mode_arg_t *arg = NULL;
-			if (k_mem_slab_alloc(&gnss_send_slab, (void **)(&arg), K_FOREVER) != 0) {
-				LOG_ERR("Failed to allocate memory");
+			LOG_DBG("setting mode");
+			int ret = gnss_set_mode(ev->mode, true);
+			if (ret != 0) {
+				LOG_ERR("Failed to set mode %d", ret);
+				char *msg = "Failed to set GNSS receiver mode";
+				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
 				return false;
 			}
-			msg.arg = (void *)arg;
-			arg->retries = ev->retries;
-			arg->ret = ev->ret;
-			arg->sync_sem = ev->sync_sem;
-			arg->mode = ev->mode;
-			if (arg->sync_sem == NULL) {
-				LOG_ERR("Semaphore not passed");
-				return false;
-			}
-			k_msgq_put(&gnss_msgq, &msg, K_NO_WAIT);
+			current_mode = ev->mode;
 		}
 		return false;
 	}

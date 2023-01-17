@@ -590,6 +590,10 @@ static bool event_handler(const struct event_header *eh)
 
 		return false;
 	}
+	if (is_gnss_mode_changed_event(eh)) {
+		const struct gnss_mode_changed_event *ev = cast_gnss_mode_changed_event(eh);
+		gnss_set_mode(ev->mode);
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 	return false;
@@ -602,3 +606,4 @@ EVENT_SUBSCRIBE(MODULE, ble_beacon_event);
 EVENT_SUBSCRIBE(MODULE, sound_status_event);
 EVENT_SUBSCRIBE(MODULE, movement_out_event);
 EVENT_SUBSCRIBE(MODULE, turn_off_fence_event);
+EVENT_SUBSCRIBE(MODULE, gnss_mode_changed_event);

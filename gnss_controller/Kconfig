@@ -26,4 +26,13 @@ if GNSS_CONTROLLER
     config GNSS_INIT_MAX_COUNT
         int "number of tries before gnss init should return -1"
         default 6
+    config GNSS_CMD_RETRIES
+        int "number of retries for sending a cmd to GNSS"
+        default 1
+    config GNSS_THREAD_PRIORITY
+        int "GNSS thread priority"
+        default 6
+    config GNSS_STACK_SIZE
+        int "GNSS stack size"
+        default 128
 endif

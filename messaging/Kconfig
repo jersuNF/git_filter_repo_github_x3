@@ -43,6 +43,9 @@ if MESSAGING
 	config CC_ACK_TIMEOUT_SEC
 	    int "Timeout when waiting for ack from cellular controller"
 	    default 3
+	config APP_FOTA_WDT_MIN
+		int "Application wdt for maximum time FOTA can take (hang workaround)"
+		default 10
 
 	menu "Message Queues"
 		config MSGQ_BLE_CTRL_SIZE

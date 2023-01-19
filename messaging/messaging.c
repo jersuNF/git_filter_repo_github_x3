@@ -127,7 +127,6 @@ int8_t request_ano_frame(uint16_t, uint16_t);
 void ano_download(uint16_t, uint16_t);
 void proto_InitHeader(NofenceMessage *);
 void process_poll_response(NofenceMessage *);
-void process_upgrade_request(VersionInfoFW *);
 uint8_t process_fence_msg(FenceDefinitionResponse *);
 uint8_t process_ano_msg(UbxAnoReply *);
 
@@ -175,6 +174,7 @@ struct k_work_delayable process_warning_work;
 struct k_work_delayable process_warning_correction_start_work;
 struct k_work_delayable process_warning_correction_end_work;
 struct k_work_delayable log_send_work;
+struct k_work_delayable fota_wdt_work;
 
 struct fence_def_update {
 	struct k_work_delayable work;
@@ -1066,6 +1066,12 @@ static bool event_handler(const struct event_header *eh)
 	if (is_dfu_status_event(eh)) {
 		struct dfu_status_event *fw_upgrade_event = cast_dfu_status_event(eh);
 
+		if (fw_upgrade_event->dfu_status == DFU_STATUS_IDLE ||
+		    fw_upgrade_event->dfu_status == DFU_STATUS_SUCCESS_REBOOT_SCHEDULED) {
+			/* Error or cancelled, stop the watchdog */
+			LOG_INF("Cancelling APP FOTA WDT");
+			k_work_cancel_delayable(&fota_wdt_work);
+		}
 		if (fw_upgrade_event->dfu_status == DFU_STATUS_IDLE &&
 		    fw_upgrade_event->dfu_error != 0) {
 			fota_reset = true;
@@ -1267,6 +1273,44 @@ void messaging_rx_thread_fn()
 	}
 }
 
+/**
+ * @brief Default App watchdog callback
+ */
+static void fota_app_wdt_cb()
+{
+	sys_reboot(SYS_REBOOT_COLD);
+}
+
+static fota_wdt_cb g_wdt_cb = fota_app_wdt_cb;
+
+/**
+ * @brief Trigger called by fota_wdt_work
+ */
+void fota_app_wdt_trigger()
+{
+	if (g_wdt_cb) {
+		g_wdt_cb();
+	}
+}
+
+/**
+ * @brief Register/overwrite fota app watchdog callback
+ * @param fota wdt callback
+ */
+void fota_wdt_cb_register(fota_wdt_cb wdt_cb)
+{
+	g_wdt_cb = wdt_cb;
+}
+
+/**
+ * @brief Work item handler for "fota_wdt_work". Restarts the system
+ * @param item Pointer to work item.
+ */
+static void fota_wdt_work_fn(struct k_work *item)
+{
+	fota_app_wdt_trigger();
+}
+
 int messaging_module_init(void)
 {
 	LOG_INF("Initializing messaging module.");
@@ -1297,6 +1341,7 @@ int messaging_module_init(void)
 	k_work_init_delayable(&process_warning_correction_end_work, log_correction_end_work_fn);
 	k_work_init_delayable(&data_request_work, data_request_work_fn);
 	k_work_init_delayable(&m_fence_update_req.work, fence_update_req_fn);
+	k_work_init_delayable(&fota_wdt_work, fota_wdt_work_fn);
 
 	memset(&pasture_temp, 0, sizeof(pasture_t));
 	cached_fences_counter = 0;
@@ -1867,6 +1912,10 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 			ev->version = fw_ver_from_server->ulApplicationVersion;
 			EVENT_SUBMIT(ev);
 			fota_reset = false;
+			/* Restart the device if FOTA doesn't finish in 10min */
+			LOG_INF("Starting APP FOTA WDT");
+			k_work_reschedule_for_queue(&message_q, &fota_wdt_work,
+						    K_MINUTES(CONFIG_APP_FOTA_WDT_MIN));
 		}
 	}
 }

@@ -140,9 +140,9 @@ static inline int update_pasture_from_stg(void)
 	/* Add check for fence status, in case collar has rebooted after invalidation */
 	if (get_fence_status() == FenceStatus_TurnedOffByBLE) {
 		LOG_WRN("Fence is turned off by BLE");
-		/* Submit event that we have now begun to use the new fence. */
+		/* Submit event to reset the cached fence version to 0. */
 		struct update_fence_version *ver = new_update_fence_version();
-		ver->fence_version = UINT32_MAX;
+		ver->fence_version = 0;
 		ver->total_fences = 0;
 		EVENT_SUBMIT(ver);
 		return 0;
@@ -154,7 +154,7 @@ static inline int update_pasture_from_stg(void)
 		nf_app_warning(ERR_AMC, err, NULL, 0);
 		/* Submit event that we have now begun to use the new fence. */
 		struct update_fence_version *ver = new_update_fence_version();
-		ver->fence_version = UINT32_MAX;
+		ver->fence_version = 0;
 		ver->total_fences = 0;
 		EVENT_SUBMIT(ver);
 		return 0;

@@ -34,5 +34,5 @@ if GNSS_CONTROLLER
         default 6
     config GNSS_STACK_SIZE
         int "GNSS stack size"
-        default 128
+        default 1024
 endif

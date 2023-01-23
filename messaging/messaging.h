@@ -26,7 +26,6 @@ typedef void (*fota_wdt_cb)(void);
  * @return Returns 0 if successfull, otherwise negative error code.
  */
 int messaging_module_init(void);
-void process_upgrade_request(VersionInfoFW *);
 
 /**
  * @brief Register a cb called by fota_wdt_trigger

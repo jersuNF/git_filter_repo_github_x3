@@ -127,6 +127,7 @@ int8_t request_ano_frame(uint16_t, uint16_t);
 void ano_download(uint16_t, uint16_t);
 void proto_InitHeader(NofenceMessage *);
 void process_poll_response(NofenceMessage *);
+static void process_upgrade_request(VersionInfoFW *);
 uint8_t process_fence_msg(FenceDefinitionResponse *);
 uint8_t process_ano_msg(UbxAnoReply *);
 

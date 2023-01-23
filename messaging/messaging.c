@@ -1071,6 +1071,11 @@ static bool event_handler(const struct event_header *eh)
 			/* Error or cancelled, stop the watchdog */
 			LOG_INF("Cancelling APP FOTA WDT");
 			k_work_cancel_delayable(&fota_wdt_work);
+		} else {
+			/* Start/Kick the FOTA application watchdog */
+			LOG_INF("Kicking APP FOTA WDT");
+			k_work_reschedule_for_queue(&message_q, &fota_wdt_work,
+						    K_MINUTES(CONFIG_APP_FOTA_WDT_MINUTES));
 		}
 		if (fw_upgrade_event->dfu_status == DFU_STATUS_IDLE &&
 		    fw_upgrade_event->dfu_error != 0) {
@@ -1912,10 +1917,6 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 			ev->version = fw_ver_from_server->ulApplicationVersion;
 			EVENT_SUBMIT(ev);
 			fota_reset = false;
-			/* Restart the device if FOTA doesn't finish in 10min */
-			LOG_INF("Starting APP FOTA WDT");
-			k_work_reschedule_for_queue(&message_q, &fota_wdt_work,
-						    K_MINUTES(CONFIG_APP_FOTA_WDT_MIN));
 		}
 	}
 }

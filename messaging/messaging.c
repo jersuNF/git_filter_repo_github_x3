@@ -1284,6 +1284,10 @@ void messaging_rx_thread_fn()
  */
 static void fota_app_wdt_cb()
 {
+	int err = stg_config_u8_write(STG_U8_RESET_REASON, (uint8_t)REBOOT_FOTA_HANG);
+	if (err != 0) {
+		LOG_ERR("Error writing fota reset reason");
+	}
 	sys_reboot(SYS_REBOOT_COLD);
 }
 

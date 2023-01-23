@@ -1302,10 +1302,6 @@ int messaging_module_init(void)
 	cached_fences_counter = 0;
 	pasture_temp.m.us_pasture_crc = EMPTY_FENCE_CRC;
 
-	/** @todo Should add semaphore and only start these queues when
-	 *  we get connection to network with modem.
-	 */
-
 	err = k_work_schedule_for_queue(&message_q, &data_request_work, K_NO_WAIT);
 	if (err < 0) {
 		return err;

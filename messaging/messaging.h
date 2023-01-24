@@ -19,10 +19,22 @@ typedef struct {
 	uint16_t zap_count;
 } collar_state_struct_t;
 
+typedef void (*fota_wdt_cb)(void);
+
 /**
  * @brief Initialization of the messaging module. 
  * @return Returns 0 if successfull, otherwise negative error code.
  */
 int messaging_module_init(void);
 
+/**
+ * @brief Register a cb called by fota_wdt_trigger
+ * @param callback to register
+ */
+void fota_wdt_cb_register(fota_wdt_cb wdt_cb);
+
+/**
+ * @brief Trigger registered watchdog callback
+ */
+void fota_wdt_trigger();
 #endif /* _MESSAGING_H_ */

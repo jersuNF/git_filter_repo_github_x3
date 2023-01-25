@@ -78,7 +78,6 @@ K_SEM_DEFINE(sem_release_tx_thread, 0, 1);
 static collar_state_struct_t current_state;
 static gnss_last_fix_struct_t cached_fix;
 
-static bool fota_reset = true;
 static bool block_fota_request = false;
 
 typedef enum {
@@ -148,7 +147,7 @@ static bool m_confirm_acc_limits, m_confirm_ble_key;
 
 K_MUTEX_DEFINE(send_binary_mutex);
 K_MUTEX_DEFINE(read_flash_mutex);
-static bool reboot_scheduled;
+static bool reboot_scheduled = false;
 
 K_MSGQ_DEFINE(ble_cmd_msgq, sizeof(struct ble_cmd_event), CONFIG_MSGQ_BLE_CMD_SIZE,
 	      4 /* Byte alignment */);
@@ -205,7 +204,9 @@ typedef enum {
 	/* Add additional states here (ANO, diagnostic etc)... */
 } messaging_tx_type_t;
 
-atomic_t m_halt_data_transfer = ATOMIC_INIT(0);
+atomic_t m_fota_in_progress = ATOMIC_INIT(0);
+atomic_t m_break_log_stream_token = ATOMIC_INIT(0);
+
 atomic_t m_message_tx_type = ATOMIC_INIT(0);
 
 static int set_tx_state_ready(messaging_tx_type_t tx_type);
@@ -294,15 +295,21 @@ static void build_log_message()
  * @param len Length of the encoded log message read from storage.
  * @return Returns 0 if successfull, otherwise negative error code.
  */
-int read_and_send_log_data_cb(uint8_t *data, size_t len)
+static int read_and_send_log_data_cb(uint8_t *data, size_t len)
 {
 	/* Only send log data stored to flash if not halted by some other process, e.g. a pending
 	 * FOTA. Retuning an error from this callback will abort the FCB walk in the storage
 	 * controller untill log data trafic is reinstated. */
-	if (atomic_get(&m_halt_data_transfer) == true) {
-		LOG_DBG("Unable to send log data, data transfer is currently halted");
+	if (atomic_get(&m_fota_in_progress) == true) {
+		LOG_DBG("FOTA download in progress, will not send log data now!");
 		return -EBUSY;
 	}
+
+	if (atomic_get(&m_break_log_stream_token) == true) {
+		LOG_DBG("Breaking the log stream!");
+		return -EBUSY;
+	}
+
 	LOG_DBG("Send log message fetched from flash");
 
 	/* Fetch the length from the two first bytes */
@@ -634,17 +641,24 @@ static int set_tx_state_ready(messaging_tx_type_t tx_type)
 	int state = atomic_get(&m_message_tx_type);
 	if (state != IDLE) {
 		/* Tx thread busy sending something else */
-		if ((tx_type == POLL_REQ) && (state == LOG_MSG)) {
-			/* Sending log messages always starts with a poll request- no need to send
-			 * additional poll */
+		if ((state == LOG_MSG) && (tx_type == POLL_REQ)) {
+			/* poll requests should always go through in the case of too many logs
+			 * stored on the flash. Tx thread will consume the token when the fcb 
+			 * walk returns. */
+			atomic_set(&m_break_log_stream_token, true);
 			return 0;
 		}
 		return -EBUSY;
 	}
-	if ((tx_type != POLL_REQ) && (atomic_get(&m_halt_data_transfer) != false)) {
-		/* Unable to send log messages as log data transfer is currently halted */
-		return -EACCES;
+	if ((tx_type == LOG_MSG)) {
+		if (atomic_get(&m_fota_in_progress) == true) {
+			/* Unable to send log messages as log data transfer is currently halted */
+			return -EACCES;
+		} else {
+			atomic_set(&m_break_log_stream_token, false);
+		}
 	}
+
 	state = (int)tx_type;
 	atomic_set(&m_message_tx_type, state);
 
@@ -704,7 +718,7 @@ void messaging_tx_thread_fn(void)
 
 			/* LOG MESSAGES */
 			if ((tx_type == LOG_MSG) && (err == 0) &&
-			    (atomic_get(&m_halt_data_transfer) == false)) {
+			    (atomic_get(&m_fota_in_progress) == false)) {
 				/* Sending, all stored log messages are already proto encoded */
 				err = send_all_stored_messages();
 				/* Log message error handler,
@@ -715,8 +729,7 @@ void messaging_tx_thread_fn(void)
 			}
 
 			/* FENCE DEFINITION REQUEST */
-			if ((tx_type == FENCE_REQ) &&
-			    (atomic_get(&m_halt_data_transfer) == false)) {
+			if ((tx_type == FENCE_REQ)) {
 				NofenceMessage fence_req;
 				proto_InitHeader(&fence_req);
 				fence_req.which_m = NofenceMessage_fence_definition_req_tag;
@@ -737,6 +750,14 @@ void messaging_tx_thread_fn(void)
 
 			/* Reset Tx thread */
 			atomic_set(&m_message_tx_type, IDLE);
+
+			if (atomic_get(&m_break_log_stream_token) == true) {
+				/* consume the token and enforce the poll request */
+				atomic_set(&m_break_log_stream_token, false);
+				atomic_set(&m_message_tx_type, POLL_REQ);
+				k_sem_give(&sem_release_tx_thread);
+			}
+
 		} else {
 			LOG_WRN("Tx thread semaphore returned unexpectedly");
 			k_sem_reset(&sem_release_tx_thread);
@@ -1080,15 +1101,13 @@ static bool event_handler(const struct event_header *eh)
 		}
 		if (fw_upgrade_event->dfu_status == DFU_STATUS_IDLE &&
 		    fw_upgrade_event->dfu_error != 0) {
-			fota_reset = true;
-
 			/* DFU/FOTA is canceled, release the halt on log data trafic in the
 			 * messaging tx thread */
-			atomic_set(&m_halt_data_transfer, false);
+			atomic_set(&m_fota_in_progress, false);
 		} else if (fw_upgrade_event->dfu_status != DFU_STATUS_IDLE) {
 			/* DFU/FOTA has started or is in progress, halt log data trafic in the
 			 * messaging tx thread */
-			atomic_set(&m_halt_data_transfer, true);
+			atomic_set(&m_fota_in_progress, true);
 		}
 		return false;
 	}
@@ -1236,24 +1255,20 @@ static void process_lte_proto_event(void)
 		return;
 	}
 
-	/* Process poll response if data transfer is not otherwie halted for some reason, e.g. a
-	 * pending or ongoing FOTA */
-	if (atomic_get(&m_halt_data_transfer) == 0) {
-		if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
-			LOG_INF("Process poll reponse");
-			process_poll_response(&proto);
-			return;
-		} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
-			uint8_t received_frame = process_fence_msg(&proto.m.fence_definition_resp);
-			fence_download(received_frame);
-			return;
-		} else if (proto.which_m == NofenceMessage_ubx_ano_reply_tag) {
-			uint16_t new_ano_frame = process_ano_msg(&proto.m.ubx_ano_reply);
-			ano_download(proto.m.ubx_ano_reply.usAnoId, new_ano_frame);
-			return;
-		} else {
-			return;
-		}
+	if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
+		LOG_INF("Process poll reponse");
+		process_poll_response(&proto);
+		return;
+	} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
+		uint8_t received_frame = process_fence_msg(&proto.m.fence_definition_resp);
+		fence_download(received_frame);
+		return;
+	} else if (proto.which_m == NofenceMessage_ubx_ano_reply_tag) {
+		uint16_t new_ano_frame = process_ano_msg(&proto.m.ubx_ano_reply);
+		ano_download(proto.m.ubx_ano_reply.usAnoId, new_ano_frame);
+		return;
+	} else {
+		return;
 	}
 }
 
@@ -1914,10 +1929,8 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 		if (!reboot_scheduled) {
 			struct start_fota_event *ev = new_start_fota_event();
 			ev->override_default_host = false;
-			ev->reset_download_client = fota_reset;
 			ev->version = fw_ver_from_server->ulApplicationVersion;
 			EVENT_SUBMIT(ev);
-			fota_reset = false;
 		}
 	}
 }

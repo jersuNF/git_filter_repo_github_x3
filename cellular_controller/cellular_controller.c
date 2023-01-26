@@ -117,15 +117,13 @@ void receive_tcp(struct data *sock_data)
 				if (socket_idle_count > SOCK_RECV_TIMEOUT) {
 					LOG_WRN("Socket receive timed out!");
 					if (!sending_in_progress) {
-						k_sem_take(&close_main_socket_sem, K_FOREVER);
 						/*fota_in_progress = false;
 						 * PSV does not interrupt
 						 * FOTA on 2G, consider
 						 * enabling it with 2G during
 						 * slow FOTA to save some
 						 * energy.*/
-						connected = false;
-						int ret = stop_tcp(fota_in_progress);
+						int ret = stop_tcp(fota_in_progress, &connected, &close_main_socket_sem);
 						socket_idle_count = 0;
 						if (ret != 0) {
 							modem_is_ready = false;
@@ -136,8 +134,7 @@ void receive_tcp(struct data *sock_data)
 				char *e_msg = "Socket receive error!";
 				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
 				if (!sending_in_progress) {
-					connected = false;
-					int ret = stop_tcp(fota_in_progress);
+					int ret = stop_tcp(fota_in_progress, &connected, &close_main_socket_sem);
 					if (ret != 0) {
 						modem_is_ready = false;
 					}
@@ -264,6 +261,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		LOG_WRN("Dropping message!");
 		return false;
 	} else if (is_check_connection(eh)) {
+		k_sem_reset(&close_main_socket_sem);
 		k_sem_give(&connection_state_sem);
 		return false;
 	} else if (is_free_message_mem_event(eh)) {
@@ -423,15 +421,14 @@ static void cellular_controller_keep_alive(void *dev)
 					} else {
 						modem_is_ready = false;
 						fota_in_progress = false;
-						stop_tcp(fota_in_progress);
+						stop_tcp(fota_in_progress, &connected, &close_main_socket_sem);
 					}
 				} else {
 					socket_idle_count = 0;
 					if (!fota_in_progress) {
 						ret = check_ip();
 						if (ret != 0) {
-							stop_tcp(fota_in_progress);
-							connected = false;
+							stop_tcp(fota_in_progress, &connected, &close_main_socket_sem);
 						}
 					}
 				}

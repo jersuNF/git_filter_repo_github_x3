@@ -205,7 +205,7 @@ int get_ip(char **collar_ip)
  * will close the latest TCP socket with id greater than zero, as zero is
  * reserved for the listening socket. */
 /* TODO: enhance robustness. */
-int stop_tcp(const bool keep_modem_awake)
+int stop_tcp(const bool keep_modem_awake, bool *flag, struct k_sem *sem)
 {
 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
 		if (conf.ipv6.tcp.sock > 0) {
@@ -221,7 +221,9 @@ int stop_tcp(const bool keep_modem_awake)
 		}
 	}
 
-	if (!keep_modem_awake) {
+	*flag = false;
+
+	if (!keep_modem_awake && k_sem_take((struct k_sem *)sem, K_FOREVER) == 0) {
 		int ret = modem_nf_sleep();
 		if (ret != 0) {
 			LOG_ERR("Failed to switch modem to power saving!");

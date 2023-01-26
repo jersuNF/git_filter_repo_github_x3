@@ -12,14 +12,14 @@
 
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define RCV_PRIORITY CONFIG_RECV_THREAD_PRIORITY
-#define SOCKET_POLL_INTERVAL 0.25
+#define SOCKET_POLL_INTERVAL 1
 #define SOCK_RECV_TIMEOUT 10
 #define MODULE cellular_controller
 #define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_MSEC
 
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
-K_SEM_DEFINE(messaging_ack, 1, 1);
+K_SEM_DEFINE(messaging_ack, 0, 1);
 K_SEM_DEFINE(fota_progress_update, 0, 1);
 
 K_THREAD_DEFINE(send_tcp_from_q, CONFIG_SEND_THREAD_STACK_SIZE, send_tcp_fn, NULL, NULL, NULL,
@@ -49,6 +49,7 @@ K_SEM_DEFINE(listen_sem, 0, 1); /* this semaphore will be given by the modem
 
 K_SEM_DEFINE(close_main_socket_sem, 0, 1);
 
+static bool waiting_for_msg = false;
 static bool modem_is_ready = false;
 static bool power_level_ok = false;
 static bool fota_in_progress = false;
@@ -86,10 +87,10 @@ void receive_tcp(struct data *sock_data)
 {
 	int received;
 	char *buf = NULL;
+	static bool initializing = true;
 
 	while (1) {
-		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
-		if (connected) {
+		if (connected && waiting_for_msg) {
 			received = socket_receive(sock_data, &buf);
 			if (received > 0) {
 				socket_idle_count = 0;
@@ -97,8 +98,9 @@ void receive_tcp(struct data *sock_data)
 				LOG_WRN("received %d bytes!", received);
 #endif
 				LOG_WRN("will take semaphore!");
-				if (k_sem_take(&messaging_ack, K_MSEC(MESSAGING_ACK_TIMEOUT)) ==
-				    0) {
+				if (initializing || k_sem_take(&messaging_ack, K_MSEC(MESSAGING_ACK_TIMEOUT)) == 0
+				    ) {
+					initializing = false;
 					pMsgIn = (uint8_t *)k_malloc(received);
 					memcpy(pMsgIn, buf, received);
 					struct cellular_proto_in_event *msgIn =
@@ -141,7 +143,7 @@ void receive_tcp(struct data *sock_data)
 				}
 			}
 		}
-		//		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
+				k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
 	}
 }
 
@@ -272,6 +274,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		struct cellular_ack_event *ack = new_cellular_ack_event();
 		ack->message_sent = true;
 		EVENT_SUBMIT(ack);
+		waiting_for_msg = true;
 		return false;
 	} else if (is_dfu_status_event(eh)) {
 		struct dfu_status_event *fw_upgrade_event = cast_dfu_status_event(eh);
@@ -282,6 +285,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			stop_rssi();
 		} else {
 			fota_in_progress = false;
+			enable_rssi();
 		}
 		return false;
 	} else if (is_pwr_status_event(eh)) {

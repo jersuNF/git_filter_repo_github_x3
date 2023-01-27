@@ -35,7 +35,7 @@ K_KERNEL_STACK_DEFINE(keep_alive_stack, CONFIG_CELLULAR_KEEP_ALIVE_STACK_SIZE);
 struct k_thread keep_alive_thread;
 static struct k_sem connection_state_sem;
 
-int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
+int socket_connect(struct data *, struct sockaddr *, socklen_t);
 int socket_listen(struct data *);
 int socket_receive(struct data *, char **);
 void listen_sock_poll(void);

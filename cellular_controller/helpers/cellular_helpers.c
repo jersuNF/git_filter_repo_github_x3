@@ -82,7 +82,8 @@ static size_t sendall(int sock, const void *buf, size_t len)
 	return to_send;
 }
 
-int8_t socket_connect(struct data *data, struct sockaddr *addr, socklen_t addrlen)
+int socket_connect(struct data *data, struct sockaddr *addr, socklen_t
+								     addrlen)
 {
 	int ret, socket_id;
 	data->tcp.sock = socket(addr->sa_family, SOCK_STREAM, IPPROTO_TCP);

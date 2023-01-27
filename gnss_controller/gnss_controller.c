@@ -26,7 +26,6 @@ static int gnss_set_mode(gnss_mode_t mode, bool wakeup);
 static gnss_t gnss_data_buffer;
 static gnss_mode_t current_mode = GNSSMODE_NOMODE;
 static uint16_t current_rate_ms = UINT16_MAX;
-
 const struct device *gnss_dev = NULL;
 static uint8_t gnss_reset_count;
 static uint8_t gnss_timeout_count;
@@ -117,6 +116,7 @@ int gnss_controller_init(void)
 	};
 	enum States current_state = ST_GNSS_FW_DRIVER_INIT;
 	int ret;
+	struct ublox_mon_ver mia_m10_versions;
 	gnss_reset_count = 0;
 	gnss_timeout_count = 0;
 	current_mode = GNSSMODE_NOMODE;
@@ -158,6 +158,16 @@ int gnss_controller_init(void)
 			}
 		} break;
 		case ST_GNSS_RUNNING: {
+			// Query the mia m10 for SW version and HW version and print them.
+			ret = gnss_version_get(gnss_dev, &mia_m10_versions);
+			if (ret != 0) {
+				char *msg = "Failed to get version of mia m10!";
+				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
+				return ret;
+			}
+			LOG_INF("The GNSS SW Version:%s", log_strdup(mia_m10_versions.swVersion));
+			LOG_INF("The GNSS Hardware Version:%s",
+				log_strdup(mia_m10_versions.hwVersion));
 #if defined(CONFIG_TEST)
 			pub_gnss_thread_id =
 #endif

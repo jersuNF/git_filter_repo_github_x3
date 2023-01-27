@@ -22,6 +22,7 @@ static _Noreturn void publish_gnss_data(void *ctx);
 static int gnss_data_update_cb(const gnss_t *);
 static void gnss_timed_out(void);
 static int gnss_set_mode(gnss_mode_t mode, bool wakeup);
+static void gnss_thread_fn(void);
 
 static gnss_t gnss_data_buffer;
 static gnss_mode_t current_mode = GNSSMODE_NOMODE;
@@ -32,6 +33,55 @@ static uint8_t gnss_timeout_count;
 static uint8_t gnss_failed_init_count;
 
 K_THREAD_STACK_DEFINE(pub_gnss_stack, STACK_SIZE);
+
+K_THREAD_DEFINE(send_to_gnss, CONFIG_GNSS_STACK_SIZE, gnss_thread_fn, NULL, NULL, NULL,
+		K_PRIO_COOP(CONFIG_GNSS_THREAD_PRIORITY), 0, 0);
+
+enum gnss_action_e { GNSS_ACTION_NUL = 0, GNSS_ACTION_SET_MODE };
+
+typedef struct gnss_msgq_t {
+	enum gnss_action_e action;
+	void *arg;
+} gnss_msgq_t;
+
+K_MSGQ_DEFINE(gnss_msgq, sizeof(gnss_msgq_t), 1, 4);
+
+static void gnss_thread_fn(void)
+{
+	while (true) {
+		gnss_msgq_t msg;
+		k_msgq_get(&gnss_msgq, &msg, K_FOREVER);
+
+		switch (msg.action) {
+		case GNSS_ACTION_SET_MODE: {
+			LOG_DBG("setting mode");
+			int rc = 0;
+			int retries = CONFIG_GNSS_CMD_RETRIES;
+			gnss_mode_t mode = (gnss_mode_t)(msg.arg);
+			do {
+				rc = gnss_set_mode(mode, true);
+			} while ((retries-- > 0) && (rc != 0));
+
+			if (rc == 0) {
+				current_mode = mode;
+			} else {
+				LOG_ERR("Failed to set mode %d with %d retries", rc,
+					CONFIG_GNSS_CMD_RETRIES);
+				char *msg = "Failed to set GNSS receiver mode";
+				nf_app_error(ERR_GNSS_CONTROLLER, rc, msg, sizeof(*msg));
+			}
+			/* Send out an event (to the amc_handler)to answer with current mode */
+			struct gnss_mode_changed_event *ev = new_gnss_mode_changed_event();
+			ev->mode = current_mode;
+			EVENT_SUBMIT(ev);
+			break;
+		}
+		default:
+			LOG_ERR("Unrecognized action %d", msg.action);
+		}
+	}
+}
+
 struct k_thread pub_gnss_thread;
 static bool initialized = false;
 
@@ -268,14 +318,10 @@ static bool gnss_controller_event_handler(const struct event_header *eh)
 		LOG_DBG("MODE = %d old = %d ", ev->mode, current_mode);
 		if (ev->mode != current_mode) {
 			LOG_DBG("setting mode");
-			int ret = gnss_set_mode(ev->mode, true);
-			if (ret != 0) {
-				LOG_ERR("Failed to set mode %d", ret);
-				char *msg = "Failed to set GNSS receiver mode";
-				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
-				return false;
-			}
-			current_mode = ev->mode;
+			gnss_msgq_t msg;
+			msg.arg = (void *)(ev->mode);
+			msg.action = GNSS_ACTION_SET_MODE;
+			k_msgq_put(&gnss_msgq, &msg, K_NO_WAIT);
 		}
 		return false;
 	}

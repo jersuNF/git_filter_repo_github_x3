@@ -44,7 +44,6 @@ static uint8_t pain_cnt_def_free = _PAIN_CNT_DEF_ESCAPED;
 static Mode current_mode = Mode_Mode_UNKNOWN;
 static FenceStatus current_fence_status = FenceStatus_FenceStatus_UNKNOWN;
 static CollarStatus current_collar_status = CollarStatus_CollarStatus_UNKNOWN;
-static gnss_mode_t current_gnss_mode = GNSSMODE_NOMODE;
 
 /* Variable used to check GNSS mode. */
 static bool first_time_since_start = true;
@@ -733,8 +732,7 @@ void set_sensor_modes(Mode mode, FenceStatus fs, CollarStatus cs, amc_zone_t zon
 	}
 
 	/* Send GNSS mode change event from amc_gnss.c */
-	if (current_gnss_mode != gnss_mode) {
-		current_gnss_mode = gnss_mode;
-		gnss_update_mode(current_gnss_mode);
+	if (gnss_get_mode() != gnss_mode) {
+		gnss_update_mode(gnss_mode);
 	}
 }

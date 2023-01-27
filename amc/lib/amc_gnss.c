@@ -193,9 +193,8 @@ int gnss_update_mode(gnss_mode_t mode)
 		return -EINVAL;
 	}
 
-	gnss_mode = mode;
 	struct gnss_set_mode_event *ev = new_gnss_set_mode_event();
-	ev->mode = gnss_mode;
+	ev->mode = mode;
 	EVENT_SUBMIT(ev);
 
 	return 0;
@@ -204,6 +203,11 @@ int gnss_update_mode(gnss_mode_t mode)
 gnss_mode_t gnss_get_mode(void)
 {
 	return gnss_mode;
+}
+
+void gnss_set_mode(gnss_mode_t mode)
+{
+	gnss_mode = mode;
 }
 
 bool gnss_has_fix(void)

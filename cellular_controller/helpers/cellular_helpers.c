@@ -222,9 +222,15 @@ int stop_tcp(const bool keep_modem_awake, bool *flag, struct k_sem *sem)
 		}
 	}
 
-	*flag = false;
+	if (flag != NULL) {
+		LOG_ERR("NULL pointer for connected flag!");
+		*flag = false;
+	}
 
-	if (!keep_modem_awake && k_sem_take((struct k_sem *)sem, K_FOREVER) == 0) {
+	if (!keep_modem_awake) {
+		if (sem != NULL) {
+			k_sem_take((struct k_sem *)sem, K_MINUTES(1));
+		}
 		int ret = modem_nf_sleep();
 		if (ret != 0) {
 			LOG_ERR("Failed to switch modem to power saving!");

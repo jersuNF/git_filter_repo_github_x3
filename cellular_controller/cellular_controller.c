@@ -98,8 +98,9 @@ void receive_tcp(struct data *sock_data)
 				LOG_WRN("received %d bytes!", received);
 #endif
 				LOG_WRN("will take semaphore!");
-				if (initializing || k_sem_take(&messaging_ack, K_MSEC(MESSAGING_ACK_TIMEOUT)) == 0
-				    ) {
+				if (initializing ||
+				    k_sem_take(&messaging_ack, K_MSEC(MESSAGING_ACK_TIMEOUT)) ==
+					    0) {
 					initializing = false;
 					pMsgIn = (uint8_t *)k_malloc(received);
 					memcpy(pMsgIn, buf, received);
@@ -125,7 +126,8 @@ void receive_tcp(struct data *sock_data)
 						 * enabling it with 2G during
 						 * slow FOTA to save some
 						 * energy.*/
-						int ret = stop_tcp(fota_in_progress, &connected, &close_main_socket_sem);
+						int ret = stop_tcp(fota_in_progress, &connected,
+								   &close_main_socket_sem);
 						socket_idle_count = 0;
 						if (ret != 0) {
 							modem_is_ready = false;
@@ -136,14 +138,15 @@ void receive_tcp(struct data *sock_data)
 				char *e_msg = "Socket receive error!";
 				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
 				if (!sending_in_progress) {
-					int ret = stop_tcp(fota_in_progress, &connected, &close_main_socket_sem);
+					int ret = stop_tcp(fota_in_progress, &connected,
+							   &close_main_socket_sem);
 					if (ret != 0) {
 						modem_is_ready = false;
 					}
 				}
 			}
 		}
-				k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
+		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
 	}
 }
 
@@ -381,8 +384,7 @@ static void cellular_controller_keep_alive(void *dev)
 					if (ret == -EALREADY) {
 						LOG_WRN("Modem suspended!");
 					} else {
-						LOG_ERR("Failed to switch off"
-							" modem!");
+						LOG_ERR("Failed to switch off modem!");
 					}
 				} else {
 					LOG_WRN("Modem switched off!");
@@ -425,14 +427,15 @@ static void cellular_controller_keep_alive(void *dev)
 					} else {
 						modem_is_ready = false;
 						fota_in_progress = false;
-						stop_tcp(fota_in_progress, &connected, &close_main_socket_sem);
+						stop_tcp(fota_in_progress, &connected, NULL);
 					}
 				} else {
 					socket_idle_count = 0;
 					if (!fota_in_progress) {
 						ret = check_ip();
 						if (ret != 0) {
-							stop_tcp(fota_in_progress, &connected, &close_main_socket_sem);
+							stop_tcp(fota_in_progress, &connected,
+								 &close_main_socket_sem);
 						}
 					}
 				}
@@ -440,6 +443,7 @@ static void cellular_controller_keep_alive(void *dev)
 				modem_nf_pwr_off();
 				connected = false;
 				sending_in_progress = false;
+				k_sem_reset(&close_main_socket_sem);
 				fota_in_progress = false;
 			}
 		update_connection_state:

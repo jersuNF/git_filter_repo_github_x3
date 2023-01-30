@@ -38,6 +38,12 @@ int gnss_update_mode(gnss_mode_t mode);
  */
 gnss_mode_t gnss_get_mode(void);
 
+/** @brief Set (interna) GNSS power mode. 
+ * 
+ * @param[in] mode Power mode value to set. 
+ */
+void gnss_set_mode(gnss_mode_t mode);
+
 /** @brief Validate that GNSS fix is good enough, and update flags
  * 
  * @param[in] gnss_data Position data from GNSS

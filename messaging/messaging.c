@@ -1489,16 +1489,6 @@ void build_poll_request(NofenceMessage *poll_req)
 			       sizeof(poll_req->m.poll_message_req.xSimCardId) - 1);
 		}
 
-		/* TODO pshustad, clean up and re-enable the commented code below */
-		//		uint16_t xbootVersion;
-		//		if (xboot_get_version(&xbootVersion) == XB_SUCCESS) {
-		//			poll_req.m.poll_message_req.versionInfo
-		//				.usATmegaBootloaderVersion =
-		//				xbootVersion;
-		//			poll_req.m.poll_message_req.versionInfo
-		//				.has_usATmegaBootloaderVersion = true;
-		//		}
-
 		poll_req->m.poll_message_req.has_versionInfoHW = true;
 
 		uint8_t pcb_rf_version = 0;
@@ -1531,16 +1521,22 @@ void build_poll_request(NofenceMessage *poll_req)
 		poll_req->m.poll_message_req.has_ucMCUSR = true;
 		poll_req->m.poll_message_req.ucMCUSR = reboot_reason;
 
-		/** @todo Add information of SIM card */
-#if 0
-		poll_req.m.poll_message_req.has_xSimCardId = true;
-		memcpy(poll_req.m.poll_message_req.xSimCardId, BGS_SCID(),
-			sizeof(poll_req.m.poll_message_req.xSimCardId));
-		poll_req.m.poll_message_req.versionInfo.has_ulATmegaVersion =
-			true;
-		poll_req.m.poll_message_req.versionInfo.ulATmegaVersion =
-			NF_X25_VERSION_NUMBER;
-#endif
+		/* Add modem model and FW version */
+		const char *modem_model = NULL;
+		const char *modem_version = NULL;
+		int ret = modem_nf_get_model_and_fw_version(&modem_model, &modem_version);
+		if (ret == 0) {
+			poll_req->m.poll_message_req.has_xVersionInfoModem = true;
+			strncpy(poll_req->m.poll_message_req.xVersionInfoModem.xModel, modem_model,
+				sizeof(poll_req->m.poll_message_req.xVersionInfoModem.xModel) - 1);
+			strncpy(poll_req->m.poll_message_req.xVersionInfoModem.xVersion,
+				modem_version,
+				sizeof(poll_req->m.poll_message_req.xVersionInfoModem.xVersion) -
+					1);
+
+		} else {
+			LOG_WRN("Could not get modem version info: %d", ret);
+		}
 	}
 }
 

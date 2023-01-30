@@ -93,7 +93,8 @@ static APP_BMEM bool connected;
 static uint8_t *pMsgIn = NULL;
 static float socket_idle_count;
 
-static void give_up_main_soc(void) {
+static void give_up_main_soc(void)
+{
 	waiting_for_msg = false;
 	k_sem_give(&close_main_socket_sem);
 	k_sem_give(&connection_state_sem);

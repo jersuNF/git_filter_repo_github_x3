@@ -19,7 +19,6 @@ static struct net_if *iface;
 static struct net_if_config *cfg;
 #define GSM_DEVICE DT_LABEL(DT_INST(0, u_blox_sara_r4))
 
-
 K_TIMER_DEFINE(sendall_timer, NULL, NULL);
 
 int8_t lte_init(void)

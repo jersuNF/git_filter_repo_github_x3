@@ -54,7 +54,7 @@ static bool modem_is_ready = false;
 static bool power_level_ok = false;
 static bool fota_in_progress = false;
 static bool sending_in_progress = false;
-static bool pending = false;
+
 APP_DMEM struct configs conf = {
 	.ipv4 = {
 		.proto = "IPv4",
@@ -374,8 +374,7 @@ static void cellular_controller_keep_alive(void *dev)
 {
 	int ret;
 	while (true) {
-		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0 && !pending) {
-			pending = true;
+		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
 			if (!power_level_ok) {
 				connected = false;
 				modem_is_ready = false;
@@ -448,7 +447,6 @@ static void cellular_controller_keep_alive(void *dev)
 			}
 		update_connection_state:
 			announce_connection_state(connected);
-			pending = false;
 		}
 	}
 }

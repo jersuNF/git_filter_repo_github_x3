@@ -499,7 +499,7 @@ int8_t cellular_controller_init(void)
  * The queue can hold a single message and it will be discarded on arrival of
  * a new meassage.
  * .*/
-int send_tcp_q(char *msg, size_t len)
+static int send_tcp_q(char *msg, size_t len)
 {
 	LOG_DBG("send_tcp_q start!");
 	struct msg2server msgout;
@@ -514,7 +514,7 @@ int send_tcp_q(char *msg, size_t len)
 	return 0;
 }
 
-void send_tcp_fn(void)
+static void send_tcp_fn(void)
 {
 	while (true) {
 		int rc = k_poll(events, 1, K_FOREVER);

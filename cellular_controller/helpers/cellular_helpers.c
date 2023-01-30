@@ -222,7 +222,6 @@ int stop_tcp(const bool keep_modem_awake, bool *flag, struct k_sem *sem)
 	}
 
 	if (flag != NULL) {
-		LOG_ERR("NULL pointer for connected flag!");
 		*flag = false;
 	}
 

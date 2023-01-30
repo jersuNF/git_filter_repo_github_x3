@@ -19,14 +19,6 @@ static struct net_if *iface;
 static struct net_if_config *cfg;
 #define GSM_DEVICE DT_LABEL(DT_INST(0, u_blox_sara_r4))
 
-struct msg2server {
-	char *msg;
-	size_t len;
-};
-K_MSGQ_DEFINE(msgq, sizeof(struct msg2server), 1, 4);
-
-struct k_poll_event events[1] = { K_POLL_EVENT_STATIC_INITIALIZER(
-	K_POLL_TYPE_MSGQ_DATA_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY, &msgq, 0) };
 
 K_TIMER_DEFINE(sendall_timer, NULL, NULL);
 
@@ -205,7 +197,7 @@ int get_ip(char **collar_ip)
  * will close the latest TCP socket with id greater than zero, as zero is
  * reserved for the listening socket. */
 /* TODO: enhance robustness. */
-int stop_tcp(const bool keep_modem_awake, bool *flag, struct k_sem *sem)
+int stop_tcp(const bool keep_modem_awake, bool *flag)
 {
 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
 		if (conf.ipv6.tcp.sock > 0) {
@@ -226,9 +218,6 @@ int stop_tcp(const bool keep_modem_awake, bool *flag, struct k_sem *sem)
 	}
 
 	if (!keep_modem_awake) {
-		if (sem != NULL) {
-			k_sem_take((struct k_sem *)sem, K_MINUTES(1));
-		}
 		int ret = modem_nf_sleep();
 		if (ret != 0) {
 			LOG_ERR("Failed to switch modem to power saving!");
@@ -263,50 +252,6 @@ int send_tcp(char *msg, size_t len)
 	/* TODO: how to handle partial sends? sendall() will keep retrying,
      * this should be handled here as well.*/
 	return ret;
-}
-
-/** put a message in the send out queue
- * The queue can hold a single message and it will be discarded on arrival of
- * a new meassage.
- * .*/
-int send_tcp_q(char *msg, size_t len)
-{
-	LOG_DBG("send_tcp_q start!");
-	struct msg2server msgout;
-	msgout.msg = msg;
-	msgout.len = len;
-	LOG_DBG("send_tcp_q allocated msgout!");
-	while (k_msgq_put(&msgq, &msgout, K_NO_WAIT) != 0) {
-		/* Message queue is full: purge old data & try again */
-		k_msgq_purge(&msgq);
-	}
-	LOG_DBG("message successfully pushed to queue!");
-	return 0;
-}
-
-void send_tcp_fn(void)
-{
-	while (true) {
-		int rc = k_poll(events, 1, K_FOREVER);
-		if (rc == 0) {
-			while (k_msgq_num_used_get(&msgq) > 0) {
-				struct msg2server msg_in_q;
-				k_msgq_get(&msgq, &msg_in_q, K_FOREVER);
-				int ret = send_tcp(msg_in_q.msg, msg_in_q.len);
-				if (ret != msg_in_q.len) {
-					LOG_WRN("Failed to send TCP message!");
-					struct messaging_stop_connection_event *end_connection =
-						new_messaging_stop_connection_event();
-					EVENT_SUBMIT(end_connection);
-				} else {
-					struct free_message_mem_event *ev =
-						new_free_message_mem_event();
-					EVENT_SUBMIT(ev);
-				}
-			}
-			events[0].state = K_POLL_STATE_NOT_READY;
-		}
-	}
 }
 
 const struct device *bind_modem(void)

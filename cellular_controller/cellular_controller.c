@@ -12,18 +12,28 @@
 
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define RCV_PRIORITY CONFIG_RECV_THREAD_PRIORITY
-#define SOCKET_POLL_INTERVAL 0.25
+#define SOCKET_POLL_INTERVAL 1
 #define SOCK_RECV_TIMEOUT 10
 #define MODULE cellular_controller
 #define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_MSEC
 
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
 
-K_SEM_DEFINE(messaging_ack, 1, 1);
+K_SEM_DEFINE(messaging_ack, 0, 1);
 K_SEM_DEFINE(fota_progress_update, 0, 1);
+
+struct msg2server {
+	char *msg;
+	size_t len;
+};
 
 K_THREAD_DEFINE(send_tcp_from_q, CONFIG_SEND_THREAD_STACK_SIZE, send_tcp_fn, NULL, NULL, NULL,
 		K_PRIO_COOP(CONFIG_SEND_THREAD_PRIORITY), 0, 0);
+
+K_MSGQ_DEFINE(msgq, sizeof(struct msg2server), 1, 4);
+
+struct k_poll_event events[1] = { K_POLL_EVENT_STATIC_INITIALIZER(
+	K_POLL_TYPE_MSGQ_DATA_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY, &msgq, 0) };
 
 char server_address[STG_CONFIG_HOST_PORT_BUF_LEN - 1];
 char server_address_tmp[STG_CONFIG_HOST_PORT_BUF_LEN - 1];
@@ -35,7 +45,7 @@ K_KERNEL_STACK_DEFINE(keep_alive_stack, CONFIG_CELLULAR_KEEP_ALIVE_STACK_SIZE);
 struct k_thread keep_alive_thread;
 static struct k_sem connection_state_sem;
 
-int8_t socket_connect(struct data *, struct sockaddr *, socklen_t);
+int socket_connect(struct data *, struct sockaddr *, socklen_t);
 int socket_listen(struct data *);
 int socket_receive(struct data *, char **);
 void listen_sock_poll(void);
@@ -49,11 +59,11 @@ K_SEM_DEFINE(listen_sem, 0, 1); /* this semaphore will be given by the modem
 
 K_SEM_DEFINE(close_main_socket_sem, 0, 1);
 
+static bool waiting_for_msg = false;
 static bool modem_is_ready = false;
 static bool power_level_ok = false;
 static bool fota_in_progress = false;
-static bool sending_in_progress = false;
-static bool pending = false;
+
 APP_DMEM struct configs conf = {
 	.ipv4 = {
 		.proto = "IPv4",
@@ -82,14 +92,22 @@ K_THREAD_DEFINE(listen_recv_tid, RCV_THREAD_STACK, listen_sock_poll, NULL, NULL,
 static APP_BMEM bool connected;
 static uint8_t *pMsgIn = NULL;
 static float socket_idle_count;
+
+static void give_up_main_soc(void)
+{
+	waiting_for_msg = false;
+	k_sem_give(&close_main_socket_sem);
+	k_sem_give(&connection_state_sem);
+}
+
 void receive_tcp(struct data *sock_data)
 {
 	int received;
 	char *buf = NULL;
+	static bool initializing = true;
 
 	while (1) {
-		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
-		if (connected) {
+		if (connected && waiting_for_msg) {
 			received = socket_receive(sock_data, &buf);
 			if (received > 0) {
 				socket_idle_count = 0;
@@ -97,8 +115,10 @@ void receive_tcp(struct data *sock_data)
 				LOG_WRN("received %d bytes!", received);
 #endif
 				LOG_WRN("will take semaphore!");
-				if (k_sem_take(&messaging_ack, K_MSEC(MESSAGING_ACK_TIMEOUT)) ==
-				    0) {
+				if (initializing ||
+				    k_sem_take(&messaging_ack, K_MSEC(MESSAGING_ACK_TIMEOUT)) ==
+					    0) {
+					initializing = false;
 					pMsgIn = (uint8_t *)k_malloc(received);
 					memcpy(pMsgIn, buf, received);
 					struct cellular_proto_in_event *msgIn =
@@ -116,35 +136,15 @@ void receive_tcp(struct data *sock_data)
 				socket_idle_count += SOCKET_POLL_INTERVAL;
 				if (socket_idle_count > SOCK_RECV_TIMEOUT) {
 					LOG_WRN("Socket receive timed out!");
-					if (!sending_in_progress) {
-						k_sem_take(&close_main_socket_sem, K_FOREVER);
-						/*fota_in_progress = false;
-						 * PSV does not interrupt
-						 * FOTA on 2G, consider
-						 * enabling it with 2G during
-						 * slow FOTA to save some
-						 * energy.*/
-						connected = false;
-						int ret = stop_tcp(fota_in_progress);
-						socket_idle_count = 0;
-						if (ret != 0) {
-							modem_is_ready = false;
-						}
-					}
+					give_up_main_soc();
 				}
 			} else {
 				char *e_msg = "Socket receive error!";
 				nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
-				if (!sending_in_progress) {
-					connected = false;
-					int ret = stop_tcp(fota_in_progress);
-					if (ret != 0) {
-						modem_is_ready = false;
-					}
-				}
+				give_up_main_soc();
 			}
 		}
-		//		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
+		k_sleep(K_SECONDS(SOCKET_POLL_INTERVAL));
 	}
 }
 
@@ -204,9 +204,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 	} else if (is_messaging_stop_connection_event(eh)) {
 		k_free(CharMsgOut);
 		CharMsgOut = NULL;
-		modem_is_ready = false;
-		sending_in_progress = false;
-		k_sem_give(&close_main_socket_sem);
+		give_up_main_soc();
 		struct cellular_ack_event *ack = new_cellular_ack_event();
 		ack->message_sent = false;
 		EVENT_SUBMIT(ack);
@@ -243,8 +241,6 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		}
 		return false;
 	} else if (is_messaging_proto_out_event(eh)) {
-		sending_in_progress = true;
-		k_sem_reset(&close_main_socket_sem);
 		socket_idle_count = 0;
 		struct messaging_proto_out_event *event = cast_messaging_proto_out_event(eh);
 		uint8_t *pCharMsgOut = event->buf;
@@ -269,11 +265,10 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 	} else if (is_free_message_mem_event(eh)) {
 		k_free(CharMsgOut);
 		CharMsgOut = NULL;
-		sending_in_progress = false;
-		k_sem_give(&close_main_socket_sem);
 		struct cellular_ack_event *ack = new_cellular_ack_event();
 		ack->message_sent = true;
 		EVENT_SUBMIT(ack);
+		waiting_for_msg = true;
 		return false;
 	} else if (is_dfu_status_event(eh)) {
 		struct dfu_status_event *fw_upgrade_event = cast_dfu_status_event(eh);
@@ -284,6 +279,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			stop_rssi();
 		} else {
 			fota_in_progress = false;
+			enable_rssi();
 		}
 		return false;
 	} else if (is_pwr_status_event(eh)) {
@@ -365,12 +361,20 @@ static void publish_gsm_info(void)
 	}
 }
 
+static void end_connection(void)
+{
+	int ret = stop_tcp(fota_in_progress, &connected);
+	socket_idle_count = 0;
+	if (ret != 0) {
+		modem_is_ready = false;
+	}
+}
+
 static void cellular_controller_keep_alive(void *dev)
 {
 	int ret;
 	while (true) {
-		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0 && !pending) {
-			pending = true;
+		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
 			if (!power_level_ok) {
 				connected = false;
 				modem_is_ready = false;
@@ -379,8 +383,7 @@ static void cellular_controller_keep_alive(void *dev)
 					if (ret == -EALREADY) {
 						LOG_WRN("Modem suspended!");
 					} else {
-						LOG_ERR("Failed to switch off"
-							" modem!");
+						LOG_ERR("Failed to switch off modem!");
 					}
 				} else {
 					LOG_WRN("Modem switched off!");
@@ -423,27 +426,29 @@ static void cellular_controller_keep_alive(void *dev)
 					} else {
 						modem_is_ready = false;
 						fota_in_progress = false;
-						stop_tcp(fota_in_progress);
+						end_connection(); /* ungraceful */
 					}
 				} else {
 					socket_idle_count = 0;
-					if (!fota_in_progress) {
-						ret = check_ip();
-						if (ret != 0) {
-							stop_tcp(fota_in_progress);
-							connected = false;
+					if (k_sem_take(&close_main_socket_sem, K_NO_WAIT) != 0) {
+						if (!fota_in_progress) { /* skip ip check when FOTA is in
+ * progress- */
+							ret = check_ip();
+							if (ret != 0) {
+								end_connection(); /* ungraceful */
+							}
 						}
+					} else {
+						end_connection(); /* graceful */
 					}
 				}
 			} else {
 				modem_nf_pwr_off();
 				connected = false;
-				sending_in_progress = false;
 				fota_in_progress = false;
 			}
 		update_connection_state:
 			announce_connection_state(connected);
-			pending = false;
 		}
 	}
 }
@@ -455,7 +460,6 @@ void announce_connection_state(bool state)
 	ev->state = state;
 	EVENT_SUBMIT(ev);
 	if (state == true) {
-		k_sem_reset(&close_main_socket_sem);
 		socket_idle_count = 0;
 		struct modem_state *modem_active = new_modem_state();
 		modem_active->mode = POWER_ON;
@@ -489,6 +493,50 @@ int8_t cellular_controller_init(void)
 			K_NO_WAIT);
 
 	return 0;
+}
+
+/** put a message in the send out queue
+ * The queue can hold a single message and it will be discarded on arrival of
+ * a new meassage.
+ * .*/
+static int send_tcp_q(char *msg, size_t len)
+{
+	LOG_DBG("send_tcp_q start!");
+	struct msg2server msgout;
+	msgout.msg = msg;
+	msgout.len = len;
+	LOG_DBG("send_tcp_q allocated msgout!");
+	while (k_msgq_put(&msgq, &msgout, K_NO_WAIT) != 0) {
+		/* Message queue is full: purge old data & try again */
+		k_msgq_purge(&msgq);
+	}
+	LOG_DBG("message successfully pushed to queue!");
+	return 0;
+}
+
+static void send_tcp_fn(void)
+{
+	while (true) {
+		int rc = k_poll(events, 1, K_FOREVER);
+		if (rc == 0) {
+			while (k_msgq_num_used_get(&msgq) > 0) {
+				struct msg2server msg_in_q;
+				k_msgq_get(&msgq, &msg_in_q, K_FOREVER);
+				int ret = send_tcp(msg_in_q.msg, msg_in_q.len);
+				if (ret != msg_in_q.len) {
+					LOG_WRN("Failed to send TCP message!");
+					struct messaging_stop_connection_event *end_connection =
+						new_messaging_stop_connection_event();
+					EVENT_SUBMIT(end_connection);
+				} else {
+					struct free_message_mem_event *ev =
+						new_free_message_mem_event();
+					EVENT_SUBMIT(ev);
+				}
+			}
+			events[0].state = K_POLL_STATE_NOT_READY;
+		}
+	}
 }
 
 EVENT_LISTENER(MODULE, cellular_controller_event_handler);

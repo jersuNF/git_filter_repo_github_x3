@@ -19,6 +19,7 @@ zephyr_include_directories(
 	${CMAKE_CURRENT_SOURCE_DIR}/../../events/collar_stats/
 	${CMAKE_CURRENT_SOURCE_DIR}/../../events/power_manager/
 	${CMAKE_CURRENT_SOURCE_DIR}/../../modules/power_manager/
+	${CMAKE_CURRENT_SOURCE_DIR}/../../modules/nofence_watchdog/
 	${CMAKE_CURRENT_SOURCE_DIR}/include/
 	${PROJECT_BINARY_DIR}/include/generated/)
 
@@ -37,6 +38,7 @@ target_sources(app PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/../../events/storage/storage_event.c
 	${CMAKE_CURRENT_SOURCE_DIR}/../../events/power_manager/pwr_event.c
 	${CMAKE_CURRENT_SOURCE_DIR}/../../modules/power_manager/pwr_module.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../modules/nofence_watchdog/nofence_watchdog.c
 )
 
 add_dependencies(${ZEPHYR_CURRENT_LIBRARY}

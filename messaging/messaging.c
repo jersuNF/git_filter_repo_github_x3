@@ -38,6 +38,8 @@
 #include "histogram_events.h"
 #include <sys/sys_heap.h>
 #include "amc_const.h"
+#include "pwr_event.h"
+#include "nofence_watchdog.h"
 
 #define MODULE messaging
 LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
@@ -208,6 +210,10 @@ atomic_t m_fota_in_progress = ATOMIC_INIT(0);
 atomic_t m_break_log_stream_token = ATOMIC_INIT(0);
 
 atomic_t m_message_tx_type = ATOMIC_INIT(0);
+
+#define WDT_MODULE_MESSAGING ("messaging")
+#define WDT_MODULE_KEEP_ALIVE ("keep_alive")
+#define WDT_MODULE_RECV_TCP ("receive_tcp")
 
 static int set_tx_state_ready(messaging_tx_type_t tx_type);
 
@@ -805,6 +811,8 @@ static void update_cache_reg(cached_and_ready_enum index)
  */
 static bool event_handler(const struct event_header *eh)
 {
+	/* Kick watchdog here */
+	nofence_wdt_kick(WDT_MODULE_MESSAGING);
 	if (is_pwr_reboot_event(eh)) {
 		reboot_scheduled = true;
 		return false;
@@ -847,6 +855,8 @@ static bool event_handler(const struct event_header *eh)
 		return true;
 	}
 	if (is_cellular_proto_in_event(eh)) {
+		/* Kick receive_tcp() Watchdog */
+		nofence_wdt_kick(WDT_MODULE_RECV_TCP);
 		struct cellular_proto_in_event *ev = cast_cellular_proto_in_event(eh);
 		while (k_msgq_put(&lte_proto_msgq, ev, K_NO_WAIT) != 0) {
 			k_msgq_purge(&lte_proto_msgq);
@@ -985,6 +995,8 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_connection_state_event(eh)) {
+		/* Kick watchdog here */
+		nofence_wdt_kick(WDT_MODULE_KEEP_ALIVE);
 		struct connection_state_event *ev = cast_connection_state_event(eh);
 		if (ev->state) {
 			k_sem_give(&connection_ready);
@@ -1017,7 +1029,6 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_send_poll_request_now(eh)) {
 		LOG_DBG("Received a nudge on listening socket!");
-
 		int err;
 		err = k_work_reschedule_for_queue(&message_q, &modem_poll_work, K_NO_WAIT);
 		if (err < 0) {
@@ -1306,6 +1317,15 @@ static void fota_app_wdt_cb()
 	sys_reboot(SYS_REBOOT_COLD);
 }
 
+static void nofence_wdt_cb_trigger(uint8_t reason)
+{
+	int err = stg_config_u8_write(STG_U8_RESET_REASON, reason);
+	if (err != 0) {
+		LOG_ERR("Error writing fota reset reason");
+	}
+	sys_reboot(SYS_REBOOT_COLD);
+}
+
 static fota_wdt_cb g_wdt_cb = fota_app_wdt_cb;
 
 /**
@@ -1371,6 +1391,20 @@ int messaging_module_init(void)
 	memset(&pasture_temp, 0, sizeof(pasture_t));
 	cached_fences_counter = 0;
 	pasture_temp.m.us_pasture_crc = EMPTY_FENCE_CRC;
+
+	/* Initialize nofence watchdog */
+	nofence_wdt_init();
+	nofence_wdt_register_cb(nofence_wdt_cb_trigger);
+	nofence_wdt_module_register(WDT_MODULE_MESSAGING, REBOOT_WDT_RESET_MESSAGING,
+				    CONFIG_WDT_MODULE_MESSAGING_TIME_SECONDS);
+	nofence_wdt_module_register(WDT_MODULE_KEEP_ALIVE, REBOOT_WDT_RESET_KEEP_ALIVE,
+				    CONFIG_WDT_MODULE_KEEP_ALIVE_TIME_SECONDS);
+	nofence_wdt_module_register(WDT_MODULE_RECV_TCP, REBOOT_WDT_RESET_RECV_TCP,
+				    CONFIG_WDT_MODULE_RECV_TCP_TIME_SECONDS);
+
+	/** @todo Should add semaphore and only start these queues when
+	 *  we get connection to network with modem.
+	 */
 
 	err = k_work_schedule_for_queue(&message_q, &data_request_work, K_NO_WAIT);
 	if (err < 0) {
@@ -1825,6 +1859,16 @@ void process_poll_response(NofenceMessage *proto)
 
 			LOG_INF("Poll period of %d seconds will be used",
 				atomic_get(&poll_period_seconds));
+			uint32_t wdt_module_ts =
+				atomic_get(&poll_period_seconds) * CONFIG_WDT_KEEP_ALIVE_NUM_POLLS;
+			/* Setup the KEEP_ALIVE watchdog to be smallest of WDT_KEEP_ALIVE_NUM_POLLS and CONFIG_WDT_KEEP_MAX_TIME_SECONDS */
+			if (CONFIG_WDT_KEEP_ALIVE_NUM_POLLS * atomic_get(&poll_period_seconds) >
+			    CONFIG_WDT_KEEP_MAX_TIME_SECONDS) {
+				wdt_module_ts = CONFIG_WDT_KEEP_MAX_TIME_SECONDS;
+			}
+
+			nofence_wdt_module_register(WDT_MODULE_KEEP_ALIVE,
+						    REBOOT_WDT_RESET_KEEP_ALIVE, wdt_module_ts);
 		}
 	}
 	m_confirm_acc_limits = false;

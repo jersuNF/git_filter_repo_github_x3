@@ -1,0 +1,27 @@
+menuconfig NOFENCE_WATCHDOG_ENABLE
+	bool "Enable watchdog"
+	select NOFENCE_WATCHDOG
+	default y
+
+if NOFENCE_WATCHDOG_ENABLE
+	module = NOFENCE_WATCHDOG
+	module-str = Nofence-Watchdog
+	source "subsys/logging/Kconfig.template.log_config"
+
+	config NOFENCE_WATCHDOG_TIMEOUT_SEC
+		int "Application watchdog timeout in seconds"
+		default 4320
+
+	config SIZE_WDT_MODULE_NAMES
+		int "size of module name string"
+		default 30
+
+	config NUM_WDT_MODULES
+		int "max number of wdt modules"
+		default 10
+	menu "ERROR_HANDLER"
+    	rsource "./../../modules/error_handler/Kconfig"
+	endmenu # ERROR_HANDLER
+endif # WATCHDOG_ENABLE
+
+

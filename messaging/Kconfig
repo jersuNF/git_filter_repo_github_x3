@@ -47,6 +47,22 @@ if MESSAGING
 		int "Application wdt for maximum time in minutes FOTA can take (hang workaround)"
 		default 5
 
+	config WDT_MODULE_MESSAGING_TIME_SECONDS
+		int "watchdog trigger time for MODULE_MESSAGING"
+		default 120 #2 min
+	config WDT_MODULE_KEEP_ALIVE_TIME_SECONDS
+		int "watchdog trigger time for MODULE_KEEP_ALIVE"
+		default 10800 #3 hours
+	config WDT_MODULE_RECV_TCP_TIME_SECONDS
+		int "watchdog trigger time for MODULE_RECV_TCP"
+		default 10800 #3 hours
+	config WDT_KEEP_ALIVE_NUM_POLLS
+		int "WDT will kick in if no connection for 15 polls"
+		default 15
+	config WDT_KEEP_MAX_TIME_SECONDS
+		int "Maximum watchdog time"
+		default 259200 #3 days
+
 	menu "Message Queues"
 		config MSGQ_BLE_CTRL_SIZE
 		int "Size of the bluetooth control command data received"

@@ -23,12 +23,15 @@ if GNSS_CONTROLLER
     config GNSS_TIMEOUT_SLACK_MS
         int "Extra milliseconds to add to the expected GNSS rate before generating a timeout event"
         default 100
-    config GNSS_INIT_MAX_COUNT
-        int "number of tries before gnss init should return -1"
-        default 6
+    config GNSS_MAX_COUNT_INIT
+        int "number of tries before gnss init retry should return -1"
+        default 3
     config GNSS_CMD_RETRIES
         int "number of retries for sending a cmd to GNSS"
         default 1
+    config GNSS_MAX_COUNT_SOFT_RESTART
+        int "number of tries before gnss init should perform hard resetn pin toggle"
+        default 3
     config GNSS_THREAD_PRIORITY
         int "GNSS thread priority"
         default 6

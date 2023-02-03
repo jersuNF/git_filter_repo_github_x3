@@ -117,11 +117,11 @@ int ep_module_init(void)
 static int ep_module_release(bool first_pulse)
 {
 	if (!device_is_ready(ep_ctrl_pwm_dev)) {
-		LOG_WRN("Electic pulse PWM device not ready!");
+		LOG_WRN("electric pulse PWM device not ready!");
 		return -ENODEV;
 	}
 	if (!device_is_ready(ep_ctrl_dev)) {
-		LOG_WRN("Electic pulse GPIO device not ready!");
+		LOG_WRN("electric pulse GPIO device not ready!");
 		return -ENODEV;
 	}
 
@@ -155,7 +155,7 @@ static int ep_module_release(bool first_pulse)
 	ret = pwm_pin_set_usec(ep_ctrl_pwm_dev, PWM_EP_CHANNEL, (EP_ON_TIME_US + EP_OFF_TIME_US),
 			       EP_ON_TIME_US, 0);
 	if (ret != 0) {
-		LOG_WRN("Unable to set electic pulse PWM signal!");
+		LOG_WRN("Unable to set electric pulse PWM signal!");
 	} else {
 		k_busy_wait(ep_duration_us);
 		g_last_pulse_time = current_time;
@@ -164,11 +164,11 @@ static int ep_module_release(bool first_pulse)
 	/* Turn OFF electric pulse signal (PWM) */
 	ret = pwm_pin_set_usec(ep_ctrl_pwm_dev, PWM_EP_CHANNEL, 0, 0, 0);
 	if (ret != 0) {
-		LOG_WRN("Unable to disable electic pulse PWM signal!");
+		LOG_WRN("Unable to disable electric pulse PWM signal!");
 	}
 	ret = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_LOW);
 	if (ret != 0) {
-		LOG_WRN("Unable to disable electic pulse GPIO signal!");
+		LOG_WRN("Unable to disable electric pulse GPIO signal!");
 	}
 
 	return ret;

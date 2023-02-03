@@ -28,9 +28,8 @@ static gnss_t gnss_data_buffer;
 static gnss_mode_t current_mode = GNSSMODE_NOMODE;
 static uint16_t current_rate_ms = UINT16_MAX;
 const struct device *gnss_dev = NULL;
-static uint8_t gnss_reset_count;
-static uint8_t gnss_timeout_count;
-static uint8_t gnss_failed_init_count;
+static uint8_t gnss_reset_count = 0;
+static uint8_t gnss_timeout_count = 0;
 
 K_THREAD_STACK_DEFINE(pub_gnss_stack, STACK_SIZE);
 
@@ -102,30 +101,6 @@ static void gnss_controller_send_timeout_event(void)
 	EVENT_SUBMIT(new_data);
 }
 
-static int gnss_controller_setup(void)
-{
-	int ret = gnss_wakeup(gnss_dev);
-	if (ret != 0) {
-		LOG_ERR("gnss_wakeup failed %d", ret);
-		return ret;
-	}
-	ret = gnss_setup(gnss_dev, false);
-	if (ret != 0) {
-		LOG_ERR("gnss_setup failed %d", ret);
-		return ret;
-	}
-	/* See https://content.u-blox.com/sites/default/files/documents/MIA-M10Q_IntegrationManual_UBX-21028173.pdf
-     * Section 2.1, receiver configuration. MIA M10 resets clear the configuration, so a reset must be followed
-     *  By a new configuration
-     * The configuration stored in BBR is also cleared by a RESET_N signal or a UBX-CFG-RST message
-     * with reset mode set to a hardware reset (resetMode 0x00 and 0x04), but otherwise will be used as
-     * long as the backup battery supply remains.
-     * CAUTION The configuration interface has changed from earlier u-blox positioning receivers.
-     * Users must adopt the configuration interface described in this document.
-     */
-	return ret;
-}
-
 /** @brief Reset and initialize GNSS  */
 static int gnss_controller_reset_and_setup_gnss(uint16_t mask)
 {
@@ -156,84 +131,132 @@ static int gnss_controller_reset_and_setup_gnss(uint16_t mask)
 	return 0;
 }
 
-int gnss_controller_init(void)
+int gnss_controller_setup(void)
 {
-	enum States {
-		ST_GNSS_FW_DRIVER_INIT = 0,
-		ST_GNSS_FW_CB_INIT,
-		ST_GNSS_HW_INIT,
-		ST_GNSS_RUNNING
-	};
-	enum States current_state = ST_GNSS_FW_DRIVER_INIT;
-	int ret;
+	int ret = -ENOSYS;
 	struct ublox_mon_ver mia_m10_versions;
+
+	ret = gnss_set_data_cb(gnss_dev, gnss_data_update_cb);
+	if (ret != 0) {
+		LOG_WRN("Failed to register data CB! %d", ret);
+		return ret;
+	}
+
+	ret = gnss_wakeup(gnss_dev);
+	if (ret != 0) {
+		LOG_WRN("gnss_wakeup failed %d", ret);
+		return ret;
+	}
+
+	ret = gnss_setup(gnss_dev, false);
+	if (ret != 0) {
+		LOG_WRN("gnss_setup failed %d", ret);
+		return ret;
+	}
+	// Default values to please ztest
+	mia_m10_versions.swVersion[0] = 0;
+	mia_m10_versions.hwVersion[0] = 0;
+	// Query the mia m10 for SW version and HW version and print them.
+	ret = gnss_version_get(gnss_dev, &mia_m10_versions);
+	if (ret != 0) {
+		LOG_WRN("Failed to get version of mia m10! %d", ret);
+		return ret;
+	}
+
+	LOG_INF("The GNSS SW Version:%s", log_strdup(mia_m10_versions.swVersion));
+	LOG_INF("The GNSS Hardware Version:%s", log_strdup(mia_m10_versions.hwVersion));
+	return ret;
+}
+
+int gnss_controller_init_retry_softcold_setup(void)
+{
+	int ret = -ENOSYS;
+	uint8_t gnss_init_count = 0;
+
+	while (gnss_init_count < CONFIG_GNSS_MAX_COUNT_INIT) {
+		LOG_INF(" Trying INIT [count=%d, ret=%d]", gnss_init_count, ret);
+		ret = gnss_controller_setup();
+		if (ret == 0) {
+			return ret;
+		}
+		gnss_init_count++;
+	}
+
+	return ret;
+}
+
+int gnss_controller_init_retry_softcold(void)
+{
+	int ret = -ENOSYS;
 	gnss_reset_count = 0;
-	gnss_timeout_count = 0;
-	current_mode = GNSSMODE_NOMODE;
-	gnss_failed_init_count = 0;
-	while (gnss_failed_init_count < CONFIG_GNSS_INIT_MAX_COUNT) {
-		LOG_INF("current state: %i, N= %i, ret= %i", current_state, gnss_failed_init_count,
-			ret);
-		switch (current_state) {
-		case ST_GNSS_FW_DRIVER_INIT: {
-			gnss_dev = DEVICE_DT_GET(DT_ALIAS(gnss));
-			if (gnss_dev == NULL) {
-				char *msg = "Couldn't get instance of the GNSS device!";
-				nf_app_error(ERR_GNSS_CONTROLLER, -1, msg, sizeof(*msg));
-				gnss_failed_init_count++;
-			} else {
-				current_state = ST_GNSS_FW_CB_INIT;
-			}
-		} break;
-		case ST_GNSS_FW_CB_INIT: {
-			ret = gnss_set_data_cb(gnss_dev, gnss_data_update_cb);
-			if (ret != 0) {
-				char *msg = "Failed to register data CB!";
-				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
-				current_state = ST_GNSS_FW_DRIVER_INIT;
-				gnss_failed_init_count++;
-			} else {
-				current_state = ST_GNSS_HW_INIT;
-			}
-		} break;
-		case ST_GNSS_HW_INIT: {
-			ret = gnss_controller_setup();
-			if (ret != 0) {
-				char *msg = "Failed setup of GNSS!";
-				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
-				current_state = ST_GNSS_FW_CB_INIT;
-				gnss_failed_init_count++;
-			} else {
-				current_state = ST_GNSS_RUNNING;
-			}
-		} break;
-		case ST_GNSS_RUNNING: {
-			// Query the mia m10 for SW version and HW version and print them.
-			ret = gnss_version_get(gnss_dev, &mia_m10_versions);
-			if (ret != 0) {
-				char *msg = "Failed to get version of mia m10!";
-				nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
-				return ret;
-			}
-			LOG_INF("The GNSS SW Version:%s", log_strdup(mia_m10_versions.swVersion));
-			LOG_INF("The GNSS Hardware Version:%s",
-				log_strdup(mia_m10_versions.hwVersion));
-#if defined(CONFIG_TEST)
-			pub_gnss_thread_id =
-#endif
-				k_thread_create(&pub_gnss_thread, pub_gnss_stack,
-						K_KERNEL_STACK_SIZEOF(pub_gnss_stack),
-						(k_thread_entry_t)publish_gnss_data, (void *)NULL,
-						NULL, NULL, PRIORITY, 0, K_NO_WAIT);
-			return 0;
-		} break;
-		default:
-			break;
+
+	ret = gnss_controller_init_retry_softcold_setup();
+	if (ret == 0) {
+		return ret;
+	}
+
+	while (gnss_reset_count < CONFIG_GNSS_MAX_COUNT_SOFT_RESTART) {
+		ret = gnss_reset(gnss_dev, GNSS_RESET_MASK_COLD, GNSS_RESET_MODE_HW_IMMEDIATELY);
+
+		gnss_reset_count++;
+		LOG_INF("RESTART [ iteration=%d, ret=%d ]", gnss_reset_count, ret);
+
+		ret = gnss_controller_init_retry_softcold_setup();
+		if (ret == 0) {
+			return ret;
 		}
 	}
-	LOG_ERR("GNSS init failed %i, after %i tries.", ret, gnss_failed_init_count);
-	//TODO: add hard reset
-	return -1;
+
+	return ret;
+}
+
+int gnss_controller_init_retry(void)
+{
+	int ret = -ENOSYS;
+
+	ret = gnss_controller_init_retry_softcold();
+	if (ret == 0) {
+		return ret;
+	}
+	// If SOFT-COLD resets fail, try to toggle the resetn pin for a hard reset.
+	ret = gnss_resetn_pin(gnss_dev);
+	if (ret != 0) {
+		char *msg = "gnss_resetn_pin toggle failed";
+		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
+		return ret;
+	}
+
+	ret = gnss_controller_init_retry_softcold();
+
+	return ret;
+}
+
+int gnss_controller_init(void)
+{
+	current_mode = GNSSMODE_NOMODE;
+	gnss_timeout_count = 0;
+	int ret;
+
+	gnss_dev = DEVICE_DT_GET(DT_ALIAS(gnss));
+	if (!gnss_dev) {
+		return -ENODEV;
+	}
+
+	ret = gnss_controller_init_retry();
+	if (ret != 0) {
+		char *msg = "gnss init failed after using the resetn pin";
+		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
+		return ret;
+	}
+
+#if defined(CONFIG_TEST)
+	pub_gnss_thread_id =
+#endif
+		k_thread_create(&pub_gnss_thread, pub_gnss_stack,
+				K_KERNEL_STACK_SIZEOF(pub_gnss_stack),
+				(k_thread_entry_t)publish_gnss_data, (void *)NULL, NULL, NULL,
+				PRIORITY, 0, K_NO_WAIT);
+	return 0;
 }
 
 static _Noreturn void publish_gnss_data(void *ctx)

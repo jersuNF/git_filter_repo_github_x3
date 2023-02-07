@@ -593,6 +593,7 @@ static bool event_handler(const struct event_header *eh)
 	if (is_gnss_mode_changed_event(eh)) {
 		const struct gnss_mode_changed_event *ev = cast_gnss_mode_changed_event(eh);
 		gnss_set_mode(ev->mode);
+		return false;
 	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);

@@ -1945,7 +1945,6 @@ void process_poll_response(NofenceMessage *proto)
 		if (err < 0) {
 			LOG_ERR("Failed to schedule work");
 		}
-		return;
 	}
 
 	if (pResp->has_versionInfo) {

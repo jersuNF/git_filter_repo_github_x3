@@ -123,7 +123,6 @@ void mark_new_application_as_valid(void)
  */
 static bool event_handler(const struct event_header *eh)
 {
-	static uint32_t fota_requests;
 	if (is_start_fota_event(eh)) {
 		struct start_fota_event *ev = cast_start_fota_event(eh);
 
@@ -152,15 +151,13 @@ static bool event_handler(const struct event_header *eh)
 			status->dfu_error = 0;
 			EVENT_SUBMIT(status);
 		} else if (ret == -EALREADY) {
-			if (++fota_requests > FOTA_RETRIES) {
-				if (fota_requests == UINT32_MAX)
-					fota_requests = FOTA_RETRIES;
-				struct dfu_status_event *status = new_dfu_status_event();
-				status->dfu_status = DFU_STATUS_IDLE;
-				status->dfu_error = -ENODATA;
-				EVENT_SUBMIT(status);
-			}
+			/* If FOTA is already in process */
+			struct dfu_status_event *status = new_dfu_status_event();
+			status->dfu_status = DFU_STATUS_ALREADY_RUNNING;
+			status->dfu_error = -EALREADY;
+			EVENT_SUBMIT(status);
 		} else {
+			/* Any other error means the DFU is now idle */
 			struct dfu_status_event *status = new_dfu_status_event();
 			status->dfu_status = DFU_STATUS_IDLE;
 			status->dfu_error = -ENODATA;

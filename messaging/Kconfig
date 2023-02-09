@@ -48,7 +48,7 @@ if MESSAGING
 		default 5
 	config APP_FOTA_FAILURES_BEFORE_REBOOT
                 int "Number of consecutive FOTA attempts before the App reboots (hang workaround)"
-                default 20
+                default 10
 	config WDT_MODULE_MESSAGING_TIME_SECONDS
 		int "watchdog trigger time for MODULE_MESSAGING"
 		default 120 #2 min

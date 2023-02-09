@@ -1980,6 +1980,7 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 		LOG_INF("Received new app version from server %i",
 			fw_ver_from_server->ulApplicationVersion);
 		if (!reboot_scheduled) {
+			m_fota_attempts++;
 			struct start_fota_event *ev = new_start_fota_event();
 			ev->override_default_host = false;
 			ev->version = fw_ver_from_server->ulApplicationVersion;

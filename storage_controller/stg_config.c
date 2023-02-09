@@ -16,7 +16,7 @@
 #include "storage.h"
 #include "nf_settings.h"
 
-#define COPY_FROM_EEPROM 1
+#define COPY_FROM_EEPROM 0
 
 LOG_MODULE_REGISTER(stg_config, CONFIG_STG_CONFIG_LOG_LEVEL);
 

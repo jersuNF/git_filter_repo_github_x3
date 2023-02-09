@@ -76,8 +76,6 @@ extern struct configs conf_listen;
 int reset_modem(void);
 int get_ip(char **);
 int send_tcp(char *, size_t);
-static int send_tcp_q(char *, size_t);
 int stop_tcp(const bool, bool *);
 const struct device *bind_modem(void);
 int check_ip(void);
-static void send_tcp_fn(void);

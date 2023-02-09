@@ -138,7 +138,7 @@ int socket_listen(struct data *data)
 	return ret;
 }
 
-int socket_receive(struct data *data, char **msg)
+int socket_receive(const struct data *data, char **msg)
 {
 	int received;
 	static char buf[RECV_BUF_SIZE];

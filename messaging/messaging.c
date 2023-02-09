@@ -103,6 +103,7 @@ static int cached_and_ready_reg[CACHED_READY_END_OF_LIST];
 
 static int rat, mnc, rssi, min_rssi, max_rssi;
 static uint8_t ccid[20] = "\0";
+static char mdm_fw_file_name[sizeof(((PollMessageResponse *)NULL)->xModemFwFileName)] = "\0";
 
 static uint8_t expected_ano_frame, new_ano_in_progress;
 static bool first_ano_frame;
@@ -131,7 +132,9 @@ int8_t request_ano_frame(uint16_t, uint16_t);
 void ano_download(uint16_t, uint16_t);
 void proto_InitHeader(NofenceMessage *);
 void process_poll_response(NofenceMessage *);
-static void process_upgrade_request(VersionInfoFW *);
+
+static int process_upgrade_request(VersionInfoFW *);
+
 uint8_t process_fence_msg(FenceDefinitionResponse *);
 uint8_t process_ano_msg(UbxAnoReply *);
 
@@ -187,8 +190,9 @@ struct fence_def_update {
 	int request_frame;
 } m_fence_update_req;
 
-atomic_t poll_period_seconds = ATOMIC_INIT(15 * 60);
-atomic_t log_period_minutes = ATOMIC_INIT(30);
+static atomic_t poll_period_seconds = ATOMIC_INIT(15 * 60);
+static atomic_t log_period_minutes = ATOMIC_INIT(30);
+static atomic_t m_new_mdm_fw_update_state = ATOMIC_INIT(0);
 
 /* Messaging Rx thread */
 K_THREAD_DEFINE(messaging_rx_thread, CONFIG_MESSAGING_THREAD_STACK_SIZE, messaging_rx_thread_fn,
@@ -1079,8 +1083,6 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_gsm_info_event(eh)) {
-		LOG_WRN("GSM info received!");
-
 		struct gsm_info_event *ev = cast_gsm_info_event(eh);
 		rat = ev->gsm_info.rat;
 		mnc = ev->gsm_info.mnc;
@@ -1089,7 +1091,7 @@ static bool event_handler(const struct event_header *eh)
 		max_rssi = ev->gsm_info.max_rssi;
 		memcpy(ccid, ev->gsm_info.ccid, sizeof(ccid));
 
-		LOG_WRN("RSSI, rat: %d, %d, %d, %d, %s", rssi, min_rssi, max_rssi, rat,
+		LOG_INF("RSSI, rat: %d, %d, %d, %d, %s", rssi, min_rssi, max_rssi, rat,
 			log_strdup(ccid));
 		update_cache_reg(GSM_INFO);
 		return false;
@@ -1133,6 +1135,17 @@ static bool event_handler(const struct event_header *eh)
 			/* DFU/FOTA has started or is in progress, halt log data trafic in the
 			 * messaging tx thread */
 			atomic_set(&m_fota_in_progress, true);
+		}
+		return false;
+	}
+	if (is_mdm_fw_update_event(eh)) {
+		struct mdm_fw_update_event *ev = cast_mdm_fw_update_event(eh);
+		atomic_set(&m_new_mdm_fw_update_state, ev->status);
+		int err;
+		err = k_work_reschedule_for_queue(&message_q, &modem_poll_work, K_SECONDS(5));
+		if (err < 0) {
+			LOG_ERR("Error starting modem poll worker on mdm fw update! (%d)", err);
+			nf_app_error(ERR_MESSAGING, err, NULL, 0);
 		}
 		return false;
 	}
@@ -1204,6 +1217,7 @@ EVENT_SUBSCRIBE(MODULE, warn_correction_end_event);
 EVENT_SUBSCRIBE(MODULE, gsm_info_event);
 EVENT_SUBSCRIBE(MODULE, dfu_status_event);
 EVENT_SUBSCRIBE(MODULE, block_fota_event);
+EVENT_SUBSCRIBE(MODULE, mdm_fw_update_event);
 
 /**
  * @brief Process commands recieved on the bluetooth interface, and performs the appropriate
@@ -1568,7 +1582,10 @@ void build_poll_request(NofenceMessage *poll_req)
 		pwr_module_reboot_reason(&reboot_reason);
 		poll_req->m.poll_message_req.has_ucMCUSR = true;
 		poll_req->m.poll_message_req.ucMCUSR = reboot_reason;
+	}
 
+	if (m_transfer_boot_params ||
+	    atomic_get(&m_new_mdm_fw_update_state) >= MDM_FW_DOWNLOAD_COMPLETE) {
 		/* Add modem model and FW version */
 		const char *modem_model = NULL;
 		const char *modem_version = NULL;
@@ -1581,7 +1598,18 @@ void build_poll_request(NofenceMessage *poll_req)
 				modem_version,
 				sizeof(poll_req->m.poll_message_req.xVersionInfoModem.xVersion) -
 					1);
-
+			if (atomic_get(&m_new_mdm_fw_update_state) == MDM_FW_DOWNLOAD_COMPLETE) {
+				poll_req->m.poll_message_req.xVersionInfoModem
+					.has_xModemFwFileNameDownloaded = true;
+				strncpy(poll_req->m.poll_message_req.xVersionInfoModem
+						.xModemFwFileNameDownloaded,
+					&mdm_fw_file_name[0],
+					sizeof(poll_req->m.poll_message_req.xVersionInfoModem
+						       .xModemFwFileNameDownloaded) -
+						1);
+				LOG_INF("%s", poll_req->m.poll_message_req.xVersionInfoModem
+						      .xModemFwFileNameDownloaded);
+			}
 		} else {
 			LOG_WRN("Could not get modem version info: %d", ret);
 		}
@@ -1817,6 +1845,16 @@ void process_poll_response(NofenceMessage *proto)
 
 	/* When we receive a poll reply, we don't want to transfer boot params */
 	m_transfer_boot_params = false;
+
+	if (atomic_cas(&m_new_mdm_fw_update_state, MDM_FW_DOWNLOAD_COMPLETE, 0)) {
+		struct messaging_mdm_fw_event *mdm_fw_ver = new_messaging_mdm_fw_event();
+		mdm_fw_ver->buf = NULL;
+		mdm_fw_ver->len = 0;
+		EVENT_SUBMIT(mdm_fw_ver);
+	}
+
+	atomic_cas(&m_new_mdm_fw_update_state, INSTALLATION_COMPLETE, 0);
+
 	PollMessageResponse *pResp = &proto->m.poll_message_resp;
 	if (pResp->has_xServerIp && strlen(pResp->xServerIp) > 0) {
 		struct messaging_host_address_event *host_add_event =
@@ -1962,10 +2000,23 @@ void process_poll_response(NofenceMessage *proto)
 	}
 
 	if (pResp->has_versionInfo) {
-		process_upgrade_request(&pResp->versionInfo);
+		if (process_upgrade_request(&pResp->versionInfo) == 0) {
+			return;
+		}
+	}
+
+	if (pResp->has_xModemFwFileName) {
+		strncpy(mdm_fw_file_name, pResp->xModemFwFileName,
+			sizeof(pResp->xModemFwFileName) - 1);
+		LOG_INF("%s", mdm_fw_file_name);
+		struct messaging_mdm_fw_event *mdm_fw_ver = new_messaging_mdm_fw_event();
+		mdm_fw_ver->buf = mdm_fw_file_name;
+		mdm_fw_ver->len = sizeof(pResp->xModemFwFileName);
+		EVENT_SUBMIT(mdm_fw_ver);
 	}
 	return;
 }
+
 /** @todo : This is code duplication, create a utility parsing host and port from NVS */
 static int get_and_parse_server_ip_address(char *buf, size_t size)
 {
@@ -1988,7 +2039,7 @@ static int get_and_parse_server_ip_address(char *buf, size_t size)
  * version is available on the server.
  * @param fw_ver_from_server The firmware version available on the server.
  */
-void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
+static int process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 {
 	if (fw_ver_from_server->has_ulApplicationVersion &&
 	    fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER &&
@@ -2007,8 +2058,10 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 
 			ev->version = fw_ver_from_server->ulApplicationVersion;
 			EVENT_SUBMIT(ev);
+			return 0;
 		}
 	}
+	return -1;
 }
 
 /** @brief Process a fence frame and stores it into the cached pasture so we can validate if its

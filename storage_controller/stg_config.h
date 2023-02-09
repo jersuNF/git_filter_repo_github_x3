@@ -42,6 +42,7 @@ typedef enum {
 	STG_U32_WARN_CNT_TOT,
 	STG_STR_HOST_PORT,
 	STG_BLOB_BLE_KEY,
+	STG_U8_MODEM_INSTALLING,
 	STG_PARAM_ID_CNT
 } stg_config_param_id_t;
 

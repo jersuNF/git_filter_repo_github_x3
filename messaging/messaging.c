@@ -82,6 +82,9 @@ static gnss_last_fix_struct_t cached_fix;
 
 static bool block_fota_request = false;
 
+/** @brief counts the number of FOTA requests, only reset on success */
+static int m_fota_attempts = 0;
+
 typedef enum {
 	COLLAR_MODE,
 	COLLAR_STATUS,
@@ -1114,7 +1117,18 @@ static bool event_handler(const struct event_header *eh)
 		    fw_upgrade_event->dfu_error != 0) {
 			/* DFU/FOTA is canceled, release the halt on log data trafic in the
 			 * messaging tx thread */
+			LOG_WRN("DFU error %d", fw_upgrade_event->dfu_error);
 			atomic_set(&m_fota_in_progress, false);
+			if (m_fota_attempts > CONFIG_APP_FOTA_FAILURES_BEFORE_REBOOT) {
+				int err = stg_config_u8_write(
+					STG_U8_RESET_REASON,
+					(uint8_t)REBOOT_FOTA_MAX_FAILURE_ATTEMPTS);
+				if (err != 0) {
+					LOG_ERR("Error writing fota reset reason");
+				}
+				LOG_WRN("Rebooting due to too many failed FOTA tries");
+				sys_reboot(SYS_REBOOT_COLD);
+			}
 		} else if (fw_upgrade_event->dfu_status != DFU_STATUS_IDLE) {
 			/* DFU/FOTA has started or is in progress, halt log data trafic in the
 			 * messaging tx thread */
@@ -1982,6 +1996,7 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 		LOG_INF("Received new app version from server %i",
 			fw_ver_from_server->ulApplicationVersion);
 		if (!reboot_scheduled) {
+			m_fota_attempts++;
 			struct start_fota_event *ev = new_start_fota_event();
 			if (get_and_parse_server_ip_address(ev->host, sizeof(ev->host)) == 0) {
 				ev->override_default_host = true;

@@ -131,6 +131,7 @@ static bool event_handler(const struct event_header *eh)
 		/* This variable MUST be static, as the FOTA subsystem stores a pointer to it */
 		static char path_tmp[CONFIG_FW_UPGRADE_PATH_LEN];
 
+		/* @todo, the code below needs refactoring */
 		memset(path_tmp, 0, sizeof(path_tmp));
 		memset(host_tmp, 0, sizeof(host_tmp));
 

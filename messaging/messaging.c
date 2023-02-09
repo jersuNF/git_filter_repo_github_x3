@@ -1952,7 +1952,7 @@ void process_poll_response(NofenceMessage *proto)
 	}
 	return;
 }
-
+/** @todo : This is code duplication, create a utility parsing host and port from NVS */
 static int get_and_parse_server_ip_address(char *buf, size_t size)
 {
 	uint8_t port_length = 0;

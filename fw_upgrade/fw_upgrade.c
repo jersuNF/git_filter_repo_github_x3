@@ -127,20 +127,19 @@ static bool event_handler(const struct event_header *eh)
 		struct start_fota_event *ev = cast_start_fota_event(eh);
 
 		/* This variable MUST be static, as the FOTA subsystem stores a pointer to it */
-		static char host_tmp[CONFIG_FW_UPGRADE_HOST_LEN];
+		static char host_tmp[CONFIG_FW_UPGRADE_HOST_LEN + sizeof(":1234")];
 		/* This variable MUST be static, as the FOTA subsystem stores a pointer to it */
 		static char path_tmp[CONFIG_FW_UPGRADE_PATH_LEN];
 
+		memset(path_tmp, 0, sizeof(path_tmp));
+		memset(host_tmp, 0, sizeof(host_tmp));
+
 		if (ev->override_default_host) {
-			memcpy(host_tmp, ev->host, CONFIG_FW_UPGRADE_HOST_LEN);
-			memcpy(path_tmp, ev->path, CONFIG_FW_UPGRADE_PATH_LEN);
+			snprintf(host_tmp, sizeof(host_tmp), "%s:%d", ev->host, 5252);
 		} else {
-			memset(host_tmp, 0, CONFIG_FW_UPGRADE_HOST_LEN);
-			memset(path_tmp, 0, CONFIG_FW_UPGRADE_PATH_LEN);
-			memcpy(host_tmp, CACHE_HOST_NAME, sizeof(CACHE_HOST_NAME));
-			snprintf(path_tmp, CONFIG_FW_UPGRADE_PATH_LEN, CACHE_PATH_NAME,
-				 ev->version);
+			strncpy(host_tmp, CACHE_HOST_NAME, sizeof(host_tmp) - 1);
 		}
+		snprintf(path_tmp, sizeof(path_tmp), CACHE_PATH_NAME, ev->version);
 
 		/* If no error, submit in progress event. */
 		int ret = fota_download_start(host_tmp, path_tmp, -1, 0, 0);

@@ -1953,6 +1953,22 @@ void process_poll_response(NofenceMessage *proto)
 	return;
 }
 
+static int get_and_parse_server_ip_address(char *buf, size_t size)
+{
+	uint8_t port_length = 0;
+	int ret = stg_config_str_read(STG_STR_HOST_PORT, buf, &port_length);
+	if (ret != 0) {
+		LOG_ERR("Failed to read host address from ext flash");
+		return ret;
+	}
+	char *ptr_colon = strchr(buf, ':');
+	if (ptr_colon == NULL) {
+		return -EINVAL;
+	}
+	*ptr_colon = '\0';
+	return 0;
+}
+
 /**
  * @brief Process an incoming firmware upgrade request, and starts the firmware download if a new
  * version is available on the server.
@@ -1967,7 +1983,13 @@ void process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 			fw_ver_from_server->ulApplicationVersion);
 		if (!reboot_scheduled) {
 			struct start_fota_event *ev = new_start_fota_event();
-			ev->override_default_host = false;
+			if (get_and_parse_server_ip_address(ev->host, sizeof(ev->host)) == 0) {
+				ev->override_default_host = true;
+			} else {
+				LOG_WRN("Cannot parse server address");
+				ev->override_default_host = false;
+			}
+
 			ev->version = fw_ver_from_server->ulApplicationVersion;
 			EVENT_SUBMIT(ev);
 		}

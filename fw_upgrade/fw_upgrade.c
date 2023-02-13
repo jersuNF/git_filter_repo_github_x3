@@ -36,37 +36,47 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_FW_UPGRADE_LOG_LEVEL);
 #define FOTA_RETRIES                                                                               \
 	2 /* to ensure modem is switched back to PSV in case of
  * unhandled FOTA download errors */
+static bool cancel_fota = false;
 
 /* This variable MUST be static, as the FOTA subsystem stores a pointer to it */
 static char host_tmp[CONFIG_FW_UPGRADE_HOST_LEN + sizeof(":1234")];
 /* This variable MUST be static, as the FOTA subsystem stores a pointer to it */
 static char path_tmp[CONFIG_FW_UPGRADE_PATH_LEN];
 
-K_SEM_DEFINE(new_fota_attempt, 0, 1);
+K_SEM_DEFINE(dl_client_offload, 0, 1);
 struct k_thread start_download_client_thread;
 K_THREAD_STACK_DEFINE(start_download_client_stack, CONFIG_START_DL_CLIENT_STACK);
 
 static void attempt_to_start_dl_client(void)
 {
 	while (true) {
-		if (k_sem_take(&new_fota_attempt, K_FOREVER) == 0) {
-			/* If no error, submit in progress event. */
-			int ret = fota_download_start(host_tmp, path_tmp, -1, 0, 0);
-			struct dfu_status_event *status = new_dfu_status_event();
-			if (ret == 0) {
-				status->dfu_status = DFU_STATUS_IN_PROGRESS;
-				status->dfu_error = 0;
-				EVENT_SUBMIT(status);
-			} else if (ret == -EALREADY) {
-				/* If FOTA is already in process */
-				status->dfu_status = DFU_STATUS_ALREADY_RUNNING;
-				status->dfu_error = -EALREADY;
-				EVENT_SUBMIT(status);
+		if (k_sem_take(&dl_client_offload, K_FOREVER) == 0) {
+			if (cancel_fota) {
+				int ret = fota_download_cancel();
+				if (ret == -EAGAIN) {
+					LOG_WRN("LTE FOTA is not running");
+				} else if (ret != 0) {
+					LOG_ERR("Failed to cancel FOTA request");
+				}
 			} else {
-				/* Any other error means the DFU is now idle */
-				status->dfu_status = DFU_STATUS_IDLE;
-				status->dfu_error = -ENODATA;
-				EVENT_SUBMIT(status);
+				/* If no error, submit in progress event. */
+				int ret = fota_download_start(host_tmp, path_tmp, -1, 0, 0);
+				struct dfu_status_event *status = new_dfu_status_event();
+				if (ret == 0) {
+					status->dfu_status = DFU_STATUS_IN_PROGRESS;
+					status->dfu_error = 0;
+					EVENT_SUBMIT(status);
+				} else if (ret == -EALREADY) {
+					/* If FOTA is already in process */
+					status->dfu_status = DFU_STATUS_ALREADY_RUNNING;
+					status->dfu_error = -EALREADY;
+					EVENT_SUBMIT(status);
+				} else {
+					/* Any other error means the DFU is now idle */
+					status->dfu_status = DFU_STATUS_IDLE;
+					status->dfu_error = -ENODATA;
+					EVENT_SUBMIT(status);
+				}
 			}
 		}
 	}
@@ -176,7 +186,8 @@ static bool event_handler(const struct event_header *eh)
 			strncpy(host_tmp, CACHE_HOST_NAME, sizeof(host_tmp) - 1);
 		}
 		snprintf(path_tmp, sizeof(path_tmp), CACHE_PATH_NAME, ev->version);
-		k_sem_give(&new_fota_attempt);
+		cancel_fota = false;
+		k_sem_give(&dl_client_offload);
 
 		return false;
 	}
@@ -184,12 +195,8 @@ static bool event_handler(const struct event_header *eh)
 		/* Cancel an ongoing FOTA. This will trigger FOTA_DOWNLOAD_EVT_CANCELLED 
 		 * status in the fota_dl_handler callback 
 		 */
-		int ret = fota_download_cancel();
-		if (ret == -EAGAIN) {
-			LOG_WRN("LTE FOTA is not running");
-		} else if (ret != 0) {
-			LOG_ERR("Failed to cancel FOTA request");
-		}
+		cancel_fota = true;
+		k_sem_give(&dl_client_offload);
 		return false;
 	}
 

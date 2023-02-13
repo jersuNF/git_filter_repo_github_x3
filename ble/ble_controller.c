@@ -740,7 +740,8 @@ static void init_eeprom_variables(void)
 		if (serial_id > 999999) {
 			strncpy(bt_device_name, "NF??????", DEVICE_NAME_LEN + 1);
 		} else {
-			sprintf(bt_device_name, "NF%06d", current_serial_number);
+			snprintf(bt_device_name, sizeof(bt_device_name), "NF%06d",
+				 current_serial_number);
 		}
 		current_serial_number = serial_id;
 	}

@@ -10,10 +10,20 @@ if FW_UPGRADE
 	  be high enough to ensure modules shut down correctly
 	default 5
 
+	config START_DL_CLIENT_STACK
+    	int "stack size for start download client offload thread"
+    	help
+    	  stack size for a thread that will offload the event handler from starting the download client when getting a start FOTA event
+    	default 2048
+
 	config FW_UPGRADE_LOG_LEVEL
 		int "0 - 4 for logging. OFF -> ERR -> WRN -> INF -> DBG"
 		default 3
 		depends on LOG
+
+    config DOWNLOAD_CLIENT_OFFLOAD_THREAD_PRIO #TODO: use a lower priority
+            int "thread priority for download_client start & fota cancel offload thread"
+            default 1
 
 	menu "FW_EVENTS"
 	rsource "./../../events/fw_upgrade/Kconfig"

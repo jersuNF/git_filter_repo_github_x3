@@ -26,7 +26,7 @@ struct msg2server {
 	char *msg;
 	size_t len;
 };
-
+static void send_tcp_fn(void);
 K_THREAD_DEFINE(send_tcp_from_q, CONFIG_SEND_THREAD_STACK_SIZE, send_tcp_fn, NULL, NULL, NULL,
 		K_PRIO_COOP(CONFIG_SEND_THREAD_PRIORITY), 0, 0);
 
@@ -47,7 +47,7 @@ static struct k_sem connection_state_sem;
 
 int socket_connect(struct data *, struct sockaddr *, socklen_t);
 int socket_listen(struct data *);
-int socket_receive(struct data *, char **);
+int socket_receive(const struct data *, char **);
 void listen_sock_poll(void);
 int8_t lte_init(void);
 bool lte_is_ready(void);
@@ -63,6 +63,8 @@ static bool waiting_for_msg = false;
 static bool modem_is_ready = false;
 static bool power_level_ok = false;
 static bool fota_in_progress = false;
+
+static bool enable_mdm_fota = false;
 
 APP_DMEM struct configs conf = {
 	.ipv4 = {
@@ -80,7 +82,9 @@ APP_DMEM struct configs conf_listen = {
 	},
 };
 
-void receive_tcp(struct data *);
+static int send_tcp_q(char *, size_t);
+
+void receive_tcp(const struct data *);
 K_THREAD_DEFINE(recv_tid, RCV_THREAD_STACK, receive_tcp, &conf.ipv4, NULL, NULL,
 		K_PRIO_COOP(RCV_PRIORITY), 0, 0);
 
@@ -92,6 +96,7 @@ K_THREAD_DEFINE(listen_recv_tid, RCV_THREAD_STACK, listen_sock_poll, NULL, NULL,
 static APP_BMEM bool connected;
 static uint8_t *pMsgIn = NULL;
 static float socket_idle_count;
+static char *m_ftp_url = NULL;
 
 static void give_up_main_soc(void)
 {
@@ -100,7 +105,7 @@ static void give_up_main_soc(void)
 	k_sem_give(&connection_state_sem);
 }
 
-void receive_tcp(struct data *sock_data)
+void receive_tcp(const struct data *sock_data)
 {
 	int received;
 	char *buf = NULL;
@@ -259,7 +264,18 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		EVENT_SUBMIT(ack);
 		LOG_WRN("Dropping message!");
 		return false;
+	} else if (is_messaging_mdm_fw_event(eh)) {
+		struct messaging_mdm_fw_event *ev = cast_messaging_mdm_fw_event(eh);
+		m_ftp_url = ev->buf;
+		LOG_INF("%s", m_ftp_url);
+		enable_mdm_fota = true;
+		announce_connection_state(false);
+		return false;
 	} else if (is_check_connection(eh)) {
+		if (enable_mdm_fota) {
+			announce_connection_state(false);
+			return false;
+		}
 		k_sem_give(&connection_state_sem);
 		return false;
 	} else if (is_free_message_mem_event(eh)) {
@@ -289,6 +305,13 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			power_level_ok = false;
 		} else if (ev->pwr_state == PWR_NORMAL) {
 			power_level_ok = true;
+		}
+		return false;
+	} else if (is_save_modem_status_event(eh)) {
+		struct save_modem_status_event *ev = cast_save_modem_status_event(eh);
+		LOG_INF("Writing %d to modem status", ev->modem_status);
+		if (stg_config_u8_write(STG_U8_MODEM_INSTALLING, ev->modem_status) != 0) {
+			LOG_ERR("Writing to NVS fail");
 		}
 		return false;
 	}
@@ -370,11 +393,77 @@ static void end_connection(void)
 	}
 }
 
+static mdm_fota_status mdm_fota(void)
+{
+	static bool download_complete = false;
+	static bool mdm_install_started = false;
+	int ret = INSTALLATION_FAILED;
+	struct modem_nf_uftp_params ftp_params;
+	ftp_params.ftp_server = "172.31.45.52";
+	ftp_params.ftp_user = "sarar412";
+	ftp_params.ftp_password = "Klave12005";
+	ftp_params.download_timeout_sec = 3600;
+
+	if (!download_complete) {
+		LOG_INF("Starting FTP download, %s!", m_ftp_url);
+		ret = modem_nf_ftp_fw_download(&ftp_params, m_ftp_url);
+		if (ret == 0) {
+			download_complete = true;
+			LOG_INF("FTP download successful!");
+			struct mdm_fw_update_event *ev = new_mdm_fw_update_event();
+			ev->status = MDM_FW_DOWNLOAD_COMPLETE;
+			EVENT_SUBMIT(ev);
+			return MDM_FW_DOWNLOAD_COMPLETE;
+		} else {
+			LOG_WRN("FTP download failed!");
+			struct mdm_fw_update_event *ev = new_mdm_fw_update_event();
+			ev->status = DOWNLOAD_FAILED;
+			EVENT_SUBMIT(ev);
+			return DOWNLOAD_FAILED;
+		}
+	} else if (!mdm_install_started) {
+		mdm_install_started = true;
+		LOG_INF("Starting modem upgrade!");
+		ret = modem_nf_ftp_fw_install(true);
+		if (ret == 0) {
+			LOG_INF("Modem upgrade successful!");
+			return INSTALLATION_COMPLETE;
+		} else {
+			LOG_ERR("Modem upgrade failed!");
+			return INSTALLATION_FAILED;
+		}
+	}
+	return MDM_FOTA_STATUS_INIT;
+}
+
 static void cellular_controller_keep_alive(void *dev)
 {
 	int ret;
+	static mdm_fota_status mdm_state = MDM_FOTA_STATUS_INIT;
 	while (true) {
 		if (k_sem_take(&connection_state_sem, K_FOREVER) == 0) {
+			if (enable_mdm_fota) {
+				mdm_state = mdm_fota();
+
+				switch (mdm_state) {
+				case MDM_FW_DOWNLOAD_COMPLETE:
+					enable_mdm_fota = false;
+					end_connection();
+					goto update_connection_state;
+					break;
+				case INSTALLATION_COMPLETE:
+					modem_is_ready = false;
+					break;
+				case DOWNLOAD_FAILED:
+					enable_mdm_fota = false;
+					end_connection();
+					break;
+				default:
+					enable_mdm_fota = false;
+					LOG_INF("Modem FW upgrade was NOT successful!");
+				}
+			}
+
 			if (!power_level_ok) {
 				connected = false;
 				modem_is_ready = false;
@@ -400,12 +489,20 @@ static void cellular_controller_keep_alive(void *dev)
 				fota_in_progress = false;
 				ret = reset_modem();
 				if (ret == 0) {
+					if (mdm_state == INSTALLATION_COMPLETE) {
+						struct mdm_fw_update_event *ev =
+							new_mdm_fw_update_event();
+						ev->status = INSTALLATION_COMPLETE;
+						EVENT_SUBMIT(ev);
+						mdm_state = MDM_FOTA_STATUS_INIT;
+					}
 					publish_gsm_info();
 					ret = cellular_controller_connect(dev);
 					if (ret == 0) {
 						modem_is_ready = true;
 					}
 				}
+				enable_mdm_fota = false;
 			}
 			if (cellular_controller_is_ready()) {
 				if (!connected) { //check_ip
@@ -423,6 +520,7 @@ static void cellular_controller_keep_alive(void *dev)
 					if (ret >= 0) {
 						connected = true;
 						socket_idle_count = 0;
+						k_sem_reset(&close_main_socket_sem);
 					} else {
 						modem_is_ready = false;
 						fota_in_progress = false;
@@ -459,8 +557,8 @@ void announce_connection_state(bool state)
 	struct connection_state_event *ev = new_connection_state_event();
 	ev->state = state;
 	EVENT_SUBMIT(ev);
+	socket_idle_count = 0;
 	if (state == true) {
-		socket_idle_count = 0;
 		struct modem_state *modem_active = new_modem_state();
 		modem_active->mode = POWER_ON;
 		EVENT_SUBMIT(modem_active);
@@ -472,6 +570,26 @@ bool cellular_controller_is_ready(void)
 {
 	return modem_is_ready;
 }
+static uint8_t g_modem_status_cache = 0x00;
+
+static int modem_read_status_nvm(uint8_t *status)
+{
+	if (g_modem_status_cache != 0) {
+		*status = g_modem_status_cache;
+		return 0;
+	}
+	return -1;
+}
+
+static int modem_write_status_nvm(uint8_t status)
+{
+	g_modem_status_cache = status;
+	/* Post event */
+	struct save_modem_status_event *ev = new_save_modem_status_event();
+	ev->modem_status = status;
+	EVENT_SUBMIT(ev);
+	return 0;
+}
 
 int8_t cellular_controller_init(void)
 {
@@ -482,6 +600,11 @@ int8_t cellular_controller_init(void)
 		nf_app_error(ERR_CELLULAR_CONTROLLER, -ENODEV, NULL, 0);
 		return -1;
 	}
+	if (stg_config_u8_read(STG_U8_MODEM_INSTALLING, &g_modem_status_cache) != 0) {
+		LOG_ERR("Error retrieving STG_U8_MODEM_INSTALLING from NVS");
+	}
+	LOG_INF("modem status read: %d", g_modem_status_cache);
+	set_modem_status_cb(modem_read_status_nvm, modem_write_status_nvm);
 
 	/* Start connection keep-alive thread */
 	modem_is_ready = false;
@@ -542,9 +665,11 @@ static void send_tcp_fn(void)
 EVENT_LISTENER(MODULE, cellular_controller_event_handler);
 EVENT_SUBSCRIBE(MODULE, messaging_ack_event);
 EVENT_SUBSCRIBE(MODULE, messaging_proto_out_event);
+EVENT_SUBSCRIBE(MODULE, messaging_mdm_fw_event);
 EVENT_SUBSCRIBE(MODULE, messaging_stop_connection_event);
 EVENT_SUBSCRIBE(MODULE, messaging_host_address_event);
 EVENT_SUBSCRIBE(MODULE, check_connection);
 EVENT_SUBSCRIBE(MODULE, free_message_mem_event);
 EVENT_SUBSCRIBE(MODULE, dfu_status_event);
 EVENT_SUBSCRIBE(MODULE, pwr_status_event);
+EVENT_SUBSCRIBE(MODULE, save_modem_status_event);

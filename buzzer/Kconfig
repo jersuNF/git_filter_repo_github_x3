@@ -34,6 +34,9 @@ if BUZZER
 	config BUZZER_LONGEST_NOTE_SUSTAIN
 		int "Maximum length of sustain notes in s, prevents timeouts on sems."
 		default 10
+	config BUZZER_WELCOME_THRESHOLD
+		int "Minimum battery percentace for welcome tone to be played"
+		default 4
 
 	menu "ERROR_HANDLER"
     	rsource "./../../modules/error_handler/Kconfig"

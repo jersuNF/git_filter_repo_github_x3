@@ -61,18 +61,20 @@ static void attempt_to_start_dl_client(void)
 			} else {
 				/* If no error, submit in progress event. */
 				int ret = fota_download_start(host_tmp, path_tmp, -1, 0, 0);
-				struct dfu_status_event *status = new_dfu_status_event();
 				if (ret == 0) {
+					struct dfu_status_event *status = new_dfu_status_event();
 					status->dfu_status = DFU_STATUS_IN_PROGRESS;
 					status->dfu_error = 0;
 					EVENT_SUBMIT(status);
 				} else if (ret == -EALREADY) {
 					/* If FOTA is already in process */
+					struct dfu_status_event *status = new_dfu_status_event();
 					status->dfu_status = DFU_STATUS_ALREADY_RUNNING;
 					status->dfu_error = -EALREADY;
 					EVENT_SUBMIT(status);
 				} else {
 					/* Any other error means the DFU is now idle */
+					struct dfu_status_event *status = new_dfu_status_event();
 					status->dfu_status = DFU_STATUS_IDLE;
 					status->dfu_error = -ENODATA;
 					EVENT_SUBMIT(status);
@@ -146,8 +148,8 @@ int fw_upgrade_module_init()
 
 	k_thread_create(&start_download_client_thread, start_download_client_stack,
 			K_KERNEL_STACK_SIZEOF(start_download_client_stack),
-			(k_thread_entry_t)attempt_to_start_dl_client, NULL, NULL, NULL, 1, 0,
-			K_NO_WAIT);
+			(k_thread_entry_t)attempt_to_start_dl_client, NULL, NULL, NULL,
+			CONFIG_DOWNLOAD_CLIENT_OFFLOAD_THREAD_PRIO, 0, K_NO_WAIT);
 
 	return fota_download_init(fota_dl_handler);
 }

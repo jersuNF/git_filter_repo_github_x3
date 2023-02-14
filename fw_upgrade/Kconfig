@@ -21,6 +21,10 @@ if FW_UPGRADE
 		default 3
 		depends on LOG
 
+    config DOWNLOAD_CLIENT_OFFLOAD_THREAD_PRIO #TODO: use a lower priority
+            int "thread priority for download_client start & fota cancel offload thread"
+            default 1
+
 	menu "FW_EVENTS"
 	rsource "./../../events/fw_upgrade/Kconfig"
 	endmenu # FW_EVENTS

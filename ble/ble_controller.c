@@ -740,16 +740,9 @@ static void init_eeprom_variables(void)
 		if (serial_id > 999999) {
 			strncpy(bt_device_name, "NF??????", DEVICE_NAME_LEN + 1);
 		} else {
-			char tmp[DEVICE_NAME_LEN + 1];
-			snprintf(tmp, 7, "%i", serial_id);
-			uint32_t len = strlen(tmp);
-			memset(bt_device_name, '0', sizeof(bt_device_name));
-			bt_device_name[0] = 'N';
-			bt_device_name[1] = 'F';
-			strcpy(bt_device_name + DEVICE_NAME_LEN - len, tmp);
-
-			current_serial_number = serial_id;
+			snprintf(bt_device_name, sizeof(bt_device_name), "NF%06d", serial_id);
 		}
+		current_serial_number = serial_id;
 	}
 
 	/* Init collar mode */

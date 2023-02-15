@@ -651,6 +651,7 @@ void fence_update_req_fn(struct k_work *item)
  */
 static int set_tx_state_ready(messaging_tx_type_t tx_type)
 {
+	static int poll_retries = 0;
 	int state = atomic_get(&m_message_tx_type);
 	if (state != IDLE) {
 		/* Tx thread busy sending something else */
@@ -658,7 +659,10 @@ static int set_tx_state_ready(messaging_tx_type_t tx_type)
 			/* poll requests should always go through in the case of too many logs
 			 * stored on the flash. Tx thread will consume the token when the fcb 
 			 * walk returns. */
-			atomic_set(&m_break_log_stream_token, true);
+			if (poll_retries++ >= 1) {
+				poll_retries = 0;
+				atomic_set(&m_break_log_stream_token, true);
+			}
 			return 0;
 		}
 		return -EBUSY;

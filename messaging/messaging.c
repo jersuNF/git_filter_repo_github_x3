@@ -62,7 +62,7 @@ static gnss_mode_t cached_gnss_mode = GNSSMODE_NOMODE;
 
 atomic_t cached_batt = ATOMIC_INIT(0);
 static uint32_t cached_chrg;
-atomic_t cached_temp = ATOMIC_INIT(0);
+uint32_t cached_temp = 0;
 atomic_t cached_press = ATOMIC_INIT(0);
 atomic_t cached_hum = ATOMIC_INIT(0);
 atomic_t cached_warning_duration = ATOMIC_INIT(0);
@@ -283,12 +283,12 @@ static void build_log_message()
 	seq_msg.which_m = NofenceMessage_seq_msg_2_tag;
 	seq_msg.m.seq_msg_2.has_bme280 = true;
 	seq_msg.m.seq_msg_2.bme280.ulPressure = (uint32_t)atomic_get(&cached_press);
-	seq_msg.m.seq_msg_2.bme280.ulTemperature = (uint32_t)atomic_get(&cached_temp);
+	seq_msg.m.seq_msg_2.bme280.ulTemperature = cached_temp;
 	seq_msg.m.seq_msg_2.bme280.ulHumidity = (uint32_t)atomic_get(&cached_hum);
 	seq_msg.m.seq_msg_2.has_xBatteryQc = true;
 	seq_msg.m.seq_msg_2.xBatteryQc.usVbattMax = histogram.qc_battery.usVbattMax;
 	seq_msg.m.seq_msg_2.xBatteryQc.usVbattMin = histogram.qc_battery.usVbattMin;
-	seq_msg.m.seq_msg_2.xBatteryQc.usTemperature = (uint16_t)atomic_get(&cached_temp);
+	seq_msg.m.seq_msg_2.xBatteryQc.usTemperature = 0;
 	seq_msg.m.seq_msg_2.has_xGnssModeCounts = true;
 	memcpy(&seq_msg.m.seq_msg_2.xGnssModeCounts, &histogram.gnss_modes,
 	       sizeof(seq_msg.m.seq_msg_2.xGnssModeCounts));
@@ -1054,7 +1054,7 @@ static bool event_handler(const struct event_header *eh)
 		/* Multiply sensor values with scaling factor and cache */
 		atomic_set(&cached_press, (uint32_t)(ev->press * 1000));
 		atomic_set(&cached_hum, (uint32_t)(ev->humidity * 1000));
-		atomic_set(&cached_temp, (uint32_t)(ev->temp * 100));
+		cached_temp = ev->temp;
 		return false;
 	}
 	if (is_warn_correction_start_event(eh)) {

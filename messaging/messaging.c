@@ -123,31 +123,45 @@ enum collar_state_flags {
 	BATTERY_LVL_FLAG,
 	COLLAR_STATE_FLAG_CNT,
 };
+
 static inline void set_initial_collar_state_flag(uint8_t aFlag);
+
 static inline bool has_initial_collar_states();
 
 void build_poll_request(NofenceMessage *);
+
 void fence_download(uint8_t);
+
 int8_t request_ano_frame(uint16_t, uint16_t);
+
 void ano_download(uint16_t, uint16_t);
+
 void proto_InitHeader(NofenceMessage *);
+
 void process_poll_response(NofenceMessage *);
 
 static int process_upgrade_request(VersionInfoFW *);
 
 uint8_t process_fence_msg(FenceDefinitionResponse *);
+
 uint8_t process_ano_msg(UbxAnoReply *);
 
 int encode_and_send_message(NofenceMessage *);
+
 int encode_and_store_message(NofenceMessage *);
+
 int send_binary_message(uint8_t *, size_t);
+
 static int send_all_stored_messages(void);
 
 static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix, _DatePos *pos);
+
 bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *);
+
 static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
 
 void messaging_rx_thread_fn(void);
+
 void messaging_tx_thread_fn(void);
 
 static bool m_transfer_boot_params = true;
@@ -190,8 +204,8 @@ struct fence_def_update {
 	int request_frame;
 } m_fence_update_req;
 
-static atomic_t poll_period_seconds = ATOMIC_INIT(15 * 60);
-static atomic_t log_period_minutes = ATOMIC_INIT(30);
+static atomic_t poll_period_seconds = ATOMIC_INIT(CONFIG_DEFAULT_POLL_INTERVAL_MINUTES * 60);
+static atomic_t log_period_msec = ATOMIC_INIT(CONFIG_DEFAULT_LOG_INTERVAL_MINUTES) * 60 * 1000;
 static atomic_t m_new_mdm_fw_update_state = ATOMIC_INIT(0);
 
 /* Messaging Rx thread */
@@ -227,7 +241,7 @@ static int set_tx_state_ready(messaging_tx_type_t tx_type);
 /**
  * @brief Builds SEQ messages (1 and 2) with the latest data and store them to external storage.
  */
-static void build_log_message()
+static int build_log_message()
 {
 	int err;
 
@@ -240,7 +254,7 @@ static void build_log_message()
 	if (err) {
 		LOG_ERR("Timeout on waiting for histogram (%d)", err);
 		nf_app_error(ERR_MESSAGING, err, NULL, 0);
-		return;
+		return err;
 	}
 
 	/* Initialize generic seq message */
@@ -276,7 +290,7 @@ static void build_log_message()
 	if (err != 0) {
 		LOG_ERR("Failed to encode and save sequence message 1");
 		nf_app_error(ERR_MESSAGING, err, NULL, 0);
-		return;
+		return err;
 	}
 
 	/* Build seq 2 message */
@@ -298,8 +312,8 @@ static void build_log_message()
 	if (err != 0) {
 		LOG_ERR("Failed to encode and save sequence message 2");
 		nf_app_error(ERR_MESSAGING, err, NULL, 0);
-		return;
 	}
+	return err;
 }
 
 /**
@@ -311,8 +325,8 @@ static void build_log_message()
 static int read_and_send_log_data_cb(uint8_t *data, size_t len)
 {
 	/* Only send log data stored to flash if not halted by some other process, e.g. a pending
-	 * FOTA. Retuning an error from this callback will abort the FCB walk in the storage
-	 * controller untill log data trafic is reinstated. */
+     * FOTA. Retuning an error from this callback will abort the FCB walk in the storage
+     * controller untill log data trafic is reinstated. */
 	if (atomic_get(&m_fota_in_progress) == true) {
 		LOG_DBG("FOTA download in progress, will not send log data now!");
 		return -EBUSY;
@@ -355,7 +369,7 @@ static int send_all_stored_messages(void)
 		}
 
 		/* If all entries has been consumed, empty storage and we HAVE data on the
-		 * partition.*/
+         * partition.*/
 		if (stg_log_pointing_to_last()) {
 			err = stg_clear_partition(STG_PARTITION_LOG);
 			if (err) {
@@ -377,18 +391,18 @@ static int send_all_stored_messages(void)
 /**
  * @brief Work item handler for "log_periodic_work". Builds seq messages and store them to
  * external flash, and schedules an immediate send.
- * Rescheduled at regular interval as set by "log_period_minutes".
+ * Rescheduled at regular interval as set by "log_period_msec".
  */
 void log_data_periodic_fn()
 {
 	int ret;
 	ret = k_work_reschedule_for_queue(&message_q, &log_periodic_work,
-					  K_MINUTES(atomic_get(&log_period_minutes)));
+					  K_MSEC(atomic_get(&log_period_msec)));
 	if (ret < 0) {
 		LOG_ERR("Failed to reschedule periodic seq messages!");
 	}
 
-	build_log_message();
+	ret = build_log_message();
 	LOG_DBG("SEQ messages stored to flash");
 
 	if (m_transfer_boot_params) {
@@ -423,6 +437,17 @@ void modem_poll_work_fn()
 		LOG_DBG("Periodic poll failed, reschedule, error %d", ret);
 		/* Tx Thread busy, reschedule in 1 minute */
 		k_work_reschedule_for_queue(&message_q, &modem_poll_work, K_SECONDS(15));
+	}
+
+	static bool initialized = false;
+	static int64_t last_log_ts_msec = 0;
+	if ((k_uptime_get() - last_log_ts_msec) >= log_period_msec && !initialized) {
+		initialized = true;
+		last_log_ts_msec = k_uptime_get();
+		ret = k_work_schedule_for_queue(&message_q, &log_periodic_work, K_MSEC(250));
+		if (ret != 0) {
+			LOG_DBG("Periodic log failed, reschedule, error %d", ret);
+		}
 	}
 }
 
@@ -656,8 +681,8 @@ static int set_tx_state_ready(messaging_tx_type_t tx_type)
 		/* Tx thread busy sending something else */
 		if ((state == LOG_MSG) && (tx_type == POLL_REQ)) {
 			/* poll requests should always go through in the case of too many logs
-			 * stored on the flash. Tx thread will consume the token when the fcb 
-			 * walk returns. */
+             * stored on the flash. Tx thread will consume the token when the fcb
+             * walk returns. */
 			atomic_set(&m_break_log_stream_token, true);
 			return 0;
 		}
@@ -965,8 +990,8 @@ static bool event_handler(const struct event_header *eh)
 	if (is_update_flash_erase(eh)) {
 		current_state.flash_erase_count++;
 		/** @todo Not written to storage. Should it? And also be added to
-		 * update cache reg??
-		 */
+         * update cache reg??
+         */
 		/*update_cache_reg(FLASH_ERASE_COUNT);*/
 		return false;
 	}
@@ -1121,7 +1146,7 @@ static bool event_handler(const struct event_header *eh)
 		if (fw_upgrade_event->dfu_status == DFU_STATUS_IDLE &&
 		    fw_upgrade_event->dfu_error != 0) {
 			/* DFU/FOTA is canceled, release the halt on log data trafic in the
-			 * messaging tx thread */
+             * messaging tx thread */
 			LOG_WRN("DFU error %d", fw_upgrade_event->dfu_error);
 			atomic_set(&m_fota_in_progress, false);
 			if (m_fota_attempts > CONFIG_APP_FOTA_FAILURES_BEFORE_REBOOT) {
@@ -1136,7 +1161,7 @@ static bool event_handler(const struct event_header *eh)
 			}
 		} else if (fw_upgrade_event->dfu_status != DFU_STATUS_IDLE) {
 			/* DFU/FOTA has started or is in progress, halt log data trafic in the
-			 * messaging tx thread */
+             * messaging tx thread */
 			atomic_set(&m_fota_in_progress, true);
 		}
 		return false;
@@ -1434,22 +1459,18 @@ int messaging_module_init(void)
 				    CONFIG_WDT_MODULE_RECV_TCP_TIME_SECONDS);
 
 	/** @todo Should add semaphore and only start these queues when
-	 *  we get connection to network with modem.
-	 */
+     *  we get connection to network with modem.
+     */
 
-	err = k_work_schedule_for_queue(&message_q, &data_request_work, K_NO_WAIT);
-	if (err < 0) {
-		return err;
-	}
+	//	err = k_work_schedule_for_queue(&message_q, &data_request_work, K_NO_WAIT);
+	//	if (err < 0) {
+	//		return err;
+	//	}
 	err = k_work_schedule_for_queue(&message_q, &modem_poll_work, K_NO_WAIT);
 	if (err < 0) {
 		return err;
 	}
-	err = k_work_schedule_for_queue(&message_q, &log_periodic_work,
-					K_MINUTES(atomic_get(&log_period_minutes)));
-	if (err < 0) {
-		return err;
-	}
+
 	return 0;
 }
 
@@ -1487,8 +1508,8 @@ void build_poll_request(NofenceMessage *poll_req)
 	}
 	if (m_confirm_acc_limits || m_transfer_boot_params) {
 		/** @warning Assumes all the activity values are given with the
-		 *  m_confirm_acc_limits flag set in poll response from server.
-		 */
+         *  m_confirm_acc_limits flag set in poll response from server.
+         */
 		poll_req->m.poll_message_req.has_usAccSigmaSleepLimit = true;
 		poll_req->m.poll_message_req.has_usAccSigmaNoActivityLimit = true;
 		poll_req->m.poll_message_req.has_usOffAnimalTimeLimitSec = true;
@@ -1864,8 +1885,8 @@ void process_poll_response(NofenceMessage *proto)
 			new_messaging_host_address_event();
 		strncpy(host_add_event->address, pResp->xServerIp, sizeof(pResp->xServerIp));
 		EVENT_SUBMIT(host_add_event);
-		/*cellular controller writes it to ext flash if it is different from the 
-		 * previously stored address.*/
+		/*cellular controller writes it to ext flash if it is different from the
+         * previously stored address.*/
 	}
 	if (pResp->has_bEraseFlash && pResp->bEraseFlash) {
 		struct request_flash_erase_event *flash_erase_event =

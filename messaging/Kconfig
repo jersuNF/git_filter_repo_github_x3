@@ -64,6 +64,12 @@ if MESSAGING
 	config WDT_KEEP_MAX_TIME_SECONDS
 		int "Maximum watchdog time"
 		default 259200 #3 days
+	config DEFAULT_POLL_INTERVAL_MINUTES
+        int "Default time interval between poll request messages"
+        default 15
+	config DEFAULT_LOG_INTERVAL_MINUTES
+        int "Default time interval between periodic seq/seq2 messages"
+        default 30
 
 	menu "Message Queues"
 		config MSGQ_BLE_CTRL_SIZE

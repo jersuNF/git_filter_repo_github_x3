@@ -1585,7 +1585,8 @@ void build_poll_request(NofenceMessage *poll_req)
 	}
 
 	if (m_transfer_boot_params ||
-	    atomic_get(&m_new_mdm_fw_update_state) >= MDM_FW_DOWNLOAD_COMPLETE) {
+	    atomic_get(&m_new_mdm_fw_update_state) == MDM_FW_DOWNLOAD_COMPLETE ||
+	    atomic_get(&m_new_mdm_fw_update_state) == INSTALLATION_COMPLETE) {
 		/* Add modem model and FW version */
 		const char *modem_model = NULL;
 		const char *modem_version = NULL;

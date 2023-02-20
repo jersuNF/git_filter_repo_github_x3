@@ -205,7 +205,7 @@ struct fence_def_update {
 } m_fence_update_req;
 
 static atomic_t poll_period_seconds = ATOMIC_INIT(CONFIG_DEFAULT_POLL_INTERVAL_MINUTES * 60);
-static atomic_t log_period_msec = ATOMIC_INIT(CONFIG_DEFAULT_LOG_INTERVAL_MINUTES) * 60 * 1000;
+static atomic_t log_period_min = ATOMIC_INIT(CONFIG_DEFAULT_LOG_INTERVAL_MINUTES);
 static atomic_t m_new_mdm_fw_update_state = ATOMIC_INIT(0);
 
 /* Messaging Rx thread */
@@ -391,13 +391,13 @@ static int send_all_stored_messages(void)
 /**
  * @brief Work item handler for "log_periodic_work". Builds seq messages and store them to
  * external flash, and schedules an immediate send.
- * Rescheduled at regular interval as set by "log_period_msec".
+ * Rescheduled at regular interval as set by "log_period_min".
  */
 void log_data_periodic_fn()
 {
 	int ret;
 	ret = k_work_reschedule_for_queue(&message_q, &log_periodic_work,
-					  K_MSEC(atomic_get(&log_period_msec)));
+					  K_MINUTES(atomic_get(&log_period_min)));
 	if (ret < 0) {
 		LOG_ERR("Failed to reschedule periodic seq messages!");
 	}
@@ -441,7 +441,7 @@ void modem_poll_work_fn()
 
 	static bool initialized = false;
 	static int64_t last_log_ts_msec = 0;
-	if ((k_uptime_get() - last_log_ts_msec) >= log_period_msec && !initialized) {
+	if (!initialized && (k_uptime_get() - last_log_ts_msec) >= log_period_min * 60 * 1000) {
 		initialized = true;
 		last_log_ts_msec = k_uptime_get();
 		ret = k_work_schedule_for_queue(&message_q, &log_periodic_work, K_MSEC(250));

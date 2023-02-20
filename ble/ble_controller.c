@@ -58,9 +58,7 @@ static K_WORK_DEFINE(bt_send_work, bt_send_work_handler);
 static struct bt_conn *current_conn;
 static struct bt_gatt_exchange_params exchange_params;
 static uint32_t nus_max_send_len;
-static atomic_t atomic_bt_ready;
-static atomic_t atomic_bt_adv_active;
-static atomic_t atomic_bt_scan_active;
+
 #if CONFIG_BEACON_SCAN_ENABLE
 static struct k_work_delayable periodic_beacon_scanner_work;
 static struct k_work_delayable beacon_processor_work;
@@ -215,10 +213,6 @@ static void periodic_beacon_scanner_work_fn()
 static void beacon_processor_work_fn()
 {
 	static uint8_t last_distance = UINT8_MAX;
-
-	if (atomic_get(&atomic_bt_scan_active) == false) {
-		return;
-	}
 
 	beacon_shortest_distance(&m_shortest_dist2beacon);
 
@@ -384,12 +378,6 @@ static void adv_start(void)
 {
 	int err;
 
-	if (!atomic_get(&atomic_bt_ready)) {
-		/* Advertising will start when ready */
-		LOG_WRN("Advertising not ready to start");
-		return;
-	}
-
 	err = bt_le_adv_start(BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONNECTABLE, BT_GAP_ADV_SLOW_INT_MIN,
 					      BT_GAP_ADV_SLOW_INT_MAX, NULL),
 			      ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
@@ -398,20 +386,6 @@ static void adv_start(void)
 		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
 	} else {
 		LOG_INF("Starting BLE advertising");
-	}
-}
-
-/**
- * @brief Stop bluetooth advertisement. Set module state to standby.
- */
-static void adv_stop(void)
-{
-	int err;
-
-	err = bt_le_adv_stop();
-	if (err) {
-		LOG_ERR("Failed to stop ble advertisement (%d)", err);
-		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
 	}
 }
 
@@ -547,18 +521,12 @@ static void fence_def_ver_update(uint16_t fence_def_ver)
 }
 /**
  * @brief Function to initialize bt_nus and data in manufacture advertisement
- * array
- * @param[in] err error code
+ * array after the BLE stack has been initialized
  */
-static void bt_ready(int err)
+static void bt_ready(void)
 {
-	if (err) {
-		LOG_ERR("%s: %d", __func__, err);
-		return;
-	}
-
 #if CONFIG_BT_NUS
-	err = bt_nus_init(&nus_cb);
+	int err = bt_nus_init(&nus_cb);
 	if (err) {
 		LOG_ERR("Bluetooth Nordic Uart init service failed (%d)", err);
 		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
@@ -585,9 +553,6 @@ static void bt_ready(int err)
 	mfg_data[BLE_MFG_IDX_HW_VER] = current_hw_ver;
 	mfg_data[BLE_MFG_IDX_ATMEGA_VER] = (atmega_ver & 0x00ff);
 	mfg_data[BLE_MFG_IDX_ATMEGA_VER + 1] = (atmega_ver & 0xff00) >> 8;
-
-	atomic_set(&atomic_bt_ready, true);
-	atomic_set(&atomic_bt_adv_active, true);
 }
 
 #if CONFIG_BEACON_SCAN_ENABLE
@@ -650,17 +615,8 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 
 static void scan_start(void)
 {
-	if (atomic_get(&atomic_bt_scan_active) == true) {
-		return;
-	}
 	m_shortest_dist2beacon = UINT8_MAX;
 	m_cross_type = CROSS_UNDEFINED;
-
-	if (!atomic_get(&atomic_bt_ready)) {
-		/* Scan will start when bt is ready */
-		LOG_WRN("Scanning not ready to start");
-		return;
-	}
 
 	/* Initialize the beacon list */
 	init_beacon_list();
@@ -688,24 +644,15 @@ static void scan_start(void)
 		m_beacon_scan_start_timer = k_uptime_get();
 		k_work_reschedule(&beacon_processor_work,
 				  K_SECONDS(CONFIG_BEACON_PROCESSING_INTERVAL));
-
-		atomic_set(&atomic_bt_scan_active, true);
 	}
 }
 
 static void scan_stop(void)
 {
-	if (atomic_get(&atomic_bt_scan_active) == false) {
-		return;
-	}
-
 	int err = bt_le_scan_stop();
 	if (err) {
 		LOG_ERR("Stop Beacon scanning failed (%d)", err);
 		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
-	} else {
-		LOG_INF("Stop scanning for Beacons");
-		atomic_set(&atomic_bt_scan_active, false);
 	}
 }
 #endif /* CONFIG_BEACON_SCAN_ENABLE */
@@ -789,18 +736,19 @@ static void init_eeprom_variables(void)
 int ble_module_init()
 {
 	init_eeprom_variables();
-	atomic_set(&atomic_bt_adv_active, false);
-	atomic_set(&atomic_bt_scan_active, false);
 
 	nus_max_send_len = ATT_MIN_PAYLOAD;
 
 	/* Enable ble subsystem */
-	int err = bt_enable(bt_ready);
+	int err = bt_enable(NULL);
 	if (err) {
 		LOG_ERR("Failed to enable Bluetooth (%d)", err);
 		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
 		return err;
 	}
+	/* After synchronously  enabling the BLE stack, init advertisment */
+	bt_ready();
+
 	/* Set the ble device name in Generic Access Profile */
 	err = bt_set_name(bt_device_name);
 	if (err) {
@@ -809,9 +757,7 @@ int ble_module_init()
 	}
 
 	/* Start ble advertisement */
-	if (atomic_get(&atomic_bt_adv_active)) {
-		adv_start();
-	}
+	adv_start();
 
 	/* Callback to monitor connected/disconnected state */
 	bt_conn_cb_register(&conn_callbacks);
@@ -892,16 +838,6 @@ static bool event_handler(const struct event_header *eh)
 
 		int ret = 0;
 		switch (event->cmd) {
-		case BLE_CTRL_ADV_ENABLE:
-			if (!atomic_set(&atomic_bt_adv_active, true)) {
-				adv_start();
-			}
-			break;
-		case BLE_CTRL_ADV_DISABLE:
-			if (atomic_set(&atomic_bt_adv_active, false)) {
-				adv_stop();
-			}
-			break;
 		case BLE_CTRL_BATTERY_UPDATE:
 			battery_update(event->param.battery);
 			break;

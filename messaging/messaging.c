@@ -460,18 +460,15 @@ void log_send_work_fn()
 	static uint8_t retry_cnt = 0;
 
 	int err = set_tx_state_ready(LOG_MSG);
-	if ((err != 0) && (err != -EACCES) && (retry_cnt < 2)) {
+	if (err != 0 && retry_cnt++ <= 2) {
 		LOG_DBG("Unable to schedule log messages, Tx thread not ready- rescheduling");
 		err = k_work_reschedule_for_queue(&message_q, &log_send_work, K_SECONDS(15));
 		if (err < 0) {
 			LOG_ERR("Failed to reschedule work");
 		}
-		retry_cnt++;
-	} else if ((err != 0) && ((retry_cnt >= 2) || (err == -EACCES))) {
-		LOG_DBG("Unable to send log message, exhausted retry attempts or logs halted");
+	} else {
 		retry_cnt = 0;
 	}
-	return;
 }
 
 /**

@@ -1462,11 +1462,12 @@ int messaging_module_init(void)
      *  we get connection to network with modem.
      */
 
-	//	err = k_work_schedule_for_queue(&message_q, &data_request_work, K_NO_WAIT);
-	//	if (err < 0) {
-	//		return err;
-	//	}
 	err = k_work_schedule_for_queue(&message_q, &modem_poll_work, K_NO_WAIT);
+	if (err < 0) {
+		return err;
+	}
+
+	err = k_work_schedule_for_queue(&message_q, &data_request_work, K_NO_WAIT);
 	if (err < 0) {
 		return err;
 	}

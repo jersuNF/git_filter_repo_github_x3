@@ -707,7 +707,6 @@ static int set_tx_state_ready(messaging_tx_type_t tx_type)
  */
 void messaging_tx_thread_fn(void)
 {
-	static bool resume_logs = false;
 	static int err = 0;
 	static int64_t m_last_poll_req_timestamp_ms = 0;
 	while (true) {
@@ -753,9 +752,8 @@ void messaging_tx_thread_fn(void)
 			}
 
 			/* LOG MESSAGES */
-			if ((resume_logs || tx_type == LOG_MSG) && (err == 0) &&
+			if ((tx_type == LOG_MSG) && (err == 0) &&
 			    (atomic_get(&m_fota_in_progress) == false)) {
-				resume_logs = false;
 				/* Sending, all stored log messages are already proto encoded */
 				err = send_all_stored_messages();
 				/* Log message error handler,
@@ -793,7 +791,6 @@ void messaging_tx_thread_fn(void)
 				atomic_set(&m_break_log_stream_token, false);
 				atomic_set(&m_message_tx_type, POLL_REQ);
 				k_sem_give(&sem_release_tx_thread);
-				resume_logs = true;
 			}
 
 		} else {

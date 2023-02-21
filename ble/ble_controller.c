@@ -59,6 +59,7 @@ static struct bt_conn *current_conn;
 static struct bt_gatt_exchange_params exchange_params;
 static uint32_t nus_max_send_len;
 
+static atomic_t atomic_bt_scan_active;
 #if CONFIG_BEACON_SCAN_ENABLE
 static struct k_work_delayable periodic_beacon_scanner_work;
 static struct k_work_delayable beacon_processor_work;
@@ -213,6 +214,10 @@ static void periodic_beacon_scanner_work_fn()
 static void beacon_processor_work_fn()
 {
 	static uint8_t last_distance = UINT8_MAX;
+
+	if (atomic_get(&atomic_bt_scan_active) == false) {
+		return;
+	}
 
 	beacon_shortest_distance(&m_shortest_dist2beacon);
 
@@ -615,6 +620,9 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type,
 
 static void scan_start(void)
 {
+	if (atomic_get(&atomic_bt_scan_active) == true) {
+		return;
+	}
 	m_shortest_dist2beacon = UINT8_MAX;
 	m_cross_type = CROSS_UNDEFINED;
 
@@ -644,15 +652,24 @@ static void scan_start(void)
 		m_beacon_scan_start_timer = k_uptime_get();
 		k_work_reschedule(&beacon_processor_work,
 				  K_SECONDS(CONFIG_BEACON_PROCESSING_INTERVAL));
+
+		atomic_set(&atomic_bt_scan_active, true);
 	}
 }
 
 static void scan_stop(void)
 {
+	if (atomic_get(&atomic_bt_scan_active) == false) {
+		return;
+	}
+
 	int err = bt_le_scan_stop();
 	if (err) {
 		LOG_ERR("Stop Beacon scanning failed (%d)", err);
 		nf_app_error(ERR_BLE_MODULE, err, NULL, 0);
+	} else {
+		LOG_INF("Stop scanning for Beacons");
+		atomic_set(&atomic_bt_scan_active, false);
 	}
 }
 #endif /* CONFIG_BEACON_SCAN_ENABLE */
@@ -736,7 +753,7 @@ static void init_eeprom_variables(void)
 int ble_module_init()
 {
 	init_eeprom_variables();
-
+	atomic_set(&atomic_bt_scan_active, false);
 	nus_max_send_len = ATT_MIN_PAYLOAD;
 
 	/* Enable ble subsystem */

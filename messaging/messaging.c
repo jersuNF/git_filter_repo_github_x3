@@ -1141,11 +1141,14 @@ static bool event_handler(const struct event_header *eh)
 	if (is_mdm_fw_update_event(eh)) {
 		struct mdm_fw_update_event *ev = cast_mdm_fw_update_event(eh);
 		atomic_set(&m_new_mdm_fw_update_state, ev->status);
-		int err;
-		err = k_work_reschedule_for_queue(&message_q, &modem_poll_work, K_SECONDS(5));
-		if (err < 0) {
-			LOG_ERR("Error starting modem poll worker on mdm fw update! (%d)", err);
-			nf_app_error(ERR_MESSAGING, err, NULL, 0);
+		if (ev->status == MDM_FW_DOWNLOAD_COMPLETE || ev->status == INSTALLATION_COMPLETE) {
+			int err = k_work_reschedule_for_queue(&message_q, &modem_poll_work,
+							      K_SECONDS(5));
+			if (err < 0) {
+				LOG_ERR("Error starting modem poll worker on mdm fw update! (%d)",
+					err);
+				nf_app_error(ERR_MESSAGING, err, NULL, 0);
+			}
 		}
 		return false;
 	}

@@ -1054,7 +1054,7 @@ static bool event_handler(const struct event_header *eh)
 		/* Multiply sensor values with scaling factor and cache */
 		atomic_set(&cached_press, (uint32_t)(ev->press * 1000));
 		atomic_set(&cached_hum, (uint32_t)(ev->humidity * 1000));
-		cached_temp = ev->temp;
+		cached_temp = ev->temp * 100;
 		return false;
 	}
 	if (is_warn_correction_start_event(eh)) {

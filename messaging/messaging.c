@@ -62,7 +62,7 @@ static gnss_mode_t cached_gnss_mode = GNSSMODE_NOMODE;
 
 atomic_t cached_batt = ATOMIC_INIT(0);
 static uint32_t cached_chrg;
-uint32_t cached_temp = 0;
+int32_t cached_temp = 0;
 atomic_t cached_press = ATOMIC_INIT(0);
 atomic_t cached_hum = ATOMIC_INIT(0);
 atomic_t cached_warning_duration = ATOMIC_INIT(0);

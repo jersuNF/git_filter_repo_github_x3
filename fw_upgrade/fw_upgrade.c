@@ -22,16 +22,21 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_FW_UPGRADE_LOG_LEVEL);
 
 #define CACHE_HOST_NAME "172.31.36.11:5252"
 
+#define _MAKE_CACHE_PATH_NAME(a) "firmware/x25/%u/" #a "/app_update.bin?s=%u"
+
 /** @brief Make sure we give the FOTA path to the hardware we built on. */
 #ifdef CONFIG_BOARD_NF_SG25_27O_NRF52840
-#define CACHE_PATH_NAME "firmware/x25/%i/nf_sg25_27o_nrf52840/app_update.bin"
+#define CACHE_PATH_NAME _MAKE_CACHE_PATH_NAME(nf_sg25_27o_nrf52840)
 #elif CONFIG_BOARD_NF_C25_25G_NRF52840
-#define CACHE_PATH_NAME "firmware/x25/%i/nf_c25_25g_nrf52840/app_update.bin"
+#define CACHE_PATH_NAME _MAKE_CACHE_PATH_NAME(nf_c25_25g_nrf52840)
 #elif CONFIG_BOARD_NATIVE_POSIX
-#define CACHE_PATH_NAME "firmware/x25/%i/not_valid!/app_update.bin"
+#define CACHE_PATH_NAME _MAKE_CACHE_PATH_NAME(NOT_VALID)
 #else
 #error Unsupported boardfile for performing Nofence FOTA! (SG25/C25 only)
 #endif
+
+/* %u -> 4294967295 => 2 bytes-> 10 bytes, i.e. increase of 16 bytes  */
+#define CACHE_PATH_NAME_MAX_LEN sizeof(CACHE_PATH_NAME) + 16
 
 #define FOTA_RETRIES                                                                               \
 	2 /* to ensure modem is switched back to PSV in case of
@@ -41,7 +46,7 @@ static bool cancel_fota = false;
 /* This variable MUST be static, as the FOTA subsystem stores a pointer to it */
 static char host_tmp[CONFIG_FW_UPGRADE_HOST_LEN + sizeof(":1234")];
 /* This variable MUST be static, as the FOTA subsystem stores a pointer to it */
-static char path_tmp[CONFIG_FW_UPGRADE_PATH_LEN];
+static char path_tmp[CACHE_PATH_NAME_MAX_LEN + 1];
 
 K_SEM_DEFINE(dl_client_offload, 0, 1);
 struct k_thread start_download_client_thread;
@@ -187,7 +192,10 @@ static bool event_handler(const struct event_header *eh)
 		} else {
 			strncpy(host_tmp, CACHE_HOST_NAME, sizeof(host_tmp) - 1);
 		}
-		snprintf(path_tmp, sizeof(path_tmp), CACHE_PATH_NAME, ev->version);
+		/* We are passing the serial_id in the HTTP request so that the server
+		 * easily can trace or download
+		 */
+		snprintf(path_tmp, sizeof(path_tmp), CACHE_PATH_NAME, ev->version, ev->serial_id);
 		cancel_fota = false;
 		k_sem_give(&dl_client_offload);
 

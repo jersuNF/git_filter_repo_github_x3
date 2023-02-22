@@ -2058,7 +2058,7 @@ static int process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 				LOG_WRN("Cannot parse server address");
 				ev->override_default_host = false;
 			}
-
+			ev->serial_id = serial_id;
 			ev->version = fw_ver_from_server->ulApplicationVersion;
 			EVENT_SUBMIT(ev);
 			return 0;

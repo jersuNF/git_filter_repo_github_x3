@@ -440,8 +440,10 @@ void modem_poll_work_fn()
 	}
 
 	static bool initialized = false;
-	if (!initialized) {
+	static int64_t last_log_ts_msec = 0;
+	if (!initialized && (k_uptime_get() - last_log_ts_msec) >= log_period_min * 60 * 1000) {
 		initialized = true;
+		last_log_ts_msec = k_uptime_get();
 		ret = k_work_schedule_for_queue(&message_q, &log_periodic_work, K_MSEC(250));
 		if (ret != 0) {
 			LOG_DBG("Periodic log failed, reschedule, error %d", ret);

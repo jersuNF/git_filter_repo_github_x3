@@ -38,8 +38,9 @@ int zone_update(int16_t instant_dist, gnss_t *gnss_data, amc_zone_t *updated_zon
 	int ret = 0;
 	amc_zone_t new_zone;
 
-	if ((gnss_data->latest.msss > CONFIG_ZONE_MIN_TIME_SINCE_RESET) &&
-	    ((zone != PSM_ZONE) || (zone_get_time_since_update() > CONFIG_ZONE_PSM_LEAST_TIME))) {
+	if ((gnss_data->latest.msss > CONFIG_ZONE_MIN_TIME_SINCE_RESET_MS) &&
+	    ((zone != PSM_ZONE) ||
+	     (zone_get_time_since_update() > CONFIG_ZONE_PSM_LEAST_TIME_MS))) {
 		/* Find zone for given distance */
 		uint32_t markers_cnt = sizeof(markers) / sizeof(zone_mark_t);
 		for (uint32_t i = 0; i < markers_cnt - 1; i++) {
@@ -70,10 +71,10 @@ int zone_update(int16_t instant_dist, gnss_t *gnss_data, amc_zone_t *updated_zon
 	} else {
 		ret = -ETIME;
 
-		if ((zone_get_time_since_update() > CONFIG_ZONE_LEAST_TIME) &&
-		    (gnss_data->latest.msss > CONFIG_ZONE_MIN_TIME_SINCE_RESET) &&
+		if ((zone_get_time_since_update() > CONFIG_ZONE_LEAST_TIME_MS) &&
+		    (gnss_data->latest.msss > CONFIG_ZONE_MIN_TIME_SINCE_RESET_MS) &&
 		    ((zone != PSM_ZONE) || ((k_uptime_get_32() - gnss_data->latest.updated_at) >
-					    CONFIG_MAX_PSM_FIX_AGE))) {
+					    CONFIG_MAX_PSM_FIX_AGE_MS))) {
 			zone_set(NO_ZONE);
 		}
 	}

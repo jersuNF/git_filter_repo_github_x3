@@ -493,6 +493,7 @@ static _Noreturn void collect_stats_fn(void)
 			v_bat_max = 0;
 			v_bat_min = UINT16_MAX;
 			has_way_pnt = false;
+			steps = 0;
 			memset(&animal_behave, 0, sizeof(animal_behave));
 
 			/* write temporary variable to queue*/

@@ -52,9 +52,6 @@ static movement_state_t prev_state = STATE_INACTIVE;
 static uint8_t num_acc_fifo_samples = 0;
 static acc_activity_t last_activity = ACTIVITY_NO;
 
-/* Work queue item for triggering a read from the sensor */
-static struct k_work_delayable sample_sensor_work;
-
 /* Variable used to check if we time out regarding new accelerometer data. */
 void movement_timeout_fn(struct k_timer *dummy);
 K_TIMER_DEFINE(movement_timeout_timer, movement_timeout_fn, NULL);
@@ -359,10 +356,11 @@ void fetch_and_display(const struct device *sensor)
 #endif
 }
 
-static void sample_sensor_work_fn(struct k_work *work)
+/* Interrupt trigger function. */
+static void trigger_handler(const struct device *dev, const struct sensor_trigger *trig)
 {
-	k_work_reschedule(&sample_sensor_work, K_MSEC(SENSOR_SAMPLE_INTERVAL_MS));
-	fetch_and_display(sensor);
+	fetch_and_display(dev);
+	/** @todo Resample logic to 1hz / 10hz. */
 }
 
 static int update_acc_odr(acc_mode_t mode_hz)
@@ -401,6 +399,12 @@ static int update_acc_odr(acc_mode_t mode_hz)
 	int ret = sensor_attr_set(sensor, trig.chan, SENSOR_ATTR_SAMPLING_FREQUENCY, &odr);
 	if (ret != 0) {
 		LOG_ERR("Failed to set odr: %d", ret);
+		return ret;
+	}
+
+	ret = sensor_trigger_set(sensor, &trig, trigger_handler);
+	if (ret != 0) {
+		LOG_ERR("Failed to set trigger: %d", ret);
 		return ret;
 	}
 	return 0;
@@ -447,10 +451,6 @@ int init_movement_controller(void)
 		return err;
 	}
 
-	/* Init and start the sensor sampling work item */
-	k_work_init_delayable(&sample_sensor_work, sample_sensor_work_fn);
-	k_work_reschedule(&sample_sensor_work, K_MSEC(SENSOR_SAMPLE_INTERVAL_MS));
-
 	/* Start the timeout timer. This is reset everytime we have calculated
 	 * the activity successfully. */
 	k_timer_start(&movement_timeout_timer, K_SECONDS(CONFIG_MOVEMENT_TIMEOUT_SEC), K_NO_WAIT);
@@ -483,6 +483,7 @@ int init_movement_controller(void)
 static bool event_handler(const struct event_header *eh)
 {
 	int err;
+	/* todo: movement_set_mode_event is unused, just DELETE it to save place and complexity */
 	if (is_movement_set_mode_event(eh)) {
 		struct movement_set_mode_event *ev = cast_movement_set_mode_event(eh);
 		err = update_acc_odr(ev->acc_mode);

@@ -151,11 +151,12 @@ int fw_upgrade_module_init()
 	/* Submit event. */
 	EVENT_SUBMIT(event);
 
-	k_thread_create(&start_download_client_thread, start_download_client_stack,
-			K_KERNEL_STACK_SIZEOF(start_download_client_stack),
-			(k_thread_entry_t)attempt_to_start_dl_client, NULL, NULL, NULL,
-			CONFIG_DOWNLOAD_CLIENT_OFFLOAD_THREAD_PRIO, 0, K_NO_WAIT);
-
+	k_tid_t thread =
+		k_thread_create(&start_download_client_thread, start_download_client_stack,
+				K_KERNEL_STACK_SIZEOF(start_download_client_stack),
+				(k_thread_entry_t)attempt_to_start_dl_client, NULL, NULL, NULL,
+				CONFIG_DOWNLOAD_CLIENT_OFFLOAD_THREAD_PRIO, 0, K_NO_WAIT);
+	k_thread_name_set(thread, "dl_client");
 	return fota_download_init(fota_dl_handler);
 }
 

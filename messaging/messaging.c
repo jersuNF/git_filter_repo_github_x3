@@ -1422,9 +1422,12 @@ int messaging_module_init(void)
 	EVENT_SUBMIT(ev);
 
 	k_work_queue_init(&message_q);
+	struct k_work_queue_config cfg = {
+		.name = "message_q",
+	};
 	k_work_queue_start(&message_q, messaging_send_thread,
 			   K_THREAD_STACK_SIZEOF(messaging_send_thread),
-			   K_PRIO_COOP(CONFIG_MESSAGING_SEND_THREAD_PRIORITY), NULL);
+			   K_PRIO_COOP(CONFIG_MESSAGING_SEND_THREAD_PRIORITY), &cfg);
 
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
 	k_work_init_delayable(&log_periodic_work, log_data_periodic_fn);

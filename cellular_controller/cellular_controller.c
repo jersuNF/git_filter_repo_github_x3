@@ -609,11 +609,11 @@ int8_t cellular_controller_init(void)
 	/* Start connection keep-alive thread */
 	modem_is_ready = false;
 	k_sem_init(&connection_state_sem, 0, 1);
-	k_thread_create(&keep_alive_thread, keep_alive_stack,
-			K_KERNEL_STACK_SIZEOF(keep_alive_stack),
-			(k_thread_entry_t)cellular_controller_keep_alive, (void *)gsm_dev, NULL,
-			NULL, K_PRIO_COOP(CONFIG_CELLULAR_KEEP_ALIVE_THREAD_PRIORITY), 0,
-			K_NO_WAIT);
+	k_tid_t thread = k_thread_create(
+		&keep_alive_thread, keep_alive_stack, K_KERNEL_STACK_SIZEOF(keep_alive_stack),
+		(k_thread_entry_t)cellular_controller_keep_alive, (void *)gsm_dev, NULL, NULL,
+		K_PRIO_COOP(CONFIG_CELLULAR_KEEP_ALIVE_THREAD_PRIORITY), 0, K_NO_WAIT);
+	k_thread_name_set(thread, "keep_alive");
 
 	return 0;
 }

@@ -119,10 +119,11 @@ int time_use_module_init(void)
 {
 	LOG_INF("Initializing the time_use module.");
 
-	k_thread_create(&collect_stats_thread, collect_stats_stack,
-			K_THREAD_STACK_SIZEOF(collect_stats_stack),
-			(k_thread_entry_t)collect_stats_fn, NULL, NULL, NULL,
-			TIME_USE_THREAD_PRIORITY, 0, K_NO_WAIT);
+	k_tid_t thread = k_thread_create(&collect_stats_thread, collect_stats_stack,
+					 K_THREAD_STACK_SIZEOF(collect_stats_stack),
+					 (k_thread_entry_t)collect_stats_fn, NULL, NULL, NULL,
+					 TIME_USE_THREAD_PRIORITY, 0, K_NO_WAIT);
+	k_thread_name_set(thread, "collect_stats");
 	return 0;
 }
 

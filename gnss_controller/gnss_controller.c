@@ -251,11 +251,17 @@ int gnss_controller_init(void)
 
 #if defined(CONFIG_TEST)
 	pub_gnss_thread_id =
+#else
+	k_tid_t thread =
 #endif
+
 		k_thread_create(&pub_gnss_thread, pub_gnss_stack,
 				K_KERNEL_STACK_SIZEOF(pub_gnss_stack),
 				(k_thread_entry_t)publish_gnss_data, (void *)NULL, NULL, NULL,
 				PRIORITY, 0, K_NO_WAIT);
+#if !defined(CONFIG_TEST)
+	k_thread_name_set(thread, "gnss_ctrler");
+#endif
 	return 0;
 }
 

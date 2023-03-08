@@ -273,9 +273,12 @@ int stg_init_storage_controller(void)
 	/* Setup work threads. */
 	if (!queue_inited) {
 		k_work_queue_init(&erase_q);
+		struct k_work_queue_config cfg = {
+			.name = "storage_q",
+		};
 		k_work_queue_start(&erase_q, erase_flash_thread,
 				   K_THREAD_STACK_SIZEOF(erase_flash_thread),
-				   CONFIG_STORAGE_THREAD_PRIORITY, NULL);
+				   CONFIG_STORAGE_THREAD_PRIORITY, &cfg);
 		k_work_init(&erase_work, erase_flash_fn);
 		queue_inited = true;
 	}

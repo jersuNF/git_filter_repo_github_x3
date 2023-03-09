@@ -2330,6 +2330,6 @@ static inline bool has_initial_collar_states()
 	return (m_initial_collar_state_flags ==
 				((1 << COLLAR_MODE_FLAG) | (1 << COLLAR_STATUS_FLAG) |
 				 (1 << FENCE_STATUS_FLAG) | (1 << BATTERY_LVL_FLAG)) ?
-			true :
-			false);
+			      true :
+			      false);
 }

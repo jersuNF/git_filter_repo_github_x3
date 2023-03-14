@@ -19,12 +19,17 @@
 #include "storage.h"
 #include "storage_event.h"
 
+#include "system_diagnostic_structure.h"
+
 #include "error_event.h"
 
 #include "messaging_module_events.h"
 
 #include "embedded.pb.h"
 #include "UBX.h"
+
+#include <date_time.h>
+#include <time.h>
 
 /* Get sizes and offset definitions from pm_static.yml. */
 #include <pm_config.h>
@@ -33,29 +38,33 @@
 #define MODULE storage_controller
 LOG_MODULE_REGISTER(MODULE, CONFIG_STORAGE_CONTROLLER_LOG_LEVEL);
 
+/* Log partition. */
 static const struct flash_area *log_area;
 static struct fcb log_fcb;
 static struct flash_sector log_sectors[FLASH_LOG_NUM_SECTORS];
+static struct fcb_entry active_log_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
+K_MUTEX_DEFINE(log_mutex);
 
+/* System diagnostic partition. */
+static struct fcb_entry active_system_diag_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
+static const struct flash_area *system_diag_area;
+static struct fcb system_diag_fcb;
+static struct flash_sector system_diag_sectors[FLASH_SYSTEM_DIAG_NUM_SECTORS];
+K_MUTEX_DEFINE(system_diag_mutex);
+
+/* ANO partition. */
 static inline void update_ano_active_entry();
 static const struct flash_area *ano_area;
 static struct fcb ano_fcb;
 static struct flash_sector ano_sectors[FLASH_ANO_NUM_SECTORS];
+K_MUTEX_DEFINE(ano_mutex);
+static struct fcb_entry active_ano_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
+static struct fcb_entry last_sent_ano_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
 
-static struct fcb_entry active_ano_entry = { .fe_sector = NULL,
-					     .fe_elem_off = 0 };
-static struct fcb_entry last_sent_ano_entry = { .fe_sector = NULL,
-						.fe_elem_off = 0 };
-
-static struct fcb_entry active_log_entry = { .fe_sector = NULL,
-					     .fe_elem_off = 0 };
-
+/* Pasture partition. */
 static const struct flash_area *pasture_area;
 static struct fcb pasture_fcb;
 static struct flash_sector pasture_sectors[FLASH_PASTURE_NUM_SECTORS];
-
-K_MUTEX_DEFINE(log_mutex);
-K_MUTEX_DEFINE(ano_mutex);
 K_MUTEX_DEFINE(pasture_mutex);
 
 K_KERNEL_STACK_DEFINE(erase_flash_thread, CONFIG_STORAGE_THREAD_SIZE);
@@ -76,6 +85,10 @@ void erase_flash_fn(struct k_work *item)
 		return;
 	}
 	err = stg_clear_partition(STG_PARTITION_PASTURE);
+	if (err) {
+		return;
+	}
+	err = stg_clear_partition(STG_PARTITION_SYSTEM_DIAG);
 	if (err) {
 		return;
 	}
@@ -100,6 +113,8 @@ struct fcb *get_fcb(flash_partition_t partition)
 		fcb = &ano_fcb;
 	} else if (partition == STG_PARTITION_PASTURE) {
 		fcb = &pasture_fcb;
+	} else if (partition == STG_PARTITION_SYSTEM_DIAG) {
+		fcb = &system_diag_fcb;
 	} else {
 		LOG_ERR("Invalid partition given.");
 		return NULL;
@@ -121,6 +136,8 @@ struct k_mutex *get_mutex(flash_partition_t partition)
 		return &ano_mutex;
 	} else if (partition == STG_PARTITION_PASTURE) {
 		return &pasture_mutex;
+	} else if (partition == STG_PARTITION_SYSTEM_DIAG) {
+		return &system_diag_mutex;
 	}
 	LOG_ERR("Invalid partition given.");
 	return NULL;
@@ -152,6 +169,11 @@ static inline int init_fcb_on_partition(flash_partition_t partition)
 		area_id = FLASH_AREA_ID(pasture_partition);
 		area = pasture_area;
 		sector_ptr = pasture_sectors;
+	} else if (partition == STG_PARTITION_SYSTEM_DIAG) {
+		sector_cnt = FLASH_SYSTEM_DIAG_NUM_SECTORS;
+		area_id = FLASH_AREA_ID(system_diagnostic);
+		area = system_diag_area;
+		sector_ptr = system_diag_sectors;
 	} else {
 		LOG_ERR("Invalid partition given. %d", -EINVAL);
 		return -EINVAL;
@@ -159,10 +181,12 @@ static inline int init_fcb_on_partition(flash_partition_t partition)
 
 	err = flash_area_open(area_id, &area);
 	if (err) {
-		LOG_ERR("Error opening flash area for partition %d, err %d",
-			partition, err);
+		LOG_ERR("Error opening flash area for partition %d, err %d", partition, err);
 		return err;
 	}
+
+	LOG_DBG("FCB Init: Partition(%d), AreaID(%d), FaID(%d), FaOff(%d), FaSize(%d)", partition,
+		area_id, (uint8_t)area->fa_id, (int)area->fa_off, (int)area->fa_size);
 
 	/* Check if area has a flash device available. */
 	dev = device_get_binding(area->fa_dev_name);
@@ -194,8 +218,7 @@ static inline int init_fcb_on_partition(flash_partition_t partition)
 	 */
 	err = flash_area_get_sectors(area_id, &sector_cnt, sector_ptr);
 	if (err) {
-		LOG_ERR("Unable to setup sectors for partition %d, err %d.",
-			partition, err);
+		LOG_ERR("Unable to setup sectors for partition %d, err %d.", partition, err);
 		return err;
 	}
 
@@ -204,13 +227,12 @@ static inline int init_fcb_on_partition(flash_partition_t partition)
 
 	err = fcb_init(area_id, fcb);
 	if (err) {
-		LOG_ERR("Unable to initialize fcb for partition %d, err %d.",
-			partition, err);
+		LOG_ERR("Unable to initialize fcb for partition %d, err %d.", partition, err);
 		return err;
 	}
 
-	LOG_INF("Setup FCB for partition %d: %d sectors with sizes %db.",
-		partition, fcb->f_sector_cnt, fcb->f_sectors[0].fs_size);
+	LOG_INF("Setup FCB for partition %d: %d sectors with sizes %db.", partition,
+		fcb->f_sector_cnt, fcb->f_sectors[0].fs_size);
 
 	return err;
 }
@@ -223,6 +245,7 @@ int stg_init_storage_controller(void)
 	k_mutex_unlock(&log_mutex);
 	k_mutex_unlock(&ano_mutex);
 	k_mutex_unlock(&pasture_mutex);
+	k_mutex_unlock(&system_diag_mutex);
 
 	/* Initialize FCB on LOG and ANO partitions
 	 * based on pm_static.yml/.dts flash setup.
@@ -242,6 +265,11 @@ int stg_init_storage_controller(void)
 		return err;
 	}
 
+	err = init_fcb_on_partition(STG_PARTITION_SYSTEM_DIAG);
+	if (err) {
+		return err;
+	}
+
 	/* Setup work threads. */
 	if (!queue_inited) {
 		k_work_queue_init(&erase_q);
@@ -255,45 +283,56 @@ int stg_init_storage_controller(void)
 	/* Check which ANO partition is active. We just booted, so
 	 * we have to go through every entry.
 	 */
-//	update_ano_active_entry(NULL);
+	//	update_ano_active_entry(NULL);
 
 	return 0;
 }
 
-int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
-			   size_t len)
+int stg_write_to_partition(flash_partition_t partition, uint8_t *data, size_t len)
 {
 	struct fcb_entry loc;
 	struct fcb *fcb = get_fcb(partition);
 	int err = 0;
 
+	/* Check for multiple of 4 */
+	int padding = 0;
+	int multiple = (len % 4U);
+	if (multiple != 0) {
+		padding = 4 - multiple;
+	}
+	size_t new_len = len + padding;
+	uint8_t *new_data = k_malloc(new_len);
+	memset(new_data, 0xFF, new_len);
+	memcpy(new_data, data, len);
+
 	/* Appending a new entry, rotate(replaces) oldest if no space. */
-	err = fcb_append(fcb, len, &loc);
+	err = fcb_append(fcb, new_len, &loc);
 	if (err == -ENOSPC) {
 		err = fcb_rotate(fcb);
 		if (err) {
-			LOG_ERR("Unable to rotate fcb from -ENOSPC, err %d",
-				err);
+			LOG_ERR("Unable to rotate fcb from -ENOSPC, err %d", err);
+			k_free(new_data);
 			return err;
 		}
 		/* Retry appending. */
-		err = fcb_append(fcb, len, &loc);
+		err = fcb_append(fcb, new_len, &loc);
 		if (err) {
-			LOG_ERR("Unable to recover in appending function, err %d",
-				err);
-			nf_app_error(ERR_STORAGE_CONTROLLER, -ENOTRECOVERABLE,
-				     NULL, 0);
+			LOG_ERR("Unable to recover in appending function, err %d", err);
+			nf_app_error(ERR_STORAGE_CONTROLLER, -ENOTRECOVERABLE, NULL, 0);
+			k_free(new_data);
 			return err;
 		}
 		LOG_INF("Rotated FCB since it's full.");
 	} else if (err) {
 		LOG_ERR("Error appending new fcb entry, err %d", err);
+		k_free(new_data);
 		return err;
 	}
 
-	err = flash_area_write(fcb->fap, FCB_ENTRY_FA_DATA_OFF(loc), data, len);
+	err = flash_area_write(fcb->fap, FCB_ENTRY_FA_DATA_OFF(loc), new_data, new_len);
 	if (err) {
 		LOG_ERR("Error writing to flash area. err %d", err);
+		k_free(new_data);
 		return err;
 	}
 
@@ -302,6 +341,7 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data,
 	if (err) {
 		LOG_ERR("Error finishing new entry. err %d", err);
 	}
+	k_free(new_data);
 	return err;
 }
 
@@ -314,7 +354,8 @@ int stg_clear_partition(flash_partition_t partition)
 	}
 
 	if (k_mutex_lock(mtx, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
-		LOG_ERR("Mutex timeout in storage controller when clearing.");
+		LOG_ERR("Mutex timeout in storage controller when clearing FCB: Partition %i",
+			partition);
 		return -ETIMEDOUT;
 	}
 
@@ -327,6 +368,9 @@ int stg_clear_partition(flash_partition_t partition)
 	} else if (partition == STG_PARTITION_LOG) {
 		active_log_entry.fe_sector = NULL;
 		active_log_entry.fe_elem_off = 0;
+	} else if (partition == STG_PARTITION_SYSTEM_DIAG) {
+		active_system_diag_entry.fe_sector = NULL;
+		active_system_diag_entry.fe_elem_off = 0;
 	}
 
 	struct fcb *fcb = get_fcb(partition);
@@ -338,35 +382,80 @@ int stg_clear_partition(flash_partition_t partition)
 
 int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 {
-	if (k_mutex_lock(&log_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
-		return -ETIMEDOUT;
-	}
+	k_mutex_lock(&log_mutex, K_NO_WAIT);
+	if (log_mutex.lock_count == 1) {
+		if (fcb_is_empty(&log_fcb)) {
+			k_mutex_unlock(&log_mutex);
+			return -ENODATA;
+		}
 
-	if (fcb_is_empty(&log_fcb)) {
+		struct fcb_entry start_entry;
+
+		memcpy(&start_entry, &active_log_entry, sizeof(struct fcb_entry));
+
+		int err = fcb_getnext(&log_fcb, &start_entry);
+		if (err) {
+			k_mutex_unlock(&log_mutex);
+			return -ENODATA;
+		}
+
+		err = fcb_walk_from_entry(cb, &log_fcb, &start_entry, num_entries, &log_mutex);
+		if (err != 0) {
+			LOG_ERR("Error reading from log partition.");
+			k_mutex_unlock(&log_mutex);
+			return err;
+		}
+
+		/* Update the entry we're currently on. */
+		memcpy(&active_log_entry, &start_entry, sizeof(struct fcb_entry));
+
 		k_mutex_unlock(&log_mutex);
-		return -ENODATA;
-	}
-
-	struct fcb_entry start_entry;
-
-	memcpy(&start_entry, &active_log_entry, sizeof(struct fcb_entry));
-
-	int err = fcb_getnext(&log_fcb, &start_entry);
-	if (err) {
+		return err;
+	} else {
 		k_mutex_unlock(&log_mutex);
-		return -ENODATA;
+		return -EBUSY;
+	}
+}
+
+bool ano_is_same_day_or_greater(UBX_MGA_ANO_RAW_t *ano_date)
+{
+	/* Fetch unix timestamp. */
+	int64_t unixtime = 0;
+
+	if (date_time_now(&unixtime) != 0) {
+		/* Time is not yet acquired, keep all ANO entries
+		 * as they still might be valid.
+		 */
+		return true;
 	}
 
-	err = fcb_walk_from_entry(cb, &log_fcb, &start_entry, num_entries);
-	if (err && err != -EINTR) {
-		LOG_ERR("Error reading from log partition.");
+	time_t raw_time = (time_t)unixtime;
+	struct tm *gm_time = gmtime(&raw_time);
+
+	/* Time since 1900 > Time since 2000 */
+	if (gm_time->tm_year + 1900 > ano_date->mga_ano.year + 2000) {
+		return false;
 	}
 
-	/* Update the entry we're currently on. */
-	memcpy(&active_log_entry, &start_entry, sizeof(struct fcb_entry));
+	if (gm_time->tm_year + 1900 < ano_date->mga_ano.year + 2000) {
+		return true;
+	}
 
-	k_mutex_unlock(&log_mutex);
-	return err;
+	/* 0..11 > 1..12 */
+	if (gm_time->tm_mon + 1 > ano_date->mga_ano.month) {
+		return false;
+	}
+
+	if (gm_time->tm_mon + 1 < ano_date->mga_ano.month) {
+		return true;
+	}
+
+	/* 1..31 < 1..31 */
+	if (gm_time->tm_mday > ano_date->mga_ano.day) {
+		return false;
+	}
+
+	return true;
 }
 
 /** @brief When condition is met that we have a valid ANO partition,
@@ -381,16 +470,11 @@ int check_if_ano_valid_cb(uint8_t *data, size_t len)
 {
 	GPS_UBX_MGA_ANO_t *ano_frame = (GPS_UBX_MGA_ANO_t *)(data);
 
-	/* Age logic here. */
-	LOG_INF("Year %i, month %i, day %i", ano_frame->year,
-		ano_frame->month, ano_frame->day);
-
-	/** @todo If age is valid, update ano sector. Fetch from somewhere! */
-	if (ano_frame->year == 22) {
-		/* Done, we found oldest, valid timestamp, exit loop. */
+	if (ano_is_same_day_or_greater(ano_frame)) {
 		return -EINTR;
 	}
-	return -EINTR;
+
+	return 0;
 }
 
 /** @brief Goes through ANO partition data and stops whenever
@@ -412,13 +496,11 @@ static inline void update_ano_active_entry(struct fcb_entry *entry)
 		memcpy(&start_entry, entry, sizeof(struct fcb_entry));
 	}
 
-	int err = fcb_walk_from_entry(check_if_ano_valid_cb, &ano_fcb,
-				      &start_entry, 0);
+	int err = fcb_walk_from_entry(check_if_ano_valid_cb, &ano_fcb, &start_entry, 0, &ano_mutex);
 
 	if (err == -EINTR) {
 		/* Found valid boot partition, copy the entry header. */
-		memcpy(&active_ano_entry, &start_entry,
-		       sizeof(struct fcb_entry));
+		memcpy(&active_ano_entry, &start_entry, sizeof(struct fcb_entry));
 	} else if (err == -ENODATA) {
 		LOG_WRN("No ano frames available at ano partition.");
 	} else if (err) {
@@ -446,11 +528,9 @@ int stg_read_ano_data(fcb_read_cb cb, bool last_valid_ano, uint16_t num_entries)
 	struct fcb_entry start_entry;
 
 	if (last_valid_ano) {
-		memcpy(&start_entry, &active_ano_entry,
-		       sizeof(struct fcb_entry));
+		memcpy(&start_entry, &active_ano_entry, sizeof(struct fcb_entry));
 	} else {
-		memcpy(&start_entry, &last_sent_ano_entry,
-		       sizeof(struct fcb_entry));
+		memcpy(&start_entry, &last_sent_ano_entry, sizeof(struct fcb_entry));
 	}
 
 	err = fcb_getnext(&ano_fcb, &start_entry);
@@ -459,7 +539,7 @@ int stg_read_ano_data(fcb_read_cb cb, bool last_valid_ano, uint16_t num_entries)
 		return -ENODATA;
 	}
 
-	err = fcb_walk_from_entry(cb, &ano_fcb, &start_entry, num_entries);
+	err = fcb_walk_from_entry(cb, &ano_fcb, &start_entry, num_entries, &ano_mutex);
 
 	if (err && err != -EINTR) {
 		k_mutex_unlock(&ano_mutex);
@@ -477,13 +557,11 @@ int stg_read_ano_data(fcb_read_cb cb, bool last_valid_ano, uint16_t num_entries)
 
 int stg_read_pasture_data(fcb_read_cb cb)
 {
-	if (k_mutex_lock(&pasture_mutex,
-			 K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+	if (k_mutex_lock(&pasture_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
 	}
 
 	struct fcb *fcb = get_fcb(STG_PARTITION_PASTURE);
-
 	if (fcb_is_empty(fcb)) {
 		k_mutex_unlock(&pasture_mutex);
 		return -ENODATA;
@@ -491,7 +569,6 @@ int stg_read_pasture_data(fcb_read_cb cb)
 
 	struct fcb_entry entry;
 	int err = fcb_offset_last_n(fcb, 1, &entry);
-
 	if (err) {
 		k_mutex_unlock(&pasture_mutex);
 		return err;
@@ -500,35 +577,33 @@ int stg_read_pasture_data(fcb_read_cb cb)
 	size_t fence_size = entry.fe_data_len;
 	uint8_t *fence = k_malloc(fence_size);
 
-	err = flash_area_read(fcb->fap, FCB_ENTRY_FA_DATA_OFF(entry), fence,
-			      fence_size);
+	err = flash_area_read(fcb->fap, FCB_ENTRY_FA_DATA_OFF(entry), fence, fence_size);
 	if (err) {
 		k_free(fence);
 		k_mutex_unlock(&pasture_mutex);
 		return err;
 	}
 
-	cb(fence, fence_size);
+	err = cb(fence, fence_size);
 	k_free(fence);
-
 	k_mutex_unlock(&pasture_mutex);
 	return err;
 }
 
 int stg_write_log_data(uint8_t *data, size_t len)
 {
-	if (k_mutex_lock(&log_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+	if (k_mutex_lock(&log_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT)) == 0 &&
+	    log_mutex.lock_count <= 1) {
+		int err = stg_write_to_partition(STG_PARTITION_LOG, data, len);
+		if (err) {
+			LOG_ERR("Error writing to log partition.");
+		}
+		k_mutex_unlock(&log_mutex);
+		return err;
+	} else {
+		k_mutex_unlock(&log_mutex);
 		return -ETIMEDOUT;
 	}
-
-	int err = stg_write_to_partition(STG_PARTITION_LOG, data, len);
-
-	if (err) {
-		LOG_ERR("Error writing to log partition.");
-	}
-
-	k_mutex_unlock(&log_mutex);
-	return err;
 }
 
 int stg_write_ano_data(uint8_t *data, size_t len)
@@ -549,8 +624,7 @@ int stg_write_ano_data(uint8_t *data, size_t len)
 
 int stg_write_pasture_data(uint8_t *data, size_t len)
 {
-	if (k_mutex_lock(&pasture_mutex,
-			 K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+	if (k_mutex_lock(&pasture_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
 	}
 
@@ -561,6 +635,56 @@ int stg_write_pasture_data(uint8_t *data, size_t len)
 	}
 
 	k_mutex_unlock(&pasture_mutex);
+	return err;
+}
+
+int stg_read_system_diagnostic_log(fcb_read_cb cb, uint16_t num_entries)
+{
+	if (k_mutex_lock(&system_diag_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+		return -ETIMEDOUT;
+	}
+
+	if (fcb_is_empty(&system_diag_fcb)) {
+		k_mutex_unlock(&system_diag_mutex);
+		return -ENODATA;
+	}
+
+	struct fcb_entry start_entry;
+
+	memcpy(&start_entry, &active_system_diag_entry, sizeof(struct fcb_entry));
+
+	int err = fcb_getnext(&system_diag_fcb, &start_entry);
+	if (err) {
+		k_mutex_unlock(&system_diag_mutex);
+		return -ENODATA;
+	}
+
+	err = fcb_walk_from_entry(cb, &system_diag_fcb, &start_entry, num_entries,
+				  &system_diag_mutex);
+	if (err && err != -EINTR) {
+		LOG_ERR("Error reading from system diagnostic partition.");
+	}
+
+	/* Update the entry we're currently on. */
+	memcpy(&active_system_diag_entry, &start_entry, sizeof(struct fcb_entry));
+
+	k_mutex_unlock(&system_diag_mutex);
+	return err;
+}
+
+int stg_write_system_diagnostic_log(uint8_t *data, size_t len)
+{
+	if (k_mutex_lock(&system_diag_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+		return -ETIMEDOUT;
+	}
+
+	int err = stg_write_to_partition(STG_PARTITION_SYSTEM_DIAG, data, len);
+
+	if (err) {
+		LOG_ERR("Error writing to system diagnostic partition %i", err);
+	}
+
+	k_mutex_unlock(&system_diag_mutex);
 	return err;
 }
 
@@ -597,14 +721,17 @@ int stg_fcb_reset_and_init()
 	memset(&log_fcb, 0, sizeof(log_fcb));
 	memset(&ano_fcb, 0, sizeof(ano_fcb));
 	memset(&pasture_fcb, 0, sizeof(pasture_fcb));
+	memset(&system_diag_fcb, 0, sizeof(pasture_fcb));
 
 	memset(&active_ano_entry, 0, sizeof(struct fcb_entry));
 	memset(&last_sent_ano_entry, 0, sizeof(struct fcb_entry));
 	memset(&active_log_entry, 0, sizeof(struct fcb_entry));
+	memset(&active_system_diag_entry, 0, sizeof(struct fcb_entry));
 
 	active_ano_entry.fe_sector = NULL;
 	last_sent_ano_entry.fe_sector = NULL;
 	active_log_entry.fe_sector = NULL;
+	active_system_diag_entry.fe_sector = NULL;
 
 	return stg_init_storage_controller();
 }
@@ -635,8 +762,7 @@ bool stg_log_pointing_to_last()
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_request_flash_erase_event(eh)) {
-		struct request_flash_erase_event *ev =
-			cast_request_flash_erase_event(eh);
+		struct request_flash_erase_event *ev = cast_request_flash_erase_event(eh);
 
 		if (ev->magic == STORAGE_ERASE_MAGIC) {
 			k_work_submit_to_queue(&erase_q, &erase_work);

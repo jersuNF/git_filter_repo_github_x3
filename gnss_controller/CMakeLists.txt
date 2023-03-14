@@ -4,7 +4,7 @@ if(CONFIG_GNSS_CONTROLLER)
                 ./../../events/gnss_controller
                 ./../../../src/events/error_handler
                 ./../../drivers/gnss/zephyr
-                ${CMAKE_CURRENT_SOURCE_DIR}/../../../include
+                ./../../modules/nf_settings/include
                 )
 
         target_sources(app PRIVATE

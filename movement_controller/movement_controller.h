@@ -22,7 +22,7 @@ int init_movement_controller(void);
 #define A_DEC_THRESHOLD_MED 0
 
 /** Amplitude of z-acceleration needed to count a step. */
-#define STEP_THRESHOLD 3000
+#define STEP_THRESHOLD 1500
 
 /** Number of steps needed in the step counter for activity to be HIGH. */
 #define STEPS 10
@@ -45,7 +45,7 @@ int init_movement_controller(void);
 /**
  * Default Accelerometer limit for how long it has to be inactive to be off. (30 * 60)
  */
-#define OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT 5
+#define OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT (30 * 60)
 
 /**
  *  Default Accelerometer limit for 2021 No Activity detection algorithm.
@@ -58,7 +58,12 @@ int init_movement_controller(void);
  */
 #define ACC_STD_EXP_MOVING_AVERAGE_N 60
 
-/** @brief Resets the total step count. */
-void reset_total_steps(void);
+/** @brief Used to get the delta of how long we've been in active state. */
+uint32_t get_active_delta(void);
+
+#ifdef CONFIG_TEST
+void _movement_controller_reset_for_test(void);
+uint32_t _movement_controler_get_acc_std_final(void);
+#endif
 
 #endif /* _MOVEMENT_CONTROLLER_H_ */

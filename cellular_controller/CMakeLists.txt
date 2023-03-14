@@ -3,8 +3,11 @@ zephyr_include_directories(
         ./helpers
         ./../../events/cellular_controller/
         ./../../events/messaging/
+        ./../../events/fw_upgrade/
         ./../../events/error_handler/
-        ../../include)
+        ./../../events/power_manager/
+        ../../include
+        ./../../modules/nf_settings/include)
 
 target_sources(app PRIVATE
         cellular_controller.c

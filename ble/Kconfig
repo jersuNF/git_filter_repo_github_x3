@@ -8,14 +8,22 @@ module = BLE_SERVICE
 module-str = BLE Service
 source "subsys/logging/Kconfig.template.log_config"
 
+module = BEACON_PROCESSOR
+module-str = Beacon processor
+source "subsys/logging/Kconfig.template.log_config"
+
 config NOFENCE_SERIAL_NUMBER
 	int "Nofence serial number"
-	default 1
+	default 0
 
 
 config NOFENCE_FIRMWARE_NUMBER
 	int "Nofence firmware number"
 	default 1
+
+config NOFENCE_HARDWARE_NUMBER
+	int "Nofence firmware number"
+	default 14
 
 config MSG_BUF_SIZE
 	int "Transport interface buffer size"
@@ -39,6 +47,10 @@ config BEACON_HIGH_LIMIT
 	int "High limit distance measurement. Given in meters"
 	default 15
 
+config BEACON_MIN_MEASUREMENTS
+	int "Minimum measurements per Beacon. Must be smaller than max."
+	default 4
+
 config BEACON_MAX_MEASUREMENTS
 	int "Max measurements per Beacon"
 	default 8
@@ -58,3 +70,11 @@ config BEACON_SCAN_DURATION
 config BEACON_SCAN_PERIODIC_INTERVAL
 	int "Set the periodic interval to start beacon scanner. In seconds"
 	default 60
+
+config BEACON_PROCESSING_INTERVAL
+	int "Set the beacon processing interval while scanning. In seconds"
+	default 1
+
+config BEACON_SCAN_ENABLE
+	bool "Enable scanning for beacon"
+	default y

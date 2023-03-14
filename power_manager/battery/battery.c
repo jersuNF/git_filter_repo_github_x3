@@ -64,6 +64,9 @@ mov_avg_t v_batt_mov_avg;
 
 static bool battery_ok;
 
+static atomic_t battery_min_mv = ATOMIC_INIT(UINT16_MAX);
+static atomic_t battery_max_mv = ATOMIC_INIT(0);
+
 static const struct divider_config divider_config = {
 #if DT_NODE_HAS_STATUS(VBATT, okay)
 	.io_channel = {
@@ -137,11 +140,9 @@ static int divider_setup(void)
 			LOG_ERR("Failed to get GPIO %s", gcp->label);
 			return -ENOENT;
 		}
-		err = gpio_pin_configure(ddp->gpio, gcp->pin,
-					 GPIO_OUTPUT_INACTIVE | gcp->flags);
+		err = gpio_pin_configure(ddp->gpio, gcp->pin, GPIO_OUTPUT_INACTIVE | gcp->flags);
 		if (err != 0) {
-			LOG_ERR("Failed to control feed %s.%u: %d", gcp->label,
-				gcp->pin, err);
+			LOG_ERR("Failed to control feed %s.%u: %d", gcp->label, gcp->pin, err);
 			return err;
 		}
 	}
@@ -162,8 +163,7 @@ static int divider_setup(void)
 	};
 
 	if (cfg->output_ohm != 0) {
-		accp->input_positive =
-			SAADC_CH_PSELP_PSELP_AnalogInput0 + iocp->channel;
+		accp->input_positive = SAADC_CH_PSELP_PSELP_AnalogInput0 + iocp->channel;
 	} else {
 		accp->input_positive = SAADC_CH_PSELP_PSELP_VDD;
 	}
@@ -220,13 +220,11 @@ int battery_sample(void)
 		if (rc == 0) {
 			int32_t val = ddp->raw;
 
-			adc_raw_to_millivolts(adc_ref_internal(ddp->adc),
-					      ddp->adc_cfg.gain, sp->resolution,
-					      &val);
+			adc_raw_to_millivolts(adc_ref_internal(ddp->adc), ddp->adc_cfg.gain,
+					      sp->resolution, &val);
 
 			if (dcp->output_ohm != 0) {
-				rc = val * (uint64_t)dcp->full_ohm /
-				     dcp->output_ohm;
+				rc = val * (uint64_t)dcp->full_ohm / dcp->output_ohm;
 
 			} else {
 				rc = val;
@@ -237,32 +235,16 @@ int battery_sample(void)
 	return rc;
 }
 
-unsigned int battery_level_soc(unsigned int batt_mV,
-			       const struct battery_level_point *curve)
+unsigned int battery_level_soc(unsigned int batt_mV)
 {
-	const struct battery_level_point *pb = curve;
-
-	if (batt_mV >= pb->lvl_mV) {
-		/* Measured voltage above highest point, cap at maximum. */
-		return (pb->lvl_pptt / 100);
+	unsigned int batt_level_precentage;
+	if (batt_mV < CONFIG_BATTERY_EMPTY_MV) {
+		return 0;
+	} else if (batt_mV > CONFIG_BATTERY_FULL_MV) {
+		return 100;
 	}
-	/* Go down to the last point at or below the measured voltage. */
-	while ((pb->lvl_pptt > 0) && (batt_mV < pb->lvl_mV)) {
-		++pb;
-	}
-	if (batt_mV < pb->lvl_mV) {
-		/* Below lowest point, cap at minimum */
-		return pb->lvl_pptt;
-	}
-
-	/* Linear interpolation between below and above points. */
-	const struct battery_level_point *pa = pb - 1;
-	int batt_level_pptt = pb->lvl_pptt + ((pa->lvl_pptt - pb->lvl_pptt) *
-					      (batt_mV - pb->lvl_mV) /
-					      (pa->lvl_mV - pb->lvl_mV));
-
-	/* Return the battery State Of Charge (SOC) in % based on battery discharge curve */
-	unsigned int batt_level_precentage = (batt_level_pptt / 100);
+	batt_level_precentage = 100 * (batt_mV - CONFIG_BATTERY_EMPTY_MV) /
+				(CONFIG_BATTERY_FULL_MV - CONFIG_BATTERY_EMPTY_MV);
 	return batt_level_precentage;
 }
 
@@ -286,6 +268,28 @@ int battery_sample_averaged(void)
 		LOG_ERR("Failed to read battery voltage: %d", batt_mV);
 		return -ENOENT;
 	}
+	uint16_t curr_batt_max = atomic_get(&battery_max_mv);
+	uint16_t curr_batt_min = atomic_get(&battery_min_mv);
+
+	if (batt_mV < curr_batt_min) {
+		atomic_set(&battery_min_mv, batt_mV);
+	}
+	if (batt_mV > curr_batt_max) {
+		atomic_set(&battery_max_mv, batt_mV);
+	}
+
 	uint16_t approx_batt_value = approx_moving_average(&v_batt_mov_avg, batt_mV);
 	return approx_batt_value;
+}
+
+uint16_t battery_get_max(void)
+{
+	uint16_t curr_batt_max = (uint16_t)atomic_get(&battery_max_mv);
+	return curr_batt_max;
+}
+
+uint16_t battery_get_min(void)
+{
+	uint16_t curr_batt_min = (uint16_t)atomic_get(&battery_min_mv);
+	return curr_batt_min;
 }

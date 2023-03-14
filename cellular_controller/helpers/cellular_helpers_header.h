@@ -11,7 +11,7 @@
 #include <net/net_if.h>
 #include <net/net_event.h>
 #include <net/socket.h>
-#include "nf_eeprom.h"
+
 #define INVALID_SOCK (-1)
 #define PEER_PORT CONFIG_SERVER_PORT
 #define RECV_BUF_SIZE CONFIG_RECV_BUF_MAX
@@ -71,10 +71,11 @@ struct configs {
      * A structure for socket initialization
      */
 extern struct configs conf;
+extern struct configs conf_listen;
 
 int reset_modem(void);
 int get_ip(char **);
-int8_t send_tcp(char *, size_t);
-void stop_tcp(void);
+int send_tcp(char *, size_t);
+int stop_tcp(const bool, bool *);
 const struct device *bind_modem(void);
 int check_ip(void);

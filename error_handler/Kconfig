@@ -9,7 +9,31 @@ if ERROR_HANDLER
 		default 3
 		depends on LOG
 
-	config ERROR_USER_MESSAGE_SIZE
+	config ERROR_MAX_USER_MESSAGE_SIZE
 		int "How large can the user message string be."
 		default 64
+
+
+	config ERROR_THREAD_PRIORITY
+		int "Priority of the message processing thread"
+		default -3
+		help
+		  A cooperative thread has a negative priority value. 
+		  Once it becomes the current thread, a cooperative thread 
+		  remains the current thread until it performs an action 
+		  that makes it unready.
+		  A preemptible thread has a non-negative priority value. 
+		  Once it becomes the current thread, a preemptible thread 
+		  may be supplanted at any time if a cooperative thread, 
+		  or a preemptible thread of higher or equal priority, 
+		  becomes ready.
+
+	config ERROR_THREAD_STACK_SIZE
+		int "Size of the error thread"
+		default 2048
+	
+	config ERROR_BLE_UART_OUTPUT_ENABLE
+		bool "Enable external logging via BLE UART"
+		default n
+	
 endif

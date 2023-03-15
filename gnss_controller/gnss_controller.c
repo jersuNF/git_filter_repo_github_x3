@@ -2,12 +2,12 @@
 #include <device.h>
 #include <devicetree.h>
 #include <logging/log.h>
+#include <date_time.h>
 #include "gnss_controller.h"
 #include "gnss_controller_events.h"
 #include "error_event.h"
 #include "gnss.h"
 #include "kernel.h"
-#include "nf_eeprom.h"
 #include "UBX.h"
 #include "messaging_module_events.h"
 #include "storage.h"
@@ -105,6 +105,7 @@ static bool initialized = false;
 
 #if defined(CONFIG_TEST)
 k_tid_t pub_gnss_thread_id;
+k_tid_t ano_gnss_thread_id;
 #endif
 
 /** @brief Sends a timeout event from the GNSS controller */
@@ -275,11 +276,15 @@ int gnss_controller_init(void)
 				K_KERNEL_STACK_SIZEOF(pub_gnss_stack),
 				(k_thread_entry_t)publish_gnss_data, (void *)NULL, NULL, NULL,
 				PRIORITY, 0, K_NO_WAIT);
+
+#if defined(CONFIG_TEST)
+	ano_gnss_thread_id =
+#endif
+		k_thread_create(&update_ano_thread, update_ano_stack,
+				K_KERNEL_STACK_SIZEOF(update_ano_stack),
+				(k_thread_entry_t)install_fresh_ano, NULL, NULL, NULL,
+				UPDATE_ANO_PRIORITY, 0, K_NO_WAIT);
 	return 0;
-	k_thread_create(&update_ano_thread, update_ano_stack,
-			K_KERNEL_STACK_SIZEOF(update_ano_stack),
-			(k_thread_entry_t)install_fresh_ano, NULL, NULL, NULL, UPDATE_ANO_PRIORITY,
-			0, K_NO_WAIT);
 }
 
 static _Noreturn void publish_gnss_data(void *ctx)
@@ -427,26 +432,26 @@ static uint32_t ano_date_to_unixtime_midday(uint8_t year, uint8_t month, uint8_t
 	return time2unix(&nf_time);
 }
 
-int install_ano_msg(GPS_UBX_MGA_ANO_t *new_ano_message)
+int install_ano_msg(UBX_MGA_ANO_RAW_t *raw_ano)
 {
-	return gnss_upload_assist_data(gnss_dev, (uint8_t *)new_ano_message,
-				       sizeof(GPS_UBX_MGA_ANO_t));
+	return gnss_upload_assist_data(gnss_dev, raw_ano);
 }
 
-GPS_UBX_MGA_ANO_t ano_msg;
+static UBX_MGA_ANO_RAW_t raw_ano;
+
 static inline int read_ano_callback(uint8_t *data, size_t len)
 {
-	uint32_t ano_msg_age;
-	ano_msg_age = ano_date_to_unixtime_midday(ano_msg.year, ano_msg.month, ano_msg.day);
-	LOG_INF("ano msg age=%d, svID =%d", ano_msg_age, ano_msg.svId);
-	if (len != sizeof(GPS_UBX_MGA_ANO_t)) {
-		LOG_ERR("Error reading ano entry from flash, size not "
-			"correct!");
+	if (len != sizeof(UBX_MGA_ANO_RAW_t)) {
+		LOG_ERR("Error reading ano entry from flash, size not correct!");
 		return -EINVAL;
 	}
 	/* Memcpy the flash contents. */
-	memset(&ano_msg, 0, len);
-	memcpy(&ano_msg, data, len);
+	memset(&raw_ano, 0, len);
+	memcpy(&raw_ano, data, len);
+	uint32_t ano_msg_age;
+	ano_msg_age = ano_date_to_unixtime_midday(raw_ano.mga_ano.year, raw_ano.mga_ano.month,
+						  raw_ano.mga_ano.day);
+	LOG_INF("ano msg age=%d, svID =%d", ano_msg_age, raw_ano.mga_ano.svId);
 	return 0;
 }
 
@@ -459,32 +464,43 @@ static inline int read_ano_callback(uint8_t *data, size_t len)
  */
 _Noreturn void install_fresh_ano(void)
 {
-	static uint32_t last_installed_ano_time, serial_id;
-	static bool all_ano_installed = false, ano_downloaded = false;
+	static uint32_t last_installed_ano_time;
+	static uint32_t serial_id;
+	static bool all_ano_installed = false;
+	static bool ano_downloaded = false;
 	uint32_t ano_msg_age = 0;
+	uint32_t unix_time_sec;
+	int64_t unix_time_ms;
 	int ret;
-	/* todo, get rid off this */
-	static uint32_t current_time;
 
 	while (true) {
-		current_time = gnss_data_buffer.lastfix.unix_timestamp;
-		if (current_time > UNIX_TIMESTAMP_1_JAN_2000) {
+		/* TODO, make semaphore */
+		k_sleep(K_MSEC(200));
+		ret = date_time_now(&unix_time_ms);
+		if (ret != 0) {
+			LOG_WRN("date_time_now failed %d", ret);
+			continue;
+		}
+		unix_time_sec = unix_time_ms / 1000;
+
+		if (unix_time_sec > UNIX_TIMESTAMP_1_JAN_2000) {
 			if (!all_ano_installed) {
 				//			k_sem_take(&ano_update, K_FOREVER);
 				int err = stg_read_ano_data(read_ano_callback, false, 1);
 				if (err == 0) {
 					/*check timestamp and install if fresh.*/
-					ano_msg_age = ano_date_to_unixtime_midday(
-						ano_msg.year, ano_msg.month, ano_msg.day);
-					LOG_WRN("time: %d, ano_msg_time: %d", current_time,
+					ano_msg_age =
+						ano_date_to_unixtime_midday(raw_ano.mga_ano.year,
+									    raw_ano.mga_ano.month,
+									    raw_ano.mga_ano.day);
+					LOG_DBG("time: %d, ano_msg_time: %d", unix_time_sec,
 						ano_msg_age);
-					if (ano_msg_age > current_time &&
+					if (ano_msg_age > unix_time_sec &&
 					    ano_msg_age >= last_installed_ano_time) {
-						ret = install_ano_msg(&ano_msg);
+						ret = gnss_upload_assist_data(gnss_dev, &raw_ano);
 						if (ret == 0) {
 							last_installed_ano_time = ano_msg_age;
-							LOG_INF("Installed ano "
-								"msg!");
+							LOG_INF("Installed ano msg!");
 						} else {
 							LOG_INF("Failed to "
 								"install "
@@ -508,7 +524,7 @@ _Noreturn void install_fresh_ano(void)
 				}
 			}
 			if (serial_id == 0) {
-				int err = eep_read_serial(&serial_id);
+				int err = stg_config_u32_read(STG_U32_UID, &serial_id);
 				if (err != 0) {
 					LOG_ERR("Failed to read serial id from eeprom!");
 				}
@@ -518,12 +534,13 @@ _Noreturn void install_fresh_ano(void)
 			server with update ano requests from all collars
 			at the same time. */
 			uint16_t offset = (serial_id & 0x0FF) * 56;
-			if ((last_installed_ano_time + offset < current_time) &&
+			if ((last_installed_ano_time + offset < unix_time_sec) &&
 			    all_ano_installed && !ano_downloaded) {
 				/* Time to download new ano data from the server*/
 				struct start_ano_download *ev = new_start_ano_download();
 				LOG_INF("Submitting req_ano!");
 				EVENT_SUBMIT(ev);
+				/* FIXME: DO NOT CLEAR THE ANO PARTITION !*/
 				int err = stg_clear_partition(STG_PARTITION_ANO);
 				if (err != 0) {
 					LOG_ERR("Failed to clear ano "
@@ -537,7 +554,5 @@ _Noreturn void install_fresh_ano(void)
 				 * timeout expires. */
 			}
 		}
-		//		k_yield();
-		k_sleep(K_MSEC(200));
 	}
 }

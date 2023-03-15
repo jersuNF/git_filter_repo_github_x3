@@ -147,7 +147,7 @@ static int process_upgrade_request(VersionInfoFW *);
 
 uint8_t process_fence_msg(FenceDefinitionResponse *);
 
-uint8_t process_ano_msg(UbxAnoReply *);
+static int process_ano_msg(UbxAnoReply *anoResp);
 
 int encode_and_send_message(NofenceMessage *);
 
@@ -2240,39 +2240,71 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 }
 
 /**
- * @brief Process an incomming ANO message, mainly stores it to external flash.
- * @param anoResp The ANO message.
- * @return Returns 0 if successfull, otherwise negative error code.
+ * @brief Process an incomming ANO message, chopping it up in UBX-MGA_ANO messages and
+ * saving it to flash.
+ * @param anoResp The ANO protobuf message
+ * @retval < 0 Error occurred. The value gives the detailed reason
+ * @retval > 0 Needs to download more ANO packages
+ * @retval 0 ANO data successfully saved and we don't need more
+ *
  */
-uint8_t process_ano_msg(UbxAnoReply *anoResp)
+static int process_ano_msg(UbxAnoReply *anoResp)
 {
-	uint8_t rec_ano_frames = anoResp->rgucBuf.size / sizeof(UBX_MGA_ANO_RAW_t);
-
+	int err;
 	UBX_MGA_ANO_RAW_t *temp = NULL;
-	temp = (UBX_MGA_ANO_RAW_t *)(anoResp->rgucBuf.bytes + sizeof(UBX_MGA_ANO_RAW_t));
-
-	uint32_t age = ano_date_to_unixtime_midday(temp->mga_ano.year, temp->mga_ano.month,
-						   temp->mga_ano.day);
-
-	/* Write to storage controller's ANO WRITE partition. */
-	int err = stg_write_ano_data((uint8_t *)&anoResp->rgucBuf, anoResp->rgucBuf.size);
-
-	if (err) {
-		LOG_ERR("Error writing ano frame to storage controller (%d)", err);
-		nf_app_error(ERR_MESSAGING, err, NULL, 0);
+	ano_rec_t ano_rec;
+	uint8_t n_mga_ano = anoResp->rgucBuf.size / sizeof(UBX_MGA_ANO_RAW_t);
+	if (n_mga_ano == 0) {
+		return -ENODATA;
 	}
+	for (int i = 0; i < n_mga_ano; i++) {
+		memset(&ano_rec, 0, sizeof(ano_rec));
+		temp = (UBX_MGA_ANO_RAW_t *)(anoResp->rgucBuf.bytes +
+					     sizeof(UBX_MGA_ANO_RAW_t) * i);
+		/*
+		 * usAnoId identifies the day of the year (1-366) when the packet was generated.
+		 * And we would like to use the closest day to the current date when
+		 * feeding the GNSS receiver.
+		 */
+
+		ano_rec.ano_id = anoResp->usAnoId;
+		ano_rec.sequence_id = anoResp->usStartAno + i;
+
+		memcpy(&ano_rec.raw_ano, temp, sizeof(UBX_MGA_ANO_RAW_t));
+		err = stg_write_ano_data(&ano_rec);
+
+		if (err) {
+			LOG_ERR("Error writing ano frame to storage controller (%d)", err);
+			return err;
+		}
+	}
+
+	uint32_t ano_time_md = ano_date_to_unixtime_midday(temp->mga_ano.year, temp->mga_ano.month,
+							   temp->mga_ano.day);
+
 	int64_t current_time_ms = 0;
 
 	err = date_time_now(&current_time_ms);
 	if (err) {
 		LOG_ERR("Error fetching date time (%d)", err);
-		nf_app_error(ERR_MESSAGING, err, NULL, 0);
+		return err;
 	}
-	if (age > (current_time_ms / 1000) + SECONDS_IN_THREE_DAYS) {
-		return DOWNLOAD_COMPLETE;
+	/* Use the last record in the ANO message to stamp NVS data */
+	err = stg_config_u16_write(STG_U16_ANO_ID, anoResp->usAnoId);
+	if (err) {
+		return err;
+	}
+	err = stg_config_u16_write(STG_U16_ANO_START_ID, anoResp->usStartAno + n_mga_ano);
+	if (err) {
+		return err;
 	}
 
-	return rec_ano_frames;
+	if (ano_time_md > (current_time_ms / 1000) + SECONDS_IN_THREE_DAYS) {
+		err = stg_config_u32_write(STG_U32_ANO_TIMESTAMP, ano_time_md);
+		return err;
+	}
+
+	return n_mga_ano;
 }
 
 /**
@@ -2340,7 +2372,7 @@ static uint32_t ano_date_to_unixtime_midday(uint8_t year, uint8_t month, uint8_t
 	nf_time.day = day;
 	nf_time.month = month;
 	nf_time.year = year + 2000;
-	nf_time.hour = 12; //assumed per ANO specs
+	nf_time.hour = 12;
 	nf_time.minute = nf_time.second = 0;
 	return time2unix(&nf_time);
 }

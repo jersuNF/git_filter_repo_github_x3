@@ -7,6 +7,7 @@
 
 #include <zephyr.h>
 #include "fcb_ext.h"
+#include "ano_structure.h"
 
 /** Used to tell storage controller which region to read/write to. */
 typedef enum {
@@ -121,7 +122,7 @@ int stg_write_log_data(uint8_t *data, size_t len);
  * 
  * @return 0 on success, otherwise negative errno
  */
-int stg_write_ano_data(uint8_t *data, size_t len);
+int stg_write_ano_data(const ano_rec_t *ano_rec);
 
 /** 
  * @brief Writes log data to external flash LOG partition.

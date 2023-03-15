@@ -76,6 +76,7 @@ static bool queue_inited = false;
 
 void erase_flash_fn(struct k_work *item)
 {
+	LOG_INF("Erasing all flash partitions!");
 	int err = stg_clear_partition(STG_PARTITION_LOG);
 	if (err) {
 		return;
@@ -283,7 +284,8 @@ int stg_init_storage_controller(void)
 	/* Check which ANO partition is active. We just booted, so
 	 * we have to go through every entry.
 	 */
-	//	update_ano_active_entry(NULL);
+	/* TODO, fixme PSH, find a better way of finding this entry, delegate to thread outside */
+	update_ano_active_entry(NULL);
 
 	return 0;
 }
@@ -417,7 +419,7 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 	}
 }
 
-bool ano_is_same_day_or_greater(UBX_MGA_ANO_RAW_t *ano_date)
+static bool ano_is_same_day_or_greater(UBX_MGA_ANO_RAW_t *ano_date)
 {
 	/* Fetch unix timestamp. */
 	int64_t unixtime = 0;
@@ -468,7 +470,7 @@ bool ano_is_same_day_or_greater(UBX_MGA_ANO_RAW_t *ano_date)
  */
 int check_if_ano_valid_cb(uint8_t *data, size_t len)
 {
-	GPS_UBX_MGA_ANO_t *ano_frame = (GPS_UBX_MGA_ANO_t *)(data);
+	UBX_MGA_ANO_RAW_t *ano_frame = (UBX_MGA_ANO_RAW_t *)(data);
 
 	if (ano_is_same_day_or_greater(ano_frame)) {
 		return -EINTR;
@@ -606,13 +608,13 @@ int stg_write_log_data(uint8_t *data, size_t len)
 	}
 }
 
-int stg_write_ano_data(uint8_t *data, size_t len)
+int stg_write_ano_data(const ano_rec_t *ano_rec)
 {
 	if (k_mutex_lock(&ano_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
 	}
 
-	int err = stg_write_to_partition(STG_PARTITION_ANO, data, len);
+	int err = stg_write_to_partition(STG_PARTITION_ANO, (uint8_t *)ano_rec, sizeof(*ano_rec));
 
 	if (err) {
 		LOG_ERR("Error writing to ano partition, err %i", err);

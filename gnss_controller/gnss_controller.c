@@ -11,7 +11,7 @@
 #include "UBX.h"
 #include "messaging_module_events.h"
 #include "storage.h"
-#include "unixTime.h"
+#include "timeutil.h"
 
 #define NEW_GNSS_DATA_STACK_SIZE 1024
 #define NEW_GNSS_DATA_PRIORITY 7
@@ -24,6 +24,8 @@
 #define GNSS_1SEC 1000
 
 #define UNIX_TIMESTAMP_1_JAN_2000 1451606400
+
+#define SECONDS_IN_12_HOURS (12 * 3600)
 
 K_SEM_DEFINE(new_data_sem, 0, 1);
 
@@ -38,7 +40,7 @@ static int gnss_data_update_cb(const gnss_t *);
 static void gnss_timed_out(void);
 static int gnss_set_mode(gnss_mode_t mode, bool wakeup);
 static void gnss_thread_fn(void);
-static _Noreturn void install_fresh_ano(void);
+static _Noreturn void gnss_ano_install_thread_fn(void);
 
 static gnss_t gnss_data_buffer;
 static gnss_mode_t current_mode = GNSSMODE_NOMODE;
@@ -107,6 +109,66 @@ static bool initialized = false;
 k_tid_t pub_gnss_thread_id;
 k_tid_t ano_gnss_thread_id;
 #endif
+
+static bool ano_is_same_day_or_greater(UBX_MGA_ANO_RAW_t *ano_date)
+{
+	/* Fetch unix timestamp. */
+	int64_t unixtime = 0;
+
+	if (date_time_now(&unixtime) != 0) {
+		/* Time is not yet acquired, keep all ANO entries
+		 * as they still might be valid.
+		 */
+		return true;
+	}
+
+	time_t raw_time = (time_t)unixtime;
+	struct tm *gm_time = gmtime(&raw_time);
+
+	/* Time since 1900 > Time since 2000 */
+	if (gm_time->tm_year + 1900 > ano_date->mga_ano.year + 2000) {
+		return false;
+	}
+
+	if (gm_time->tm_year + 1900 < ano_date->mga_ano.year + 2000) {
+		return true;
+	}
+
+	/* 0..11 > 1..12 */
+	if (gm_time->tm_mon + 1 > ano_date->mga_ano.month) {
+		return false;
+	}
+
+	if (gm_time->tm_mon + 1 < ano_date->mga_ano.month) {
+		return true;
+	}
+
+	/* 1..31 < 1..31 */
+	if (gm_time->tm_mday > ano_date->mga_ano.day) {
+		return false;
+	}
+
+	return true;
+}
+
+/** @brief When condition is met that we have a valid ANO partition,
+ *         return -EINTR.
+ * @param[in] data data to check
+ * @param[in] len size of data
+ *
+ * @returns 0 if we want to search more ANO frames.
+ * @returns -EINTR if we found a valid frame, stopping the walk process.
+ */
+int check_if_ano_valid_cb(uint8_t *data, size_t len)
+{
+	UBX_MGA_ANO_RAW_t *ano_frame = (UBX_MGA_ANO_RAW_t *)(data);
+
+	if (ano_is_same_day_or_greater(ano_frame)) {
+		return -EINTR;
+	}
+
+	return 0;
+}
 
 /** @brief Sends a timeout event from the GNSS controller */
 static void gnss_controller_send_timeout_event(void)
@@ -282,7 +344,7 @@ int gnss_controller_init(void)
 #endif
 		k_thread_create(&update_ano_thread, update_ano_stack,
 				K_KERNEL_STACK_SIZEOF(update_ano_stack),
-				(k_thread_entry_t)install_fresh_ano, NULL, NULL, NULL,
+				(k_thread_entry_t)gnss_ano_install_thread_fn, NULL, NULL, NULL,
 				UPDATE_ANO_PRIORITY, 0, K_NO_WAIT);
 	return 0;
 }
@@ -421,37 +483,17 @@ static void gnss_timed_out(void)
 	}
 }
 
-static uint32_t ano_date_to_unixtime_midday(uint8_t year, uint8_t month, uint8_t day)
-{
-	nf_time_t nf_time;
-	nf_time.day = day;
-	nf_time.month = month;
-	nf_time.year = year + 2000;
-	nf_time.hour = 12; //assumed per ANO specs
-	nf_time.minute = nf_time.second = 0;
-	return time2unix(&nf_time);
-}
-
-int install_ano_msg(UBX_MGA_ANO_RAW_t *raw_ano)
-{
-	return gnss_upload_assist_data(gnss_dev, raw_ano);
-}
-
-static UBX_MGA_ANO_RAW_t raw_ano;
+static ano_rec_t ano_rec;
 
 static inline int read_ano_callback(uint8_t *data, size_t len)
 {
-	if (len != sizeof(UBX_MGA_ANO_RAW_t)) {
-		LOG_ERR("Error reading ano entry from flash, size not correct!");
+	if (len != sizeof(ano_rec_t)) {
+		LOG_ERR("Error reading ano entry from flash was %d expected %d", len,
+			sizeof(UBX_MGA_ANO_RAW_t));
 		return -EINVAL;
 	}
 	/* Memcpy the flash contents. */
-	memset(&raw_ano, 0, len);
-	memcpy(&raw_ano, data, len);
-	uint32_t ano_msg_age;
-	ano_msg_age = ano_date_to_unixtime_midday(raw_ano.mga_ano.year, raw_ano.mga_ano.month,
-						  raw_ano.mga_ano.day);
-	LOG_INF("ano msg age=%d, svID =%d", ano_msg_age, raw_ano.mga_ano.svId);
+	memcpy(&ano_rec, data, sizeof(ano_rec));
 	return 0;
 }
 
@@ -462,97 +504,86 @@ static inline int read_ano_callback(uint8_t *data, size_t len)
  *  (day) on eeprom on success of installation of all messages for that day.
  * In case of failure, sleep for 1 minute before retrying.
  */
-_Noreturn void install_fresh_ano(void)
+_Noreturn void gnss_ano_install_thread_fn(void)
 {
-	static uint32_t last_installed_ano_time;
-	static uint32_t serial_id;
-	static bool all_ano_installed = false;
-	static bool ano_downloaded = false;
-	uint32_t ano_msg_age = 0;
-	uint32_t unix_time_sec;
-	int64_t unix_time_ms;
+	uint32_t last_installed_ano_time = 0;
+	uint32_t serial_id = 0;
+	bool all_ano_installed = false;
+	bool ano_downloaded = false;
+	bool start_from_flash = true;
+	uint32_t unix_time_sec = 0;
+	int64_t unix_time_ms = 0;
 	int ret;
+
+	int err = stg_config_u32_read(STG_U32_UID, &serial_id);
+	if (err != 0) {
+		LOG_ERR("Failed to read serial id from eeprom!");
+	}
 
 	while (true) {
 		/* TODO, make semaphore */
 		k_sleep(K_MSEC(200));
 		ret = date_time_now(&unix_time_ms);
 		if (ret != 0) {
-			LOG_WRN("date_time_now failed %d", ret);
+			/* normal situation at boot, before we get server or GNSS time */
 			continue;
 		}
 		unix_time_sec = unix_time_ms / 1000;
-
-		if (unix_time_sec > UNIX_TIMESTAMP_1_JAN_2000) {
-			if (!all_ano_installed) {
-				//			k_sem_take(&ano_update, K_FOREVER);
-				int err = stg_read_ano_data(read_ano_callback, false, 1);
-				if (err == 0) {
-					/*check timestamp and install if fresh.*/
-					ano_msg_age =
-						ano_date_to_unixtime_midday(raw_ano.mga_ano.year,
-									    raw_ano.mga_ano.month,
-									    raw_ano.mga_ano.day);
-					LOG_DBG("time: %d, ano_msg_time: %d", unix_time_sec,
-						ano_msg_age);
-					if (ano_msg_age > unix_time_sec &&
-					    ano_msg_age >= last_installed_ano_time) {
-						ret = gnss_upload_assist_data(gnss_dev, &raw_ano);
-						if (ret == 0) {
-							last_installed_ano_time = ano_msg_age;
-							LOG_INF("Installed ano msg!");
-						} else {
-							LOG_INF("Failed to "
-								"install "
-								"ano msg! ,%d",
-								ret);
-						}
-						//TODO: handle failure to install ano_msg
+		if (unix_time_sec <= UNIX_TIMESTAMP_1_JAN_2000) {
+			continue;
+		}
+		if (!all_ano_installed) {
+			int err = stg_read_ano_data(read_ano_callback, start_from_flash, 1);
+			if (err == 0) {
+				start_from_flash = false;
+				uint16_t last_good_ano_id = UINT16_MAX;
+				uint32_t ano_time_md =
+					ano_date_to_unixtime_midday(ano_rec.raw_ano.mga_ano.year,
+								    ano_rec.raw_ano.mga_ano.month,
+								    ano_rec.raw_ano.mga_ano.day);
+				/* check that the ano data is from the current day or in the future */
+				int err = stg_config_u16_read(STG_U16_LAST_GOOD_ANO_ID,
+							      &last_good_ano_id);
+				if (err) {
+					LOG_WRN("Failed to read STG_U16_LAST_GOOD_ANO_ID %d", err);
+				}
+				if (ano_time_md + SECONDS_IN_12_HOURS >= unix_time_sec &&
+				    (last_good_ano_id == 0 || last_good_ano_id == 0xFFFF ||
+				     last_good_ano_id == ano_rec.ano_id)) {
+					ret = gnss_upload_assist_data(gnss_dev, &ano_rec.raw_ano);
+					if (ret == 0) {
+						LOG_INF("Installed ano msg!");
+						last_installed_ano_time = ano_time_md;
+					} else {
+						LOG_ERR("Failed to install ano %d", ret);
 					}
-					//					else {
-					//						LOG_INF("Finished installing "
-					//							" all ano from flash!");
-					//						all_ano_installed = true;
-					//					}
-				} else if (err == -ENODATA) {
-					LOG_INF("Reached end of ano "
-						"partition!");
-					all_ano_installed = true;
-					last_installed_ano_time = ano_msg_age;
-				} else {
-					LOG_ERR("Failed to read ano entry from flash!");
 				}
+			} else if (err == -ENODATA) {
+				LOG_DBG("Reached end of ano partition");
+				all_ano_installed = true;
+
+			} else {
+				LOG_ERR("Failed to read ano entry from flash!");
 			}
-			if (serial_id == 0) {
-				int err = stg_config_u32_read(STG_U32_UID, &serial_id);
-				if (err != 0) {
-					LOG_ERR("Failed to read serial id from eeprom!");
-				}
-				LOG_INF("Serial number = %i", serial_id);
-			}
-			/* adding  a random offset to avoid storming the
+		}
+
+		/* adding  a random offset to avoid storming the
 			server with update ano requests from all collars
 			at the same time. */
-			uint16_t offset = (serial_id & 0x0FF) * 56;
-			if ((last_installed_ano_time + offset < unix_time_sec) &&
-			    all_ano_installed && !ano_downloaded) {
-				/* Time to download new ano data from the server*/
-				struct start_ano_download *ev = new_start_ano_download();
-				LOG_INF("Submitting req_ano!");
-				EVENT_SUBMIT(ev);
-				/* FIXME: DO NOT CLEAR THE ANO PARTITION !*/
-				int err = stg_clear_partition(STG_PARTITION_ANO);
-				if (err != 0) {
-					LOG_ERR("Failed to clear ano "
-						"partition!");
-				}
-				if (k_sem_take(&ano_update, K_MINUTES(5)) == 0) {
-					all_ano_installed = false;
-					ano_downloaded = true;
-				}
-				/* wait until ano download is complete or
-				 * timeout expires. */
+		uint16_t offset = (serial_id & 0x0FF) * 56;
+		if ((last_installed_ano_time + offset < unix_time_sec) && all_ano_installed &&
+		    !ano_downloaded) {
+			/* Time to download new ano data from the server*/
+			struct start_ano_download *ev = new_start_ano_download();
+			LOG_DBG("Submitting req_ano!");
+			EVENT_SUBMIT(ev);
+
+			if (k_sem_take(&ano_update, K_MINUTES(5)) == 0) {
+				all_ano_installed = false;
+				ano_downloaded = true;
 			}
+			/* wait until ano download is complete or
+				 * timeout expires. */
 		}
 	}
 }

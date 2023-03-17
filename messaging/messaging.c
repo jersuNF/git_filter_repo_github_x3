@@ -21,7 +21,6 @@
 #include "request_events.h"
 #include "nf_version.h"
 #include "UBX.h"
-#include "unixTime.h"
 #include "error_event.h"
 
 #include "nf_crc16.h"
@@ -37,16 +36,18 @@
 #include "sound_event.h"
 #include "histogram_events.h"
 #include <sys/sys_heap.h>
+#include <sys/timeutil.h>
 #include "amc_const.h"
 #include "pwr_event.h"
 #include "nofence_watchdog.h"
+#include "timeutil.h"
 
 #define MODULE messaging
 LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
-#define SECONDS_IN_THREE_DAYS 259200
+#define TWO_AND_A_HALF_DAYS_SEC (3600 * (24 + 24 + 12))
 #define MSECCONDS_PER_HOUR 3600000
 
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
@@ -160,8 +161,6 @@ static int send_all_stored_messages(void);
 static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix, _DatePos *pos);
 
 bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *);
-
-static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
 
 void messaging_rx_thread_fn(void);
 
@@ -2299,8 +2298,8 @@ static int process_ano_msg(UbxAnoReply *anoResp)
 		return err;
 	}
 
-	if (ano_time_md > (current_time_ms / 1000) + SECONDS_IN_THREE_DAYS) {
-		err = stg_config_u32_write(STG_U32_ANO_TIMESTAMP, ano_time_md);
+	if (ano_time_md > (current_time_ms / 1000) + TWO_AND_A_HALF_DAYS_SEC) {
+		err = stg_config_u32_write(STG_U16_LAST_GOOD_ANO_ID, anoResp->usAnoId);
 		return err;
 	}
 
@@ -2357,24 +2356,6 @@ static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix, _D
 bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *gps)
 {
 	return gps->unix_timestamp != 0;
-}
-
-/**
- * @brief Converts ANO datetime to unix time.
- * @param year ANO data year.
- * @param month ANO data month.
- * @param day ANO data day.
- * @return Returns the unit time.
- */
-static uint32_t ano_date_to_unixtime_midday(uint8_t year, uint8_t month, uint8_t day)
-{
-	nf_time_t nf_time;
-	nf_time.day = day;
-	nf_time.month = month;
-	nf_time.year = year + 2000;
-	nf_time.hour = 12;
-	nf_time.minute = nf_time.second = 0;
-	return time2unix(&nf_time);
 }
 
 /**

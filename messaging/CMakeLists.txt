@@ -28,7 +28,7 @@ zephyr_include_directories(
 target_sources(app PRIVATE 
 ${CMAKE_CURRENT_SOURCE_DIR}/messaging.c
 ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/crc/nf_crc16.c
-${CMAKE_CURRENT_SOURCE_DIR}/../../lib/time/unixTime.c
+${CMAKE_CURRENT_SOURCE_DIR}/../../lib/time/timeutil.c
 ${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/ble_data_event.c
 ${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/ble_cmd_event.c
 ${CMAKE_CURRENT_SOURCE_DIR}/../../events/ble/ble_ctrl_event.c

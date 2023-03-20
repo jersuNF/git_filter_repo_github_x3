@@ -80,6 +80,7 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries);
  * 
  * @param[in] cb pointer location to the callback function that is 
  *               called during the fcb walk.
+ * @param[in] cb_arg passed to the callback function as the cb_arg parameter
  * @param[in] read_from_start If true, read from oldest FIFO entry, if true, read from last retrieved
  * location
  * @param[in] num_entries number of entries we want to read. If 0, read all.

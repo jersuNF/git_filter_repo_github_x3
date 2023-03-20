@@ -433,11 +433,14 @@ int is_valid_id(stg_config_param_id_t param_id)
 	case STG_U16_ZAP_CNT_TOT:
 	case STG_U16_ZAP_CNT_DAY:
 	case STG_U16_PRODUCT_TYPE:
+	case STG_U16_ANO_ID:
+	case STG_U16_ANO_START_ID:
 	case STG_U16_LAST_GOOD_ANO_ID: {
 		param_type = STG_U16_PARAM_TYPE;
 		break;
 	}
 	case STG_U32_UID:
+	case STG_U32_ANO_TIMESTAMP:
 	case STG_U32_WARN_CNT_TOT: {
 		param_type = STG_U32_PARAM_TYPE;
 		break;

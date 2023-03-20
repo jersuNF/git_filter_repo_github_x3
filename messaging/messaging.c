@@ -109,9 +109,6 @@ static int rat, mnc, rssi, min_rssi, max_rssi;
 static uint8_t ccid[20] = "\0";
 static char mdm_fw_file_name[sizeof(((PollMessageResponse *)NULL)->xModemFwFileName)] = "\0";
 
-static uint8_t expected_ano_frame, new_ano_in_progress;
-static bool first_ano_frame;
-
 /* Time since the server updated the date time in seconds. */
 static atomic_t server_timestamp_sec = ATOMIC_INIT(0);
 
@@ -138,7 +135,7 @@ void fence_download(uint8_t);
 
 int8_t request_ano_frame(uint16_t, uint16_t);
 
-void ano_download(uint16_t, uint16_t);
+static void ano_download(void);
 
 void proto_InitHeader(NofenceMessage *);
 
@@ -1335,8 +1332,13 @@ static void process_lte_proto_event(void)
 		fence_download(received_frame);
 		return;
 	} else if (proto.which_m == NofenceMessage_ubx_ano_reply_tag) {
-		uint16_t new_ano_frame = process_ano_msg(&proto.m.ubx_ano_reply);
-		ano_download(proto.m.ubx_ano_reply.usAnoId, new_ano_frame);
+		err = process_ano_msg(&proto.m.ubx_ano_reply);
+		if (err == 0) {
+			ano_download();
+		} else {
+			LOG_ERR("Failed to download ANO : %d", err);
+		}
+
 		return;
 	} else {
 		return;
@@ -1365,7 +1367,6 @@ void messaging_rx_thread_fn()
 		if (start_ano) {
 			start_ano = false;
 			uint16_t ano_id;
-			/* TODO, FIXME PSH, why are we reading ANO ID here */
 			int ret = stg_config_u16_read(STG_U16_ANO_ID, &ano_id);
 			LOG_WRN("ano id = %i", ano_id);
 			if (ret != 0) {
@@ -1697,9 +1698,6 @@ void fence_download(uint8_t received_frame)
 
 /**
  * @brief Builds and sends a ANO data request to the server.
- *
- * @param ano_id The identifier of the ANO request.
- * @param ano_start The start identifier for the ANO request.
  * @return Returns 0 if successfull, otherwise a negative error code.
  */
 int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
@@ -1721,50 +1719,39 @@ int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 
 /**
  * @brief Handler for ANO data download.
- * @param ano_id The identifier of the ANO request.
- * @param new_ano_frame A frame of the ANO data download.
  */
-void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
+static void ano_download(void)
 {
-	if (first_ano_frame) {
-		new_ano_in_progress = ano_id;
-		expected_ano_frame = 0;
-		first_ano_frame = false;
-	} else if (new_ano_frame == 0 && !first_ano_frame) {
-		expected_ano_frame = 0;
-		new_ano_in_progress = 0;
+	int64_t curr_time;
+	uint32_t ano_timestamp;
+	uint16_t ano_id;
+	uint16_t ano_frame;
+	if (date_time_now(&curr_time) != 0) {
+		LOG_DBG("No current time, cannot download ANO");
 		return;
 	}
-	if (new_ano_frame >= 0) {
-		if (new_ano_frame == DOWNLOAD_COMPLETE) {
-			LOG_INF("ANO %d download complete.", new_ano_in_progress);
-			expected_ano_frame = 0;
-			struct ano_ready *ev = new_ano_ready();
-			EVENT_SUBMIT(ev);
-			/* TODO, FIXME PSH, why are we persisting ANO ID here ? */
-			int err = stg_config_u16_write(STG_U16_ANO_ID, ano_id);
-			if (err != 0) {
-				LOG_ERR("Failed to write ano_id!");
-			}
-			return;
+	int32_t unix_time = (uint32_t)(curr_time / 1000);
+	int ret = stg_config_u32_read(STG_U32_ANO_TIMESTAMP, &ano_timestamp);
+	if (ret != 0 || ano_timestamp == UINT32_MAX) {
+		LOG_WRN("Cannot read last ano timestamp %d", ret);
+		ano_timestamp = 0;
+	}
+	/* If the latest ano frome is too old, we need to download */
+	if (ano_timestamp <= unix_time + (3600 * 24 * 3)) {
+		ret = stg_config_u16_read(STG_U16_ANO_ID, &ano_id);
+		if (ret != 0 || ano_id == UINT16_MAX) {
+			ano_id = 0;
 		}
-
-		expected_ano_frame += new_ano_frame;
-		/* TODO: handle failure to send request!*/
-		int ret = request_ano_frame(ano_id, expected_ano_frame);
-
-		LOG_INF("Requesting frame %d of new ano: %d.", expected_ano_frame,
-			new_ano_in_progress);
-
+		ret = stg_config_u16_read(STG_U16_ANO_START_ID, &ano_frame);
+		if (ret != 0 || ano_frame == UINT16_MAX) {
+			ano_frame = 0;
+		}
+		ret = request_ano_frame(ano_id, ano_frame);
 		if (ret != 0) {
-			/* TODO: reset ANO state and retry later.*/
-			expected_ano_frame = 0;
-			new_ano_in_progress = 0;
+			LOG_ERR("Cannot request ANO frame %d", ret);
 		}
-		return;
 	}
 }
-
 /**
  * @brief Initialize a Nofence protobuf message (See NofenceMessage).
  * @param msg The initialized Nofence protobuf message.
@@ -1775,7 +1762,7 @@ void proto_InitHeader(NofenceMessage *msg)
 	msg->header.ulId = serial_id;
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
-	static int64_t curr_time = 0;
+	int64_t curr_time = 0;
 	if (!date_time_now(&curr_time)) {
 		/* Convert to seconds since 1.1.1970 */
 		msg->header.ulUnixTimestamp = (uint32_t)(curr_time / 1000);
@@ -2300,10 +2287,14 @@ static int process_ano_msg(UbxAnoReply *anoResp)
 
 	if (ano_time_md > (current_time_ms / 1000) + TWO_AND_A_HALF_DAYS_SEC) {
 		err = stg_config_u32_write(STG_U16_LAST_GOOD_ANO_ID, anoResp->usAnoId);
-		return err;
+		if (err) {
+			return err;
+		} else {
+			return 1;
+		}
 	}
 
-	return n_mga_ano;
+	return 0;
 }
 
 /**

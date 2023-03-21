@@ -237,6 +237,20 @@ atomic_t m_message_tx_type = ATOMIC_INIT(0);
 
 static int set_tx_state_ready(messaging_tx_type_t tx_type);
 
+static void process_flash_erased(void)
+{
+	int err;
+	LOG_DBG("Clearing ANO config values");
+	err = stg_config_u16_write(STG_U16_ANO_ID, UINT16_MAX);
+	err |= stg_config_u16_write(STG_U16_ANO_START_ID, UINT16_MAX);
+	err |= stg_config_u16_write(STG_U16_LAST_GOOD_ANO_ID, 0);
+	err |= stg_config_u32_write(STG_U32_ANO_TIMESTAMP, 0);
+
+	if (err) {
+		LOG_ERR("Could not clear stg %d", err);
+	}
+}
+
 /**
  * @brief Builds SEQ messages (1 and 2) with the latest data and store them to external storage.
  */
@@ -864,8 +878,10 @@ static bool event_handler(const struct event_header *eh)
 			time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
 			struct tm *tm_time = gmtime(&gm_time);
 
-			if (tm_time->tm_year < 2015) {
-				LOG_DBG("Invalid gnss packet.");
+			/* tm_year is relative to 1900 */
+			if (tm_time->tm_year < 120) {
+				LOG_WRN("Invalid gnss packet, unix time was %lu",
+					(unsigned long)ev->gnss_data.lastfix.unix_timestamp);
 				return false;
 			}
 			/* Update date_time library which storage uses for ANO data. */
@@ -976,14 +992,6 @@ static bool event_handler(const struct event_header *eh)
 				LOG_ERR("Error schedule poll request work (%d)", err);
 			}
 		}
-		return false;
-	}
-	if (is_update_flash_erase(eh)) {
-		current_state.flash_erase_count++;
-		/** @todo Not written to storage. Should it? And also be added to
-         * update cache reg??
-         */
-		/*update_cache_reg(FLASH_ERASE_COUNT);*/
 		return false;
 	}
 	if (is_update_zap_count(eh)) {
@@ -1176,6 +1184,14 @@ static bool event_handler(const struct event_header *eh)
 		start_ano = true;
 		return false;
 	}
+	if (is_flash_erased_event(eh)) {
+		current_state.flash_erase_count++;
+		/** @todo Not written to storage. Should it? And also be added to
+         * update cache reg??
+         */
+		process_flash_erased();
+		return false;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 	return false;
@@ -1228,7 +1244,6 @@ EVENT_SUBSCRIBE(MODULE, update_collar_mode);
 EVENT_SUBSCRIBE(MODULE, update_collar_status);
 EVENT_SUBSCRIBE(MODULE, update_fence_status);
 EVENT_SUBSCRIBE(MODULE, update_fence_version);
-EVENT_SUBSCRIBE(MODULE, update_flash_erase);
 EVENT_SUBSCRIBE(MODULE, update_zap_count);
 EVENT_SUBSCRIBE(MODULE, animal_warning_event);
 EVENT_SUBSCRIBE(MODULE, animal_escape_event);
@@ -1246,6 +1261,7 @@ EVENT_SUBSCRIBE(MODULE, dfu_status_event);
 EVENT_SUBSCRIBE(MODULE, block_fota_event);
 EVENT_SUBSCRIBE(MODULE, mdm_fw_update_event);
 EVENT_SUBSCRIBE(MODULE, start_ano_download);
+EVENT_SUBSCRIBE(MODULE, flash_erased_event);
 
 /**
  * @brief Process commands recieved on the bluetooth interface, and performs the appropriate
@@ -1325,12 +1341,9 @@ static void process_lte_proto_event(void)
 	if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
 		LOG_INF("Process poll reponse");
 		process_poll_response(&proto);
-		//		request_ano_frame(0,0);
-		return;
 	} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
 		uint8_t received_frame = process_fence_msg(&proto.m.fence_definition_resp);
 		fence_download(received_frame);
-		return;
 	} else if (proto.which_m == NofenceMessage_ubx_ano_reply_tag) {
 		err = process_ano_msg(&proto.m.ubx_ano_reply);
 		if (err == 0) {
@@ -1338,10 +1351,6 @@ static void process_lte_proto_event(void)
 		} else {
 			LOG_ERR("Failed to download ANO : %d", err);
 		}
-
-		return;
-	} else {
-		return;
 	}
 }
 
@@ -1366,19 +1375,7 @@ void messaging_rx_thread_fn()
 		}
 		if (start_ano) {
 			start_ano = false;
-			uint16_t ano_id;
-			int ret = stg_config_u16_read(STG_U16_ANO_ID, &ano_id);
-			LOG_WRN("ano id = %i", ano_id);
-			if (ret != 0) {
-				LOG_ERR("Failed to read ano_id from eeprom!");
-			}
-			if (ano_id > 366) {
-				ano_id = 0;
-			}
-			int err = request_ano_frame(ano_id, 0);
-			if (err != 0) {
-				LOG_ERR("Couldn't send kick-off ano request!");
-			}
+			ano_download();
 		}
 	}
 }
@@ -1702,7 +1699,7 @@ void fence_download(uint8_t received_frame)
  */
 int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 {
-	LOG_WRN("Start ANO request message!");
+	LOG_DBG("request_ano_frame()");
 	NofenceMessage ano_req;
 	proto_InitHeader(&ano_req); /* fill up message header. */
 	ano_req.which_m = NofenceMessage_ubx_ano_req_tag;
@@ -1727,16 +1724,18 @@ static void ano_download(void)
 	uint16_t ano_id;
 	uint16_t ano_frame;
 	if (date_time_now(&curr_time) != 0) {
-		LOG_DBG("No current time, cannot download ANO");
+		LOG_DBG("No current time, cannot download ANO now");
 		return;
 	}
-	int32_t unix_time = (uint32_t)(curr_time / 1000);
+	uint32_t unix_time = (uint32_t)(curr_time / 1000);
 	int ret = stg_config_u32_read(STG_U32_ANO_TIMESTAMP, &ano_timestamp);
 	if (ret != 0 || ano_timestamp == UINT32_MAX) {
 		LOG_WRN("Cannot read last ano timestamp %d", ret);
 		ano_timestamp = 0;
 	}
 	/* If the latest ano frome is too old, we need to download */
+	LOG_DBG("ano-time %lu, unix_time %lu", (unsigned long)ano_timestamp,
+		(unsigned long)unix_time);
 	if (ano_timestamp <= unix_time + (3600 * 24 * 3)) {
 		ret = stg_config_u16_read(STG_U16_ANO_ID, &ano_id);
 		if (ret != 0 || ano_id == UINT16_MAX) {
@@ -2284,13 +2283,14 @@ static int process_ano_msg(UbxAnoReply *anoResp)
 	if (err) {
 		return err;
 	}
-
+	err = stg_config_u32_write(STG_U32_ANO_TIMESTAMP, ano_time_md);
+	if (err) {
+		return err;
+	}
 	if (ano_time_md > (current_time_ms / 1000) + TWO_AND_A_HALF_DAYS_SEC) {
-		err = stg_config_u32_write(STG_U16_LAST_GOOD_ANO_ID, anoResp->usAnoId);
+		err = stg_config_u16_write(STG_U16_LAST_GOOD_ANO_ID, anoResp->usAnoId);
 		if (err) {
 			return err;
-		} else {
-			return 1;
 		}
 	}
 

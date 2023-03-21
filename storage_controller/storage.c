@@ -93,7 +93,7 @@ void erase_flash_fn(struct k_work *item)
 		return;
 	}
 
-	struct update_flash_erase *ev = new_update_flash_erase();
+	struct flash_erased_event *ev = new_flash_erased_event();
 	EVENT_SUBMIT(ev);
 }
 

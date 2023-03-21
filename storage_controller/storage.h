@@ -8,14 +8,7 @@
 #include <zephyr.h>
 #include "fcb_ext.h"
 #include "ano_structure.h"
-
-/** Used to tell storage controller which region to read/write to. */
-typedef enum {
-	STG_PARTITION_LOG = 0,
-	STG_PARTITION_ANO = 1,
-	STG_PARTITION_PASTURE = 2,
-	STG_PARTITION_SYSTEM_DIAG = 3
-} flash_partition_t;
+#include "storage_event.h"
 
 /** 
  * @brief Setup external flash driver

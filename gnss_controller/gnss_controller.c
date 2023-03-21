@@ -479,7 +479,6 @@ _Noreturn void gnss_ano_install_thread_fn(void)
 	bool all_ano_installed = false;
 	bool ano_downloaded = false;
 	bool start_from_flash = true;
-	int64_t unix_time_ms = 0;
 	int ret;
 
 	int err = stg_config_u32_read(STG_U32_UID, &serial_id);
@@ -493,6 +492,7 @@ _Noreturn void gnss_ano_install_thread_fn(void)
 		if (!date_time_is_valid()) {
 			continue;
 		}
+		int64_t unix_time_ms = 0;
 		ret = date_time_now(&unix_time_ms);
 		if (ret != 0) {
 			continue;
@@ -527,8 +527,6 @@ _Noreturn void gnss_ano_install_thread_fn(void)
 				all_ano_installed = false;
 				ano_downloaded = true;
 			}
-			/* wait until ano download is complete or
-				 * timeout expires. */
 		}
 	}
 }

@@ -474,6 +474,7 @@ _Noreturn void gnss_ano_install_thread_fn(void)
 {
 	bool all_ano_installed = false;
 	bool start_from_flash = true;
+	bool gnss_receiver_got_time = false;
 	int ret;
 
 	/* Wait for valid date time before we start installing */
@@ -486,15 +487,32 @@ start_installing:
 	all_ano_installed = false;
 
 	while (!all_ano_installed) {
-
 		int64_t unix_time_ms = 0;
 		ret = date_time_now(&unix_time_ms);
 		if (ret != 0) {
-			LOG_ERR("Cannot get date_time %d",ret);
+			LOG_ERR("Cannot get date_time %d", ret);
 			break;
 		}
+
 		/* The callback needs the unix time to decide relevant ANO records */
 		_ano_unix_time_sec = unix_time_ms / 1000;
+
+		if (!gnss_receiver_got_time) {
+			struct tm tm;
+			time_t t = _ano_unix_time_sec;
+			if (!gmtime_r(&t, &tm)) {
+				LOG_ERR("gmtime_r failed");
+				break;
+			}
+			ret = gnss_ini_mga_time_utc(gnss_dev, tm.tm_year + 1900, tm.tm_mon + 1,
+						    tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+						    10);
+			if (ret != 0) {
+				LOG_ERR("Cannot set GNSS time %d", ret);
+				break;
+			}
+			gnss_receiver_got_time = true;
+		}
 
 		/* Note, most of the processing done in the callback */
 		int err = stg_read_ano_data(read_ano_callback, start_from_flash, 1);

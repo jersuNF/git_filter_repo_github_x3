@@ -28,8 +28,7 @@
 #define SECONDS_IN_12_HOURS (12 * 3600)
 
 K_SEM_DEFINE(new_data_sem, 0, 1);
-
-K_SEM_DEFINE(ano_update, 0, 1);
+K_SEM_DEFINE(install_ano_sem, 0, 1);
 
 #define MODULE gnss_controller
 LOG_MODULE_REGISTER(MODULE, CONFIG_GNSS_CONTROLLER_LOG_LEVEL);
@@ -360,6 +359,8 @@ static int gnss_set_mode(gnss_mode_t mode, bool wakeup)
 			return ret;
 		}
 	}
+	/* Let the ANO thread know */
+	k_sem_give(&install_ano_sem);
 
 	return 0;
 }
@@ -378,8 +379,8 @@ static bool gnss_controller_event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-	if (is_ano_ready(eh)) {
-		k_sem_give(&ano_update);
+	if (is_ano_ready_event(eh)) {
+		k_sem_give(&install_ano_sem);
 		return false;
 	}
 	return false;
@@ -390,7 +391,7 @@ EVENT_SUBSCRIBE(MODULE, gnss_data_rate);
 EVENT_SUBSCRIBE(MODULE, gnss_switch_off);
 EVENT_SUBSCRIBE(MODULE, gnss_switch_on);
 EVENT_SUBSCRIBE(MODULE, gnss_set_mode);
-EVENT_SUBSCRIBE(MODULE, ano_ready);
+EVENT_SUBSCRIBE(MODULE, ano_ready_event);
 EVENT_SUBSCRIBE(MODULE, gnss_set_mode_event);
 
 /**
@@ -430,7 +431,6 @@ static void gnss_timed_out(void)
 
 static ano_rec_t _ano_rec;
 static uint32_t _ano_unix_time_sec;
-static uint32_t _ano_last_installed_ano_time;
 
 static inline int read_ano_callback(uint8_t *data, size_t len)
 {
@@ -457,76 +457,59 @@ static inline int read_ano_callback(uint8_t *data, size_t len)
 		if (ret == 0) {
 			LOG_DBG("Installed ano ID=%d,off=%d,time=%d", _ano_rec.ano_id,
 				_ano_rec.sequence_id, ano_time_md);
-			_ano_last_installed_ano_time = ano_time_md;
 		} else {
 			LOG_ERR("Failed to install ano %d", ret);
 		}
+	} else {
+		LOG_DBG("DROPS ano ID=%d,off=%d,time=%d", _ano_rec.ano_id, _ano_rec.sequence_id,
+			ano_time_md);
 	}
 	return ret;
 }
 
 /**
  * @brief install new ano data to GNSS receiver.
- * Starts as soon as new data is available on the flash,
- *  iterates on the ano messages in flash and updates the last ano record
- *  (day) on eeprom on success of installation of all messages for that day.
- * In case of failure, sleep for 1 minute before retrying.
  */
 _Noreturn void gnss_ano_install_thread_fn(void)
 {
-	uint32_t last_installed_ano_time = 0;
-	uint32_t serial_id = 0;
 	bool all_ano_installed = false;
-	bool ano_downloaded = false;
 	bool start_from_flash = true;
 	int ret;
 
-	int err = stg_config_u32_read(STG_U32_UID, &serial_id);
-	if (err != 0) {
-		LOG_ERR("Failed to read serial id from eeprom!");
+	/* Wait for valid date time before we start installing */
+	/* TODO, we could use the date_time_event_handler to set a semaphore instead */
+	while (!date_time_is_valid()) {
+		k_sleep(K_MSEC(200));
 	}
 
-	while (true) {
-		/* TODO, make semaphore */
-		k_sleep(K_MSEC(200));
-		if (!date_time_is_valid()) {
-			continue;
-		}
+start_installing:
+	all_ano_installed = false;
+
+	while (!all_ano_installed) {
+
 		int64_t unix_time_ms = 0;
 		ret = date_time_now(&unix_time_ms);
 		if (ret != 0) {
-			continue;
+			LOG_ERR("Cannot get date_time %d",ret);
+			break;
 		}
+		/* The callback needs the unix time to decide relevant ANO records */
 		_ano_unix_time_sec = unix_time_ms / 1000;
 
-		if (!all_ano_installed) {
-			/* Note, most of the processing done in the callback */
-			int err = stg_read_ano_data(read_ano_callback, start_from_flash, 1);
-			if (err == 0) {
-				start_from_flash = false;
-			} else if (err == -ENODATA) {
-				LOG_DBG("Reached end of ano partition");
-				all_ano_installed = true;
-			} else {
-				LOG_ERR("Failed to read ano entry from flash!");
-			}
-		}
-
-		/* adding  a random offset to avoid storming the
-			server with update ano requests from all collars
-			at the same time. */
-		uint16_t offset = (serial_id & 0x0FF) * 56;
-		if ((last_installed_ano_time + offset < _ano_unix_time_sec) && all_ano_installed &&
-		    !ano_downloaded) {
-			/* Time to download new ano data from the server*/
-			struct start_ano_download *ev = new_start_ano_download();
-			LOG_DBG("Submitting req_ano!");
-			EVENT_SUBMIT(ev);
-
-			if (k_sem_take(&ano_update, K_MINUTES(5)) == 0) {
-				all_ano_installed = false;
-				ano_downloaded = true;
-			}
+		/* Note, most of the processing done in the callback */
+		int err = stg_read_ano_data(read_ano_callback, start_from_flash, 1);
+		if (err == 0) {
+			start_from_flash = false;
+		} else if (err == -ENODATA) {
+			LOG_DBG("Reached end of ano partition");
+			all_ano_installed = true;
+		} else {
+			LOG_ERR("Failed to read ano entry from flash!");
 		}
 	}
+	/* wait for any new ANO data coming in, or the GNSS receiver has changed state */
+	k_sem_take(&install_ano_sem, K_FOREVER);
+
+	/* We are never expected to return from this function */
+	goto start_installing;
 }

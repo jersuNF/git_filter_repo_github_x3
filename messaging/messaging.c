@@ -86,9 +86,6 @@ static bool block_fota_request = false;
 /** @brief counts the number of FOTA requests, only reset on success */
 static int m_fota_attempts = 0;
 
-/* todo, revisit */
-static bool start_ano = false;
-
 typedef enum {
 	COLLAR_MODE,
 	COLLAR_STATUS,
@@ -133,9 +130,9 @@ void build_poll_request(NofenceMessage *);
 
 void fence_download(uint8_t);
 
-int8_t request_ano_frame(uint16_t, uint16_t);
+int request_ano_frame(uint16_t, uint16_t);
 
-static void ano_download(void);
+static void ano_download_work_fn(struct k_work *item);
 
 void proto_InitHeader(NofenceMessage *);
 
@@ -196,6 +193,7 @@ struct k_work_delayable process_warning_correction_start_work;
 struct k_work_delayable process_warning_correction_end_work;
 struct k_work_delayable log_send_work;
 struct k_work_delayable fota_wdt_work;
+struct k_work_delayable ano_download_work;
 
 struct fence_def_update {
 	struct k_work_delayable work;
@@ -237,6 +235,10 @@ atomic_t m_message_tx_type = ATOMIC_INIT(0);
 
 static int set_tx_state_ready(messaging_tx_type_t tx_type);
 
+/**
+ * @brief, called when the external flash has been erased, in case we
+ * must reset the ANO variables in NVS
+ */
 static void process_flash_erased(void)
 {
 	int err;
@@ -248,6 +250,34 @@ static void process_flash_erased(void)
 
 	if (err) {
 		LOG_ERR("Could not clear stg %d", err);
+	}
+}
+
+/**
+ * @brief: Checks if we should kick-off a new ano download sequence.
+ * Uses our serial number to smear out requests so that collars do not
+ * bomb the server at the same time
+ */
+static void check_kickoff_ano_download_start()
+{
+	uint32_t ano_timestamp;
+	uint16_t offset = (serial_id & 0x0FF) * 56;
+	int ret = stg_config_u32_read(STG_U32_ANO_TIMESTAMP, &ano_timestamp);
+	if (ret != 0 || ano_timestamp == UINT32_MAX) {
+		LOG_WRN("Cannot read last ano timestamp %d", ret);
+		ano_timestamp = 0;
+	}
+	int64_t curr_time;
+	if (date_time_now(&curr_time) != 0) {
+		LOG_DBG("No current time, cannot download ANO now");
+		return;
+	}
+	uint32_t unix_time = (uint32_t)(curr_time / 1000);
+	if (ano_timestamp + offset <= unix_time + (3600 * 24 * 3)) {
+		ret = k_work_reschedule_for_queue(&message_q, &ano_download_work, K_NO_WAIT);
+		if (ret < 0) {
+			LOG_ERR("Failed to schedule ANO");
+		}
 	}
 }
 
@@ -1179,11 +1209,7 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
-	if (is_start_ano_download(eh)) {
-		LOG_WRN("Received ano request!");
-		start_ano = true;
-		return false;
-	}
+
 	if (is_flash_erased_event(eh)) {
 		current_state.flash_erase_count++;
 		/** @todo Not written to storage. Should it? And also be added to
@@ -1347,7 +1373,11 @@ static void process_lte_proto_event(void)
 	} else if (proto.which_m == NofenceMessage_ubx_ano_reply_tag) {
 		err = process_ano_msg(&proto.m.ubx_ano_reply);
 		if (err == 0) {
-			ano_download();
+			err = k_work_reschedule_for_queue(&message_q, &ano_download_work,
+							  K_NO_WAIT);
+			if (err < 0) {
+				LOG_ERR("Failed to schedule ANO");
+			}
 		} else {
 			LOG_ERR("Failed to download ANO : %d", err);
 		}
@@ -1372,10 +1402,6 @@ void messaging_rx_thread_fn()
 		/* Set all the events to not ready again. */
 		for (int i = 0; i < NUM_MSGQ_EVENTS; i++) {
 			msgq_events[i].state = K_POLL_STATE_NOT_READY;
-		}
-		if (start_ano) {
-			start_ano = false;
-			ano_download();
 		}
 	}
 }
@@ -1462,6 +1488,7 @@ int messaging_module_init(void)
 	k_work_init_delayable(&data_request_work, data_request_work_fn);
 	k_work_init_delayable(&m_fence_update_req.work, fence_update_req_fn);
 	k_work_init_delayable(&fota_wdt_work, fota_wdt_work_fn);
+	k_work_init_delayable(&ano_download_work, ano_download_work_fn);
 
 	memset(&pasture_temp, 0, sizeof(pasture_t));
 	cached_fences_counter = 0;
@@ -1697,7 +1724,7 @@ void fence_download(uint8_t received_frame)
  * @brief Builds and sends a ANO data request to the server.
  * @return Returns 0 if successfull, otherwise a negative error code.
  */
-int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
+int request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 {
 	LOG_DBG("request_ano_frame()");
 	NofenceMessage ano_req;
@@ -1717,7 +1744,7 @@ int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 /**
  * @brief Handler for ANO data download.
  */
-static void ano_download(void)
+static void ano_download_work_fn(struct k_work *item)
 {
 	int64_t curr_time;
 	uint32_t ano_timestamp;
@@ -1918,9 +1945,6 @@ void process_poll_response(NofenceMessage *proto)
 	}
 	/* TODO: set activation mode to (pResp->eActivationMode); */
 
-	if (pResp->has_bUseUbloxAno) {
-		/* TODO: publish enable ANO event to GPS controller */
-	}
 	if (pResp->has_bUseServerTime && pResp->bUseServerTime) {
 		LOG_INF("Set date and time from server");
 		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
@@ -2054,6 +2078,13 @@ void process_poll_response(NofenceMessage *proto)
 		mdm_fw_ver->buf = mdm_fw_file_name;
 		mdm_fw_ver->len = sizeof(pResp->xModemFwFileName);
 		EVENT_SUBMIT(mdm_fw_ver);
+	}
+
+	if (pResp->has_bUseUbloxAno) {
+		/* kick off ANO-download if needed. In effect, each poll message response
+		 * will check if we should start download new AssistNowOffline data*
+		 */
+		check_kickoff_ano_download_start();
 	}
 	return;
 }
@@ -2292,6 +2323,9 @@ static int process_ano_msg(UbxAnoReply *anoResp)
 		if (err) {
 			return err;
 		}
+		/* Fire an event so that GNSS can be updated */
+		struct ano_ready_event *ano_ready = new_ano_ready_event();
+		EVENT_SUBMIT(ano_ready);
 	}
 
 	return 0;

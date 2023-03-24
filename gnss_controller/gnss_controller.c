@@ -13,22 +13,17 @@
 #include "storage.h"
 #include "timeutil.h"
 
-#define NEW_GNSS_DATA_STACK_SIZE 1024
-#define NEW_GNSS_DATA_PRIORITY 7
-
 #define UPDATE_ANO_STACK_SIZE 1024
 #define UPDATE_ANO_PRIORITY 12
 
 #define STACK_SIZE 1024
 #define PRIORITY 7
-#define GNSS_1SEC 1000
-
-#define UNIX_TIMESTAMP_1_JAN_2000 1451606400
 
 #define SECONDS_IN_12_HOURS (12 * 3600)
 
 K_SEM_DEFINE(new_data_sem, 0, 1);
 K_SEM_DEFINE(install_ano_sem, 0, 1);
+K_SEM_DEFINE(ano_thread_cmd_issued_sem, 0, 1);
 
 #define MODULE gnss_controller
 LOG_MODULE_REGISTER(MODULE, CONFIG_GNSS_CONTROLLER_LOG_LEVEL);
@@ -53,7 +48,12 @@ K_THREAD_STACK_DEFINE(pub_gnss_stack, STACK_SIZE);
 K_THREAD_DEFINE(send_to_gnss, CONFIG_GNSS_STACK_SIZE, gnss_thread_fn, NULL, NULL, NULL,
 		K_PRIO_COOP(CONFIG_GNSS_THREAD_PRIORITY), 0, 0);
 
-enum gnss_action_e { GNSS_ACTION_NUL = 0, GNSS_ACTION_SET_MODE };
+enum gnss_action_e {
+	GNSS_ACTION_NUL = 0,
+	GNSS_ACTION_SET_MODE,
+	GNSS_ACTION_INTERNAL_ANO_UPLOAD_STARTING,
+	GNSS_ACTION_INTERNAL_ANO_UPLOAD_FINISHED,
+};
 
 typedef struct gnss_msgq_t {
 	enum gnss_action_e action;
@@ -67,12 +67,15 @@ K_MSGQ_DEFINE(gnss_msgq, sizeof(gnss_msgq_t), 1, 4);
 
 static void gnss_thread_fn(void)
 {
+	bool set_to_backup_when_ano_finished = false;
 	while (true) {
 		gnss_msgq_t msg;
 		k_msgq_get(&gnss_msgq, &msg, K_FOREVER);
 
 		switch (msg.action) {
 		case GNSS_ACTION_SET_MODE: {
+			/* If we have been commanded to change mode, be sure not to override when ano finished */
+			set_to_backup_when_ano_finished = false;
 			LOG_DBG("setting mode");
 			int rc = 0;
 			int retries = CONFIG_GNSS_CMD_RETRIES;
@@ -95,6 +98,30 @@ static void gnss_thread_fn(void)
 			EVENT_SUBMIT(ev);
 			break;
 		}
+		case GNSS_ACTION_INTERNAL_ANO_UPLOAD_STARTING: {
+			if (current_mode == GNSSMODE_INACTIVE) {
+				set_to_backup_when_ano_finished = true;
+				int rc = gnss_wakeup(gnss_dev);
+				if (rc != 0) {
+					LOG_WRN("Cannot wake up the receiver %d", rc);
+				}
+			}
+			/* Notify the ANO thread that it can continue */
+			k_sem_give(&ano_thread_cmd_issued_sem);
+			break;
+		}
+		case GNSS_ACTION_INTERNAL_ANO_UPLOAD_FINISHED: {
+			if (set_to_backup_when_ano_finished) {
+				int rc = gnss_set_backup_mode(gnss_dev);
+				if (rc != 0) {
+					LOG_WRN("Cannot set internal backup mode %d", rc);
+				}
+			}
+			/* Notify the ANO thread that it can continue */
+			k_sem_give(&ano_thread_cmd_issued_sem);
+			break;
+		}
+
 		default:
 			LOG_ERR("Unrecognized action %d", msg.action);
 		}
@@ -359,8 +386,6 @@ static int gnss_set_mode(gnss_mode_t mode, bool wakeup)
 			return ret;
 		}
 	}
-	/* Let the ANO thread know */
-	k_sem_give(&install_ano_sem);
 
 	return 0;
 }
@@ -371,7 +396,6 @@ static bool gnss_controller_event_handler(const struct event_header *eh)
 		struct gnss_set_mode_event *ev = cast_gnss_set_mode_event(eh);
 		LOG_DBG("MODE = %d old = %d ", ev->mode, current_mode);
 		if (ev->mode != current_mode) {
-			LOG_DBG("setting mode");
 			gnss_msgq_t msg;
 			msg.arg = (void *)(ev->mode);
 			msg.action = GNSS_ACTION_SET_MODE;
@@ -486,6 +510,14 @@ _Noreturn void gnss_ano_install_thread_fn(void)
 start_installing:
 	all_ano_installed = false;
 
+	/* Notify the GNSS commander thread that we are about to uoload ANO
+         * and require that the GNSS receiver is woken up
+         */
+	gnss_msgq_t msg = { .action = GNSS_ACTION_INTERNAL_ANO_UPLOAD_STARTING };
+	k_msgq_put(&gnss_msgq, &msg, K_NO_WAIT);
+	/* Wait for the receiver to be woken up */
+	k_sem_take(&ano_thread_cmd_issued_sem, K_FOREVER);
+
 	while (!all_ano_installed) {
 		int64_t unix_time_ms = 0;
 		ret = date_time_now(&unix_time_ms);
@@ -514,7 +546,7 @@ start_installing:
 			gnss_receiver_got_time = true;
 		}
 
-		/* Note, most of the processing done in the callback */
+		/* Note, most of the processing is done in the read_ano_callback: */
 		int err = stg_read_ano_data(read_ano_callback, start_from_flash, 1);
 		if (err == 0) {
 			start_from_flash = false;
@@ -523,10 +555,27 @@ start_installing:
 			all_ano_installed = true;
 		} else {
 			LOG_ERR("Failed to read ano entry from flash!");
+			/* This could happen if the GNSS receiver is in backup mode */
+			/* break the loop and wait for semaphore */
+			break;
 		}
 	}
-	/* wait for any new ANO data coming in, or the GNSS receiver has changed state */
-	k_sem_take(&install_ano_sem, K_FOREVER);
+	/* Notify the GNSS commander thread that we are finished uploading ANO
+         * and that the receiver might be put to sleep if it should have been
+         */
+	gnss_msgq_t msg2 = { .action = GNSS_ACTION_INTERNAL_ANO_UPLOAD_FINISHED };
+	k_msgq_put(&gnss_msgq, &msg2, K_NO_WAIT);
+	/* Wait for the command to finish */
+	k_sem_take(&ano_thread_cmd_issued_sem, K_FOREVER);
+
+	/*
+	 * Wait forever for new data coming in, or, if we encountered an error,
+	 * try again after 5 minutes.
+	 */
+	ret = k_sem_take(&install_ano_sem, all_ano_installed ? K_FOREVER : K_MINUTES(5));
+	if (ret != 0) {
+		LOG_WRN("Retrying ANO install");
+	}
 
 	/* We are never expected to return from this function */
 	goto start_installing;

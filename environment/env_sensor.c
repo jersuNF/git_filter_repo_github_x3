@@ -12,6 +12,8 @@
 
 #include <stdio.h>
 
+#include <pm/pm.h>
+
 /* https://www.mouser.com/datasheet/2/783/BST-BME280-DS002-1509607.pdf */
 
 /* C. */
@@ -35,10 +37,10 @@
 LOG_MODULE_REGISTER(env_sensor, CONFIG_ENV_SENSOR_LOG_LEVEL);
 /** @brief Checks sanity of the value and submits either error or warning
  *         event to error handler based on result.
- * 
+ *
  * @param sc channel to check for.
  * @param value value to compare with min/max.
- * 
+ *
  * @returns 0 on valid sanity within WARN range, negative errno otherwise.
  */
 static inline int sensor_sanity_check(enum sensor_channel sc, double value)
@@ -102,6 +104,8 @@ static inline void update_env_sensor_event_values(void)
 		return;
 	}
 
+	pm_device_state_set(bme_dev, PM_DEVICE_STATE_ACTIVE);
+
 	struct sensor_value temp, press, humidity;
 
 	int err = sensor_sample_fetch(bme_dev);
@@ -159,14 +163,16 @@ static inline void update_env_sensor_event_values(void)
 	ev->press = press_d;
 	ev->humidity = humidity_d;
 	EVENT_SUBMIT(ev);
+
+	pm_device_state_set(bme_dev, PM_DEVICE_STATE_SUSPENDED);
 }
 
 /**
- * @brief Main event handler function. 
- * 
- * @param[in] eh Event_header for the if-chain to 
+ * @brief Main event handler function.
+ *
+ * @param[in] eh Event_header for the if-chain to
  *               use to recognize which event triggered.
- * 
+ *
  * @return True or false based on if we want to consume the event or not.
  */
 static bool event_handler(const struct event_header *eh)

@@ -65,25 +65,44 @@ struct k_thread update_ano_thread;
 
 K_MSGQ_DEFINE(gnss_msgq, sizeof(gnss_msgq_t), 1, 4);
 
+/**
+ * @brief Set GNSS mode with retries
+ * @param[in] mode the mode to
+ * @return 0 on success, otherwise negative error code
+ */
+
+static int set_mode_with_retry(gnss_mode_t mode)
+{
+	int rc = 0;
+	int retries = CONFIG_GNSS_CMD_RETRIES;
+	do {
+		rc = gnss_set_mode(mode, true);
+	} while ((retries-- > 0) && (rc != 0));
+	return rc;
+}
+
 static void gnss_thread_fn(void)
 {
+	bool is_in_ano_install = false;
 	bool set_to_backup_when_ano_finished = false;
+
 	while (true) {
+		int rc = 0;
 		gnss_msgq_t msg;
 		k_msgq_get(&gnss_msgq, &msg, K_FOREVER);
 
 		switch (msg.action) {
 		case GNSS_ACTION_SET_MODE: {
-			/* If we have been commanded to change mode, be sure not to override when ano finished */
-			set_to_backup_when_ano_finished = false;
-			LOG_DBG("setting mode");
-			int rc = 0;
-			int retries = CONFIG_GNSS_CMD_RETRIES;
 			gnss_mode_t mode = (gnss_mode_t)(msg.arg);
-			do {
-				rc = gnss_set_mode(mode, true);
-			} while ((retries-- > 0) && (rc != 0));
-
+			if (is_in_ano_install && mode == GNSSMODE_INACTIVE) {
+				/* ANO is in progress. If the mode is backup don't set it until ANO has finished */
+				LOG_DBG("ANO in progress. Setting mode to backup when ANO is finished");
+				set_to_backup_when_ano_finished = true;
+				rc = 0;
+			} else {
+				set_to_backup_when_ano_finished = false;
+				rc = set_mode_with_retry(mode);
+			}
 			if (rc == 0) {
 				current_mode = mode;
 			} else {
@@ -92,6 +111,7 @@ static void gnss_thread_fn(void)
 				char *msg = "Failed to set GNSS receiver mode";
 				nf_app_error(ERR_GNSS_CONTROLLER, rc, msg, sizeof(*msg));
 			}
+
 			/* Send out an event (to the amc_handler)to answer with current mode */
 			struct gnss_mode_changed_event *ev = new_gnss_mode_changed_event();
 			ev->mode = current_mode;
@@ -99,6 +119,8 @@ static void gnss_thread_fn(void)
 			break;
 		}
 		case GNSS_ACTION_INTERNAL_ANO_UPLOAD_STARTING: {
+			/* If we are in backup, we must wake the receiver until ANO finished */
+			is_in_ano_install = true;
 			if (current_mode == GNSSMODE_INACTIVE) {
 				set_to_backup_when_ano_finished = true;
 				int rc = gnss_wakeup(gnss_dev);
@@ -111,6 +133,7 @@ static void gnss_thread_fn(void)
 			break;
 		}
 		case GNSS_ACTION_INTERNAL_ANO_UPLOAD_FINISHED: {
+			is_in_ano_install = false;
 			if (set_to_backup_when_ano_finished) {
 				int rc = gnss_set_backup_mode(gnss_dev);
 				if (rc != 0) {

@@ -278,6 +278,10 @@ static void check_kickoff_ano_download_start()
 		if (ret < 0) {
 			LOG_ERR("Failed to schedule ANO");
 		}
+	} else {
+		LOG_DBG("No download needed: ano_t: %lu, offset: %lu, unix_time %lu",
+			(unsigned long)ano_timestamp, (unsigned long)offset,
+			(unsigned long)unix_time);
 	}
 }
 

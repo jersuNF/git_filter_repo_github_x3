@@ -303,19 +303,19 @@ static int gnss_set_mode(gnss_mode_t mode, bool wakeup)
 	/* TODO: Add rate as an argument to gnss_set_mode */
 	switch (mode) {
 	case GNSSMODE_PSM:
-		current_rate_ms = 5000;
+		current_rate_ms = GNSSRATE_5000_MS;
 		break;
 
 	case GNSSMODE_CAUTION:
-		current_rate_ms = 1000;
+		current_rate_ms = GNSSRATE_1000_MS;
 		break;
 
 	case GNSSMODE_MAX:
-		current_rate_ms = 250;
+		current_rate_ms = GNSSRATE_250_MS;
 		break;
 
 	default:
-		current_rate_ms = 1000;
+		current_rate_ms = GNSSRATE_1000_MS;
 		break;
 	}
 

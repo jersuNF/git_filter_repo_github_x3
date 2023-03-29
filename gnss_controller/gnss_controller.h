@@ -14,5 +14,8 @@
  */
 
 int gnss_controller_init(void);
+void gnss_force_backup();
+void gnss_force_wakeup();
+void gnss_force_psmct();
 
 #endif //X3_FW_GNSS_CONTROLLER_H

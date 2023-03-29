@@ -7,6 +7,9 @@
 #include "error_event.h"
 #include "gnss.h"
 #include "kernel.h"
+
+#include <pm/pm.h>
+
 #define STACK_SIZE 1024
 #define PRIORITY 7
 
@@ -45,6 +48,11 @@ typedef struct gnss_msgq_t {
 
 K_MSGQ_DEFINE(gnss_msgq, sizeof(gnss_msgq_t), 1, 4);
 
+#ifdef CONFIG_GNSS_DATA_BATCH
+/* Work queue item for triggering a batch read from the GNSS receiver */
+static struct k_work_delayable retrieve_batch_gnss_work;
+#endif
+
 static void gnss_thread_fn(void)
 {
 	while (true) {
@@ -80,6 +88,14 @@ static void gnss_thread_fn(void)
 		}
 	}
 }
+
+#ifdef CONFIG_GNSS_DATA_BATCH
+static void gnss_retrieve_batch_work_fn(struct k_work *work)
+{
+	gnss_retrieve_batch(gnss_dev);
+	k_work_reschedule(&retrieve_batch_gnss_work, K_MSEC(current_rate_ms));
+}
+#endif
 
 struct k_thread pub_gnss_thread;
 static bool initialized = false;
@@ -123,11 +139,13 @@ static int gnss_controller_reset_and_setup_gnss(uint16_t mask)
 		LOG_ERR("gnss_setup failed %d", ret);
 		return ret;
 	}
+
 	ret = gnss_set_mode(current_mode, false);
 	if (ret != 0) {
 		LOG_ERR("gnss_set_mode %d", ret);
 		return ret;
 	}
+
 	return 0;
 }
 
@@ -142,17 +160,18 @@ int gnss_controller_setup(void)
 		return ret;
 	}
 
-	ret = gnss_wakeup(gnss_dev);
-	if (ret != 0) {
-		LOG_WRN("gnss_wakeup failed %d", ret);
-		return ret;
-	}
-
 	ret = gnss_setup(gnss_dev, false);
 	if (ret != 0) {
 		LOG_WRN("gnss_setup failed %d", ret);
 		return ret;
 	}
+
+	ret = gnss_set_mode(current_mode, false);
+	if (ret != 0) {
+		LOG_ERR("gnss_set_mode %d", ret);
+		return ret;
+	}
+
 	// Default values to please ztest
 	mia_m10_versions.swVersion[0] = 0;
 	mia_m10_versions.hwVersion[0] = 0;
@@ -165,88 +184,45 @@ int gnss_controller_setup(void)
 
 	LOG_INF("The GNSS SW Version:%s", log_strdup(mia_m10_versions.swVersion));
 	LOG_INF("The GNSS Hardware Version:%s", log_strdup(mia_m10_versions.hwVersion));
-	return ret;
-}
-
-int gnss_controller_init_retry_softcold_setup(void)
-{
-	int ret = -ENOSYS;
-	uint8_t gnss_init_count = 0;
-
-	while (gnss_init_count < CONFIG_GNSS_MAX_COUNT_INIT) {
-		LOG_INF(" Trying INIT [count=%d, ret=%d]", gnss_init_count, ret);
-		ret = gnss_controller_setup();
-		if (ret == 0) {
-			return ret;
-		}
-		gnss_init_count++;
-	}
-
-	return ret;
-}
-
-int gnss_controller_init_retry_softcold(void)
-{
-	int ret = -ENOSYS;
-	gnss_reset_count = 0;
-
-	ret = gnss_controller_init_retry_softcold_setup();
-	if (ret == 0) {
-		return ret;
-	}
-
-	while (gnss_reset_count < CONFIG_GNSS_MAX_COUNT_SOFT_RESTART) {
-		ret = gnss_reset(gnss_dev, GNSS_RESET_MASK_COLD, GNSS_RESET_MODE_HW_IMMEDIATELY);
-
-		gnss_reset_count++;
-		LOG_INF("RESTART [ iteration=%d, ret=%d ]", gnss_reset_count, ret);
-
-		ret = gnss_controller_init_retry_softcold_setup();
-		if (ret == 0) {
-			return ret;
-		}
-	}
-
-	return ret;
-}
-
-int gnss_controller_init_retry(void)
-{
-	int ret = -ENOSYS;
-
-	ret = gnss_controller_init_retry_softcold();
-	if (ret == 0) {
-		return ret;
-	}
-	// If SOFT-COLD resets fail, try to toggle the resetn pin for a hard reset.
-	ret = gnss_resetn_pin(gnss_dev);
-	if (ret != 0) {
-		char *msg = "gnss_resetn_pin toggle failed";
-		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
-		return ret;
-	}
-
-	ret = gnss_controller_init_retry_softcold();
 
 	return ret;
 }
 
 int gnss_controller_init(void)
 {
+	int ret = -ENOSYS;
+
 	current_mode = GNSSMODE_NOMODE;
 	gnss_timeout_count = 0;
-	int ret;
+	gnss_reset_count = 0;
 
 	gnss_dev = DEVICE_DT_GET(DT_ALIAS(gnss));
 	if (!gnss_dev) {
 		return -ENODEV;
 	}
 
-	ret = gnss_controller_init_retry();
-	if (ret != 0) {
-		char *msg = "gnss init failed after using the resetn pin";
-		nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
-		return ret;
+#ifdef CONFIG_GNSS_DATA_BATCH
+	/* Init and start GNSS data batch retrieval work item */
+	k_work_init_delayable(&retrieve_batch_gnss_work, gnss_retrieve_batch_work_fn);
+#endif
+
+	while (gnss_reset_count++ < CONFIG_GNSS_MAX_COUNT_RESETN_RESTART) {
+		ret = gnss_resetn_pin(gnss_dev);
+		if (ret != 0) {
+			char *msg = "gnss_resetn_pin toggle failed";
+			nf_app_error(ERR_GNSS_CONTROLLER, ret, msg, sizeof(*msg));
+			return ret;
+		}
+
+		/* Give GNSS receiver some time to initialize after reset */
+		k_sleep(K_MSEC(100));
+
+		ret = gnss_controller_setup();
+		if (ret == 0) {
+			break;
+		}
+
+		LOG_INF("RESTART [ iteration=%d, ret=%d ]", gnss_reset_count, ret);
 	}
 
 #if defined(CONFIG_TEST)
@@ -283,9 +259,11 @@ static _Noreturn void publish_gnss_data(void *ctx)
 			struct gnss_data *new_data = new_gnss_data();
 			new_data->gnss_data = gnss_data_buffer;
 			new_data->timed_out = false;
-			LOG_DBG("  GNSS data: %d, %d, %d, %d, %d", gnss_data_buffer.latest.lon,
-				gnss_data_buffer.latest.lat, gnss_data_buffer.latest.pvt_flags,
-				gnss_data_buffer.latest.h_acc_dm, gnss_data_buffer.latest.num_sv);
+			LOG_DBG("  GNSS data: lon: %d, psmState: 0x%02x, hAcc: %d, numSv: %d, mode: %d, fix: %d",
+				gnss_data_buffer.latest.lon,
+				(gnss_data_buffer.latest.pvt_flags >> 2),
+				gnss_data_buffer.latest.h_acc_dm, gnss_data_buffer.latest.num_sv,
+				gnss_data_buffer.latest.mode, gnss_data_buffer.fix_ok);
 			EVENT_SUBMIT(new_data);
 			initialized = true;
 		} else {
@@ -324,20 +302,57 @@ static int gnss_set_mode(gnss_mode_t mode, bool wakeup)
 			return ret;
 		}
 		current_rate_ms = UINT16_MAX;
-	} else if (mode == GNSSMODE_PSM || mode == GNSSMODE_CAUTION || mode == GNSSMODE_MAX) {
-		ret = gnss_set_power_mode(gnss_dev, mode);
-		if (ret != 0) {
-			LOG_ERR("failed to set GNSS to mode %u %d", mode, ret);
-			return ret;
-		}
-		ret = gnss_get_rate(gnss_dev, &current_rate_ms);
-		if (ret != 0) {
-			LOG_ERR("failed to get rate %d", ret);
-			return ret;
-		}
+
+		return 0;
 	}
 
+	/* TODO: Add rate as an argument to gnss_set_mode */
+	switch (mode) {
+	case GNSSMODE_PSM:
+		current_rate_ms = GNSSRATE_5000_MS;
+		break;
+
+	case GNSSMODE_CAUTION:
+		current_rate_ms = GNSSRATE_1000_MS;
+		break;
+
+	case GNSSMODE_MAX:
+		current_rate_ms = GNSSRATE_250_MS;
+		break;
+
+	default:
+		current_rate_ms = GNSSRATE_1000_MS;
+		break;
+	}
+
+	LOG_INF("Setting GNSS mode to %u with rate: %u", mode, current_rate_ms);
+	ret = gnss_set_power_mode(gnss_dev, mode, current_rate_ms);
+	if (ret != 0) {
+		LOG_ERR("failed to set GNSS to mode %u %d", mode, ret);
+		return ret;
+	}
+
+#ifdef CONFIG_GNSS_DATA_BATCH
+	/* Retrive data batch */
+	k_work_reschedule(&retrieve_batch_gnss_work, K_MSEC(current_rate_ms));
+#endif
+
 	return 0;
+}
+
+void gnss_force_backup()
+{
+	gnss_set_mode(GNSSMODE_INACTIVE, false);
+}
+
+void gnss_force_psmct()
+{
+	gnss_set_mode(GNSSMODE_PSM, false);
+}
+
+void gnss_force_wakeup()
+{
+	gnss_set_mode(GNSSMODE_CAUTION, true);
 }
 
 static bool gnss_controller_event_handler(const struct event_header *eh)
@@ -361,8 +376,8 @@ EVENT_LISTENER(MODULE, gnss_controller_event_handler);
 EVENT_SUBSCRIBE(MODULE, gnss_set_mode_event);
 
 /**
- * @brief Handles GNSS timeouts when no messages has been received. 
- *        Will reset GNSS with various modes depending on reset count. 
+ * @brief Handles GNSS timeouts when no messages has been received.
+ *        Will reset GNSS with various modes depending on reset count.
  *
  * @return None
  *

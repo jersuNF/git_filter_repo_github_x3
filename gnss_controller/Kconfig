@@ -32,6 +32,9 @@ if GNSS_CONTROLLER
     config GNSS_MAX_COUNT_SOFT_RESTART
         int "number of tries before gnss init should perform hard resetn pin toggle"
         default 3
+    config GNSS_MAX_COUNT_RESETN_RESTART
+        int "number of tries with resetn pin toggle before giving up"
+        default 5
     config GNSS_THREAD_PRIORITY
         int "GNSS thread priority"
         default 6

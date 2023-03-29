@@ -27,13 +27,13 @@ int init_movement_controller(void);
 /** Number of steps needed in the step counter for activity to be HIGH. */
 #define STEPS 10
 
-/** Number of seconds every column in the step queue represent. 
+/** Number of seconds every column in the step queue represent.
  *  When 3600, every column in the step queue count the steps for an hour.
  */
 #define STEP_QUEUE_TIME 3600
 
-/** Number of columns in the step queue, when 24 and 3600, 
- *  the step queue remembers the number of steps for the last 24 hours. 
+/** Number of columns in the step queue, when 24 and 3600,
+ *  the step queue remembers the number of steps for the last 24 hours.
  */
 #define STEP_QUEUE_LENGTH 24
 

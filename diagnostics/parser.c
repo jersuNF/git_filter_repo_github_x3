@@ -141,6 +141,7 @@ static int parser_test(enum diagnostics_interface interface, char *arg)
 			parser_actions.send_resp(interface, readydev, strlen(readydev));
 		}
 	} else if (parser_arg_is_matching("eeprom", arg, sub_arg_len)) {
+#if DT_NODE_HAS_STATUS(DT_ALIAS(eeprom), okay)
 		const struct device *eeprom_dev =
 			device_get_binding(DT_LABEL(DT_NODELABEL(eeprom0)));
 
@@ -187,6 +188,10 @@ static int parser_test(enum diagnostics_interface interface, char *arg)
 			const char *readydev = "EEPROM - Failed writing offset 0.\r\n";
 			parser_actions.send_resp(interface, readydev, strlen(readydev));
 		}
+#else
+		const char *readydev = "EEPROM - NO EEPROM on board\r\n";
+		parser_actions.send_resp(interface, readydev, strlen(readydev));
+#endif
 	} else if (parser_arg_is_matching("bme280", arg, sub_arg_len)) {
 		const struct device *bme_dev =
 			device_get_binding(DT_LABEL(DT_NODELABEL(environment_sensor)));

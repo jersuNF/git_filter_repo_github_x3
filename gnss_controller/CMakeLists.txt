@@ -1,4 +1,3 @@
-
 if(CONFIG_GNSS_CONTROLLER)
         zephyr_include_directories(
                 .

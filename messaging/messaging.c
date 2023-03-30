@@ -21,7 +21,6 @@
 #include "request_events.h"
 #include "nf_version.h"
 #include "UBX.h"
-#include "unixTime.h"
 #include "error_event.h"
 
 #include "nf_crc16.h"
@@ -37,16 +36,18 @@
 #include "sound_event.h"
 #include "histogram_events.h"
 #include <sys/sys_heap.h>
+#include <sys/timeutil.h>
 #include "amc_const.h"
 #include "pwr_event.h"
 #include "nofence_watchdog.h"
+#include "timeutil.h"
 
 #define MODULE messaging
 LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
 
 #define DOWNLOAD_COMPLETE 255
 #define GPS_UBX_NAV_PVT_VALID_HEADVEH_MASK 0x20
-#define SECONDS_IN_THREE_DAYS 259200
+#define TWO_AND_A_HALF_DAYS_SEC (3600 * (24 + 24 + 12))
 #define MSECCONDS_PER_HOUR 3600000
 
 #define BYTESWAP16(x) (((x) << 8) | ((x) >> 8))
@@ -97,16 +98,13 @@ typedef enum {
 	CACHED_READY_END_OF_LIST
 } cached_and_ready_enum;
 
-/* Used to check if we've cached what is requried before we perform the 
+/* Used to check if we've cached what is requried before we perform the
  * INITIAL, FIRST poll request to server */
 static int cached_and_ready_reg[CACHED_READY_END_OF_LIST];
 
 static int rat, mnc, rssi, min_rssi, max_rssi;
 static uint8_t ccid[20] = "\0";
 static char mdm_fw_file_name[sizeof(((PollMessageResponse *)NULL)->xModemFwFileName)] = "\0";
-
-static uint8_t expected_ano_frame, new_ano_in_progress;
-static bool first_ano_frame;
 
 /* Time since the server updated the date time in seconds. */
 static atomic_t server_timestamp_sec = ATOMIC_INIT(0);
@@ -132,9 +130,9 @@ void build_poll_request(NofenceMessage *);
 
 void fence_download(uint8_t);
 
-int8_t request_ano_frame(uint16_t, uint16_t);
+int request_ano_frame(uint16_t, uint16_t);
 
-void ano_download(uint16_t, uint16_t);
+static void ano_download_work_fn(struct k_work *item);
 
 void proto_InitHeader(NofenceMessage *);
 
@@ -144,7 +142,7 @@ static int process_upgrade_request(VersionInfoFW *);
 
 uint8_t process_fence_msg(FenceDefinitionResponse *);
 
-uint8_t process_ano_msg(UbxAnoReply *);
+static int process_ano_msg(UbxAnoReply *anoResp);
 
 int encode_and_send_message(NofenceMessage *);
 
@@ -157,8 +155,6 @@ static int send_all_stored_messages(void);
 static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix, _DatePos *pos);
 
 bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *);
-
-static uint32_t ano_date_to_unixtime_midday(uint8_t, uint8_t, uint8_t);
 
 void messaging_rx_thread_fn(void);
 
@@ -197,6 +193,7 @@ struct k_work_delayable process_warning_correction_start_work;
 struct k_work_delayable process_warning_correction_end_work;
 struct k_work_delayable log_send_work;
 struct k_work_delayable fota_wdt_work;
+struct k_work_delayable ano_download_work;
 
 struct fence_def_update {
 	struct k_work_delayable work;
@@ -237,6 +234,56 @@ atomic_t m_message_tx_type = ATOMIC_INIT(0);
 #define WDT_MODULE_RECV_TCP ("receive_tcp")
 
 static int set_tx_state_ready(messaging_tx_type_t tx_type);
+
+/**
+ * @brief, called when the external flash has been erased, in case we
+ * must reset the ANO variables in NVS
+ */
+static void process_flash_erased(void)
+{
+	int err;
+	LOG_DBG("Clearing ANO config values");
+	err = stg_config_u16_write(STG_U16_ANO_ID, UINT16_MAX);
+	err |= stg_config_u16_write(STG_U16_ANO_START_ID, UINT16_MAX);
+	err |= stg_config_u16_write(STG_U16_LAST_GOOD_ANO_ID, 0);
+	err |= stg_config_u32_write(STG_U32_ANO_TIMESTAMP, 0);
+
+	if (err) {
+		LOG_ERR("Could not clear stg %d", err);
+	}
+}
+
+/**
+ * @brief: Checks if we should kick-off a new ano download sequence.
+ * Uses our serial number to smear out requests so that collars do not
+ * bomb the server at the same time
+ */
+static void check_kickoff_ano_download_start()
+{
+	uint32_t ano_timestamp;
+	uint16_t offset = (serial_id & 0x0FF) * 56;
+	int ret = stg_config_u32_read(STG_U32_ANO_TIMESTAMP, &ano_timestamp);
+	if (ret != 0 || ano_timestamp == UINT32_MAX) {
+		LOG_WRN("Cannot read last ano timestamp %d", ret);
+		ano_timestamp = 0;
+	}
+	int64_t curr_time;
+	if (date_time_now(&curr_time) != 0) {
+		LOG_DBG("No current time, cannot download ANO now");
+		return;
+	}
+	uint32_t unix_time = (uint32_t)(curr_time / 1000);
+	if (ano_timestamp + offset <= unix_time + (3600 * 24 * 3)) {
+		ret = k_work_reschedule_for_queue(&message_q, &ano_download_work, K_NO_WAIT);
+		if (ret < 0) {
+			LOG_ERR("Failed to schedule ANO");
+		}
+	} else {
+		LOG_DBG("No download needed: ano_t: %lu, offset: %lu, unix_time %lu",
+			(unsigned long)ano_timestamp, (unsigned long)offset,
+			(unsigned long)unix_time);
+	}
+}
 
 /**
  * @brief Builds SEQ messages (1 and 2) with the latest data and store them to external storage.
@@ -865,8 +912,10 @@ static bool event_handler(const struct event_header *eh)
 			time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
 			struct tm *tm_time = gmtime(&gm_time);
 
-			if (tm_time->tm_year < 2015) {
-				LOG_DBG("Invalid gnss packet.");
+			/* tm_year is relative to 1900 */
+			if (tm_time->tm_year < 120) {
+				LOG_WRN("Invalid gnss packet, unix time was %lu",
+					(unsigned long)ev->gnss_data.lastfix.unix_timestamp);
 				return false;
 			}
 			/* Update date_time library which storage uses for ANO data. */
@@ -977,14 +1026,6 @@ static bool event_handler(const struct event_header *eh)
 				LOG_ERR("Error schedule poll request work (%d)", err);
 			}
 		}
-		return false;
-	}
-	if (is_update_flash_erase(eh)) {
-		current_state.flash_erase_count++;
-		/** @todo Not written to storage. Should it? And also be added to
-         * update cache reg??
-         */
-		/*update_cache_reg(FLASH_ERASE_COUNT);*/
 		return false;
 	}
 	if (is_update_zap_count(eh)) {
@@ -1172,6 +1213,15 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+
+	if (is_flash_erased_event(eh)) {
+		current_state.flash_erase_count++;
+		/** @todo Not written to storage. Should it? And also be added to
+         * update cache reg??
+         */
+		process_flash_erased();
+		return false;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 	return false;
@@ -1224,7 +1274,6 @@ EVENT_SUBSCRIBE(MODULE, update_collar_mode);
 EVENT_SUBSCRIBE(MODULE, update_collar_status);
 EVENT_SUBSCRIBE(MODULE, update_fence_status);
 EVENT_SUBSCRIBE(MODULE, update_fence_version);
-EVENT_SUBSCRIBE(MODULE, update_flash_erase);
 EVENT_SUBSCRIBE(MODULE, update_zap_count);
 EVENT_SUBSCRIBE(MODULE, animal_warning_event);
 EVENT_SUBSCRIBE(MODULE, animal_escape_event);
@@ -1241,6 +1290,8 @@ EVENT_SUBSCRIBE(MODULE, gsm_info_event);
 EVENT_SUBSCRIBE(MODULE, dfu_status_event);
 EVENT_SUBSCRIBE(MODULE, block_fota_event);
 EVENT_SUBSCRIBE(MODULE, mdm_fw_update_event);
+EVENT_SUBSCRIBE(MODULE, start_ano_download);
+EVENT_SUBSCRIBE(MODULE, flash_erased_event);
 
 /**
  * @brief Process commands recieved on the bluetooth interface, and performs the appropriate
@@ -1320,17 +1371,20 @@ static void process_lte_proto_event(void)
 	if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
 		LOG_INF("Process poll reponse");
 		process_poll_response(&proto);
-		return;
 	} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
 		uint8_t received_frame = process_fence_msg(&proto.m.fence_definition_resp);
 		fence_download(received_frame);
-		return;
 	} else if (proto.which_m == NofenceMessage_ubx_ano_reply_tag) {
-		uint16_t new_ano_frame = process_ano_msg(&proto.m.ubx_ano_reply);
-		ano_download(proto.m.ubx_ano_reply.usAnoId, new_ano_frame);
-		return;
-	} else {
-		return;
+		err = process_ano_msg(&proto.m.ubx_ano_reply);
+		if (err == 0) {
+			err = k_work_reschedule_for_queue(&message_q, &ano_download_work,
+							  K_NO_WAIT);
+			if (err < 0) {
+				LOG_ERR("Failed to schedule ANO");
+			}
+		} else {
+			LOG_ERR("Failed to download ANO : %d", err);
+		}
 	}
 }
 
@@ -1441,6 +1495,7 @@ int messaging_module_init(void)
 	k_work_init_delayable(&data_request_work, data_request_work_fn);
 	k_work_init_delayable(&m_fence_update_req.work, fence_update_req_fn);
 	k_work_init_delayable(&fota_wdt_work, fota_wdt_work_fn);
+	k_work_init_delayable(&ano_download_work, ano_download_work_fn);
 
 	memset(&pasture_temp, 0, sizeof(pasture_t));
 	cached_fences_counter = 0;
@@ -1674,13 +1729,11 @@ void fence_download(uint8_t received_frame)
 
 /**
  * @brief Builds and sends a ANO data request to the server.
- *
- * @param ano_id The identifier of the ANO request.
- * @param ano_start The start identifier for the ANO request.
  * @return Returns 0 if successfull, otherwise a negative error code.
  */
-int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
+int request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 {
+	LOG_DBG("request_ano_frame()");
 	NofenceMessage ano_req;
 	proto_InitHeader(&ano_req); /* fill up message header. */
 	ano_req.which_m = NofenceMessage_ubx_ano_req_tag;
@@ -1697,42 +1750,41 @@ int8_t request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 
 /**
  * @brief Handler for ANO data download.
- * @param ano_id The identifier of the ANO request.
- * @param new_ano_frame A frame of the ANO data download.
  */
-void ano_download(uint16_t ano_id, uint16_t new_ano_frame)
+static void ano_download_work_fn(struct k_work *item)
 {
-	if (first_ano_frame) {
-		new_ano_in_progress = ano_id;
-		expected_ano_frame = 0;
-		first_ano_frame = false;
-	} else if (new_ano_frame == 0 && !first_ano_frame) {
-		expected_ano_frame = 0;
-		new_ano_in_progress = 0;
+	int64_t curr_time;
+	uint32_t ano_timestamp;
+	uint16_t ano_id;
+	uint16_t ano_frame;
+	if (date_time_now(&curr_time) != 0) {
+		LOG_DBG("No current time, cannot download ANO now");
 		return;
 	}
-	if (new_ano_frame >= 0) {
-		if (new_ano_frame == DOWNLOAD_COMPLETE) {
-			LOG_INF("ANO %d download complete.", new_ano_in_progress);
-			return;
+	uint32_t unix_time = (uint32_t)(curr_time / 1000);
+	int ret = stg_config_u32_read(STG_U32_ANO_TIMESTAMP, &ano_timestamp);
+	if (ret != 0 || ano_timestamp == UINT32_MAX) {
+		LOG_WRN("Cannot read last ano timestamp %d", ret);
+		ano_timestamp = 0;
+	}
+	/* If the latest ano frome is too old, we need to download */
+	LOG_DBG("ano-time %lu, unix_time %lu", (unsigned long)ano_timestamp,
+		(unsigned long)unix_time);
+	if (ano_timestamp <= unix_time + (3600 * 24 * 3)) {
+		ret = stg_config_u16_read(STG_U16_ANO_ID, &ano_id);
+		if (ret != 0 || ano_id == UINT16_MAX) {
+			ano_id = 0;
 		}
-
-		expected_ano_frame += new_ano_frame;
-		/* TODO: handle failure to send request!*/
-		int ret = request_ano_frame(ano_id, expected_ano_frame);
-
-		LOG_INF("Requesting frame %d of new ano: %d.", expected_ano_frame,
-			new_ano_in_progress);
-
+		ret = stg_config_u16_read(STG_U16_ANO_START_ID, &ano_frame);
+		if (ret != 0 || ano_frame == UINT16_MAX) {
+			ano_frame = 0;
+		}
+		ret = request_ano_frame(ano_id, ano_frame);
 		if (ret != 0) {
-			/* TODO: reset ANO state and retry later.*/
-			expected_ano_frame = 0;
-			new_ano_in_progress = 0;
+			LOG_ERR("Cannot request ANO frame %d", ret);
 		}
-		return;
 	}
 }
-
 /**
  * @brief Initialize a Nofence protobuf message (See NofenceMessage).
  * @param msg The initialized Nofence protobuf message.
@@ -1743,7 +1795,7 @@ void proto_InitHeader(NofenceMessage *msg)
 	msg->header.ulId = serial_id;
 	msg->header.ulVersion = NF_X25_VERSION_NUMBER;
 	msg->header.has_ulVersion = true;
-	static int64_t curr_time = 0;
+	int64_t curr_time = 0;
 	if (!date_time_now(&curr_time)) {
 		/* Convert to seconds since 1.1.1970 */
 		msg->header.ulUnixTimestamp = (uint32_t)(curr_time / 1000);
@@ -1900,9 +1952,6 @@ void process_poll_response(NofenceMessage *proto)
 	}
 	/* TODO: set activation mode to (pResp->eActivationMode); */
 
-	if (pResp->has_bUseUbloxAno) {
-		/* TODO: publish enable ANO event to GPS controller */
-	}
 	if (pResp->has_bUseServerTime && pResp->bUseServerTime) {
 		LOG_INF("Set date and time from server");
 		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
@@ -2036,6 +2085,13 @@ void process_poll_response(NofenceMessage *proto)
 		mdm_fw_ver->buf = mdm_fw_file_name;
 		mdm_fw_ver->len = sizeof(pResp->xModemFwFileName);
 		EVENT_SUBMIT(mdm_fw_ver);
+	}
+
+	if (pResp->has_bUseUbloxAno) {
+		/* kick off ANO-download if needed. In effect, each poll message response
+		 * will check if we should start download new AssistNowOffline data*
+		 */
+		check_kickoff_ano_download_start();
 	}
 	return;
 }
@@ -2207,38 +2263,79 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 }
 
 /**
- * @brief Process an incomming ANO message, mainly stores it to external flash.
- * @param anoResp The ANO message.
- * @return Returns 0 if successfull, otherwise negative error code.
+ * @brief Process an incomming ANO message, chopping it up in UBX-MGA_ANO messages and
+ * saving it to flash.
+ * @param anoResp The ANO protobuf message
+ * @retval < 0 Error occurred. The value gives the detailed reason
+ * @retval > 0 Needs to download more ANO packages
+ * @retval 0 ANO data successfully saved and we don't need more
+ *
  */
-uint8_t process_ano_msg(UbxAnoReply *anoResp)
+static int process_ano_msg(UbxAnoReply *anoResp)
 {
-	uint8_t rec_ano_frames = anoResp->rgucBuf.size / sizeof(UBX_MGA_ANO_RAW_t);
-
+	int err;
 	UBX_MGA_ANO_RAW_t *temp = NULL;
-	temp = (UBX_MGA_ANO_RAW_t *)(anoResp->rgucBuf.bytes + sizeof(UBX_MGA_ANO_RAW_t));
-
-	uint32_t age = ano_date_to_unixtime_midday(temp->mga_ano.year, temp->mga_ano.month,
-						   temp->mga_ano.day);
-
-	/* Write to storage controller's ANO WRITE partition. */
-	int err = stg_write_ano_data((uint8_t *)&anoResp->rgucBuf, anoResp->rgucBuf.size);
-
-	if (err) {
-		LOG_ERR("Error writing ano frame to storage controller (%d)", err);
-		nf_app_error(ERR_MESSAGING, err, NULL, 0);
+	ano_rec_t ano_rec;
+	uint8_t n_mga_ano = anoResp->rgucBuf.size / sizeof(UBX_MGA_ANO_RAW_t);
+	if (n_mga_ano == 0) {
+		return -ENODATA;
 	}
+	for (int i = 0; i < n_mga_ano; i++) {
+		memset(&ano_rec, 0, sizeof(ano_rec));
+		temp = (UBX_MGA_ANO_RAW_t *)(anoResp->rgucBuf.bytes +
+					     sizeof(UBX_MGA_ANO_RAW_t) * i);
+		/*
+		 * usAnoId identifies the day of the year (1-366) when the packet was generated.
+		 * And we would like to use the closest day to the current date when
+		 * feeding the GNSS receiver.
+		 */
+
+		ano_rec.ano_id = anoResp->usAnoId;
+		ano_rec.sequence_id = anoResp->usStartAno + i;
+
+		memcpy(&ano_rec.raw_ano, temp, sizeof(UBX_MGA_ANO_RAW_t));
+		err = stg_write_ano_data(&ano_rec);
+
+		if (err) {
+			LOG_ERR("Error writing ano frame to storage controller (%d)", err);
+			return err;
+		}
+	}
+
+	uint32_t ano_time_md = ano_date_to_unixtime_midday(temp->mga_ano.year, temp->mga_ano.month,
+							   temp->mga_ano.day);
+
 	int64_t current_time_ms = 0;
 
 	err = date_time_now(&current_time_ms);
 	if (err) {
 		LOG_ERR("Error fetching date time (%d)", err);
-		nf_app_error(ERR_MESSAGING, err, NULL, 0);
+		return err;
 	}
-	if (age > (current_time_ms / 1000) + SECONDS_IN_THREE_DAYS) {
-		return DOWNLOAD_COMPLETE;
+	/* Use the last record in the ANO message to stamp NVS data */
+	err = stg_config_u16_write(STG_U16_ANO_ID, anoResp->usAnoId);
+	if (err) {
+		return err;
 	}
-	return rec_ano_frames;
+	err = stg_config_u16_write(STG_U16_ANO_START_ID, anoResp->usStartAno + n_mga_ano);
+	if (err) {
+		return err;
+	}
+	err = stg_config_u32_write(STG_U32_ANO_TIMESTAMP, ano_time_md);
+	if (err) {
+		return err;
+	}
+	if (ano_time_md > (current_time_ms / 1000) + TWO_AND_A_HALF_DAYS_SEC) {
+		err = stg_config_u16_write(STG_U16_LAST_GOOD_ANO_ID, anoResp->usAnoId);
+		if (err) {
+			return err;
+		}
+		/* Fire an event so that GNSS can be updated */
+		struct ano_ready_event *ano_ready = new_ano_ready_event();
+		EVENT_SUBMIT(ano_ready);
+	}
+
+	return 0;
 }
 
 /**
@@ -2291,24 +2388,6 @@ static void proto_get_last_known_date_pos(gnss_last_fix_struct_t *gpsLastFix, _D
 bool proto_has_last_known_date_pos(const gnss_last_fix_struct_t *gps)
 {
 	return gps->unix_timestamp != 0;
-}
-
-/**
- * @brief Converts ANO datetime to unix time.
- * @param year ANO data year.
- * @param month ANO data month.
- * @param day ANO data day.
- * @return Returns the unit time.
- */
-static uint32_t ano_date_to_unixtime_midday(uint8_t year, uint8_t month, uint8_t day)
-{
-	nf_time_t nf_time;
-	nf_time.day = day;
-	nf_time.month = month;
-	nf_time.year = year + 2000;
-	nf_time.hour = 12; //assumed per ANO specs
-	nf_time.minute = nf_time.second = 0;
-	return time2unix(&nf_time);
 }
 
 /**

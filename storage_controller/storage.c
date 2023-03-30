@@ -53,12 +53,11 @@ static struct flash_sector system_diag_sectors[FLASH_SYSTEM_DIAG_NUM_SECTORS];
 K_MUTEX_DEFINE(system_diag_mutex);
 
 /* ANO partition. */
-static inline void update_ano_active_entry();
 static const struct flash_area *ano_area;
 static struct fcb ano_fcb;
 static struct flash_sector ano_sectors[FLASH_ANO_NUM_SECTORS];
 K_MUTEX_DEFINE(ano_mutex);
-static struct fcb_entry active_ano_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
+
 static struct fcb_entry last_sent_ano_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
 
 /* Pasture partition. */
@@ -76,6 +75,7 @@ static bool queue_inited = false;
 
 void erase_flash_fn(struct k_work *item)
 {
+	LOG_INF("Erasing all flash partitions!");
 	int err = stg_clear_partition(STG_PARTITION_LOG);
 	if (err) {
 		return;
@@ -93,7 +93,7 @@ void erase_flash_fn(struct k_work *item)
 		return;
 	}
 
-	struct update_flash_erase *ev = new_update_flash_erase();
+	struct flash_erased_event *ev = new_flash_erased_event();
 	EVENT_SUBMIT(ev);
 }
 
@@ -283,11 +283,6 @@ int stg_init_storage_controller(void)
 		queue_inited = true;
 	}
 
-	/* Check which ANO partition is active. We just booted, so
-	 * we have to go through every entry.
-	 */
-	update_ano_active_entry(NULL);
-
 	return 0;
 }
 
@@ -363,9 +358,6 @@ int stg_clear_partition(flash_partition_t partition)
 	}
 
 	if (partition == STG_PARTITION_ANO) {
-		active_ano_entry.fe_sector = NULL;
-		active_ano_entry.fe_elem_off = 0;
-
 		last_sent_ano_entry.fe_sector = NULL;
 		last_sent_ano_entry.fe_elem_off = 0;
 	} else if (partition == STG_PARTITION_LOG) {
@@ -420,101 +412,7 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
 	}
 }
 
-bool ano_is_same_day_or_greater(UBX_MGA_ANO_RAW_t *ano_date)
-{
-	/* Fetch unix timestamp. */
-	int64_t unixtime = 0;
-
-	if (date_time_now(&unixtime) != 0) {
-		/* Time is not yet acquired, keep all ANO entries
-		 * as they still might be valid. 
-		 */
-		return true;
-	}
-
-	time_t raw_time = (time_t)unixtime;
-	struct tm *gm_time = gmtime(&raw_time);
-
-	/* Time since 1900 > Time since 2000 */
-	if (gm_time->tm_year + 1900 > ano_date->mga_ano.year + 2000) {
-		return false;
-	}
-
-	if (gm_time->tm_year + 1900 < ano_date->mga_ano.year + 2000) {
-		return true;
-	}
-
-	/* 0..11 > 1..12 */
-	if (gm_time->tm_mon + 1 > ano_date->mga_ano.month) {
-		return false;
-	}
-
-	if (gm_time->tm_mon + 1 < ano_date->mga_ano.month) {
-		return true;
-	}
-
-	/* 1..31 < 1..31 */
-	if (gm_time->tm_mday > ano_date->mga_ano.day) {
-		return false;
-	}
-
-	return true;
-}
-
-/** @brief When condition is met that we have a valid ANO partition,
- *         return -EINTR.
- * @param[in] data data to check
- * @param[in] len size of data
- * 
- * @returns 0 if we want to search more ANO frames.
- * @returns -EINTR if we found a valid frame, stopping the walk process.
- */
-int check_if_ano_valid_cb(uint8_t *data, size_t len)
-{
-	UBX_MGA_ANO_RAW_t *ano_frame = (UBX_MGA_ANO_RAW_t *)(data);
-
-	if (ano_is_same_day_or_greater(ano_frame)) {
-		return -EINTR;
-	}
-
-	return 0;
-}
-
-/** @brief Goes through ANO partition data and stops whenever
- *         it reaches a valid ano frame based on logic from function 
- *         check_if_ano_valid_cb. When traversing stops with -EINTR, we're done
- *         and active_ano_entry is kept on RAM for future reads.
- * 
- * @param entry Entry to start reading ANO data from. If NULL, traverse entire
- *              storage.
- */
-static inline void update_ano_active_entry(struct fcb_entry *entry)
-{
-	if (k_mutex_lock(&ano_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
-		return;
-	}
-
-	struct fcb_entry start_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
-	if (entry != NULL) {
-		memcpy(&start_entry, entry, sizeof(struct fcb_entry));
-	}
-
-	int err = fcb_walk_from_entry(check_if_ano_valid_cb, &ano_fcb, &start_entry, 0, &ano_mutex);
-
-	if (err == -EINTR) {
-		/* Found valid boot partition, copy the entry header. */
-		memcpy(&active_ano_entry, &start_entry, sizeof(struct fcb_entry));
-	} else if (err == -ENODATA) {
-		LOG_WRN("No ano frames available at ano partition.");
-	} else if (err) {
-		LOG_ERR("Error fetching ANO entries when updating %i", err);
-	}
-
-	k_mutex_unlock(&ano_mutex);
-	return;
-}
-
-int stg_read_ano_data(fcb_read_cb cb, bool last_valid_ano, uint16_t num_entries)
+int stg_read_ano_data(fcb_read_cb cb, bool read_from_start, uint16_t num_entries)
 {
 	if (k_mutex_lock(&ano_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
@@ -530,8 +428,8 @@ int stg_read_ano_data(fcb_read_cb cb, bool last_valid_ano, uint16_t num_entries)
 
 	struct fcb_entry start_entry;
 
-	if (last_valid_ano) {
-		memcpy(&start_entry, &active_ano_entry, sizeof(struct fcb_entry));
+	if (read_from_start) {
+		memset(&start_entry, 0, sizeof(start_entry));
 	} else {
 		memcpy(&start_entry, &last_sent_ano_entry, sizeof(struct fcb_entry));
 	}
@@ -609,13 +507,13 @@ int stg_write_log_data(uint8_t *data, size_t len)
 	}
 }
 
-int stg_write_ano_data(uint8_t *data, size_t len)
+int stg_write_ano_data(const ano_rec_t *ano_rec)
 {
 	if (k_mutex_lock(&ano_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return -ETIMEDOUT;
 	}
 
-	int err = stg_write_to_partition(STG_PARTITION_ANO, data, len);
+	int err = stg_write_to_partition(STG_PARTITION_ANO, (uint8_t *)ano_rec, sizeof(*ano_rec));
 
 	if (err) {
 		LOG_ERR("Error writing to ano partition, err %i", err);
@@ -726,15 +624,9 @@ int stg_fcb_reset_and_init()
 	memset(&pasture_fcb, 0, sizeof(pasture_fcb));
 	memset(&system_diag_fcb, 0, sizeof(pasture_fcb));
 
-	memset(&active_ano_entry, 0, sizeof(struct fcb_entry));
 	memset(&last_sent_ano_entry, 0, sizeof(struct fcb_entry));
 	memset(&active_log_entry, 0, sizeof(struct fcb_entry));
 	memset(&active_system_diag_entry, 0, sizeof(struct fcb_entry));
-
-	active_ano_entry.fe_sector = NULL;
-	last_sent_ano_entry.fe_sector = NULL;
-	active_log_entry.fe_sector = NULL;
-	active_system_diag_entry.fe_sector = NULL;
 
 	return stg_init_storage_controller();
 }

@@ -281,6 +281,7 @@ static int gnss_data_update_cb(const gnss_t *data)
 static int gnss_set_mode(gnss_mode_t mode, bool wakeup)
 {
 	int ret;
+	uint16_t rate_ms;
 	if (wakeup) {
 		ret = gnss_wakeup(gnss_dev);
 		if (ret != 0) {
@@ -303,24 +304,24 @@ static int gnss_set_mode(gnss_mode_t mode, bool wakeup)
 	/* TODO: Add rate as an argument to gnss_set_mode */
 	switch (mode) {
 	case GNSSMODE_PSM:
-		current_rate_ms = GNSSRATE_5000_MS;
+		rate_ms = GNSSRATE_5000_MS;
 		break;
 
 	case GNSSMODE_CAUTION:
-		current_rate_ms = GNSSRATE_1000_MS;
+		rate_ms = GNSSRATE_1000_MS;
 		break;
 
 	case GNSSMODE_MAX:
-		current_rate_ms = GNSSRATE_250_MS;
+		rate_ms = GNSSRATE_250_MS;
 		break;
 
 	default:
-		current_rate_ms = GNSSRATE_1000_MS;
+		rate_ms = GNSSRATE_1000_MS;
 		break;
 	}
 
-	LOG_INF("Setting GNSS mode to %u with rate: %u", mode, current_rate_ms);
-	ret = gnss_set_power_mode(gnss_dev, mode, current_rate_ms);
+	LOG_INF("Setting GNSS mode to %u with rate: %u", mode, rate_ms);
+	ret = gnss_set_power_mode(gnss_dev, mode, rate_ms);
 	if (ret != 0) {
 		LOG_ERR("failed to set GNSS to mode %u %d", mode, ret);
 		return ret;
@@ -330,7 +331,11 @@ static int gnss_set_mode(gnss_mode_t mode, bool wakeup)
 	/* Retrive data batch */
 	k_work_reschedule(&retrieve_batch_gnss_work, K_MSEC(current_rate_ms));
 #endif
-
+	/*
+         * Update the current_rate_ms used to check GNSS timeout AFTER mode has been set
+         * Otherwise, we might risk GNSS timeout in the receiver thread
+         */
+	current_rate_ms = rate_ms;
 	return 0;
 }
 

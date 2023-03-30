@@ -7,14 +7,8 @@
 
 #include <zephyr.h>
 #include "fcb_ext.h"
-
-/** Used to tell storage controller which region to read/write to. */
-typedef enum {
-	STG_PARTITION_LOG = 0,
-	STG_PARTITION_ANO = 1,
-	STG_PARTITION_PASTURE = 2,
-	STG_PARTITION_SYSTEM_DIAG = 3
-} flash_partition_t;
+#include "ano_structure.h"
+#include "storage_event.h"
 
 /** 
  * @brief Setup external flash driver
@@ -79,16 +73,15 @@ int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries);
  * 
  * @param[in] cb pointer location to the callback function that is 
  *               called during the fcb walk.
- * @param[in] last_valid_ano  If false, reads from last known sent ANO frame.
- *                            If true, reads from active_ano_entry which
- *                            points to oldest entry with valid ANO data.
- *                            This pointer is updated using update_ano_active_entry.
+ * @param[in] cb_arg passed to the callback function as the cb_arg parameter
+ * @param[in] read_from_start If true, read from oldest FIFO entry, if true, read from last retrieved
+ * location
  * @param[in] num_entries number of entries we want to read. If 0, read all.
  * 
  * @return 0 on success 
  * @return -ENODATA if no data available, Otherwise negative errno.
  */
-int stg_read_ano_data(fcb_read_cb cb, bool last_valid_ano, uint16_t num_entries);
+int stg_read_ano_data(fcb_read_cb cb, bool read_from_start, uint16_t num_entries);
 
 /** 
  * @brief Reads the newest pasture and callbacks the data.
@@ -121,7 +114,7 @@ int stg_write_log_data(uint8_t *data, size_t len);
  * 
  * @return 0 on success, otherwise negative errno
  */
-int stg_write_ano_data(uint8_t *data, size_t len);
+int stg_write_ano_data(const ano_rec_t *ano_rec);
 
 /** 
  * @brief Writes log data to external flash LOG partition.

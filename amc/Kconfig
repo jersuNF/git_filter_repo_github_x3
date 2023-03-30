@@ -20,9 +20,9 @@ if ANIMAL_MONITOR_CONTROL
 		int "Data size of the cached GNSS data"
 		default 64
 
-	config AMC_CALCULATION_SIZE
+	config AMC_CALCULATION_STACK_SIZE
 		int "Stack size of the calculation thread"
-		default 4096
+		default 1280
 
 	config AMC_CALCULATION_PRIORITY
 		int "Priority of the calculation thread"

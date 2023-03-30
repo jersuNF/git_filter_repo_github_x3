@@ -14,7 +14,7 @@ if FW_UPGRADE
     	int "stack size for start download client offload thread"
     	help
     	  stack size for a thread that will offload the event handler from starting the download client when getting a start FOTA event
-    	default 2048
+    	default 1536
 
 	config FW_UPGRADE_LOG_LEVEL
 		int "0 - 4 for logging. OFF -> ERR -> WRN -> INF -> DBG"

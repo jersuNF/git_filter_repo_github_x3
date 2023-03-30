@@ -36,7 +36,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
  * calculation function algorithm to determine what it needs to do in regards to 
  * sound and zap events that this calculation function can submit to event 
  * handler. */
-K_THREAD_STACK_DEFINE(amc_calculation_thread_area, CONFIG_AMC_CALCULATION_SIZE);
+K_THREAD_STACK_DEFINE(amc_calculation_thread_area, CONFIG_AMC_CALCULATION_STACK_SIZE);
 
 /* AMC work queue */
 static struct k_work_q amc_work_q;
@@ -497,9 +497,12 @@ int amc_module_init(void)
 	/* Init work item and start and init calculation work queue thread and 
 	 * item. */
 	k_work_queue_init(&amc_work_q);
+	struct k_work_queue_config cfg = {
+		.name = "amc_work",
+	};
 	k_work_queue_start(&amc_work_q, amc_calculation_thread_area,
 			   K_THREAD_STACK_SIZEOF(amc_calculation_thread_area),
-			   CONFIG_AMC_CALCULATION_PRIORITY, NULL);
+			   CONFIG_AMC_CALCULATION_PRIORITY, &cfg);
 
 	k_work_init(&handle_new_gnss_work, handle_gnss_data_fn);
 	k_work_init(&handle_new_fence_work, handle_new_fence_fn);

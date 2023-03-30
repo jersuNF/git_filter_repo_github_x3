@@ -33,7 +33,7 @@ atomic_t current_type_signal = ATOMIC_INIT(SND_READY_FOR_NEXT_TYPE);
 
 static struct k_work_q sound_q;
 static struct k_work sound_work;
-K_THREAD_STACK_DEFINE(sound_buzzer_area, CONFIG_BUZZER_THREAD_SIZE);
+K_THREAD_STACK_DEFINE(sound_buzzer_area, CONFIG_BUZZER_STACK_SIZE);
 
 K_SEM_DEFINE(abort_sound_sem, 0, 1);
 
@@ -566,8 +566,11 @@ int buzzer_module_init(void)
 	}
 
 	k_work_queue_init(&sound_q);
+	struct k_work_queue_config cfg = {
+		.name = "buzzer_q",
+	};
 	k_work_queue_start(&sound_q, sound_buzzer_area, K_THREAD_STACK_SIZEOF(sound_buzzer_area),
-			   CONFIG_BUZZER_THREAD_PRIORITY, NULL);
+			   CONFIG_BUZZER_THREAD_PRIORITY, &cfg);
 	k_work_init(&sound_work, play);
 
 	struct sound_status_event *ev = new_sound_status_event();

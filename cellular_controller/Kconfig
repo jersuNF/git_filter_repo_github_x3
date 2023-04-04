@@ -5,7 +5,7 @@ menuconfig CELLULAR_CONTROLLER
 if CELLULAR_CONTROLLER
 	config CELLULAR_KEEP_ALIVE_STACK_SIZE
 		int "Stack size for the keep alive thread."
-		default 1024
+		default 1792
 		help
 		This stack is used by the keep alive thread.
 	
@@ -34,7 +34,7 @@ if CELLULAR_CONTROLLER
 
 	config RECV_THREAD_STACK_SIZE
 	    int
-	    default 1024
+	    default 1280
 
 	config RECV_THREAD_PRIORITY
 	    int
@@ -42,7 +42,7 @@ if CELLULAR_CONTROLLER
 
 	config SEND_THREAD_STACK_SIZE
         int
-        default 1024
+        default 1280
 
     config SEND_THREAD_PRIORITY
         int

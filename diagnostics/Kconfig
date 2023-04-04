@@ -31,7 +31,7 @@ if DIAGNOSTICS
 
 	config DIAGNOSTICS_STACK_SIZE
 		int "Memory to allocate stack of handler."
-		default 1024
+		default 1280
 
 	config DIAGNOSTICS_THREAD_PRIORITY
 		int "Execution priority level for thread running diagnostics communication."

@@ -15,7 +15,7 @@ if TIME_USE
 
 	config TIME_USE_THREAD_STACK_SIZE
 		int "Size of the time_use processing thread"
-		default 1024
+		default 1280
 
 	config TIME_USE_THREAD_PRIORITY
 		int "Priority of the time_use processing thread"

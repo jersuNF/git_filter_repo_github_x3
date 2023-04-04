@@ -40,10 +40,10 @@ if GNSS_CONTROLLER
         default 6
     config GNSS_STACK_SIZE
         int "GNSS stack size"
-        default 1024
+        default 1280
     config GNSS_PUBLISH_STACK_SIZE
         int "GNSS publish stack size"
-        default 1024
+        default 1280
     config GNSS_ANO_THREAD_STACK_SIZE
         int "GNSS ANO thread stack size"
     	default 1024

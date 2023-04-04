@@ -60,11 +60,11 @@ if POWER_MANAGER
 
         config CHARGING_THRESHOLD_START
         int "Threshold to start charging, defined in mV"
-        default 4000
+        default 3900
 
         config CHARGING_THRESHOLD_STOP
         int "Threshold to stop charging, defined in mV"
-        default 4200
+        default 4100
 
         
 endif

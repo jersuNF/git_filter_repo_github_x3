@@ -1948,6 +1948,7 @@ void process_poll_response(NofenceMessage *proto)
 	// If we are asked to, reboot
 	if (pResp->has_bReboot && pResp->bReboot) {
 		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
+		r_ev->reason = REBOOT_SERVER_RESET;
 		EVENT_SUBMIT(r_ev);
 	}
 	/* TODO: set activation mode to (pResp->eActivationMode); */

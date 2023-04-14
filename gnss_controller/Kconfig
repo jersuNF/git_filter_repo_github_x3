@@ -22,7 +22,7 @@ if GNSS_CONTROLLER
         default 5000
     config GNSS_TIMEOUT_SLACK_MS
         int "Extra milliseconds to add to the expected GNSS rate before generating a timeout event"
-        default 100
+        default 500
     config GNSS_MAX_COUNT_INIT
         int "number of tries before gnss init retry should return -1"
         default 3

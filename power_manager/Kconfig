@@ -58,13 +58,20 @@ if POWER_MANAGER
         int "Seconds between modem poll"
         default 250
 
-        config CHARGING_THRESHOLD_START
+        config CHARGING_BATT_THRESHOLD_START
         int "Threshold to start charging, defined in mV"
         default 3900
 
-        config CHARGING_THRESHOLD_STOP
+        config CHARGING_BATT_THRESHOLD_STOP
         int "Threshold to stop charging, defined in mV"
         default 4100
 
+        config CHARGING_TEMP_THRESHOLD_HIGH
+        int "Threshold to unsafe charging, defined in C"
+        default 40
+
+        config CHARGING_TEMP_THRESHOLD_OK
+        int "Threshold to safe charging, defined in C"
+        default 38
         
 endif

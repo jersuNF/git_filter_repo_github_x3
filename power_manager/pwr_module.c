@@ -83,17 +83,6 @@ static void battery_poll_work_fn()
 		if (batt_voltage < CONFIG_BATTERY_LOW - CONFIG_BATTERY_THRESHOLD) {
 			current_state = PWR_LOW;
 		}
-#if CONFIG_ADC_NRFX_SAADC
-		if (batt_voltage > CONFIG_CHARGING_THRESHOLD_STOP) {
-			if (charging_in_progress()) {
-				charging_stop();
-			}
-		} else if (batt_voltage < CONFIG_CHARGING_THRESHOLD_START) {
-			if (!charging_in_progress()) {
-				charging_start();
-			}
-		}
-#endif
 		break;
 
 	case PWR_LOW:
@@ -137,6 +126,7 @@ static void charging_poll_work_fn()
 	struct pwr_status_event *event = new_pwr_status_event();
 	event->pwr_state = PWR_CHARGING;
 	event->charging_ma = charging_current_avg;
+	event->battery_mv = 0;
 	EVENT_SUBMIT(event);
 	k_work_reschedule(&charging_poll_work, K_MSEC(CONFIG_CHARGING_POLLER_WORK_MSEC));
 }
@@ -171,13 +161,6 @@ int pwr_module_init(void)
 	if (err) {
 		LOG_ERR("Failed to init charging module %d", err);
 		char *e_msg = "Failed to configure or setup charging";
-		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
-		return err;
-	}
-	err = charging_start();
-	if (err) {
-		LOG_ERR("Failed to start charging %d", err);
-		char *e_msg = "Failed to start solar charging";
 		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
 		return err;
 	}

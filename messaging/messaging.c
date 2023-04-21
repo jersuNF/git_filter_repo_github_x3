@@ -741,7 +741,7 @@ static int coredump_storage_read_send(NofenceMessage *cd_msg)
 					       sizeof(cd_msg->m.generic_msg.usBuf[0]),
 				       1);
 
-	static uint8_t chunk_id = 0;
+	uint8_t chunk_id = 0;
 	while (remaining_words > 0) {
 		proto_InitHeader(cd_msg);
 		cd_msg->which_m = NofenceMessage_generic_msg_tag;
@@ -2019,6 +2019,9 @@ void process_poll_response(NofenceMessage *proto)
 	atomic_cas(&m_new_mdm_fw_update_state, INSTALLATION_COMPLETE, 0);
 
 	PollMessageResponse *pResp = &proto->m.poll_message_resp;
+	if (pResp->has_bSendCoreDumps) {
+		m_send_core_dump = pResp->bSendCoreDumps;
+	}
 	if (pResp->has_xServerIp && strlen(pResp->xServerIp) > 0) {
 		struct messaging_host_address_event *host_add_event =
 			new_messaging_host_address_event();
@@ -2182,6 +2185,7 @@ void process_poll_response(NofenceMessage *proto)
 		 */
 		check_kickoff_ano_download_start();
 	}
+
 	return;
 }
 

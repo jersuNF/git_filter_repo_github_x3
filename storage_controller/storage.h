@@ -6,7 +6,14 @@
 #define _STORAGE_H_
 
 #include <zephyr.h>
+
+#if defined(CONFIG_MESSAGING) &&                                                                   \
+	defined(CONFIG_ZTEST) /* TODO: decouple the storage_controller code from messaging for cleaner/easier testing */
+typedef int (*fcb_read_cb)(uint8_t *data, size_t len);
+#else
 #include "fcb_ext.h"
+#endif
+
 #include "ano_structure.h"
 #include "storage_event.h"
 
@@ -173,5 +180,18 @@ int stg_write_system_diagnostic_log(uint8_t *data, size_t len);
 #define FLASH_PASTURE_NUM_SECTORS PM_PASTURE_PARTITION_SIZE / SECTOR_SIZE
 
 #define FLASH_SYSTEM_DIAG_NUM_SECTORS PM_SYSTEM_DIAGNOSTIC_SIZE / SECTOR_SIZE
+
+#if defined(CONFIG_MESSAGING) && defined(CONFIG_ZTEST)
+#define CONFIG_CORE_DUMP_FLASH_MAGIC_FLAG 0xA1A10000
+typedef enum partition {
+	coredump_partition = 0,
+} partition_name;
+
+uint32_t FLASH_AREA_OFFSET(partition_name name);
+void simulate_valid_coredump(size_t total_words);
+int write_to_core_dump_partition(size_t index, uint32_t val);
+bool is_valid_core_dump();
+void nrfx_nvmc_words_write(size_t address, uint32_t *ptr_word, size_t number_of_words);
+#endif
 
 #endif /* _STORAGE_H_ */

@@ -17,11 +17,11 @@ zephyr_include_directories(
 		${CMAKE_CURRENT_SOURCE_DIR}/../../events/error_handler/
 		${CMAKE_CURRENT_SOURCE_DIR}/../../events/storage/
 		${CMAKE_CURRENT_SOURCE_DIR}/../../modules/storage_controller/
-	${CMAKE_CURRENT_SOURCE_DIR}/../../events/collar_stats/
-	${CMAKE_CURRENT_SOURCE_DIR}/../../events/power_manager/
-	${CMAKE_CURRENT_SOURCE_DIR}/../../modules/power_manager/
-	${CMAKE_CURRENT_SOURCE_DIR}/../../modules/nofence_watchdog/
-	${CMAKE_CURRENT_SOURCE_DIR}/include/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../events/collar_stats/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../events/power_manager/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../modules/power_manager/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../modules/nofence_watchdog/
+		${CMAKE_CURRENT_SOURCE_DIR}/../../../../zephyr/subsys/debug/coredump
 		${PROJECT_BINARY_DIR}/include/generated/
 )
 

@@ -42,6 +42,12 @@
 #include "nofence_watchdog.h"
 #include "timeutil.h"
 
+#ifdef NRF52840_XXAA
+#include <nrfx_nvmc.h>
+#endif
+
+#include "coredump_header.h"
+
 #define MODULE messaging
 LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
 
@@ -166,6 +172,8 @@ static bool m_confirm_acc_limits, m_confirm_ble_key;
 K_MUTEX_DEFINE(send_binary_mutex);
 K_MUTEX_DEFINE(read_flash_mutex);
 static bool reboot_scheduled = false;
+
+static bool m_send_core_dump = true;
 
 K_MSGQ_DEFINE(ble_cmd_msgq, sizeof(struct ble_cmd_event), CONFIG_MSGQ_BLE_CMD_SIZE,
 	      4 /* Byte alignment */);
@@ -709,6 +717,77 @@ void fence_update_req_fn(struct k_work *item)
 }
 
 /**
+ * @brief read out the core dumps from the "coredump_partition" on internal flash and
+ * send them to the server in the form of protobuf GenericMessages.
+ * @return Returns 0 if successfull, otherwise a negative error code.
+ */
+static int coredump_storage_read_send(NofenceMessage *cd_msg)
+{
+	int ret = -1;
+	const uint32_t coredump_partition_address = FLASH_AREA_OFFSET(coredump_partition);
+	if (*(uint32_t *)(coredump_partition_address) != CONFIG_CORE_DUMP_FLASH_MAGIC_FLAG) {
+		return -ENODATA;
+	}
+
+	uint32_t address =
+		coredump_partition_address +
+		sizeof(uint32_t); /* offset by the size of CONFIG_CORE_DUMP_FLASH_MAGIC_FLAG */
+
+	struct flash_hdr_t cd_header;
+	memcpy(&cd_header, (void *)address, sizeof(struct flash_hdr_t));
+
+	size_t remaining_words = cd_header.size + sizeof(struct flash_hdr_t) / sizeof(uint32_t);
+	size_t total_chunks = ROUND_UP(remaining_words / sizeof(cd_msg->m.generic_msg.usBuf) /
+					       sizeof(cd_msg->m.generic_msg.usBuf[0]),
+				       1);
+
+	static uint8_t chunk_id = 0;
+	while (remaining_words > 0) {
+		proto_InitHeader(cd_msg);
+		cd_msg->which_m = NofenceMessage_generic_msg_tag;
+		cd_msg->m.generic_msg.has_usTotalChunks = false;
+		if (chunk_id == 0) {
+			cd_msg->m.generic_msg.has_usTotalChunks = true;
+			cd_msg->m.generic_msg.usTotalChunks = total_chunks;
+		}
+
+		cd_msg->m.generic_msg.msgType = GenericMessage_GenMessageType_CORE_DUMP;
+
+		cd_msg->m.generic_msg.usChunkId = chunk_id;
+
+		size_t words2copy =
+			MIN(remaining_words, sizeof(cd_msg->m.generic_msg.usBuf) /
+						     sizeof(cd_msg->m.generic_msg.usBuf[0]));
+
+		memcpy(&cd_msg->m.generic_msg.usBuf[0], (void *)address,
+		       words2copy * sizeof(uint32_t));
+
+		remaining_words -= words2copy;
+
+		address += words2copy * sizeof(uint32_t);
+
+		for (int i = 0; i < words2copy; i++) {
+			LOG_DBG("data: %d %u", i, cd_msg->m.generic_msg.usBuf[i]);
+		}
+		cd_msg->m.generic_msg.usBuf_count = words2copy;
+
+		ret = encode_and_send_message(cd_msg);
+		if (ret != 0) {
+			LOG_ERR("Failed to send core dump, err: %d!", ret);
+			break;
+		}
+		chunk_id++;
+	}
+
+	if (ret == 0) {
+		uint32_t dummy = 0;
+		nrfx_nvmc_words_write(coredump_partition_address, &dummy,
+				      1); /* reset when sending out is complete */
+	}
+	return ret;
+}
+
+/**
  * @brief Function that sets Tx type and starts the Tx sending sequence, if ready. Outgoing
  * messages from the messaging module are handled in a first come first serve manner- all though
  * all log messages stored to flash are sent for each instance of LOG_MSG.
@@ -771,15 +850,24 @@ void messaging_tx_thread_fn(void)
 
 				err = k_sem_take(&cache_lock_sem, K_SECONDS(1));
 				if (err == 0) {
-					NofenceMessage poll_msg;
-					build_poll_request(&poll_msg);
+					NofenceMessage Nofence_msg_buffer;
+					build_poll_request(&Nofence_msg_buffer);
 					k_sem_give(&cache_lock_sem);
 
-					err = encode_and_send_message(&poll_msg);
+					err = encode_and_send_message(&Nofence_msg_buffer);
 					if (err == 0) {
 						/* Store poll req. timestamp to avoid sending an
                                                  * excessive amount of poll requests */
 						m_last_poll_req_timestamp_ms = k_uptime_get();
+
+						if (m_send_core_dump) {
+							int ret = coredump_storage_read_send(
+								&Nofence_msg_buffer);
+							if (ret != 0 && ret != -ENODATA) {
+								LOG_ERR("Failed to send stored core dump, %d!",
+									ret);
+							}
+						}
 					}
 				}
 				/* Poll request error handler,

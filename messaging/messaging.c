@@ -84,6 +84,16 @@ K_SEM_DEFINE(send_out_ack, 0, 1);
 K_SEM_DEFINE(connection_ready, 0, 1);
 K_SEM_DEFINE(sem_release_tx_thread, 0, 1);
 
+typedef struct {
+	Mode collar_mode;
+	CollarStatus collar_status;
+	FenceStatus fence_status;
+	enum pwr_state_flag pwr_state;
+	uint32_t fence_version;
+	uint16_t flash_erase_count;
+	uint16_t zap_count;
+} collar_state_struct_t;
+
 static collar_state_struct_t current_state;
 static gnss_last_fix_struct_t cached_fix;
 
@@ -460,6 +470,12 @@ static void log_data_periodic_fn()
 					  K_MINUTES(atomic_get(&log_period_min)));
 	if (ret < 0) {
 		LOG_ERR("Failed to reschedule periodic seq messages!");
+	}
+
+	// Only build and send SEQ messages if the collar is in normal power state
+	if (current_state.pwr_state < PWR_NORMAL)
+	{
+		return;
 	}
 
 	ret = build_log_message();
@@ -1254,6 +1270,7 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_pwr_status_event(eh)) {
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
+		// TODO: handle charging state properly
 		if (ev->pwr_state != PWR_CHARGING) {
 			/* We want battery voltage in deci volt */
 			atomic_set(&cached_batt, (uint16_t)(ev->battery_mv / 10));
@@ -1261,6 +1278,8 @@ static bool event_handler(const struct event_header *eh)
 		} else {
 			cached_chrg += ev->charging_ma;
 		}
+
+		current_state.pwr_state = ev->pwr_state;
 		return false;
 	}
 	if (is_send_poll_request_now(eh)) {

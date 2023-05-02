@@ -494,7 +494,7 @@ int gnss_timeout_reset_fifo()
 
 int amc_module_init(void)
 {
-	/* Init work item and start and init calculation work queue thread and 
+	/* Init work item and start and init calculation work queue thread and
 	 * item. */
 	k_work_queue_init(&amc_work_q);
 	struct k_work_queue_config cfg = {

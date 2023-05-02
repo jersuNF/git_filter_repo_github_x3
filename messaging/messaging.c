@@ -209,6 +209,11 @@ struct fence_def_update {
 	int request_frame;
 } m_fence_update_req;
 
+static struct store_pos_update {
+	PositionType pos_type;
+	struct k_work_delayable work;
+} store_pos_work_container;
+
 static atomic_t poll_period_seconds = ATOMIC_INIT(CONFIG_DEFAULT_POLL_INTERVAL_MINUTES * 60);
 static atomic_t log_period_min = ATOMIC_INIT(CONFIG_DEFAULT_LOG_INTERVAL_MINUTES);
 static atomic_t m_new_mdm_fw_update_state = ATOMIC_INIT(0);
@@ -448,7 +453,7 @@ static int send_all_stored_messages(void)
  * external flash, and schedules an immediate send.
  * Rescheduled at regular interval as set by "log_period_min".
  */
-void log_data_periodic_fn()
+static void log_data_periodic_fn()
 {
 	int ret;
 	ret = k_work_reschedule_for_queue(&message_q, &log_periodic_work,
@@ -501,6 +506,26 @@ void modem_poll_work_fn()
 		if (ret != 0) {
 			LOG_DBG("Periodic log failed, reschedule, error %d", ret);
 		}
+	}
+}
+
+/**
+ * @brief Build and store a position message with the latest data.
+ */
+void store_position_message_fn(struct k_work *item)
+{
+	struct store_pos_update *container = CONTAINER_OF(item, struct store_pos_update, work);
+	NofenceMessage msg;
+	proto_InitHeader(&msg);
+	msg.which_m = NofenceMessage_position_msg_tag;
+	// pos msg specifics
+	msg.m.position_msg.eType = container->pos_type;
+	proto_get_last_known_date_pos(&cached_fix, &msg.m.position_msg.xDatePos);
+
+	int ret = encode_and_store_message(&msg);
+	if (ret != 0) {
+		LOG_ERR("Failed to encode and store position message");
+		return;
 	}
 }
 
@@ -716,6 +741,58 @@ void fence_update_req_fn(struct k_work *item)
 	return;
 }
 
+/**
+ * @brief Send a log position message to the server before GNSS SLEEP and after GNSS wakeup,
+ * to get some kind of qualitative measurements of “pulse in pasture”.
+ */
+static void log_position_state_machine()
+{
+	enum logpos_states { STARTUP = 0, WAIT_FOR_GNSS_INACTIVE, WAIT_FOR_FIX };
+	static enum logpos_states active_state = STARTUP;
+	static uint64_t last_pos_timestamp = 0;
+	int ret;
+
+	switch (active_state) {
+	case STARTUP:
+		if (cached_fix.unix_timestamp > 0) {
+			active_state = WAIT_FOR_GNSS_INACTIVE;
+		}
+		break;
+	case WAIT_FOR_GNSS_INACTIVE:
+		if (cached_fix.mode == GNSSMODE_INACTIVE) {
+			/* Do not send position log message inside beacon contact range. */
+			if (current_state.fence_status != FenceStatus_BeaconContact &&
+			    current_state.fence_status != FenceStatus_BeaconContactNormal) {
+				store_pos_work_container.pos_type = PositionType_BEFORE_BBRAM;
+				ret = k_work_schedule_for_queue(
+					&message_q, &store_pos_work_container.work, K_NO_WAIT);
+				if (ret < 0) {
+					LOG_ERR("Failed to send position log msg before GNSS SLEEP!");
+				}
+				last_pos_timestamp = cached_fix.unix_timestamp;
+			}
+			active_state = WAIT_FOR_FIX;
+		}
+		break;
+	case WAIT_FOR_FIX: {
+		if (cached_fix.mode != GNSSMODE_INACTIVE) {
+			if (cached_fix.unix_timestamp > last_pos_timestamp) {
+				store_pos_work_container.pos_type = PositionType_AFTER_BBRAM;
+				ret = k_work_reschedule_for_queue(
+					&message_q, &store_pos_work_container.work, K_NO_WAIT);
+				if (ret < 0) {
+					LOG_ERR("Failed to send position log msg after GNSS wake-up!");
+				}
+				last_pos_timestamp = cached_fix.unix_timestamp;
+				active_state = WAIT_FOR_GNSS_INACTIVE;
+			}
+		}
+	} break;
+	default:
+		active_state = STARTUP;
+		break;
+	}
+}
 /**
  * @brief read out the core dumps from the "coredump_partition" on internal flash and
  * send them to the server in the form of protobuf GenericMessages.
@@ -1009,6 +1086,9 @@ static bool event_handler(const struct event_header *eh)
 			/* Update date_time library which storage uses for ANO data. */
 			date_time_set(tm_time);
 		}
+		/* log_position state machine tick */
+		log_position_state_machine();
+
 		return false;
 	}
 	if (is_ble_cmd_event(eh)) {
@@ -1301,6 +1381,13 @@ static bool event_handler(const struct event_header *eh)
 		}
 		return false;
 	}
+	if (is_gnss_mode_changed_event(eh)) {
+		const struct gnss_mode_changed_event *ev = cast_gnss_mode_changed_event(eh);
+		cached_fix.mode = ev->mode;
+		/* log_position state machine tick */
+		log_position_state_machine();
+		return false;
+	}
 
 	if (is_flash_erased_event(eh)) {
 		current_state.flash_erase_count++;
@@ -1378,6 +1465,7 @@ EVENT_SUBSCRIBE(MODULE, gsm_info_event);
 EVENT_SUBSCRIBE(MODULE, dfu_status_event);
 EVENT_SUBSCRIBE(MODULE, block_fota_event);
 EVENT_SUBSCRIBE(MODULE, mdm_fw_update_event);
+EVENT_SUBSCRIBE(MODULE, gnss_mode_changed_event);
 EVENT_SUBSCRIBE(MODULE, start_ano_download);
 EVENT_SUBSCRIBE(MODULE, flash_erased_event);
 
@@ -1574,6 +1662,7 @@ int messaging_module_init(void)
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
 	k_work_init_delayable(&log_periodic_work, log_data_periodic_fn);
 	k_work_init_delayable(&log_send_work, log_send_work_fn);
+	k_work_init_delayable(&store_pos_work_container.work, store_position_message_fn);
 	k_work_init_delayable(&log_status_message_work, log_status_message_fn);
 	k_work_init_delayable(&process_escape_work, log_animal_escaped_work_fn);
 	k_work_init_delayable(&process_zap_work, log_zap_message_work_fn);

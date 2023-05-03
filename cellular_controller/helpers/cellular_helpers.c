@@ -261,22 +261,12 @@ const struct device *bind_modem(void)
 int check_ip(void)
 {
 	char *collar_ip = NULL;
-	uint8_t timeout_counter = 0;
-	while (timeout_counter++ <= 100) {
-		int ret = get_ip(&collar_ip);
-		if (ret != 0) {
-			LOG_ERR("Failed to get ip from sara r4 driver!");
-			return -1;
-			/*TODO: reset modem?*/
-		} else {
-			ret = memcmp(collar_ip, "\"0.0.0.0\"", 9);
-			if (ret > 0) {
-				k_sleep(K_MSEC(50));
-				return 0;
-			}
-		}
-		k_sleep(K_SECONDS(1));
+	int ret = get_ip(&collar_ip);
+	if (ret != 0) {
+		LOG_ERR("Failed to get ip from sara r4 driver!");
+		return -1;
 	}
-	LOG_ERR("Failed to acquire ip!");
-	return -1;
+	ret = memcmp(collar_ip, "\"0.0.0.0\"", 9);
+	/* If 0 address, return -1 */
+	return ret == 0 ? -1 : 0;
 }

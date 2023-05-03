@@ -100,7 +100,6 @@ static bool event_handler(const struct event_header *eh)
 			return false;
 		}
 		if (ev->battery_mv >= CONFIG_CHARGING_BATT_THRESHOLD_STOP) {
-			LOG_INF("Charger: Battery level threshold stop detected");
 			charging_sm(CHARGING_EVENT_BATT_HIGH);
 		} else if (ev->battery_mv < CONFIG_CHARGING_BATT_THRESHOLD_START) {
 			charging_sm(CHARGING_EVENT_BATT_OK);
@@ -108,7 +107,6 @@ static bool event_handler(const struct event_header *eh)
 	} else if (is_env_sensor_event(eh)) {
 		struct env_sensor_event *ev = cast_env_sensor_event(eh);
 		if (ev->temp >= (double)CONFIG_CHARGING_TEMP_THRESHOLD_HIGH) {
-			LOG_INF("Charger: Temperature level high detected");
 			charging_sm(CHARGING_EVENT_TEMP_HIGH);
 		} else if (ev->temp < (double)CONFIG_CHARGING_TEMP_THRESHOLD_OK) {
 			charging_sm(CHARGING_EVENT_TEMP_OK);

@@ -473,8 +473,7 @@ static void log_data_periodic_fn()
 	}
 
 	// Only build and send SEQ messages if the collar is in normal power state
-	if (current_state.pwr_state < PWR_NORMAL)
-	{
+	if (current_state.pwr_state < PWR_NORMAL) {
 		return;
 	}
 

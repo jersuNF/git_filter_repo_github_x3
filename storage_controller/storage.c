@@ -14,7 +14,7 @@
 #include "fcb_ext.h"
 
 #include "ano_structure.h"
-#include "log_structure.h"
+#include "seq_structure.h"
 #include "pasture_structure.h"
 #include "storage.h"
 #include "storage_event.h"
@@ -38,12 +38,12 @@
 #define MODULE storage_controller
 LOG_MODULE_REGISTER(MODULE, CONFIG_STORAGE_CONTROLLER_LOG_LEVEL);
 
-/* Log partition. */
-static const struct flash_area *log_area;
-static struct fcb log_fcb;
-static struct flash_sector log_sectors[FLASH_LOG_NUM_SECTORS];
-static struct fcb_entry active_log_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
-K_MUTEX_DEFINE(log_mutex);
+/* Seq partition. */
+static const struct flash_area *seq_area;
+static struct fcb seq_fcb;
+static struct flash_sector seq_sectors[FLASH_SEQ_NUM_SECTORS];
+static struct fcb_entry active_seq_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
+K_MUTEX_DEFINE(seq_mutex);
 
 /* System diagnostic partition. */
 static struct fcb_entry active_system_diag_entry = { .fe_sector = NULL, .fe_elem_off = 0 };
@@ -76,7 +76,7 @@ static bool queue_inited = false;
 void erase_flash_fn(struct k_work *item)
 {
 	LOG_INF("Erasing all flash partitions!");
-	int err = stg_clear_partition(STG_PARTITION_LOG);
+	int err = stg_clear_partition(STG_PARTITION_SEQ);
 	if (err) {
 		return;
 	}
@@ -107,8 +107,8 @@ struct fcb *get_fcb(flash_partition_t partition)
 {
 	struct fcb *fcb;
 
-	if (partition == STG_PARTITION_LOG) {
-		fcb = &log_fcb;
+	if (partition == STG_PARTITION_SEQ) {
+		fcb = &seq_fcb;
 	} else if (partition == STG_PARTITION_ANO) {
 		fcb = &ano_fcb;
 	} else if (partition == STG_PARTITION_PASTURE) {
@@ -130,8 +130,8 @@ struct fcb *get_fcb(flash_partition_t partition)
  */
 struct k_mutex *get_mutex(flash_partition_t partition)
 {
-	if (partition == STG_PARTITION_LOG) {
-		return &log_mutex;
+	if (partition == STG_PARTITION_SEQ) {
+		return &seq_mutex;
 	} else if (partition == STG_PARTITION_ANO) {
 		return &ano_mutex;
 	} else if (partition == STG_PARTITION_PASTURE) {
@@ -154,11 +154,11 @@ static inline int init_fcb_on_partition(flash_partition_t partition)
 	struct fcb *fcb = get_fcb(partition);
 
 	/* Based on parameter, setup variables required by FCB. */
-	if (partition == STG_PARTITION_LOG) {
-		sector_cnt = FLASH_LOG_NUM_SECTORS;
-		area_id = FLASH_AREA_ID(log_partition);
-		area = log_area;
-		sector_ptr = log_sectors;
+	if (partition == STG_PARTITION_SEQ) {
+		sector_cnt = FLASH_SEQ_NUM_SECTORS;
+		area_id = FLASH_AREA_ID(seq_partition);
+		area = seq_area;
+		sector_ptr = seq_sectors;
 	} else if (partition == STG_PARTITION_ANO) {
 		sector_cnt = FLASH_ANO_NUM_SECTORS;
 		area_id = FLASH_AREA_ID(ano_partition);
@@ -242,15 +242,15 @@ int stg_init_storage_controller(void)
 	int err;
 
 	/* Give mutexes. First come first served. */
-	k_mutex_unlock(&log_mutex);
+	k_mutex_unlock(&seq_mutex);
 	k_mutex_unlock(&ano_mutex);
 	k_mutex_unlock(&pasture_mutex);
 	k_mutex_unlock(&system_diag_mutex);
 
-	/* Initialize FCB on LOG and ANO partitions
+	/* Initialize FCB on SEQ and ANO partitions
 	 * based on pm_static.yml/.dts flash setup.
 	 */
-	err = init_fcb_on_partition(STG_PARTITION_LOG);
+	err = init_fcb_on_partition(STG_PARTITION_SEQ);
 	if (err) {
 		return err;
 	}
@@ -360,9 +360,9 @@ int stg_clear_partition(flash_partition_t partition)
 	if (partition == STG_PARTITION_ANO) {
 		last_sent_ano_entry.fe_sector = NULL;
 		last_sent_ano_entry.fe_elem_off = 0;
-	} else if (partition == STG_PARTITION_LOG) {
-		active_log_entry.fe_sector = NULL;
-		active_log_entry.fe_elem_off = 0;
+	} else if (partition == STG_PARTITION_SEQ) {
+		active_seq_entry.fe_sector = NULL;
+		active_seq_entry.fe_elem_off = 0;
 	} else if (partition == STG_PARTITION_SYSTEM_DIAG) {
 		active_system_diag_entry.fe_sector = NULL;
 		active_system_diag_entry.fe_elem_off = 0;
@@ -375,39 +375,39 @@ int stg_clear_partition(flash_partition_t partition)
 	return err;
 }
 
-int stg_read_log_data(fcb_read_cb cb, uint16_t num_entries)
+int stg_read_seq_data(fcb_read_cb cb, uint16_t num_entries)
 {
-	k_mutex_lock(&log_mutex, K_NO_WAIT);
-	if (log_mutex.lock_count == 1) {
-		if (fcb_is_empty(&log_fcb)) {
-			k_mutex_unlock(&log_mutex);
+	k_mutex_lock(&seq_mutex, K_NO_WAIT);
+	if (seq_mutex.lock_count == 1) {
+		if (fcb_is_empty(&seq_fcb)) {
+			k_mutex_unlock(&seq_mutex);
 			return -ENODATA;
 		}
 
 		struct fcb_entry start_entry;
 
-		memcpy(&start_entry, &active_log_entry, sizeof(struct fcb_entry));
+		memcpy(&start_entry, &active_seq_entry, sizeof(struct fcb_entry));
 
-		int err = fcb_getnext(&log_fcb, &start_entry);
+		int err = fcb_getnext(&seq_fcb, &start_entry);
 		if (err) {
-			k_mutex_unlock(&log_mutex);
+			k_mutex_unlock(&seq_mutex);
 			return -ENODATA;
 		}
 
-		err = fcb_walk_from_entry(cb, &log_fcb, &start_entry, num_entries, &log_mutex);
+		err = fcb_walk_from_entry(cb, &seq_fcb, &start_entry, num_entries, &seq_mutex);
 		if (err != 0) {
-			LOG_ERR("Error reading from log partition.");
-			k_mutex_unlock(&log_mutex);
+			LOG_ERR("Error reading from seq partition.");
+			k_mutex_unlock(&seq_mutex);
 			return err;
 		}
 
 		/* Update the entry we're currently on. */
-		memcpy(&active_log_entry, &start_entry, sizeof(struct fcb_entry));
+		memcpy(&active_seq_entry, &start_entry, sizeof(struct fcb_entry));
 
-		k_mutex_unlock(&log_mutex);
+		k_mutex_unlock(&seq_mutex);
 		return err;
 	} else {
-		k_mutex_unlock(&log_mutex);
+		k_mutex_unlock(&seq_mutex);
 		return -EBUSY;
 	}
 }
@@ -491,18 +491,18 @@ int stg_read_pasture_data(fcb_read_cb cb)
 	return err;
 }
 
-int stg_write_log_data(uint8_t *data, size_t len)
+int stg_write_seq_data(uint8_t *data, size_t len)
 {
-	if (k_mutex_lock(&log_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT)) == 0 &&
-	    log_mutex.lock_count <= 1) {
-		int err = stg_write_to_partition(STG_PARTITION_LOG, data, len);
+	if (k_mutex_lock(&seq_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT)) == 0 &&
+	    seq_mutex.lock_count <= 1) {
+		int err = stg_write_to_partition(STG_PARTITION_SEQ, data, len);
 		if (err) {
-			LOG_ERR("Error writing to log partition.");
+			LOG_ERR("Error writing to seq partition.");
 		}
-		k_mutex_unlock(&log_mutex);
+		k_mutex_unlock(&seq_mutex);
 		return err;
 	} else {
-		k_mutex_unlock(&log_mutex);
+		k_mutex_unlock(&seq_mutex);
 		return -ETIMEDOUT;
 	}
 }
@@ -619,38 +619,38 @@ uint32_t get_num_entries(flash_partition_t partition)
 
 int stg_fcb_reset_and_init()
 {
-	memset(&log_fcb, 0, sizeof(log_fcb));
+	memset(&seq_fcb, 0, sizeof(seq_fcb));
 	memset(&ano_fcb, 0, sizeof(ano_fcb));
 	memset(&pasture_fcb, 0, sizeof(pasture_fcb));
 	memset(&system_diag_fcb, 0, sizeof(pasture_fcb));
 
 	memset(&last_sent_ano_entry, 0, sizeof(struct fcb_entry));
-	memset(&active_log_entry, 0, sizeof(struct fcb_entry));
+	memset(&active_seq_entry, 0, sizeof(struct fcb_entry));
 	memset(&active_system_diag_entry, 0, sizeof(struct fcb_entry));
 
 	return stg_init_storage_controller();
 }
 
-bool stg_log_pointing_to_last()
+bool stg_seq_pointing_to_last()
 {
-	if (k_mutex_lock(&log_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+	if (k_mutex_lock(&seq_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
 		return false;
 	}
 
-	if (fcb_is_empty(&log_fcb)) {
-		k_mutex_unlock(&log_mutex);
+	if (fcb_is_empty(&seq_fcb)) {
+		k_mutex_unlock(&seq_mutex);
 		return false;
 	}
 
 	struct fcb_entry test_entry;
-	memcpy(&test_entry, &active_log_entry, sizeof(struct fcb_entry));
+	memcpy(&test_entry, &active_seq_entry, sizeof(struct fcb_entry));
 
-	if (fcb_getnext(&log_fcb, &test_entry) != 0) {
-		k_mutex_unlock(&log_mutex);
+	if (fcb_getnext(&seq_fcb, &test_entry) != 0) {
+		k_mutex_unlock(&seq_mutex);
 		return true;
 	}
 
-	k_mutex_unlock(&log_mutex);
+	k_mutex_unlock(&seq_mutex);
 	return false;
 }
 

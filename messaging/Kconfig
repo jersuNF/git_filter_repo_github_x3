@@ -67,7 +67,7 @@ if MESSAGING
 	config DEFAULT_POLL_INTERVAL_MINUTES
         int "Default time interval between poll request messages"
         default 15
-	config DEFAULT_LOG_INTERVAL_MINUTES
+	config DEFAULT_SEQ_INTERVAL_MINUTES
         int "Default time interval between periodic seq/seq2 messages"
         default 30
 

@@ -201,15 +201,15 @@ struct k_poll_event msgq_events[NUM_MSGQ_EVENTS] = {
 /* Messaging work queue items */
 static struct k_work_q message_q;
 struct k_work_delayable modem_poll_work;
-struct k_work_delayable log_periodic_work;
+struct k_work_delayable seq_periodic_work;
 struct k_work_delayable data_request_work;
-struct k_work_delayable log_status_message_work;
+struct k_work_delayable seq_message_work;
 struct k_work_delayable process_escape_work;
 struct k_work_delayable process_zap_work;
 struct k_work_delayable process_warning_work;
 struct k_work_delayable process_warning_correction_start_work;
 struct k_work_delayable process_warning_correction_end_work;
-struct k_work_delayable log_send_work;
+struct k_work_delayable seq_message_send_work;
 struct k_work_delayable fota_wdt_work;
 struct k_work_delayable ano_download_work;
 
@@ -225,7 +225,7 @@ static struct store_pos_update {
 } store_pos_work_container;
 
 static atomic_t poll_period_seconds = ATOMIC_INIT(CONFIG_DEFAULT_POLL_INTERVAL_MINUTES * 60);
-static atomic_t log_period_min = ATOMIC_INIT(CONFIG_DEFAULT_LOG_INTERVAL_MINUTES);
+static atomic_t seq_period_min = ATOMIC_INIT(CONFIG_DEFAULT_SEQ_INTERVAL_MINUTES);
 static atomic_t m_new_mdm_fw_update_state = ATOMIC_INIT(0);
 
 /* Messaging Rx thread */
@@ -242,13 +242,13 @@ K_KERNEL_STACK_DEFINE(messaging_send_thread, CONFIG_MESSAGING_SEND_THREAD_STACK_
 typedef enum {
 	IDLE = 0 /* Tx thread is idle */,
 	POLL_REQ /* Send periodic poll request */,
-	LOG_MSG /* Send stored log messages */,
+	SEQ_MSG /* Send stored seq messages */,
 	FENCE_REQ /* Send a fence update request */
 	/* Add additional states here (ANO, diagnostic etc)... */
 } messaging_tx_type_t;
 
 atomic_t m_fota_in_progress = ATOMIC_INIT(0);
-atomic_t m_break_log_stream_token = ATOMIC_INIT(0);
+atomic_t m_break_seq_stream_token = ATOMIC_INIT(0);
 
 atomic_t m_message_tx_type = ATOMIC_INIT(0);
 
@@ -311,7 +311,7 @@ static void check_kickoff_ano_download_start()
 /**
  * @brief Builds SEQ messages (1 and 2) with the latest data and store them to external storage.
  */
-static int build_log_message()
+static int build_seq_message()
 {
 	int err;
 
@@ -387,67 +387,67 @@ static int build_log_message()
 }
 
 /**
- * @brief Callback passed to the storage controller to send log messages stored to external flash.
- * @param data Encoded log messages read from storage.
- * @param len Length of the encoded log message read from storage.
+ * @brief Callback passed to the storage controller to send seq messages stored to external flash.
+ * @param data Encoded seq messages read from storage.
+ * @param len Length of the encoded seq message read from storage.
  * @return Returns 0 if successfull, otherwise negative error code.
  */
-static int read_and_send_log_data_cb(uint8_t *data, size_t len)
+static int read_and_send_seq_data_cb(uint8_t *data, size_t len)
 {
-	/* Only send log data stored to flash if not halted by some other process, e.g. a pending
+	/* Only send seq data stored to flash if not halted by some other process, e.g. a pending
      * FOTA. Retuning an error from this callback will abort the FCB walk in the storage
-     * controller untill log data trafic is reinstated. */
+     * controller untill seq data trafic is reinstated. */
 	if (atomic_get(&m_fota_in_progress) == true) {
-		LOG_DBG("FOTA download in progress, will not send log data now!");
+		LOG_DBG("FOTA download in progress, will not send seq data now!");
 		return -EBUSY;
 	}
 
-	if (atomic_get(&m_break_log_stream_token) == true) {
-		LOG_DBG("Breaking the log stream!");
+	if (atomic_get(&m_break_seq_stream_token) == true) {
+		LOG_DBG("Breaking the seq stream!");
 		return -EBUSY;
 	}
 
-	LOG_DBG("Send log message fetched from flash");
+	LOG_DBG("Send seq message fetched from flash");
 
 	/* Fetch the length from the two first bytes */
 	uint16_t new_len = *(uint16_t *)&data[0];
 
 	int err = send_binary_message(data, new_len);
 	if (err) {
-		LOG_ERR("Error sending binary message for log data (%d)", err);
+		LOG_ERR("Error sending binary message for seq data (%d)", err);
 		nf_app_error(ERR_MESSAGING, err, NULL, 0);
 	}
 	return err;
 }
 
 /**
- * @brief Sends all log messages stored to external flash, see read_and_send_log_data_cb.
+ * @brief Sends all seq messages stored to external flash, see read_and_send_seq_data_cb.
  * @return Returns 0 if successfull, otherwise negative error code.
  */
 static int send_all_stored_messages(void)
 {
 	k_mutex_lock(&read_flash_mutex, K_NO_WAIT);
 	if (read_flash_mutex.lock_count == 1) {
-		/*Read and send out all the log data if any.*/
-		int err = stg_read_log_data(read_and_send_log_data_cb, 0);
+		/*Read and send out all the seq data if any.*/
+		int err = stg_read_seq_data(read_and_send_seq_data_cb, 0);
 		if (err && err != -ENODATA) {
 			k_mutex_unlock(&read_flash_mutex);
-			LOG_ERR("stg_read_log_data error: %i", err);
+			LOG_ERR("stg_read_seq_data error: %i", err);
 			return err;
 		} else if (err == -ENODATA) {
-			LOG_INF("No log data available on flash for sending.");
+			LOG_INF("No seq data available on flash for sending.");
 		}
 
 		/* If all entries has been consumed, empty storage and we HAVE data on the
          * partition.*/
-		if (stg_log_pointing_to_last()) {
-			err = stg_clear_partition(STG_PARTITION_LOG);
+		if (stg_seq_pointing_to_last()) {
+			err = stg_clear_partition(STG_PARTITION_SEQ);
 			if (err) {
-				LOG_ERR("Error clearing FCB storage for LOG %i", err);
+				LOG_ERR("Error clearing FCB storage for SEQ %i", err);
 				k_mutex_unlock(&read_flash_mutex);
 				return err;
 			} else {
-				LOG_INF("Emptied LOG partition data as we have read everything.");
+				LOG_INF("Emptied SEQ partition data as we have read everything.");
 			}
 		}
 		k_mutex_unlock(&read_flash_mutex);
@@ -459,15 +459,15 @@ static int send_all_stored_messages(void)
 }
 
 /**
- * @brief Work item handler for "log_periodic_work". Builds seq messages and store them to
+ * @brief Work item handler for "seq_periodic_work". Builds seq messages and store them to
  * external flash, and schedules an immediate send.
- * Rescheduled at regular interval as set by "log_period_min".
+ * Rescheduled at regular interval as set by "seq_period_min".
  */
-static void log_data_periodic_fn()
+static void seq_periodic_fn()
 {
 	int ret;
-	ret = k_work_reschedule_for_queue(&message_q, &log_periodic_work,
-					  K_MINUTES(atomic_get(&log_period_min)));
+	ret = k_work_reschedule_for_queue(&message_q, &seq_periodic_work,
+					  K_MINUTES(atomic_get(&seq_period_min)));
 	if (ret < 0) {
 		LOG_ERR("Failed to reschedule periodic seq messages!");
 	}
@@ -477,7 +477,7 @@ static void log_data_periodic_fn()
 		return;
 	}
 
-	ret = build_log_message();
+	ret = build_seq_message();
 	LOG_DBG("SEQ messages stored to flash");
 
 	if (m_transfer_boot_params) {
@@ -485,8 +485,8 @@ static void log_data_periodic_fn()
 		return;
 	}
 
-	/* Schedule work to send log messages immediately */
-	ret = k_work_reschedule_for_queue(&message_q, &log_send_work, K_NO_WAIT);
+	/* Schedule work to send seq messages immediately */
+	ret = k_work_reschedule_for_queue(&message_q, &seq_message_send_work, K_NO_WAIT);
 	if (ret < 0) {
 		LOG_ERR("Failed to schedule a send of periodic seq messages!");
 	}
@@ -517,9 +517,9 @@ void modem_poll_work_fn()
 	static bool initialized = false;
 	if (!initialized) {
 		initialized = true;
-		ret = k_work_schedule_for_queue(&message_q, &log_periodic_work, K_MSEC(250));
+		ret = k_work_schedule_for_queue(&message_q, &seq_periodic_work, K_MSEC(250));
 		if (ret != 0) {
-			LOG_DBG("Periodic log failed, reschedule, error %d", ret);
+			LOG_DBG("Periodic seq failed, reschedule, error %d", ret);
 		}
 	}
 }
@@ -545,17 +545,17 @@ void store_position_message_fn(struct k_work *item)
 }
 
 /**
- * @brief Work item handler for "log_send_work". Initiate and sets Tx ready. Reschedules the
- * sending of log data if Tx thread is busy.
+ * @brief Work item handler for "seq_message_send_work". Initiate and sets Tx ready. Reschedules the
+ * sending of seq data if Tx thread is busy.
  */
-void log_send_work_fn()
+void seq_message_send_work_fn()
 {
 	static uint8_t retry_cnt = 0;
 
-	int err = set_tx_state_ready(LOG_MSG);
+	int err = set_tx_state_ready(SEQ_MSG);
 	if (err != 0 && retry_cnt++ <= 2) {
-		LOG_DBG("Unable to schedule log messages, Tx thread not ready- rescheduling");
-		err = k_work_reschedule_for_queue(&message_q, &log_send_work, K_SECONDS(15));
+		LOG_DBG("Unable to schedule seq messages, Tx thread not ready- rescheduling");
+		err = k_work_reschedule_for_queue(&message_q, &seq_message_send_work, K_SECONDS(15));
 		if (err < 0) {
 			LOG_ERR("Failed to reschedule work");
 		}
@@ -586,8 +586,8 @@ static void log_zap_message_work_fn()
 	}
 	LOG_DBG("AMC Correction ZAP message stored to flash, scheduling immediate send");
 
-	/* Schedule work to send log messages immediately */
-	err = k_work_reschedule_for_queue(&message_q, &log_send_work, K_NO_WAIT);
+	/* Schedule work to send seq messages immediately */
+	err = k_work_reschedule_for_queue(&message_q, &seq_message_send_work, K_NO_WAIT);
 	if (err < 0) {
 		LOG_ERR("Failed to reschedule work");
 	}
@@ -619,15 +619,15 @@ static void log_animal_escaped_work_fn()
 	}
 	LOG_DBG("AMC Escaped message stored to flash, scheduling immediate send");
 
-	/* Schedule work to send log messages immediately */
-	err = k_work_reschedule_for_queue(&message_q, &log_send_work, K_NO_WAIT);
+	/* Schedule work to send seq messages immediately */
+	err = k_work_reschedule_for_queue(&message_q, &seq_message_send_work, K_NO_WAIT);
 	if (err < 0) {
 		LOG_ERR("Failed to reschedule work");
 	}
 }
 
 /**
- * @brief Work item handler for "log_status_message_work". Builds a status message and stores it to
+ * @brief Work item handler for "seq_message_work". Builds a status message and stores it to
  * external flash, and schedules an immediate send. Status messages are sent for updates to collar
  * states such as Fence Status, Collar Mode and Collar Status.
  */
@@ -657,8 +657,8 @@ static void log_status_message_fn()
 	}
 	LOG_DBG("AMC Status message stored to flash, scheduling immediate send");
 
-	/* Schedule work to send log messages immediately */
-	err = k_work_reschedule_for_queue(&message_q, &log_send_work, K_NO_WAIT);
+	/* Schedule work to send seq messages immediately */
+	err = k_work_reschedule_for_queue(&message_q, &seq_message_send_work, K_NO_WAIT);
 	if (err < 0) {
 		LOG_ERR("Failed to reschedule work");
 	}
@@ -882,7 +882,7 @@ static int coredump_storage_read_send(NofenceMessage *cd_msg)
 /**
  * @brief Function that sets Tx type and starts the Tx sending sequence, if ready. Outgoing
  * messages from the messaging module are handled in a first come first serve manner- all though
- * all log messages stored to flash are sent for each instance of LOG_MSG.
+ * all seq messages stored to flash are sent for each instance of SEQ_MSG.
  * @param tx_state Tx message type.
  * @param send_now Flag indicating whether to send message now or not.
  * @return Returns 0 if successfull, otherwise negative error code.
@@ -892,21 +892,21 @@ static int set_tx_state_ready(messaging_tx_type_t tx_type)
 	int state = atomic_get(&m_message_tx_type);
 	if (state != IDLE) {
 		/* Tx thread busy sending something else */
-		if ((state == LOG_MSG) && (tx_type == POLL_REQ)) {
-			/* poll requests should always go through in the case of too many logs
-             * stored on the flash. Tx thread will consume the token when the fcb
-             * walk returns. */
-			atomic_set(&m_break_log_stream_token, true);
+		if ((state == SEQ_MSG) && (tx_type == POLL_REQ)) {
+			/* poll requests should always go through in the case of too many
+             * seq messages stored on the flash. Tx thread will consume the
+             * token when the fcb walk returns. */
+			atomic_set(&m_break_seq_stream_token, true);
 			return 0;
 		}
 		return -EBUSY;
 	}
-	if ((tx_type == LOG_MSG)) {
+	if ((tx_type == SEQ_MSG)) {
 		if (atomic_get(&m_fota_in_progress) == true) {
-			/* Unable to send log messages as log data transfer is currently halted */
+			/* Unable to send seq messages as seq data transfer is currently halted */
 			return -EACCES;
 		} else {
-			atomic_set(&m_break_log_stream_token, false);
+			atomic_set(&m_break_seq_stream_token, false);
 		}
 	}
 
@@ -933,7 +933,7 @@ void messaging_tx_thread_fn(void)
 
 			/* POLL REQUEST */
 			if ((tx_type == POLL_REQ) || (m_last_poll_req_timestamp_ms == 0) ||
-			    ((tx_type == LOG_MSG) &&
+			    ((tx_type == SEQ_MSG) &&
 			     ((k_uptime_get() - m_last_poll_req_timestamp_ms) >= 60000))) {
 				if (k_sem_take(&cache_ready_sem, K_SECONDS(60)) != 0) {
 					LOG_WRN("Cached semaphore not ready, Sending what we have");
@@ -976,15 +976,15 @@ void messaging_tx_thread_fn(void)
 				}
 			}
 
-			/* LOG MESSAGES */
-			if ((tx_type == LOG_MSG) && (err == 0) &&
+			/* SEQ MESSAGES */
+			if ((tx_type == SEQ_MSG) && (err == 0) &&
 			    (atomic_get(&m_fota_in_progress) == false)) {
-				/* Sending, all stored log messages are already proto encoded */
+				/* Sending, all stored seq messages are already proto encoded */
 				err = send_all_stored_messages();
-				/* Log message error handler,
+				/* Seq message error handler,
                                  * Note! Consider notifying sender, leaving error handling to src */
 				if (err != 0) {
-					LOG_WRN("Failed to send log messages");
+					LOG_WRN("Failed to send seq messages");
 				}
 			}
 
@@ -1011,9 +1011,9 @@ void messaging_tx_thread_fn(void)
 			/* Reset Tx thread */
 			atomic_set(&m_message_tx_type, IDLE);
 
-			if (atomic_get(&m_break_log_stream_token) == true) {
+			if (atomic_get(&m_break_seq_stream_token) == true) {
 				/* consume the token and enforce the poll request */
-				atomic_set(&m_break_log_stream_token, false);
+				atomic_set(&m_break_seq_stream_token, false);
 				atomic_set(&m_message_tx_type, POLL_REQ);
 				k_sem_give(&sem_release_tx_thread);
 			}
@@ -1133,9 +1133,9 @@ static bool event_handler(const struct event_header *eh)
 			if (prev_collar_mode != current_state.collar_mode) {
 				/* Notify server by status message that collar mode has changed */
 				int err = k_work_reschedule_for_queue(
-					&message_q, &log_status_message_work, K_NO_WAIT);
+					&message_q, &seq_message_work, K_NO_WAIT);
 				if (err < 0) {
-					LOG_ERR("Failed to schedule log status work (%d)", err);
+					LOG_ERR("Failed to schedule seq status work (%d)", err);
 				}
 			}
 		} else {
@@ -1158,9 +1158,9 @@ static bool event_handler(const struct event_header *eh)
 			     (prev_collar_status == CollarStatus_OffAnimal))) {
 				/* Notify server by status message that collar status has changed */
 				int err = k_work_reschedule_for_queue(
-					&message_q, &log_status_message_work, K_NO_WAIT);
+					&message_q, &seq_message_work, K_NO_WAIT);
 				if (err < 0) {
-					LOG_ERR("Failed to schedule log status work (%d)", err);
+					LOG_ERR("Failed to schedule seq message work (%d)", err);
 				}
 			}
 		} else {
@@ -1186,9 +1186,9 @@ static bool event_handler(const struct event_header *eh)
 			      (prev_fence_status == FenceStatus_TurnedOffByBLE)))) {
 				/* Notify server by status message that fence status has changed */
 				int err = k_work_reschedule_for_queue(
-					&message_q, &log_status_message_work, K_NO_WAIT);
+					&message_q, &seq_message_work, K_NO_WAIT);
 				if (err < 0) {
-					LOG_ERR("Failed to schedule log status work (%d)", err);
+					LOG_ERR("Failed to schedule seq message work (%d)", err);
 				}
 			}
 		} else {
@@ -1364,8 +1364,8 @@ static bool event_handler(const struct event_header *eh)
 		}
 		if (fw_upgrade_event->dfu_status == DFU_STATUS_IDLE &&
 		    fw_upgrade_event->dfu_error != 0) {
-			/* DFU/FOTA is canceled, release the halt on log data trafic in the
-             * messaging tx thread */
+			/* DFU/FOTA is canceled, release the halt on seq message traffic in
+             * the messaging tx thread */
 			LOG_WRN("DFU error %d", fw_upgrade_event->dfu_error);
 			atomic_set(&m_fota_in_progress, false);
 			if (m_fota_attempts > CONFIG_APP_FOTA_FAILURES_BEFORE_REBOOT) {
@@ -1379,8 +1379,8 @@ static bool event_handler(const struct event_header *eh)
 				sys_reboot(SYS_REBOOT_COLD);
 			}
 		} else if (fw_upgrade_event->dfu_status != DFU_STATUS_IDLE) {
-			/* DFU/FOTA has started or is in progress, halt log data trafic in the
-             * messaging tx thread */
+			/* DFU/FOTA has started or is in progress, halt seq message traffic
+             * in the messaging tx thread */
 			atomic_set(&m_fota_in_progress, true);
 		}
 		return false;
@@ -1678,10 +1678,10 @@ int messaging_module_init(void)
 			   K_PRIO_COOP(CONFIG_MESSAGING_SEND_THREAD_PRIORITY), &cfg);
 
 	k_work_init_delayable(&modem_poll_work, modem_poll_work_fn);
-	k_work_init_delayable(&log_periodic_work, log_data_periodic_fn);
-	k_work_init_delayable(&log_send_work, log_send_work_fn);
+	k_work_init_delayable(&seq_periodic_work, seq_periodic_fn);
+	k_work_init_delayable(&seq_message_send_work, seq_message_send_work_fn);
 	k_work_init_delayable(&store_pos_work_container.work, store_position_message_fn);
-	k_work_init_delayable(&log_status_message_work, log_status_message_fn);
+	k_work_init_delayable(&seq_message_work, log_status_message_fn);
 	k_work_init_delayable(&process_escape_work, log_animal_escaped_work_fn);
 	k_work_init_delayable(&process_zap_work, log_zap_message_work_fn);
 	k_work_init_delayable(&process_warning_work, log_warning_work_fn);
@@ -2097,7 +2097,7 @@ int encode_and_store_message(NofenceMessage *msg_proto)
 	/* Store the length of the message in the two first bytes */
 	memcpy(&encoded_msg[0], &total_size, 2);
 
-	ret = stg_write_log_data(encoded_msg, (size_t)total_size);
+	ret = stg_write_seq_data(encoded_msg, (size_t)total_size);
 	if (ret != 0) {
 		LOG_ERR("Failed to store message to flash!");
 		return ret;

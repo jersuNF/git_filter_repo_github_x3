@@ -10,7 +10,6 @@
 #include "collar_protocol.h"
 #include "embedded.pb.h"
 
-
 typedef void (*fota_wdt_cb)(void);
 
 /**

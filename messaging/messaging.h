@@ -10,15 +10,6 @@
 #include "collar_protocol.h"
 #include "embedded.pb.h"
 
-typedef struct {
-	Mode collar_mode;
-	CollarStatus collar_status;
-	FenceStatus fence_status;
-	uint32_t fence_version;
-	uint16_t flash_erase_count;
-	uint16_t zap_count;
-} collar_state_struct_t;
-
 typedef void (*fota_wdt_cb)(void);
 
 /**

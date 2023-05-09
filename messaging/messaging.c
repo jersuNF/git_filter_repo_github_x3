@@ -555,7 +555,8 @@ void seq_message_send_work_fn()
 	int err = set_tx_state_ready(SEQ_MSG);
 	if (err != 0 && retry_cnt++ <= 2) {
 		LOG_DBG("Unable to schedule seq messages, Tx thread not ready- rescheduling");
-		err = k_work_reschedule_for_queue(&message_q, &seq_message_send_work, K_SECONDS(15));
+		err = k_work_reschedule_for_queue(&message_q, &seq_message_send_work,
+						  K_SECONDS(15));
 		if (err < 0) {
 			LOG_ERR("Failed to reschedule work");
 		}
@@ -1132,8 +1133,8 @@ static bool event_handler(const struct event_header *eh)
 		if (has_initial_collar_states()) {
 			if (prev_collar_mode != current_state.collar_mode) {
 				/* Notify server by status message that collar mode has changed */
-				int err = k_work_reschedule_for_queue(
-					&message_q, &seq_message_work, K_NO_WAIT);
+				int err = k_work_reschedule_for_queue(&message_q, &seq_message_work,
+								      K_NO_WAIT);
 				if (err < 0) {
 					LOG_ERR("Failed to schedule seq status work (%d)", err);
 				}
@@ -1157,8 +1158,8 @@ static bool event_handler(const struct event_header *eh)
 			     (current_state.collar_status == CollarStatus_OffAnimal) ||
 			     (prev_collar_status == CollarStatus_OffAnimal))) {
 				/* Notify server by status message that collar status has changed */
-				int err = k_work_reschedule_for_queue(
-					&message_q, &seq_message_work, K_NO_WAIT);
+				int err = k_work_reschedule_for_queue(&message_q, &seq_message_work,
+								      K_NO_WAIT);
 				if (err < 0) {
 					LOG_ERR("Failed to schedule seq message work (%d)", err);
 				}
@@ -1185,8 +1186,8 @@ static bool event_handler(const struct event_header *eh)
 			     ((current_state.fence_status == FenceStatus_TurnedOffByBLE) &&
 			      (prev_fence_status == FenceStatus_TurnedOffByBLE)))) {
 				/* Notify server by status message that fence status has changed */
-				int err = k_work_reschedule_for_queue(
-					&message_q, &seq_message_work, K_NO_WAIT);
+				int err = k_work_reschedule_for_queue(&message_q, &seq_message_work,
+								      K_NO_WAIT);
 				if (err < 0) {
 					LOG_ERR("Failed to schedule seq message work (%d)", err);
 				}

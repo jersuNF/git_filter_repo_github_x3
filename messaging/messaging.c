@@ -509,9 +509,7 @@ void modem_poll_work_fn()
 	/* Attempt to send poll request immediately */
 	ret = set_tx_state_ready(POLL_REQ);
 	if (ret != 0) {
-		LOG_DBG("Periodic poll failed, reschedule, error %d", ret);
-		/* Tx Thread busy, reschedule in 1 minute */
-		k_work_reschedule_for_queue(&message_q, &modem_poll_work, K_SECONDS(15));
+		LOG_ERR("Periodic poll failed, error %d", ret);
 	}
 
 	static bool initialized = false;
@@ -738,6 +736,9 @@ static void log_correction_end_work_fn()
  */
 void fence_update_req_fn(struct k_work *item)
 {
+	/* TODO, PSH, the retry should be removed once we
+	 * have figured out why the schedule often fails on
+	 * the first try */
 	static int retry_cnt = 0;
 
 	int ret = set_tx_state_ready(FENCE_REQ);

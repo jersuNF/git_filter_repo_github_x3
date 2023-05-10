@@ -494,7 +494,7 @@ void modem_poll_work_fn()
 	/* Attempt to send poll request immediately */
 	ret = set_tx_state_ready(POLL_REQ);
 	if (ret != 0) {
-		LOG_DBG("Periodic poll failed, error %d", ret);
+		LOG_ERR("Periodic poll failed, error %d", ret);
 	}
 
 	static bool initialized = false;

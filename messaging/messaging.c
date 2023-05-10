@@ -967,14 +967,7 @@ void messaging_tx_thread_fn(void)
 				/* Poll request error handler,
                                  * Note! Consider notifying sender, leaving error handling to src */
 				if (err != 0) {
-					LOG_WRN("Failed to send poll request, rescheduled");
-					if (tx_type == POLL_REQ) {
-						int ret = k_work_reschedule_for_queue(
-							&message_q, &modem_poll_work, K_MINUTES(1));
-						if (ret < 0) {
-							LOG_ERR("Failed to reschedule work");
-						}
-					}
+					LOG_WRN("Failed to send poll request: %d", err);
 				}
 			}
 

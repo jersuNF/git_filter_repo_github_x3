@@ -17,7 +17,7 @@ LOG_MODULE_REGISTER(amc_dist, CONFIG_AMC_LIB_LOG_LEVEL);
  * @note Does not consider if the fence is inverted. That
  *       means, inside an inverted fence really means outside.
  * 
- * @param fence fence(polygon) to check.
+ * @param fence fence(polygon) to check. 
  * @param testx x coordinate of test point.
  * @param testy y coordinate of test point.
  * 

@@ -1,3 +1,4 @@
+#include "nclogs.h"
 /*
  * Copyright (c) 2021 Nofence AS
  */
@@ -45,7 +46,7 @@ int set_pwm_to_idle(void)
 {
 	int err = pwm_pin_set_usec(buzzer_pwm, BUZZER_PWM_CHANNEL, 0, 0, 0);
 	if (err) {
-		LOG_ERR("pwm off fails %i", err);
+		NCLOG_ERR(BUZZER_CONTROLLER, TRice( iD( 7365),"err: pwm off fails %i\n", err));
 		return err;
 	}
 	return 0;
@@ -94,7 +95,7 @@ int play_from_ms(const uint32_t period, const uint32_t sustain, const uint8_t vo
 
 	err = pwm_pin_set_usec(buzzer_pwm, BUZZER_PWM_CHANNEL, period, pulse, 0);
 	if (err) {
-		LOG_ERR("Error %d: failed to set pulse width", err);
+		NCLOG_ERR(BUZZER_CONTROLLER, TRice( iD( 5459),"err: Error %d: failed to set pulse width\n", err));
 		return err;
 	}
 
@@ -178,7 +179,7 @@ void play_song(const note_t *song, const size_t num_notes)
 		int err =
 			play_hz(song[i].t, song[i].s * USEC_PER_MSEC, BUZZER_SOUND_VOLUME_PERCENT);
 		if (err) {
-			LOG_WRN("Song aborted.");
+			NCLOG_WRN(BUZZER_CONTROLLER, TRice0( iD( 6641),"wrn: Song aborted.\n"));
 			return;
 		}
 	}
@@ -450,7 +451,7 @@ void play()
 	k_sem_take(&abort_sound_sem, K_NO_WAIT);
 
 	if (buzzer_pwm == NULL) {
-		LOG_ERR("Buzzer PWM not yet initialized.");
+		NCLOG_ERR(BUZZER_CONTROLLER, TRice0( iD( 5017),"err: Buzzer PWM not yet initialized.\n"));
 		return;
 	}
 
@@ -549,19 +550,18 @@ int buzzer_module_init(void)
 	int ret = gpio_pin_configure(buzzer_pin_dev, BUZZER_PWM_CHANNEL,
 				     (GPIO_ACTIVE_HIGH | GPIO_DS_ALT_HIGH | GPIO_DS_ALT_LOW));
 	if (ret != 0) {
-		LOG_ERR("Failed to set GPIO parameters for the buzzer channel"
-			".");
+		NCLOG_ERR(BUZZER_CONTROLLER, TRice0( iD( 3703),"err: Failed to set GPIO parameters for the buzzer channel\n" "."));
 	}
 	gpio_pin_set(buzzer_pin_dev, BUZZER_PWM_CHANNEL, 0);
 	buzzer_pwm = device_get_binding(PWM_BUZZER_LABEL);
 	if (!buzzer_pwm) {
-		LOG_ERR("Cannot find buzzer PWM device! %s", log_strdup(PWM_BUZZER_LABEL));
+		NCLOG_ERR(BUZZER_CONTROLLER, TRice0( iD( 1525),"err: Cannot find buzzer PWM device! dynamic_string\n"));
 		return -ENODEV;
 	}
 
 	int err = pwm_get_cycles_per_sec(buzzer_pwm, BUZZER_PWM_CHANNEL, &cycles);
 	if (err) {
-		LOG_ERR("Error getting clock cycles for PWM %d", err);
+		NCLOG_ERR(BUZZER_CONTROLLER, TRice( iD( 6805),"err: Error getting clock cycles for PWM %d\n", err));
 		return err;
 	}
 

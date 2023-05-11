@@ -10,6 +10,7 @@ target_include_directories(app PRIVATE
 	./../../events/power_manager/
 	./battery/
   	./../../modules/nf_settings/include
+	${CMAKE_CURRENT_SOURCE_DIR}/../../modules/nclogs/
 	./charging/
 )
 

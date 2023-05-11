@@ -1,3 +1,4 @@
+#include "nclogs.h"
 /*
  * Copyright (c) 2021 Nofence AS
  */
@@ -131,11 +132,11 @@ uint8_t acc_count_steps(int32_t gravity)
 void process_acc_data(raw_acc_data_t *acc)
 {
 	if (acc == NULL) {
-		LOG_ERR("No data available.");
+		NCLOG_ERR(MOVEMENT_CONTROLLER, TRice0( iD( 7035),"err: No data available.\n"));
 		return;
 	}
 
-	LOG_DBG("acc_std_final mov_controller: %d", acc_std_final);
+	NCLOG_DBG(MOVEMENT_CONTROLLER, TRice( iD( 4174),"dbg: acc_std_final mov_controller: %d\n", acc_std_final));
 
 	acc_fifo_x[num_acc_fifo_samples] = acc->x;
 	acc_fifo_y[num_acc_fifo_samples] = acc->y;
@@ -143,18 +144,16 @@ void process_acc_data(raw_acc_data_t *acc)
 	num_acc_fifo_samples++;
 
 	if (num_acc_fifo_samples < ACC_FIFO_ELEMENTS) {
-		LOG_DBG("Filling data buffer, sample %d/%d", num_acc_fifo_samples,
-			(ACC_FIFO_ELEMENTS - 1));
+		NCLOG_DBG(MOVEMENT_CONTROLLER, TRice( iD( 4323),"dbg: Filling data buffer, sample %d/%d\n", num_acc_fifo_samples, (ACC_FIFO_ELEMENTS - 1)));
 		return;
 	}
-	LOG_DBG("Accel. data acquired (%d/%d samples), processing", num_acc_fifo_samples,
-		ACC_FIFO_ELEMENTS);
+	NCLOG_DBG(MOVEMENT_CONTROLLER, TRice( iD( 7102),"dbg: Accel. data acquired (%d/%d samples), processing\n", num_acc_fifo_samples, ACC_FIFO_ELEMENTS));
 
 	num_acc_fifo_samples = 0;
 	if (reading_state == FIRST_READ_DISREGARD_BUFFER) {
 		reading_state = SECOND_READ_INIT_MOVING_AVERAGE;
 		/* disregard the first 32 readings as they might contain MEMS garbage */
-		LOG_DBG("Disregards first accelermoter data");
+		NCLOG_DBG(MOVEMENT_CONTROLLER, TRice0( iD( 1527),"dbg: Disregards first accelermoter data\n"));
 		return;
 	}
 
@@ -226,7 +225,7 @@ void process_acc_data(raw_acc_data_t *acc)
 	animal_activity->level = cur_activity;
 	EVENT_SUBMIT(animal_activity);
 
-	LOG_DBG("Step count = %d", stepcount);
+	NCLOG_DBG(MOVEMENT_CONTROLLER, TRice( iD( 5582),"dbg: Step count = %d\n", stepcount));
 
 	if (stepcount >= STEPS_TRIGGER) {
 		struct step_counter_event *steps = new_step_counter_event();
@@ -286,8 +285,7 @@ void process_acc_data(raw_acc_data_t *acc)
 		struct movement_out_event *event = new_movement_out_event();
 		event->state = m_state;
 
-		LOG_DBG("State is %i, activity is %i, acc_std_final %i", m_state, cur_activity,
-			acc_std_final);
+		NCLOG_DBG(MOVEMENT_CONTROLLER, TRice( iD( 2538),"dbg: State is %i, activity is %i, acc_std_final %i\n", m_state, cur_activity, acc_std_final));
 		EVENT_SUBMIT(event);
 		prev_state = m_state;
 	}
@@ -307,7 +305,7 @@ void movement_thread_fn()
 		raw_acc_data_t raw_data;
 		int err = k_msgq_get(&acc_data_msgq, &raw_data, K_FOREVER);
 		if (err) {
-			LOG_ERR("Error retrieving accelerometer message queue %i", err);
+			NCLOG_ERR(MOVEMENT_CONTROLLER, TRice( iD( 3130),"err: Error retrieving accelerometer message queue %i\n", err));
 			continue;
 		}
 		process_acc_data(&raw_data);
@@ -320,13 +318,13 @@ void fetch_and_display(const struct device *sensor)
 
 	int rc = sensor_sample_fetch(sensor);
 	if (rc < 0) {
-		LOG_ERR("Error fetching acc sensor values %i", rc);
+		NCLOG_ERR(MOVEMENT_CONTROLLER, TRice( iD( 3659),"err: Error fetching acc sensor values %i\n", rc));
 		return;
 	}
 
 	rc = sensor_channel_get(sensor, SENSOR_CHAN_ACCEL_XYZ, accel);
 	if (rc < 0) {
-		LOG_ERR("Error getting acc channel values %i", rc);
+		NCLOG_ERR(MOVEMENT_CONTROLLER, TRice( iD( 7617),"err: Error getting acc channel values %i\n", rc));
 		return;
 	}
 	/* Convert from m/s² to mg */
@@ -335,18 +333,18 @@ void fetch_and_display(const struct device *sensor)
 	accel_mg[1] = (int32_t)((sensor_value_to_double(&accel[1]) / GRAVITY) * 1000);
 	accel_mg[2] = (int32_t)((sensor_value_to_double(&accel[2]) / GRAVITY) * 1000);
 
-	LOG_DBG("Acceleration [mg]: X: %d, Y: %d, Z: %d", accel_mg[0], accel_mg[1], accel_mg[2]);
+	NCLOG_DBG(MOVEMENT_CONTROLLER, TRice( iD( 2495),"dbg: Acceleration [mg]: X: %d, Y: %d, Z: %d\n", accel_mg[0], accel_mg[1], accel_mg[2]));
 
 	raw_acc_data_t data;
 	data.x = (int16_t)(accel_mg[0] * 16); // Multiply with legacy constant
 	data.y = (int16_t)(accel_mg[1] * 16); // Multiply with legacy constant
 	data.z = (int16_t)(accel_mg[2] * 16); // Multiply with legacy constant
 
-	LOG_DBG("Raw values:  X: %d, Y: %d, Z: %d", data.x, data.y, data.z);
+	NCLOG_DBG(MOVEMENT_CONTROLLER, TRice( iD( 4059),"dbg: Raw values: X: %d, Y: %d, Z: %d\n", data.x, data.y, data.z));
 
 	while (k_msgq_put(&acc_data_msgq, &data, K_NO_WAIT) != 0) {
 		/* Message queue is full: purge old data & try again */
-		LOG_WRN("Message queue full, purging and retry");
+		NCLOG_WRN(MOVEMENT_CONTROLLER, TRice0( iD( 2591),"wrn: Message queue full, purging and retry\n"));
 		k_msgq_purge(&acc_data_msgq);
 	}
 
@@ -398,13 +396,13 @@ static int update_acc_odr(acc_mode_t mode_hz)
 
 	int ret = sensor_attr_set(sensor, trig.chan, SENSOR_ATTR_SAMPLING_FREQUENCY, &odr);
 	if (ret != 0) {
-		LOG_ERR("Failed to set odr: %d", ret);
+		NCLOG_ERR(MOVEMENT_CONTROLLER, TRice( iD( 5195),"err: Failed to set odr: %d\n", ret));
 		return ret;
 	}
 
 	ret = sensor_trigger_set(sensor, &trig, trigger_handler);
 	if (ret != 0) {
-		LOG_ERR("Failed to set trigger: %d", ret);
+		NCLOG_ERR(MOVEMENT_CONTROLLER, TRice( iD( 5953),"err: Failed to set trigger: %d\n", ret));
 		return ret;
 	}
 	return 0;
@@ -416,7 +414,7 @@ static int update_acc_range(acc_scale_t scale)
 	sensor_g_to_ms2((uint8_t)scale, &range);
 	int ret = sensor_attr_set(sensor, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_FULL_SCALE, &range);
 	if (ret != 0) {
-		LOG_ERR("Failed to set range: %d", ret);
+		NCLOG_ERR(MOVEMENT_CONTROLLER, TRice( iD( 2455),"err: Failed to set range: %d\n", ret));
 		return ret;
 	}
 	return 0;
@@ -429,14 +427,14 @@ int init_movement_controller(void)
 	sensor = device_get_binding(DT_LABEL(DT_NODELABEL(movement_sensor)));
 
 	if (sensor == NULL) {
-		LOG_ERR("Could not find LIS2DW12 driver.");
+		NCLOG_ERR(MOVEMENT_CONTROLLER, TRice0( iD( 3862),"err: Could not find LIS2DW12 driver.\n"));
 		return -ENODEV;
 	}
 	if (!device_is_ready(sensor)) {
-		LOG_ERR("Failed to setup LIS2DW12 accelerometer driver.");
+		NCLOG_ERR(MOVEMENT_CONTROLLER, TRice0( iD( 4475),"err: Failed to setup LIS2DW12 accelerometer driver.\n"));
 		return -EFAULT;
 	} else {
-		LOG_INF("Setup LIS2DW12 accelerometer driver.");
+		NCLOG_INF(MOVEMENT_CONTROLLER, TRice0( iD( 2319),"inf: Setup LIS2DW12 accelerometer driver.\n"));
 	}
 
 	/* Setup interrupt triggers. */

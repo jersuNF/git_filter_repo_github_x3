@@ -1,3 +1,4 @@
+#include "nclogs.h"
 #include <stdbool.h>
 #include <stdlib.h>
 #include <zephyr.h>
@@ -28,14 +29,14 @@ int8_t lte_init(void)
 	/* wait for network interface to be ready */
 	iface = net_if_get_default();
 	if (iface == NULL) {
-		LOG_ERR("Could not get iface (network interface)!");
+		NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 5116),"err: Could not get network interface(iface) during LTE initialization.\n"));
 		rc = -1;
 		goto exit;
 	}
 
 	cfg = net_if_get_config(iface);
 	if (cfg == NULL) {
-		LOG_ERR("Could not get iface config!");
+		NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 1418),"err: Could not get network interface(iface) config during LTE initialization.\n"));
 		rc = -2;
 		goto exit;
 	}
@@ -79,10 +80,12 @@ int socket_connect(struct data *data, struct sockaddr *addr, socklen_t addrlen)
 	data->tcp.sock = socket(addr->sa_family, SOCK_STREAM, IPPROTO_TCP);
 
 	if (data->tcp.sock < 0) {
-		LOG_ERR("Failed to create TCP socket (%s): %d", log_strdup(data->proto), errno);
+		//NCLOG_ERR(CELLULAR_CONTROLLER, TRICE_S( iD( 7167),"err: Failed to create TCP socket (%s): ", data->proto));
+		NCLOG_ERR(CELLULAR_CONTROLLER, TRice( iD( 4612),"err: %d\n", errno));
 		return -errno;
 	} else {
-		LOG_INF("Created TCP socket (%s): %d", log_strdup(data->proto), data->tcp.sock);
+		//NCLOG_DBG(CELLULAR_CONTROLLER, TRICE_S( iD( 7239),"inf: Created TCP socket (%s): ", data->proto));
+		NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 2296),"inf: %d\n", data->tcp.sock));
 		socket_id = data->tcp.sock;
 	}
 
@@ -108,7 +111,8 @@ int socket_connect(struct data *data, struct sockaddr *addr, socklen_t addrlen)
 	}
 	ret = connect(socket_id, addr, addrlen);
 	if (ret < 0) {
-		LOG_ERR("Cannot connect to TCP remote (%s): %d", data->proto, errno);
+		//NCLOG_ERR(CELLULAR_CONTROLLER, TRICE_S( iD( 4171),"err: Cannot connect to TCP remote (%s): ", data->proto));
+		NCLOG_ERR(CELLULAR_CONTROLLER, TRice( iD( 2374),"err: %d\n", errno));
 		ret = -errno;
 		return ret;
 	}
@@ -122,15 +126,18 @@ int socket_listen(struct data *data)
 	data->tcp.sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
 	if (data->tcp.sock < 0) {
-		LOG_ERR("Failed to create TCP listening socket (%s): %d", data->proto, errno);
+		//NCLOG_ERR(CELLULAR_CONTROLLER, TRICE_S( iD( 6623),"err: Failed to create TCP listening socket (%s): ", data->proto));
+		NCLOG_ERR(CELLULAR_CONTROLLER, TRice( iD( 4245),"err: %d\n", errno));
 		return -errno;
 	} else {
-		LOG_INF("Created TCP listening socket (%s): %d\n", data->proto, data->tcp.sock);
+		//NCLOG_ERR(CELLULAR_CONTROLLER, TRICE_S( iD( 7156),"err: Created TCP listening socket (%s): ", data->proto));
+		NCLOG_ERR(CELLULAR_CONTROLLER, TRice( iD( 1664),"err: %d\n\n", data->tcp.sock));
 	}
 
 	ret = listen(data->tcp.sock, 5);
 	if (ret < 0) {
-		LOG_ERR("Cannot start TCP listening socket (%s): %d", data->proto, errno);
+		//NCLOG_ERR(CELLULAR_CONTROLLER, TRICE_S( iD( 2595),"err: Cannot start TCP listening socket (%s): ", data->proto));
+		NCLOG_ERR(CELLULAR_CONTROLLER, TRice( iD( 2188),"err: %d\n", errno));
 		ret = -errno;
 	} else {
 		ret = 0;
@@ -147,7 +154,7 @@ int socket_receive(const struct data *data, char **msg)
 	if (received > 0) {
 		*msg = buf;
 #if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
-		LOG_DBG("Socket received %d bytes!\n", received);
+		NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 2226),"dbg: Socket received %d bytes!\n\n", received));
 		for (int i = 0; i < received; i++) {
 			printk("\\x%02x", buf[i]);
 		}
@@ -170,11 +177,11 @@ int reset_modem(void)
 	(void)close(conf.ipv4.tcp.sock);
 	int ret = modem_nf_reset();
 	if (ret != 0) {
-		LOG_WRN("modem_nf_reset() returned %d", ret);
+		NCLOG_WRN(CELLULAR_CONTROLLER, TRice( iD( 3090),"wrn: modem_nf_reset() returned %d\n", ret));
 		return ret;
 	}
 	ret = socket_listen(&conf_listen.ipv4);
-	LOG_WRN("socket_listen() returned %d", ret);
+	NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 2272),"inf: socket_listen() returned %d\n", ret));
 	return ret;
 }
 
@@ -219,7 +226,7 @@ int stop_tcp(const bool keep_modem_awake, bool *flag)
 	if (!keep_modem_awake) {
 		int ret = modem_nf_sleep();
 		if (ret != 0) {
-			LOG_ERR("Failed to switch modem to power saving!");
+			NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 3393),"err: Failed to switch modem to power saving!\n"));
 			/*TODO: notify error handler and take action.*/
 			return ret;
 		}
@@ -234,19 +241,18 @@ int stop_tcp(const bool keep_modem_awake, bool *flag)
 int send_tcp(char *msg, size_t len)
 {
 #if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
-	LOG_DBG("Socket sending %d bytes!\n", len);
+	NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 5050),"dbg: Socket sending %d bytes!\n\n", len));
 	for (int i = 0; i < len; i++) {
 		printk("\\x%02x", *(msg + i));
 	}
 	printk("\n");
 #endif
-	LOG_WRN("Attempting to send %d bytes!", len);
+	NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 4151),"inf: Attempting to send %d bytes!\n", len));
 	int ret;
 	ret = (int)sendall(conf.ipv4.tcp.sock, msg, len);
-	if (ret < 0) {
-		LOG_ERR("%s TCP: Failed to send data, errno %d", conf.ipv4.proto, ret);
-	} else {
-		LOG_DBG("%s TCP: Sent %d bytes", log_strdup(conf.ipv4.proto), ret);
+	if (ret >= 0) {
+		//NCLOG_DBG(CELLULAR_CONTROLLER, TRICE_S( iD( 1339),"dbg: %s TCP: Sent ", conf.ipv4.proto));
+		NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 5840),"dbg: %d bytes\n", ret));
 	}
 	/* TODO: how to handle partial sends? sendall() will keep retrying,
      * this should be handled here as well.*/
@@ -263,7 +269,7 @@ int check_ip(void)
 	char *collar_ip = NULL;
 	int ret = get_ip(&collar_ip);
 	if (ret != 0) {
-		LOG_ERR("Failed to get ip from sara r4 driver!");
+		NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 4899),"err: Failed to get ip from sara r4 driver!\n"));
 		return -1;
 	}
 	ret = memcmp(collar_ip, "\"0.0.0.0\"", 9);

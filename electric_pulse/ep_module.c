@@ -1,3 +1,4 @@
+#include "nclogs.h"
 /*
  * Copyright (c) 2021 Nofence AS
  */
@@ -74,7 +75,7 @@ int ep_module_init(void)
 	do {
 		ep_ctrl_dev = device_get_binding(EP_CTRL_LABEL);
 		if (ep_ctrl_dev == NULL) {
-			LOG_WRN("Error get device %s", log_strdup(EP_CTRL_LABEL));
+			NCLOG_WRN(ELECTRIC_PULSE_CONTROLLER, TRice0( iD( 3023),"wrn: Error get device dynamic_string\n"));
 			ret = -ENODEV;
 			break;
 		}
@@ -82,53 +83,53 @@ int ep_module_init(void)
 					 (GPIO_OUTPUT_ACTIVE | EP_CTRL_FLAGS | GPIO_DS_ALT_HIGH |
 					  GPIO_DS_ALT_LOW));
 		if (ret != 0) {
-			LOG_WRN("Failed to configure EP control pin");
+			NCLOG_WRN(ELECTRIC_PULSE_CONTROLLER, TRice0( iD( 1103),"wrn: Failed to configure EP control pin\n"));
 			break;
 		}
 		ret = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_LOW);
 		if (ret != 0) {
-			LOG_WRN("Failed to set initial value of EP control pin");
+			NCLOG_WRN(ELECTRIC_PULSE_CONTROLLER, TRice0( iD( 7331),"wrn: Failed to set initial value of EP control pin\n"));
 			break;
 		}
 
 		ep_ctrl_pwm_dev = device_get_binding(PWM_EP_LABEL);
 		if (ep_ctrl_pwm_dev == NULL) {
-			LOG_WRN("Failed to get EP PWM device");
+			NCLOG_WRN(ELECTRIC_PULSE_CONTROLLER, TRice0( iD( 4428),"wrn: Failed to get EP PWM device\n"));
 			ret = -ENODEV;
 			break;
 		}
 
 		ret = stg_config_u16_read(STG_U16_PRODUCT_TYPE, &g_product_type);
 		if (ret != 0) {
-			LOG_WRN("Failed to read product type from flash");
+			NCLOG_WRN(ELECTRIC_PULSE_CONTROLLER, TRice0( iD( 7514),"wrn: Failed to read product type from flash\n"));
 			break;
 		}
 		if ((g_product_type != PRODUCT_TYPE_SHEEP) &&
 		    (g_product_type != PRODUCT_TYPE_CATTLE)) {
-			LOG_WRN("Unknown product type, EP module set to sheep configuration");
+			NCLOG_WRN(ELECTRIC_PULSE_CONTROLLER, TRice0( iD( 5266),"wrn: Unknown product type, EP module set to sheep configuration\n"));
 			g_product_type = PRODUCT_TYPE_SHEEP;
 		}
 		return 0;
 	} while (0);
-	LOG_ERR("Failed to initializing EP module!");
+	NCLOG_ERR(ELECTRIC_PULSE_CONTROLLER, TRice0( iD( 4000),"err: Failed to initializing EP module!\n"));
 	return ret;
 }
 
 static int ep_module_release(bool first_pulse)
 {
 	if (!device_is_ready(ep_ctrl_pwm_dev)) {
-		LOG_WRN("electric pulse PWM device not ready!");
+		NCLOG_WRN(ELECTRIC_PULSE_CONTROLLER, TRice0( iD( 1013),"wrn: electric pulse PWM device not ready!\n"));
 		return -ENODEV;
 	}
 	if (!device_is_ready(ep_ctrl_dev)) {
-		LOG_WRN("electric pulse GPIO device not ready!");
+		NCLOG_WRN(ELECTRIC_PULSE_CONTROLLER, TRice0( iD( 7329),"wrn: electric pulse GPIO device not ready!\n"));
 		return -ENODEV;
 	}
 
 	int64_t current_time = k_uptime_get();
 	int64_t elapsed_time = current_time - g_last_pulse_time;
 	if (elapsed_time < MINIMUM_TIME_BETWEEN_PULSES_MS) {
-		LOG_WRN("Time between EP is shorter than allowed");
+		NCLOG_WRN(ELECTRIC_PULSE_CONTROLLER, TRice0( iD( 1506),"wrn: Time between EP is shorter than allowed\n"));
 		return -EACCES;
 	}
 
@@ -147,15 +148,14 @@ static int ep_module_release(bool first_pulse)
 		}
 	}
 
-	LOG_INF("Triggering electric pulse now (Period[us]:%d, Pulse width[us]:%d, Duration[us]:%d)",
-		(EP_ON_TIME_US + EP_OFF_TIME_US), EP_ON_TIME_US, ep_duration_us);
+	NCLOG_INF(ELECTRIC_PULSE_CONTROLLER, TRice( iD( 7301),"inf: Triggering electric pulse now (Period[us]:%d, Pulse width[us]:%d, Duration[us]:%d)\n", (EP_ON_TIME_US + EP_OFF_TIME_US), EP_ON_TIME_US, ep_duration_us));
 
 	int ret;
 	/* Turn ON electric pulse signal (PWM) */
 	ret = pwm_pin_set_usec(ep_ctrl_pwm_dev, PWM_EP_CHANNEL, (EP_ON_TIME_US + EP_OFF_TIME_US),
 			       EP_ON_TIME_US, 0);
 	if (ret != 0) {
-		LOG_WRN("Unable to set electric pulse PWM signal!");
+		NCLOG_WRN(ELECTRIC_PULSE_CONTROLLER, TRice0( iD( 4264),"wrn: Unable to set electric pulse PWM signal!\n"));
 	} else {
 		k_busy_wait(ep_duration_us);
 		g_last_pulse_time = current_time;
@@ -164,11 +164,11 @@ static int ep_module_release(bool first_pulse)
 	/* Turn OFF electric pulse signal (PWM) */
 	ret = pwm_pin_set_usec(ep_ctrl_pwm_dev, PWM_EP_CHANNEL, 0, 0, 0);
 	if (ret != 0) {
-		LOG_WRN("Unable to disable electric pulse PWM signal!");
+		NCLOG_WRN(ELECTRIC_PULSE_CONTROLLER, TRice0( iD( 1292),"wrn: Unable to disable electric pulse PWM signal!\n"));
 	}
 	ret = gpio_pin_set(ep_ctrl_dev, EP_CTRL_PIN, PIN_LOW);
 	if (ret != 0) {
-		LOG_WRN("Unable to disable electric pulse GPIO signal!");
+		NCLOG_WRN(ELECTRIC_PULSE_CONTROLLER, TRice0( iD( 1793),"wrn: Unable to disable electric pulse GPIO signal!\n"));
 	}
 
 	return ret;
@@ -192,11 +192,11 @@ static bool event_handler(const struct event_header *eh)
 				g_trigger_ready = false;
 				err = ep_module_release(event->is_first_pulse);
 				if (err < 0) {
-					LOG_ERR("Error in ep release (%d)", err);
+					NCLOG_ERR(ELECTRIC_PULSE_CONTROLLER, TRice( iD( 1287),"err: Error in ep release %d\n", err));
 					nf_app_error(ERR_EP_MODULE, err, NULL, 0);
 				}
 			} else {
-				LOG_ERR("Tried to give EP outside sound max event (%d)", -EACCES);
+				NCLOG_ERR(ELECTRIC_PULSE_CONTROLLER, TRice( iD( 1190),"err: Tried to give EP outside sound max event %d\n", -EACCES));
 				nf_app_error(ERR_EP_MODULE, -EACCES, NULL, 0);
 			}
 			break;

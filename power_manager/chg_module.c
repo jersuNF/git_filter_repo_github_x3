@@ -1,3 +1,4 @@
+#include "nclogs.h"
 #include <zephyr.h>
 
 #include "charging.h"
@@ -17,14 +18,14 @@ static void charging_stop_work_fn(struct k_work *work);
 static void charging_start_work_fn(struct k_work *work)
 {
 	ARG_UNUSED(work);
-	LOG_INF("Charger: Starting charging");
+	NCLOG_INF(POWER_MANAGER, TRice0( iD( 1226),"inf: Charger: Starting charging\n"));
 	charging_start();
 }
 
 static void charging_stop_work_fn(struct k_work *work)
 {
 	ARG_UNUSED(work);
-	LOG_INF("Charger: Stopping charging");
+	NCLOG_INF(POWER_MANAGER, TRice0( iD( 3182),"inf: Charger: Stopping charging\n"));
 	charging_stop();
 }
 

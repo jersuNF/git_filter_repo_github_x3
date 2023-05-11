@@ -41,6 +41,7 @@
 #include "pwr_event.h"
 #include "nofence_watchdog.h"
 #include "timeutil.h"
+#include "nclogs.h"
 
 #ifdef NRF52840_XXAA
 #include <nrfx_nvmc.h>
@@ -98,6 +99,8 @@ static collar_state_struct_t current_state;
 static gnss_last_fix_struct_t cached_fix;
 
 static bool block_fota_request = false;
+static bool m_upload_periodic_logs = true;
+static bool m_updated_log_levels = false;
 
 /** @brief counts the number of FOTA requests, only reset on success */
 static int m_fota_attempts = 0;
@@ -265,14 +268,14 @@ static int set_tx_state_ready(messaging_tx_type_t tx_type);
 static void process_flash_erased(void)
 {
 	int err;
-	LOG_DBG("Clearing ANO config values");
+	NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 5519),"dbg: Clearing ANO config values\n"));
 	err = stg_config_u16_write(STG_U16_ANO_ID, UINT16_MAX);
 	err |= stg_config_u16_write(STG_U16_ANO_START_ID, UINT16_MAX);
 	err |= stg_config_u16_write(STG_U16_LAST_GOOD_ANO_ID, 0);
 	err |= stg_config_u32_write(STG_U32_ANO_TIMESTAMP, 0);
 
 	if (err) {
-		LOG_ERR("Could not clear stg %d", err);
+		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 5572),"err: Could not clear stg %d\n", err));
 	}
 }
 
@@ -287,24 +290,22 @@ static void check_kickoff_ano_download_start()
 	uint16_t offset = (serial_id & 0x0FF) * 56;
 	int ret = stg_config_u32_read(STG_U32_ANO_TIMESTAMP, &ano_timestamp);
 	if (ret != 0 || ano_timestamp == UINT32_MAX) {
-		LOG_WRN("Cannot read last ano timestamp %d", ret);
+		NCLOG_WRN(MESSAGING_MODULE, TRice( iD( 2897),"wrn: Cannot read last ano timestamp %d\n", ret));
 		ano_timestamp = 0;
 	}
 	int64_t curr_time;
 	if (date_time_now(&curr_time) != 0) {
-		LOG_DBG("No current time, cannot download ANO now");
+		NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 6478),"dbg: No current time, cannot download ANO now\n"));
 		return;
 	}
 	uint32_t unix_time = (uint32_t)(curr_time / 1000);
 	if (ano_timestamp + offset <= unix_time + (3600 * 24 * 3)) {
 		ret = k_work_reschedule_for_queue(&message_q, &ano_download_work, K_NO_WAIT);
 		if (ret < 0) {
-			LOG_ERR("Failed to schedule ANO");
+			NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 1145),"err: Failed to schedule ANO\n"));
 		}
 	} else {
-		LOG_DBG("No download needed: ano_t: %lu, offset: %lu, unix_time %lu",
-			(unsigned long)ano_timestamp, (unsigned long)offset,
-			(unsigned long)unix_time);
+		NCLOG_DBG(MESSAGING_MODULE, TRice( iD( 3116),"dbg: No download needed: ano_t: %lu, offset: %lu, unix_time %lu\n", (unsigned long)ano_timestamp, (unsigned long)offset, (unsigned long)unix_time));
 	}
 }
 
@@ -322,8 +323,7 @@ static int build_seq_message()
 	collar_histogram histogram;
 	err = k_msgq_get(&histogram_msgq, &histogram, K_SECONDS(10));
 	if (err) {
-		LOG_ERR("Timeout on waiting for histogram (%d)", err);
-		nf_app_error(ERR_MESSAGING, err, NULL, 0);
+		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 5054),"err: Timeout on waiting for histogram %d\n", err));
 		return err;
 	}
 
@@ -358,8 +358,7 @@ static int build_seq_message()
 	/* Store Seq 1 message to non-volatile storage */
 	err = encode_and_store_message(&seq_msg);
 	if (err != 0) {
-		LOG_ERR("Failed to encode and save sequence message 1");
-		nf_app_error(ERR_MESSAGING, err, NULL, 0);
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 3515),"err: Failed to encode and save sequence message 1\n"));
 		return err;
 	}
 
@@ -380,8 +379,7 @@ static int build_seq_message()
 	/* Store Seq 2 message to non-volatile storage */
 	err = encode_and_store_message(&seq_msg);
 	if (err != 0) {
-		LOG_ERR("Failed to encode and save sequence message 2");
-		nf_app_error(ERR_MESSAGING, err, NULL, 0);
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 1774),"err: Failed to encode and save sequence message 2\n"));
 	}
 	return err;
 }
@@ -398,24 +396,23 @@ static int read_and_send_seq_data_cb(uint8_t *data, size_t len)
      * FOTA. Retuning an error from this callback will abort the FCB walk in the storage
      * controller untill seq data trafic is reinstated. */
 	if (atomic_get(&m_fota_in_progress) == true) {
-		LOG_DBG("FOTA download in progress, will not send seq data now!");
+		NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 7836),"dbg: FOTA download in progress, will not send log data now!\n"));
 		return -EBUSY;
 	}
 
 	if (atomic_get(&m_break_seq_stream_token) == true) {
-		LOG_DBG("Breaking the seq stream!");
+		NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 6058),"dbg: Breaking the seq stream!\n"));
 		return -EBUSY;
 	}
 
-	LOG_DBG("Send seq message fetched from flash");
+	NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 3413),"dbg: Send seq message fetched from flash\n"));
 
 	/* Fetch the length from the two first bytes */
 	uint16_t new_len = *(uint16_t *)&data[0];
 
 	int err = send_binary_message(data, new_len);
 	if (err) {
-		LOG_ERR("Error sending binary message for seq data (%d)", err);
-		nf_app_error(ERR_MESSAGING, err, NULL, 0);
+		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 6448),"err: Error sending binary message for seq data %d\n", err));
 	}
 	return err;
 }
@@ -432,10 +429,10 @@ static int send_all_stored_messages(void)
 		int err = stg_read_seq_data(read_and_send_seq_data_cb, 0);
 		if (err && err != -ENODATA) {
 			k_mutex_unlock(&read_flash_mutex);
-			LOG_ERR("stg_read_seq_data error: %i", err);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 2660),"err: stg_read_seq_data error: %i\n", err));
 			return err;
 		} else if (err == -ENODATA) {
-			LOG_INF("No seq data available on flash for sending.");
+			NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 1247),"inf: No seq data available on flash for sending.\n"));
 		}
 
 		/* If all entries has been consumed, empty storage and we HAVE data on the
@@ -443,11 +440,11 @@ static int send_all_stored_messages(void)
 		if (stg_seq_pointing_to_last()) {
 			err = stg_clear_partition(STG_PARTITION_SEQ);
 			if (err) {
-				LOG_ERR("Error clearing FCB storage for SEQ %i", err);
+				NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 6099),"err: Error clearing FCB storage for SEQ %i\n", err));
 				k_mutex_unlock(&read_flash_mutex);
 				return err;
 			} else {
-				LOG_INF("Emptied SEQ partition data as we have read everything.");
+				NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 7699),"inf: Emptied SEQ partition data as we have read everything.\n"));
 			}
 		}
 		k_mutex_unlock(&read_flash_mutex);
@@ -469,7 +466,7 @@ static void seq_periodic_fn()
 	ret = k_work_reschedule_for_queue(&message_q, &seq_periodic_work,
 					  K_MINUTES(atomic_get(&seq_period_min)));
 	if (ret < 0) {
-		LOG_ERR("Failed to reschedule periodic seq messages!");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 7508),"err: Failed to reschedule periodic seq messages!\n"));
 	}
 
 	// Only build and send SEQ messages if the collar is in normal power state
@@ -478,7 +475,7 @@ static void seq_periodic_fn()
 	}
 
 	ret = build_seq_message();
-	LOG_DBG("SEQ messages stored to flash");
+	NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 1326),"dbg: SEQ messages stored to flash\n"));
 
 	if (m_transfer_boot_params) {
 		/* Do not send SEQ message before startup poll request is sent to server */
@@ -488,7 +485,7 @@ static void seq_periodic_fn()
 	/* Schedule work to send seq messages immediately */
 	ret = k_work_reschedule_for_queue(&message_q, &seq_message_send_work, K_NO_WAIT);
 	if (ret < 0) {
-		LOG_ERR("Failed to schedule a send of periodic seq messages!");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 1905),"err: Failed to schedule a send of periodic seq messages!\n"));
 	}
 }
 
@@ -503,13 +500,13 @@ void modem_poll_work_fn()
 	int ret = k_work_reschedule_for_queue(&message_q, &modem_poll_work,
 					      K_SECONDS(atomic_get(&poll_period_seconds)));
 	if (ret < 0) {
-		LOG_ERR("Failed to reschedule periodic poll request!");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 6485),"err: Failed to reschedule periodic poll request!\n"));
 	}
 
 	/* Attempt to send poll request immediately */
 	ret = set_tx_state_ready(POLL_REQ);
 	if (ret != 0) {
-		LOG_ERR("Periodic poll failed, error %d", ret);
+		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4326),"err: Periodic poll failed, reschedule, error %d\n", ret));
 	}
 
 	static bool initialized = false;
@@ -517,7 +514,7 @@ void modem_poll_work_fn()
 		initialized = true;
 		ret = k_work_schedule_for_queue(&message_q, &seq_periodic_work, K_MSEC(250));
 		if (ret != 0) {
-			LOG_DBG("Periodic seq failed, reschedule, error %d", ret);
+			NCLOG_DBG(MESSAGING_MODULE, TRice( iD( 6512),"dbg: Periodic seq failed, reschedule, error %d\n", ret));
 		}
 	}
 }
@@ -537,7 +534,7 @@ void store_position_message_fn(struct k_work *item)
 
 	int ret = encode_and_store_message(&msg);
 	if (ret != 0) {
-		LOG_ERR("Failed to encode and store position message");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 2324),"err: Failed to encode and store position message\n"));
 		return;
 	}
 }
@@ -552,11 +549,11 @@ void seq_message_send_work_fn()
 
 	int err = set_tx_state_ready(SEQ_MSG);
 	if (err != 0 && retry_cnt++ <= 2) {
-		LOG_DBG("Unable to schedule seq messages, Tx thread not ready- rescheduling");
+		NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 4339),"dbg: Unable to schedule seq messages, Tx thread not ready- rescheduling\n"));
 		err = k_work_reschedule_for_queue(&message_q, &seq_message_send_work,
 						  K_SECONDS(15));
 		if (err < 0) {
-			LOG_ERR("Failed to reschedule work");
+			NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 3945),"err: Failed to reschedule work\n"));
 		}
 	} else {
 		retry_cnt = 0;
@@ -580,15 +577,15 @@ static void log_zap_message_work_fn()
 
 	int err = encode_and_store_message(&msg);
 	if (err != 0) {
-		LOG_ERR("Failed to encode and store AMC correction ZAP message");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 7179),"err: Failed to encode and store AMC correction ZAP message\n"));
 		return;
 	}
-	LOG_DBG("AMC Correction ZAP message stored to flash, scheduling immediate send");
+	NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 4035),"dbg: AMC Correction ZAP message stored to flash, scheduling immediate send\n"));
 
 	/* Schedule work to send seq messages immediately */
 	err = k_work_reschedule_for_queue(&message_q, &seq_message_send_work, K_NO_WAIT);
 	if (err < 0) {
-		LOG_ERR("Failed to reschedule work");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 4659),"err: Failed to reschedule work\n"));
 	}
 }
 
@@ -613,15 +610,15 @@ static void log_animal_escaped_work_fn()
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		LOG_ERR("Failed to encode and store AMC escaped message");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 1249),"err: Failed to encode and store AMC escaped message\n"));
 		return;
 	}
-	LOG_DBG("AMC Escaped message stored to flash, scheduling immediate send");
+	NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 5414),"dbg: AMC Escaped message stored to flash, scheduling immediate send\n"));
 
 	/* Schedule work to send seq messages immediately */
 	err = k_work_reschedule_for_queue(&message_q, &seq_message_send_work, K_NO_WAIT);
 	if (err < 0) {
-		LOG_ERR("Failed to reschedule work");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 1545),"err: Failed to reschedule work\n"));
 	}
 }
 
@@ -651,15 +648,15 @@ static void log_status_message_fn()
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		LOG_ERR("Failed to encode and store AMC status message");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 5366),"err: Failed to encode and store AMC status message\n"));
 		return;
 	}
-	LOG_DBG("AMC Status message stored to flash, scheduling immediate send");
+	NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 3723),"dbg: AMC Status message stored to flash, scheduling immediate send\n"));
 
 	/* Schedule work to send seq messages immediately */
 	err = k_work_reschedule_for_queue(&message_q, &seq_message_send_work, K_NO_WAIT);
 	if (err < 0) {
-		LOG_ERR("Failed to reschedule work");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 2519),"err: Failed to reschedule work\n"));
 	}
 }
 
@@ -679,10 +676,10 @@ static void log_warning_work_fn()
 
 	int err = encode_and_store_message(&msg);
 	if (err != 0) {
-		LOG_ERR("Failed to encode and store AMC correction warning message");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 7953),"err: Failed to encode and store AMC correction warning message\n"));
 		return;
 	}
-	LOG_DBG("AMC Correction warning message stored to flash");
+	NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 5999),"dbg: AMC Correction warning message stored to flash\n"));
 }
 
 /**
@@ -701,10 +698,10 @@ static void log_correction_start_work_fn()
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		LOG_ERR("Failed to encode and store AMC correction start message");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 6157),"err: Failed to encode and store AMC correction start message\n"));
 		return;
 	}
-	LOG_DBG("AMC Correction start message stored to flash");
+	NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 6620),"dbg: AMC Correction start message stored to flash\n"));
 }
 
 /**
@@ -723,10 +720,10 @@ static void log_correction_end_work_fn()
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
-		LOG_ERR("Failed to encode and store AMC correction end message");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 3902),"err: Failed to encode and store AMC correction end message\n"));
 		return;
 	}
-	LOG_DBG("AMC Correction end message stored to flash");
+	NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 7037),"dbg: AMC Correction end message stored to flash\n"));
 }
 
 /**
@@ -743,16 +740,16 @@ void fence_update_req_fn(struct k_work *item)
 
 	int ret = set_tx_state_ready(FENCE_REQ);
 	if ((ret != 0) && (retry_cnt < 2)) {
-		LOG_WRN("Unable to schedule fence update req., Tx thread not ready, rescheduling");
+		NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 4330),"wrn: Unable to schedule fence update req., Tx thread not ready, rescheduling\n"));
 		ret = k_work_reschedule_for_queue(&message_q, &m_fence_update_req.work,
 						  K_SECONDS(15));
 		if (ret < 0) {
-			LOG_ERR("Failed to reschedule work");
+			NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 7290),"err: Failed to reschedule work\n"));
 		}
 		retry_cnt++;
 		return;
 	} else if ((ret != 0) && (retry_cnt >= 2)) {
-		LOG_ERR("Unable to schedule fence update req., exhausted retry attempts");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 7630),"err: Unable to schedule fence update req., exhausted retry attempts\n"));
 		retry_cnt = 0;
 	}
 	return;
@@ -784,7 +781,7 @@ static void log_position_state_machine()
 				ret = k_work_schedule_for_queue(
 					&message_q, &store_pos_work_container.work, K_NO_WAIT);
 				if (ret < 0) {
-					LOG_ERR("Failed to send position log msg before GNSS SLEEP!");
+					NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 1196),"err: Failed to send position log msg before GNSS SLEEP!\n"));
 				}
 				last_pos_timestamp = cached_fix.unix_timestamp;
 			}
@@ -798,7 +795,7 @@ static void log_position_state_machine()
 				ret = k_work_reschedule_for_queue(
 					&message_q, &store_pos_work_container.work, K_NO_WAIT);
 				if (ret < 0) {
-					LOG_ERR("Failed to send position log msg after GNSS wake-up!");
+					NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 2028),"err: Failed to send position log msg after GNSS wake-up!\n"));
 				}
 				last_pos_timestamp = cached_fix.unix_timestamp;
 				active_state = WAIT_FOR_GNSS_INACTIVE;
@@ -861,13 +858,13 @@ static int coredump_storage_read_send(NofenceMessage *cd_msg)
 		address += words2copy * sizeof(uint32_t);
 
 		for (int i = 0; i < words2copy; i++) {
-			LOG_DBG("data: %d %u", i, cd_msg->m.generic_msg.usBuf[i]);
+			NCLOG_DBG(MESSAGING_MODULE, TRice( iD( 5766),"dbg: data: %d %u\n", i, cd_msg->m.generic_msg.usBuf[i]));
 		}
 		cd_msg->m.generic_msg.usBuf_count = words2copy;
 
 		ret = encode_and_send_message(cd_msg);
 		if (ret != 0) {
-			LOG_ERR("Failed to send core dump, err: %d!", ret);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 5368),"err: Failed to send core dump, err: %d!\n", ret));
 			break;
 		}
 		chunk_id++;
@@ -879,6 +876,48 @@ static int coredump_storage_read_send(NofenceMessage *cd_msg)
 				      1); /* reset when sending out is complete */
 	}
 	return ret;
+}
+
+/**
+ * @brief read out the trice encoded log messages from the dedicated buffer and
+ * send them to the server in the form of protobuf GenericMessages.
+ * @return Returns 0 if successfull, otherwise a negative error code.
+ */
+int send_trice_logs(NofenceMessage *trice_log_msg)
+{
+	uint8_t chunk_id = 0;
+	int ret;
+	while (chunk_id * sizeof(trice_log_msg->m.generic_msg.usBuf) <= CONFIG_NCLOG_BUFFER_SIZE) {
+		proto_InitHeader(trice_log_msg);
+		trice_log_msg->which_m = NofenceMessage_generic_msg_tag;
+		trice_log_msg->m.generic_msg.has_usTotalChunks = false;
+		trice_log_msg->m.generic_msg.usChunkId = chunk_id;
+
+		trice_log_msg->m.generic_msg.msgType = GenericMessage_GenMessageType_TRICE_LOGS;
+
+		ret = nclogs_read((uint8_t *)trice_log_msg->m.generic_msg.usBuf,
+				  sizeof(trice_log_msg->m.generic_msg.usBuf));
+
+		if (ret == 0) {
+			NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 5854),"inf: Uploaded all buffered logs!\n"));
+			return 0;
+		} else if (ret < 0) {
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7113),"err: Error %d when reading buffered logs!\n", ret));
+			return ret;
+		} else {
+			trice_log_msg->m.generic_msg.usBuf_count =
+				ret / sizeof(trice_log_msg->m.generic_msg.usBuf[0]) +
+				(ret % sizeof(trice_log_msg->m.generic_msg.usBuf[0]) != 0 ? 1 : 0);
+			ret = encode_and_send_message(trice_log_msg);
+			if (ret != 0) {
+				NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7738),"err: Failed to send trice logs, err: %d!\n", ret));
+				return ret;
+			}
+		}
+		chunk_id++;
+	}
+	NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 5589),"inf: Reached the limit for pushing logs!\n"));
+	return 0;
 }
 
 /**
@@ -938,7 +977,7 @@ void messaging_tx_thread_fn(void)
 			    ((tx_type == SEQ_MSG) &&
 			     ((k_uptime_get() - m_last_poll_req_timestamp_ms) >= 60000))) {
 				if (k_sem_take(&cache_ready_sem, K_SECONDS(60)) != 0) {
-					LOG_WRN("Cached semaphore not ready, Sending what we have");
+					NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 6047),"wrn: Cached semaphore not ready, Sending what we have\n"));
 				}
 				k_sem_give(&cache_ready_sem);
 
@@ -954,12 +993,19 @@ void messaging_tx_thread_fn(void)
                                                  * excessive amount of poll requests */
 						m_last_poll_req_timestamp_ms = k_uptime_get();
 
+						int ret = 0;
 						if (m_send_core_dump) {
-							int ret = coredump_storage_read_send(
+							ret = coredump_storage_read_send(
 								&Nofence_msg_buffer);
 							if (ret != 0 && ret != -ENODATA) {
-								LOG_ERR("Failed to send stored core dump, %d!",
-									ret);
+								NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4613),"err: Failed to send stored core dump, %d!\n", ret));
+							}
+						}
+						if ((ret == 0 || ret == -ENODATA) &&
+						    m_upload_periodic_logs) {
+							ret = send_trice_logs(&Nofence_msg_buffer);
+							if (ret != 0) {
+								NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 2970),"err: Failed to send Trice logs, %d!\n", ret));
 							}
 						}
 					}
@@ -967,7 +1013,7 @@ void messaging_tx_thread_fn(void)
 				/* Poll request error handler,
                                  * Note! Consider notifying sender, leaving error handling to src */
 				if (err != 0) {
-					LOG_WRN("Failed to send poll request: %d", err);
+					NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 2211),"err: Failed to send poll request err: %d\n", err));
 				}
 			}
 
@@ -979,7 +1025,7 @@ void messaging_tx_thread_fn(void)
 				/* Seq message error handler,
                                  * Note! Consider notifying sender, leaving error handling to src */
 				if (err != 0) {
-					LOG_WRN("Failed to send seq messages");
+					NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 4821),"wrn: Failed to send seq messages\n"));
 				}
 			}
 
@@ -997,7 +1043,7 @@ void messaging_tx_thread_fn(void)
 				/* Fence def. request error handler,
                                  * Note! Consider notifying sender, leaving error handling to src */
 				if (err != 0) {
-					LOG_WRN("Failed to send fence update request");
+					NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 4161),"wrn: Failed to send fence update request\n"));
 				}
 			}
 
@@ -1014,11 +1060,11 @@ void messaging_tx_thread_fn(void)
 			}
 
 		} else {
-			LOG_WRN("Tx thread semaphore returned unexpectedly");
+			NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 1455),"wrn: Tx thread semaphore returned unexpectedly\n"));
 			k_sem_reset(&sem_release_tx_thread);
 		}
 	}
-	LOG_ERR("Messaging Tx Thread exited unexpectedly");
+	NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 7405),"err: Messaging Tx Thread exited unexpectedly\n"));
 }
 
 /**
@@ -1027,10 +1073,10 @@ void messaging_tx_thread_fn(void)
  */
 void data_request_work_fn()
 {
-	LOG_INF("Periodic request of environment data");
+	NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 2370),"inf: Periodic request of environment data\n"));
 	int err = k_work_reschedule_for_queue(&message_q, &data_request_work, K_MINUTES(1));
 	if (err < 0) {
-		LOG_ERR("Failed to reschedule work");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 4910),"err: Failed to reschedule work\n"));
 	}
 
 	/* Request of temp, press, humidity */
@@ -1089,8 +1135,7 @@ static bool event_handler(const struct event_header *eh)
 
 			/* tm_year is relative to 1900 */
 			if (tm_time->tm_year < 120) {
-				LOG_WRN("Invalid gnss packet, unix time was %lu",
-					(unsigned long)ev->gnss_data.lastfix.unix_timestamp);
+				NCLOG_WRN(MESSAGING_MODULE, TRice( iD( 3758),"wrn: Invalid gnss packet, unix time was %lu\n", (unsigned long)ev->gnss_data.lastfix.unix_timestamp));
 				return false;
 			}
 			/* Update date_time library which storage uses for ANO data. */
@@ -1130,7 +1175,7 @@ static bool event_handler(const struct event_header *eh)
 				int err = k_work_reschedule_for_queue(&message_q, &seq_message_work,
 								      K_NO_WAIT);
 				if (err < 0) {
-					LOG_ERR("Failed to schedule seq status work (%d)", err);
+					NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 6825),"err: Failed to schedule seq status work %d\n", err));
 				}
 			}
 		} else {
@@ -1155,7 +1200,7 @@ static bool event_handler(const struct event_header *eh)
 				int err = k_work_reschedule_for_queue(&message_q, &seq_message_work,
 								      K_NO_WAIT);
 				if (err < 0) {
-					LOG_ERR("Failed to schedule seq message work (%d)", err);
+					NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 3833),"err: Failed to schedule seq message work %d\n", err));
 				}
 			}
 		} else {
@@ -1183,7 +1228,7 @@ static bool event_handler(const struct event_header *eh)
 				int err = k_work_reschedule_for_queue(&message_q, &seq_message_work,
 								      K_NO_WAIT);
 				if (err < 0) {
-					LOG_ERR("Failed to schedule seq message work (%d)", err);
+					NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 6964),"err: Failed to schedule seq message work %d\n", err));
 				}
 			}
 		} else {
@@ -1197,11 +1242,11 @@ static bool event_handler(const struct event_header *eh)
 		update_cache_reg(FENCE_VERSION);
 		if (!m_transfer_boot_params) {
 			/* Notify server as soon as the new fence is activated. */
-			LOG_WRN("Schedule poll request: fence_version!");
+			NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 2986),"wrn: Schedule poll request: fence_version!\n"));
 			int err = k_work_reschedule_for_queue(&message_q, &modem_poll_work,
 							      K_NO_WAIT);
 			if (err < 0) {
-				LOG_ERR("Error schedule poll request work (%d)", err);
+				NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 5628),"err: Error schedule poll request work %d\n", err));
 			}
 		}
 		return false;
@@ -1218,7 +1263,7 @@ static bool event_handler(const struct event_header *eh)
 
 		int err = k_work_reschedule_for_queue(&message_q, &process_zap_work, K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Error scheduling zap work (%d)", err);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4146),"err: Error scheduling zap work %d\n", err));
 		}
 		return false;
 	}
@@ -1235,8 +1280,7 @@ static bool event_handler(const struct event_header *eh)
 	if (is_animal_escape_event(eh)) {
 		int err = k_work_reschedule_for_queue(&message_q, &process_escape_work, K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Error reschedule escape work (%d)", err);
-			nf_app_error(ERR_MESSAGING, err, NULL, 0);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 2174),"err: Error reschedule escape work %d\n", err));
 		}
 		return false;
 	}
@@ -1257,8 +1301,7 @@ static bool event_handler(const struct event_header *eh)
 
 		int err = k_work_reschedule_for_queue(&message_q, &process_warning_work, K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Error reschedule warning work (%d)", err);
-			nf_app_error(ERR_MESSAGING, err, NULL, 0);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 2953),"err: Error reschedule warning work %d\n", err));
 		}
 		return false;
 	}
@@ -1277,21 +1320,18 @@ static bool event_handler(const struct event_header *eh)
 		return false;
 	}
 	if (is_send_poll_request_now(eh)) {
-		LOG_DBG("Received a nudge on listening socket!");
+		NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 6362),"dbg: Received a nudge on listening socket!\n"));
 		int err;
 		err = k_work_reschedule_for_queue(&message_q, &modem_poll_work, K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Error starting modem poll worker in response to nudge on listening socket. (%d)",
-				err);
-			nf_app_error(ERR_MESSAGING, err, NULL, 0);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7613),"err: Error starting modem poll worker in response to nudge on listening socket. %d\n", err));
 		}
 		return false;
 	}
 	if (is_env_sensor_event(eh)) {
 		struct env_sensor_event *ev = cast_env_sensor_event(eh);
 
-		LOG_DBG("Event Temp: %.2f, humid %.3f, press %.3f", ev->temp, ev->humidity,
-			ev->press);
+		NCLOG_DBG(MESSAGING_MODULE, TRice( iD( 7901),"dbg: Event Temp: %.2f, humid %.3f, press %.3f\n", ev->temp, ev->humidity, ev->press));
 
 		/* Multiply sensor values with scaling factor and cache */
 		atomic_set(&cached_press, (uint32_t)(ev->press * 1000));
@@ -1306,8 +1346,7 @@ static bool event_handler(const struct event_header *eh)
 		int err = k_work_reschedule_for_queue(
 			&message_q, &process_warning_correction_start_work, K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Error reschedule warning correction start work (%d)", err);
-			nf_app_error(ERR_MESSAGING, err, NULL, 0);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7971),"err: Error reschedule warning correction start work %d\n", err));
 		}
 		return false;
 	}
@@ -1319,8 +1358,7 @@ static bool event_handler(const struct event_header *eh)
 		err = k_work_reschedule_for_queue(&message_q, &process_warning_correction_end_work,
 						  K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Error reschedule warning correction end work (%d)", err);
-			nf_app_error(ERR_MESSAGING, err, NULL, 0);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 3032),"err: Error reschedule warning correction end work %d\n", err));
 		}
 		return false;
 	}
@@ -1333,8 +1371,10 @@ static bool event_handler(const struct event_header *eh)
 		max_rssi = ev->gsm_info.max_rssi;
 		memcpy(ccid, ev->gsm_info.ccid, sizeof(ccid));
 
-		LOG_INF("RSSI, rat: %d, %d, %d, %d, %s", rssi, min_rssi, max_rssi, rat,
-			log_strdup(ccid));
+		NCLOG_INF(MESSAGING_MODULE, TRice( iD( 1307),"inf: RSSI: %d, %d, %d\n", rssi, min_rssi, max_rssi));
+		NCLOG_INF(MESSAGING_MODULE, TRice( iD( 4074),"inf: rat: %d, dynamic_string\n",rat));
+		NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 3796),"inf: ccid: dynamic_string\n"));
+
 		update_cache_reg(GSM_INFO);
 		return false;
 	}
@@ -1349,11 +1389,11 @@ static bool event_handler(const struct event_header *eh)
 		if (fw_upgrade_event->dfu_status == DFU_STATUS_IDLE ||
 		    fw_upgrade_event->dfu_status == DFU_STATUS_SUCCESS_REBOOT_SCHEDULED) {
 			/* Error or cancelled, stop the watchdog */
-			LOG_INF("Cancelling APP FOTA WDT");
+			NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 5998),"inf: Cancelling APP FOTA WDT\n"));
 			k_work_cancel_delayable(&fota_wdt_work);
 		} else {
 			/* Start/Kick the FOTA application watchdog */
-			LOG_INF("Kicking APP FOTA WDT");
+			NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 2235),"inf: Kicking APP FOTA WDT\n"));
 			k_work_reschedule_for_queue(&message_q, &fota_wdt_work,
 						    K_MINUTES(CONFIG_APP_FOTA_WDT_MINUTES));
 		}
@@ -1361,16 +1401,16 @@ static bool event_handler(const struct event_header *eh)
 		    fw_upgrade_event->dfu_error != 0) {
 			/* DFU/FOTA is canceled, release the halt on seq message traffic in
              * the messaging tx thread */
-			LOG_WRN("DFU error %d", fw_upgrade_event->dfu_error);
+			NCLOG_WRN(MESSAGING_MODULE, TRice( iD( 4192),"wrn: DFU error %d\n", fw_upgrade_event->dfu_error));
 			atomic_set(&m_fota_in_progress, false);
 			if (m_fota_attempts > CONFIG_APP_FOTA_FAILURES_BEFORE_REBOOT) {
 				int err = stg_config_u8_write(
 					STG_U8_RESET_REASON,
 					(uint8_t)REBOOT_FOTA_MAX_FAILURE_ATTEMPTS);
 				if (err != 0) {
-					LOG_ERR("Error writing fota reset reason");
+					NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 7203),"err: Error writing fota reset reason\n"));
 				}
-				LOG_WRN("Rebooting due to too many failed FOTA tries");
+				NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 3845),"wrn: Rebooting due to too many failed FOTA tries\n"));
 				sys_reboot(SYS_REBOOT_COLD);
 			}
 		} else if (fw_upgrade_event->dfu_status != DFU_STATUS_IDLE) {
@@ -1387,9 +1427,7 @@ static bool event_handler(const struct event_header *eh)
 			int err = k_work_reschedule_for_queue(&message_q, &modem_poll_work,
 							      K_SECONDS(5));
 			if (err < 0) {
-				LOG_ERR("Error starting modem poll worker on mdm fw update! (%d)",
-					err);
-				nf_app_error(ERR_MESSAGING, err, NULL, 0);
+				NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 2774),"err: Error starting modem poll worker on mdm fw update! %d\n", err));
 			}
 		}
 		return false;
@@ -1492,8 +1530,7 @@ static inline void process_ble_cmd_event(void)
 
 	int err = k_msgq_get(&ble_cmd_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting ble_cmd_event (%d)", err);
-		nf_app_error(ERR_MESSAGING, err, NULL, 0);
+		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4582),"err: Error getting ble_cmd_event %d\n", err));
 		return;
 	}
 	enum command_char ble_command = ev.cmd;
@@ -1541,8 +1578,7 @@ static void process_lte_proto_event(void)
 
 	int err = k_msgq_get(&lte_proto_msgq, &ev, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Error getting lte_proto_event (%d)", err);
-		nf_app_error(ERR_MESSAGING, err, NULL, 0);
+		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7247),"err: Error getting lte_proto_event %d\n", err));
 		return;
 	}
 
@@ -1552,13 +1588,12 @@ static void process_lte_proto_event(void)
 	struct messaging_ack_event *ack = new_messaging_ack_event();
 	EVENT_SUBMIT(ack);
 	if (err) {
-		LOG_ERR("Error decoding protobuf message (%d)", err);
-		nf_app_error(ERR_MESSAGING, err, NULL, 0);
+		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 2373),"err: Error decoding protobuf message %d\n", err));
 		return;
 	}
 
 	if (proto.which_m == NofenceMessage_poll_message_resp_tag) {
-		LOG_INF("Process poll reponse");
+		NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 7430),"inf: Process poll reponse\n"));
 		process_poll_response(&proto);
 	} else if (proto.which_m == NofenceMessage_fence_definition_resp_tag) {
 		uint8_t received_frame = process_fence_msg(&proto.m.fence_definition_resp);
@@ -1569,10 +1604,10 @@ static void process_lte_proto_event(void)
 			err = k_work_reschedule_for_queue(&message_q, &ano_download_work,
 							  K_NO_WAIT);
 			if (err < 0) {
-				LOG_ERR("Failed to schedule ANO");
+				NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 3714),"err: Failed to schedule ANO\n"));
 			}
 		} else {
-			LOG_ERR("Failed to download ANO : %d", err);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 6066),"err: Failed to download ANO : %d\n", err));
 		}
 	}
 }
@@ -1606,7 +1641,7 @@ static void fota_app_wdt_cb()
 {
 	int err = stg_config_u8_write(STG_U8_RESET_REASON, (uint8_t)REBOOT_FOTA_HANG);
 	if (err != 0) {
-		LOG_ERR("Error writing fota reset reason");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 5933),"err: Error writing fota reset reason\n"));
 	}
 	sys_reboot(SYS_REBOOT_COLD);
 }
@@ -1615,7 +1650,7 @@ static void nofence_wdt_cb_trigger(uint8_t reason)
 {
 	int err = stg_config_u8_write(STG_U8_RESET_REASON, reason);
 	if (err != 0) {
-		LOG_ERR("Error writing fota reset reason");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 5426),"err: Error writing fota reset reason\n"));
 	}
 	sys_reboot(SYS_REBOOT_COLD);
 }
@@ -1652,11 +1687,10 @@ static void fota_wdt_work_fn(struct k_work *item)
 
 int messaging_module_init(void)
 {
-	LOG_INF("Initializing messaging module.");
+	NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 1820),"inf: Initializing messaging module.\n"));
 	int err = stg_config_u32_read(STG_U32_UID, &serial_id);
 	if (err != 0) {
-		LOG_ERR("Failed to read serial number from storage! (%d)", err);
-		nf_app_error(ERR_MESSAGING, err, NULL, 0);
+		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7349),"err: Failed to read serial number from storage! %d\n", err));
 		serial_id = 1; /* Fallback if read from storage fails */
 	}
 
@@ -1761,22 +1795,19 @@ void build_poll_request(NofenceMessage *poll_req)
 		err = stg_config_u16_read(STG_U16_ACC_SIGMA_SLEEP_LIMIT,
 					  &poll_req->m.poll_message_req.usAccSigmaSleepLimit);
 		if (err != 0) {
-			LOG_ERR("Failed to read STG_U16_ACC_SIGMA_SLEEP_LIMIT (%d)", err);
-			nf_app_error(ERR_MESSAGING, err, NULL, 0);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4276),"err: Failed to read STG_U16_ACC_SIGMA_SLEEP_LIMIT %d\n", err));
 		}
 
 		err = stg_config_u16_read(STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT,
 					  &poll_req->m.poll_message_req.usAccSigmaNoActivityLimit);
 		if (err != 0) {
-			LOG_ERR("Failed to read STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT (%d)", err);
-			nf_app_error(ERR_MESSAGING, err, NULL, 0);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 5685),"err: Failed to read STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT %d\n", err));
 		}
 
 		err = stg_config_u16_read(STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC,
 					  &poll_req->m.poll_message_req.usOffAnimalTimeLimitSec);
 		if (err != 0) {
-			LOG_ERR("Failed to read STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC (%d)", err);
-			nf_app_error(ERR_MESSAGING, err, NULL, 0);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 5190),"err: Failed to read STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC %d\n", err));
 		}
 	}
 	if (m_confirm_ble_key || m_transfer_boot_params) {
@@ -1787,8 +1818,7 @@ void build_poll_request(NofenceMessage *poll_req)
 					   poll_req->m.poll_message_req.rgubcBleKey.bytes,
 					   &key_length);
 		if (err != 0) {
-			LOG_ERR("Failed to read ble_sec_key (%d)", err);
-			nf_app_error(ERR_MESSAGING, err, NULL, 0);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 5573),"err: Failed to read ble_sec_key %d\n", err));
 		}
 	}
 	/* TODO pshustad, fill GNSSS parameters for MIA M10 */
@@ -1875,15 +1905,22 @@ void build_poll_request(NofenceMessage *poll_req)
 					sizeof(poll_req->m.poll_message_req.xVersionInfoModem
 						       .xModemFwFileNameDownloaded) -
 						1);
-				LOG_INF("%s", poll_req->m.poll_message_req.xVersionInfoModem
-						      .xModemFwFileNameDownloaded);
+				NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 6121),"inf: dynamic_string\n"));
 			}
 		} else {
-			LOG_WRN("Could not get modem version info: %d", ret);
+			NCLOG_WRN(MESSAGING_MODULE, TRice( iD( 4011),"wrn: Could not get modem version info: %d\n", ret));
+		}
+	}
+	if (m_updated_log_levels || m_transfer_boot_params) {
+		poll_req->m.poll_message_req.has_xLogConfig = true;
+		/* loop over each module and return the log level */
+		for (size_t i = 0; i < _eNCLOG_MODULE_MAX; i++) {
+			poll_req->m.poll_message_req.xLogConfig.xModule[i].xLevel =
+				nclog_get_level(i);
+			poll_req->m.poll_message_req.xLogConfig.xModule[i].xName = (eNCLOG_MODULE)i;
 		}
 	}
 }
-
 /**
  * @brief Handler for a new fence definition download from the server.
  * @param received_frame A received frame of the new fence defintion.
@@ -1896,19 +1933,17 @@ void fence_download(uint8_t received_frame)
 		fence_ready->new_fence_version = m_fence_update_req.version;
 		EVENT_SUBMIT(fence_ready);
 
-		LOG_INF("Fence ver %d download complete and notified AMC.",
-			m_fence_update_req.version);
+		NCLOG_INF(MESSAGING_MODULE, TRice( iD( 1439),"inf: Fence ver %d download complete and notified AMC.\n", m_fence_update_req.version));
 	} else if (received_frame == m_fence_update_req.request_frame) {
 		m_fence_update_req.request_frame++;
 
-		LOG_INF("Requesting frame %d of new fence: %d", m_fence_update_req.request_frame,
-			m_fence_update_req.version);
+		NCLOG_INF(MESSAGING_MODULE, TRice( iD( 6976),"inf: Requesting frame %d of new fence: %d\n", m_fence_update_req.request_frame, m_fence_update_req.version));
 
 		/* Submit a fence frame message request */
 		int err = k_work_reschedule_for_queue(&message_q, &m_fence_update_req.work,
 						      K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Failed to reschedule work");
+			NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 7718),"err: Failed to reschedule work\n"));
 		}
 	} else {
 		/* Received incorrect fence frame number, cancel download */
@@ -1923,7 +1958,7 @@ void fence_download(uint8_t received_frame)
  */
 int request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 {
-	LOG_DBG("request_ano_frame()");
+	NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 1100),"dbg: request_ano_frame()\n"));
 	NofenceMessage ano_req;
 	proto_InitHeader(&ano_req); /* fill up message header. */
 	ano_req.which_m = NofenceMessage_ubx_ano_req_tag;
@@ -1931,8 +1966,7 @@ int request_ano_frame(uint16_t ano_id, uint16_t ano_start)
 	ano_req.m.ubx_ano_req.usStartAno = ano_start;
 	int ret = encode_and_send_message(&ano_req);
 	if (ret) {
-		LOG_ERR("Failed to send request for ano %d (%d)", ano_start, ret);
-		nf_app_error(ERR_MESSAGING, ret, NULL, 0);
+		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 3690),"err: Failed to send request for ano %d %d\n", ano_start, ret));
 		return -1;
 	}
 	return 0;
@@ -1948,18 +1982,17 @@ static void ano_download_work_fn(struct k_work *item)
 	uint16_t ano_id;
 	uint16_t ano_frame;
 	if (date_time_now(&curr_time) != 0) {
-		LOG_DBG("No current time, cannot download ANO now");
+		NCLOG_DBG(MESSAGING_MODULE, TRice0( iD( 3813),"dbg: No current time, cannot download ANO now\n"));
 		return;
 	}
 	uint32_t unix_time = (uint32_t)(curr_time / 1000);
 	int ret = stg_config_u32_read(STG_U32_ANO_TIMESTAMP, &ano_timestamp);
 	if (ret != 0 || ano_timestamp == UINT32_MAX) {
-		LOG_WRN("Cannot read last ano timestamp %d", ret);
+		NCLOG_WRN(MESSAGING_MODULE, TRice( iD( 1731),"wrn: Cannot read last ano timestamp %d\n", ret));
 		ano_timestamp = 0;
 	}
 	/* If the latest ano frome is too old, we need to download */
-	LOG_DBG("ano-time %lu, unix_time %lu", (unsigned long)ano_timestamp,
-		(unsigned long)unix_time);
+	NCLOG_DBG(MESSAGING_MODULE, TRice( iD( 3003),"dbg: ano-time %lu, unix_time %lu\n", (unsigned long)ano_timestamp, (unsigned long)unix_time));
 	if (ano_timestamp <= unix_time + (3600 * 24 * 3)) {
 		ret = stg_config_u16_read(STG_U16_ANO_ID, &ano_id);
 		if (ret != 0 || ano_id == UINT16_MAX) {
@@ -1971,7 +2004,7 @@ static void ano_download_work_fn(struct k_work *item)
 		}
 		ret = request_ano_frame(ano_id, ano_frame);
 		if (ret != 0) {
-			LOG_ERR("Cannot request ANO frame %d", ret);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 5836),"err: Cannot request ANO frame %d\n", ret));
 		}
 	}
 }
@@ -2011,8 +2044,7 @@ int send_binary_message(uint8_t *data, size_t len)
 
 		int ret = k_sem_take(&connection_ready, K_FOREVER);
 		if (ret != 0) {
-			LOG_ERR("Connection not ready, can't send message now! (%d)", ret);
-			nf_app_error(ERR_MESSAGING, ret, NULL, 0);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 5058),"err: Connection not ready, can't send message now! %d\n", ret));
 			k_mutex_unlock(&send_binary_mutex);
 			return ret;
 		}
@@ -2026,7 +2058,8 @@ int send_binary_message(uint8_t *data, size_t len)
 
 		ret = k_sem_take(&send_out_ack, K_FOREVER);
 		if (ret != 0) {
-			LOG_WRN("Message not sent!");
+			NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 1406),"wrn: Message not sent!\n"));
+			/* todo: remove later, it is needed to pass the twister tests*/
 			nf_app_error(ERR_MESSAGING, ret, NULL, 0);
 			k_mutex_unlock(&send_binary_mutex);
 			return ret;
@@ -2052,13 +2085,11 @@ int encode_and_send_message(NofenceMessage *msg_proto)
 	size_t encoded_size = 0;
 	size_t header_size = 2;
 
-	LOG_INF("Start message encoding, tag: %u, version: %u", msg_proto->which_m,
-		msg_proto->header.ulVersion);
+	NCLOG_INF(MESSAGING_MODULE, TRice( iD( 6823),"inf: Start message encoding, tag: %u, version: %u\n", msg_proto->which_m, msg_proto->header.ulVersion));
 	int ret = collar_protocol_encode(msg_proto, &encoded_msg[2], NofenceMessage_size,
 					 &encoded_size);
 	if (ret) {
-		LOG_ERR("Error encoding nofence message (%d)", ret);
-		nf_app_error(ERR_MESSAGING, ret, NULL, 0);
+		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 3135),"err: Error encoding nofence message %d\n", ret));
 		return ret;
 	}
 	return send_binary_message(encoded_msg, encoded_size + header_size);
@@ -2078,13 +2109,11 @@ int encode_and_store_message(NofenceMessage *msg_proto)
 	uint8_t encoded_msg[NofenceMessage_size];
 	memset(encoded_msg, 0, sizeof(encoded_msg));
 
-	LOG_INF("Start message encoding, tag: %u, version: %u", msg_proto->which_m,
-		msg_proto->header.ulVersion);
+	NCLOG_INF(MESSAGING_MODULE, TRice( iD( 7951),"inf: Start message encoding, tag: %u, version: %u\n", msg_proto->which_m, msg_proto->header.ulVersion));
 	ret = collar_protocol_encode(msg_proto, &encoded_msg[2], NofenceMessage_size,
 				     &encoded_size);
 	if (ret) {
-		LOG_ERR("Error encoding nofence message (%d)", ret);
-		nf_app_error(ERR_MESSAGING, ret, NULL, 0);
+		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 6253),"err: Error encoding nofence message %d\n", ret));
 		return ret;
 	}
 	uint16_t total_size = encoded_size + header_size;
@@ -2094,7 +2123,7 @@ int encode_and_store_message(NofenceMessage *msg_proto)
 
 	ret = stg_write_seq_data(encoded_msg, (size_t)total_size);
 	if (ret != 0) {
-		LOG_ERR("Failed to store message to flash!");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 5871),"err: Failed to store message to flash!\n"));
 		return ret;
 	}
 	return ret;
@@ -2108,8 +2137,9 @@ void process_poll_response(NofenceMessage *proto)
 {
 	int err;
 
-	/* When we receive a poll reply, we don't want to transfer boot params */
+	/* When we receive a poll reply, we don't want to transfer boot params and log levels */
 	m_transfer_boot_params = false;
+	m_updated_log_levels = false;
 
 	if (atomic_cas(&m_new_mdm_fw_update_state, MDM_FW_DOWNLOAD_COMPLETE, 0)) {
 		struct messaging_mdm_fw_event *mdm_fw_ver = new_messaging_mdm_fw_event();
@@ -2124,6 +2154,11 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_bSendCoreDumps) {
 		m_send_core_dump = pResp->bSendCoreDumps;
 	}
+
+	if (pResp->has_bSendPeriodicLogs) {
+		m_upload_periodic_logs = pResp->bSendPeriodicLogs;
+	}
+
 	if (pResp->has_xServerIp && strlen(pResp->xServerIp) > 0) {
 		struct messaging_host_address_event *host_add_event =
 			new_messaging_host_address_event();
@@ -2147,18 +2182,16 @@ void process_poll_response(NofenceMessage *proto)
 	/* TODO: set activation mode to (pResp->eActivationMode); */
 
 	if (pResp->has_bUseServerTime && pResp->bUseServerTime) {
-		LOG_INF("Set date and time from server");
+		NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 7873),"inf: Set date and time from server\n"));
 		time_t gm_time = (time_t)proto->header.ulUnixTimestamp;
 		struct tm *tm_time = gmtime(&gm_time);
 		/* Update date_time library which storage uses for ANO data. */
 		err = date_time_set(tm_time);
 		if (err) {
-			LOG_ERR("Error updating time from server (%d)", err);
-			nf_app_error(ERR_MESSAGING, err, NULL, 0);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4206),"err: Error updating time from server %d\n", err));
 		} else {
 			/** @note This prints UTC. */
-			LOG_INF("Set timestamp to date_time library from modem: %s",
-				log_strdup(asctime(tm_time)));
+			NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 3653),"inf: Set timestamp to date_time library from modem: dynamic_string\n"));
 			atomic_set(&server_timestamp_sec,
 				   (atomic_val_t)(int32_t)(k_uptime_get_32() / 1000));
 		}
@@ -2172,11 +2205,10 @@ void process_poll_response(NofenceMessage *proto)
 				&message_q, &modem_poll_work,
 				K_SECONDS(atomic_get(&poll_period_seconds)));
 			if (err < 0) {
-				LOG_ERR("Failed to schedule work");
+				NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 3998),"err: Failed to schedule work\n"));
 			}
 
-			LOG_INF("Poll period of %d seconds will be used",
-				atomic_get(&poll_period_seconds));
+			NCLOG_INF(MESSAGING_MODULE, TRice( iD( 3246),"inf: Poll period of %d seconds will be used\n", atomic_get(&poll_period_seconds)));
 			uint32_t wdt_module_ts =
 				atomic_get(&poll_period_seconds) * CONFIG_WDT_KEEP_ALIVE_NUM_POLLS;
 			/* Setup the KEEP_ALIVE watchdog to be smallest of WDT_KEEP_ALIVE_NUM_POLLS and CONFIG_WDT_KEEP_MAX_TIME_SECONDS */
@@ -2195,8 +2227,7 @@ void process_poll_response(NofenceMessage *proto)
 		err = stg_config_u16_write(STG_U16_ACC_SIGMA_SLEEP_LIMIT,
 					   pResp->usAccSigmaSleepLimit);
 		if (err != 0) {
-			LOG_ERR("Error updating sleep sigma to ext flash (%d)", err);
-			nf_app_error(ERR_MESSAGING, err, NULL, 0);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7446),"err: Error updating sleep sigma to ext flash %d\n", err));
 		}
 
 		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
@@ -2209,8 +2240,7 @@ void process_poll_response(NofenceMessage *proto)
 		err = stg_config_u16_write(STG_U16_ACC_SIGMA_NOACTIVITY_LIMIT,
 					   pResp->usAccSigmaNoActivityLimit);
 		if (err != 0) {
-			LOG_ERR("Error updating no activity sigma to ext flash (%d)", err);
-			nf_app_error(ERR_MESSAGING, err, NULL, 0);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 3016),"err: Error updating no activity sigma to ext flash %d\n", err));
 		}
 
 		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
@@ -2223,8 +2253,7 @@ void process_poll_response(NofenceMessage *proto)
 		err = stg_config_u16_write(STG_U16_OFF_ANIMAL_TIME_LIMIT_SEC,
 					   pResp->usOffAnimalTimeLimitSec);
 		if (err != 0) {
-			LOG_ERR("Error updating off animal sigma to ext flash (%d)", err);
-			nf_app_error(ERR_MESSAGING, err, NULL, 0);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 1517),"err: Error updating off animal sigma to ext flash %d\n", err));
 		}
 
 		struct acc_sigma_event *sigma_ev = new_acc_sigma_event();
@@ -2236,7 +2265,7 @@ void process_poll_response(NofenceMessage *proto)
 	m_confirm_ble_key = false;
 	if (pResp->has_rgubcBleKey) {
 		m_confirm_ble_key = true;
-		LOG_INF("Received a ble_sec_key of size %d", pResp->rgubcBleKey.size);
+		NCLOG_INF(MESSAGING_MODULE, TRice( iD( 5027),"inf: Received a ble_sec_key of size %d\n", pResp->rgubcBleKey.size));
 
 		uint8_t current_ble_sec_key[STG_CONFIG_BLE_SEC_KEY_LEN];
 		uint8_t key_length = 0;
@@ -2244,24 +2273,23 @@ void process_poll_response(NofenceMessage *proto)
 		int ret = memcmp(pResp->rgubcBleKey.bytes, current_ble_sec_key,
 				 pResp->rgubcBleKey.size);
 		if (ret != 0) {
-			LOG_INF("New ble sec key is different. Will update ext flash");
+			NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 7935),"inf: New ble sec key is different. Will update ext flash\n"));
 			ret = stg_config_blob_write(STG_BLOB_BLE_KEY, pResp->rgubcBleKey.bytes,
 						    pResp->rgubcBleKey.size);
 			if (ret < 0) {
-				LOG_ERR("Failed to write ble sec key to ext flash (%d)", ret);
-				nf_app_error(ERR_MESSAGING, ret, NULL, 0);
+				NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4824),"err: Failed to write ble sec key to ext flash %d\n", ret));
 			}
 		}
 	}
 	if (pResp->ulFenceDefVersion != current_state.fence_version) {
-		LOG_INF("Requesting frame 0 for fence version %i.", pResp->ulFenceDefVersion);
+		NCLOG_INF(MESSAGING_MODULE, TRice( iD( 4529),"inf: Requesting frame 0 for fence version %i.\n", pResp->ulFenceDefVersion));
 
 		/* Submit a fence frame message request */
 		m_fence_update_req.version = pResp->ulFenceDefVersion;
 		m_fence_update_req.request_frame = 0;
 		err = k_work_reschedule_for_queue(&message_q, &m_fence_update_req.work, K_NO_WAIT);
 		if (err < 0) {
-			LOG_ERR("Failed to schedule work");
+			NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 2283),"err: Failed to schedule work\n"));
 		}
 	}
 
@@ -2274,7 +2302,7 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_xModemFwFileName) {
 		strncpy(mdm_fw_file_name, pResp->xModemFwFileName,
 			sizeof(pResp->xModemFwFileName) - 1);
-		LOG_INF("%s", mdm_fw_file_name);
+		NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 2794),"inf: dynamic_string\n"));
 		struct messaging_mdm_fw_event *mdm_fw_ver = new_messaging_mdm_fw_event();
 		mdm_fw_ver->buf = mdm_fw_file_name;
 		mdm_fw_ver->len = sizeof(pResp->xModemFwFileName);
@@ -2288,6 +2316,17 @@ void process_poll_response(NofenceMessage *proto)
 		check_kickoff_ano_download_start();
 	}
 
+	if (pResp->has_xLogConfig) {
+		m_updated_log_levels = true;
+		for (int i = 0; i < pResp->xLogConfig.xModule_count; i++) {
+			int ret = nclog_set_level((eNCLOG_MODULE)pResp->xLogConfig.xModule[i].xName,
+						  (eNCLOG_LVL)pResp->xLogConfig.xModule[i].xLevel);
+			if (ret != 0) {
+				LOG_ERR("nclog_set_level returned -EINVAL");
+			}
+		}
+	}
+
 	return;
 }
 
@@ -2297,7 +2336,7 @@ static int get_and_parse_server_ip_address(char *buf, size_t size)
 	uint8_t port_length = 0;
 	int ret = stg_config_str_read(STG_STR_HOST_PORT, buf, &port_length);
 	if (ret != 0) {
-		LOG_ERR("Failed to read host address from ext flash");
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 4124),"err: Failed to read host address from ext flash\n"));
 		return ret;
 	}
 	char *ptr_colon = strchr(buf, ':');
@@ -2318,15 +2357,14 @@ static int process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 	if (fw_ver_from_server->has_ulApplicationVersion &&
 	    fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER &&
 	    block_fota_request == false) {
-		LOG_INF("Received new app version from server %i",
-			fw_ver_from_server->ulApplicationVersion);
+		NCLOG_INF(MESSAGING_MODULE, TRice( iD( 7860),"inf: Received new app version from server %i\n", fw_ver_from_server->ulApplicationVersion));
 		if (!reboot_scheduled) {
 			m_fota_attempts++;
 			struct start_fota_event *ev = new_start_fota_event();
 			if (get_and_parse_server_ip_address(ev->host, sizeof(ev->host)) == 0) {
 				ev->override_default_host = true;
 			} else {
-				LOG_WRN("Cannot parse server address");
+				NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 6014),"wrn: Cannot parse server address\n"));
 				ev->override_default_host = false;
 			}
 			ev->serial_id = serial_id;
@@ -2369,9 +2407,7 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 	if (fenceResp->which_m == FenceDefinitionResponse_xHeader_tag) {
 		if (frame != 0) {
 			/* We always expect the header to be the first frame. */
-			LOG_ERR("Unexpected frame count for pasture header. (%d)", -EIO);
-			nf_app_error(ERR_MESSAGING, -EIO, NULL, 0);
-
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7108),"err: Unexpected frame count for pasture header. %d\n", -EIO));
 			return 0;
 		}
 
@@ -2385,8 +2421,7 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 						  (uint8_t)fenceResp->m.xHeader.bKeepMode);
 			if (err != 0) {
 				/* We always expect the header to be the first frame. */
-				LOG_ERR("Error writing keep mode to storage. (%d)", err);
-				nf_app_error(ERR_MESSAGING, err, NULL, 0);
+				NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7694),"err: Error writing keep mode to storage. %d\n", err));
 			}
 		}
 
@@ -2419,14 +2454,11 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 		cached_fences_counter++;
 	}
 
-	LOG_INF("Cached fence frame %i successfully.", frame);
+	NCLOG_INF(MESSAGING_MODULE, TRice( iD( 7574),"inf: Cached fence frame %i successfully.\n", frame));
 	if (frame == fenceResp->ucTotalFrames - 1) {
 		/* Validate pasture. */
 		if (cached_fences_counter != pasture_temp.m.ul_total_fences) {
-			LOG_ERR("Cached %i frames, but expected %i.", cached_fences_counter,
-				pasture_temp.m.ul_total_fences);
-			nf_app_error(ERR_MESSAGING, -EIO, NULL, 0);
-
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 6059),"err: Cached %i frames, but expected %i.\n", cached_fences_counter, pasture_temp.m.ul_total_fences));
 			return 0;
 		}
 
@@ -2441,12 +2473,11 @@ uint8_t process_fence_msg(FenceDefinitionResponse *fenceResp)
 		}
 
 		if (!validate_pasture()) {
-			LOG_ERR("CRC was not correct for new pasture. (%d)", -EIO);
-			nf_app_error(ERR_MESSAGING, -EIO, NULL, 0);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 6979),"err: CRC was not correct for new pasture. %d\n", -EIO));
 			return 0;
 		}
 
-		LOG_INF("Validated CRC for pasture and will write it to flash.");
+		NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 4881),"inf: Validated CRC for pasture and will write it to flash.\n"));
 		err = stg_write_pasture_data((uint8_t *)&pasture_temp, sizeof(pasture_temp));
 		if (err) {
 			return err;
@@ -2492,7 +2523,7 @@ static int process_ano_msg(UbxAnoReply *anoResp)
 		err = stg_write_ano_data(&ano_rec);
 
 		if (err) {
-			LOG_ERR("Error writing ano frame to storage controller (%d)", err);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 1845),"err: Error writing ano frame to storage controller %d\n", err));
 			return err;
 		}
 	}
@@ -2504,7 +2535,7 @@ static int process_ano_msg(UbxAnoReply *anoResp)
 
 	err = date_time_now(&current_time_ms);
 	if (err) {
-		LOG_ERR("Error fetching date time (%d)", err);
+		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 6411),"err: Error fetching date time %d\n", err));
 		return err;
 	}
 	/* Use the last record in the ANO message to stamp NVS data */
@@ -2597,7 +2628,6 @@ static inline void set_initial_collar_state_flag(uint8_t aFlag)
 	}
 	m_initial_collar_state_flags |= (1 << aFlag);
 }
-
 /**
  * @brief Checks whether the module has recieved all initial collar states (see collar_state_flags).
  * @return Return true if all initial collar states has been received, otherwise false.

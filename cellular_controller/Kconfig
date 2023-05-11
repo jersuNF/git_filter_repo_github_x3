@@ -42,7 +42,7 @@ if CELLULAR_CONTROLLER
 
 	config SEND_THREAD_STACK_SIZE
         int
-        default 1280
+        default 1350
 
     config SEND_THREAD_PRIORITY
         int

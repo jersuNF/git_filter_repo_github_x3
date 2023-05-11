@@ -1,3 +1,4 @@
+#include "nclogs.h"
 /*
  * Copyright (c) 2022 Nofence AS
  */
@@ -38,7 +39,7 @@ static pasture_t pasture_cache;
 int get_pasture_cache(pasture_t **pasture)
 {
 	if (pasture_cache.m.ul_total_fences == 0) {
-		LOG_WRN("Switching to \'No pasture\'!");
+		NCLOG_WRN(AMC_MODULE, TRice0( iD( 7076),"wrn: Switching to \'No pasture\'!\n"));
 	}
 
 	*pasture = &pasture_cache;
@@ -52,7 +53,7 @@ int set_pasture_cache(uint8_t *pasture, size_t len)
 	}
 	int err = k_sem_take(&fence_data_sem, K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
-		LOG_ERR("Error semaphore for fence cache %i", err);
+		NCLOG_ERR(AMC_MODULE, TRice( iD( 3132),"err: Error semaphore for fence cache %i\n", err));
 		return err;
 	}
 
@@ -77,7 +78,7 @@ int set_gnss_cache(gnss_t *gnss, const bool timed_out)
          */
 	int err = k_sem_take(&gnss_data_sem, K_NO_WAIT);
 	if (err) {
-		LOG_ERR("Consumer still swapping previous GNSS data. %i", err);
+		NCLOG_ERR(AMC_MODULE, TRice( iD( 7797),"err: Consumer still swapping previous GNSS data. %i\n", err));
 		return err;
 	}
 
@@ -102,7 +103,7 @@ int get_gnss_cache(gnss_t **gnss)
 	int err = 0;
 	err = k_sem_take(&gnss_data_sem, K_SECONDS(CONFIG_GNSS_CACHE_TIMEOUT_SEC));
 	if (err) {
-		LOG_ERR("Error semaphore for gnss cache %i", err);
+		NCLOG_ERR(AMC_MODULE, TRice( iD( 6797),"err: Error semaphore for gnss cache %i\n", err));
 		return err;
 	}
 

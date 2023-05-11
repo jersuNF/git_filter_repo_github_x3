@@ -1,0 +1,20 @@
+
+menuconfig NCLOGS
+	bool "NCLogs module"
+	help
+	  Enable trice module
+	default y
+
+if NCLOGS
+    config NCLOG_BUFFER_SIZE
+        int "Size of the circular log buffer"
+        default 1024
+
+    config NCLOG_BUFFER_USED_UP_THRESHOLD_PERCENTAGE
+          int "Size of the circular log buffer"
+          default 80
+
+    config NCLOG_DEFAULT_LEVEL
+        int "Default log level"
+        default 2 # eNCLOG_LVL_ERR
+endif

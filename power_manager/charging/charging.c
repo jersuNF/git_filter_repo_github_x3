@@ -1,3 +1,4 @@
+#include "nclogs.h"
 /*
  * Copyright (c) 2021 Nofence AS
  */
@@ -77,7 +78,7 @@ static int charging_init_adc(void)
 #endif
 		ret = adc_channel_setup(charging_adc_dev, &charging_channel_cfg);
 		if (ret != 0) {
-			LOG_ERR("Setup of charging adc channel failed with code %d", ret);
+			NCLOG_ERR(POWER_MANAGER, TRice( iD( 6496),"err: Setup of charging adc channel failed with code %d\n", ret));
 			return -ENODEV;
 		}
 	}
@@ -98,7 +99,7 @@ int charging_setup(void)
 {
 	int err = charging_init_adc();
 	charging_ok = (err == 0);
-	LOG_INF("Charging ADC setup %s", charging_ok ? "complete" : "error");
+	NCLOG_INF(POWER_MANAGER, TRice0( iD( 5249),"inf: Charging ADC setup dynamic_string\n"));
 	charging_init_moving_average();
 
 	return err;
@@ -145,7 +146,7 @@ int charging_init_module(void)
 	int err;
 	charging_load_dev = device_get_binding(CHARGING_LOAD_LABEL);
 	if (charging_load_dev == NULL) {
-		LOG_ERR("Error get device %s", log_strdup(CHARGING_LOAD_LABEL));
+		NCLOG_ERR(POWER_MANAGER, TRice0( iD( 6118),"err: Error get device dynamic_string\n"));
 		return -ENODEV;
 	}
 	/* Configure pin with flags */
@@ -156,7 +157,7 @@ int charging_init_module(void)
 
 	charging_dcdc_dev = device_get_binding(CHARGING_DCDC_LABEL);
 	if (charging_dcdc_dev == NULL) {
-		LOG_ERR("Error get device %s", log_strdup(CHARGING_DCDC_LABEL));
+		NCLOG_ERR(POWER_MANAGER, TRice0( iD( 4022),"err: Error get device dynamic_string\n"));
 		return -ENODEV;
 	}
 	/* Configure pin with flags */
@@ -172,18 +173,18 @@ int charging_start(void)
 {
 	int err;
 	if (!charging_ok) {
-		LOG_ERR("Could not start charging. Remember to call charging_setup() first");
+		NCLOG_ERR(POWER_MANAGER, TRice0( iD( 7334),"err: Could not start charging. Remember to call charging_setup() first\n"));
 		return -EPIPE;
 	}
 	if (!device_is_ready(charging_load_dev)) {
 		/* Not ready, do not use */
-		LOG_ERR("CHARGING_LOAD_DEV not ready or proper initialized");
+		NCLOG_ERR(POWER_MANAGER, TRice0( iD( 4940),"err: CHARGING_LOAD_DEV not ready or proper initialized\n"));
 		return -ENODEV;
 	}
 
 	err = gpio_pin_set(charging_load_dev, CHARGING_LOAD_PIN, PIN_HIGH);
 	if (err < 0) {
-		LOG_ERR("Could not enable charging load pin");
+		NCLOG_ERR(POWER_MANAGER, TRice0( iD( 7173),"err: Could not enable charging load pin\n"));
 		return err;
 	}
 
@@ -192,13 +193,13 @@ int charging_start(void)
 
 	if (!device_is_ready(charging_dcdc_dev)) {
 		/* Not ready, do not use */
-		LOG_ERR("CHARGING_DCDC_DEV not ready or proper initialized");
+		NCLOG_ERR(POWER_MANAGER, TRice0( iD( 5498),"err: CHARGING_DCDC_DEV not ready or proper initialized\n"));
 		return -ENODEV;
 	}
 
 	err = gpio_pin_set(charging_dcdc_dev, CHARGING_DCDC_PIN, PIN_HIGH);
 	if (err < 0) {
-		LOG_ERR("Could not enable charging dcdc pin");
+		NCLOG_ERR(POWER_MANAGER, TRice0( iD( 7675),"err: Could not enable charging dcdc pin\n"));
 		return err;
 	}
 	atomic_set(&charging_active, true);
@@ -210,12 +211,12 @@ int charging_stop(void)
 	int err;
 	if (!device_is_ready(charging_dcdc_dev)) {
 		/* Not ready, do not use */
-		LOG_ERR("CHARGING_DCDC_DEV not ready or proper initialized");
+		NCLOG_ERR(POWER_MANAGER, TRice0( iD( 2153),"err: CHARGING_DCDC_DEV not ready or proper initialized\n"));
 		return -ENODEV;
 	}
 	err = gpio_pin_set(charging_dcdc_dev, CHARGING_DCDC_PIN, PIN_LOW);
 	if (err < 0) {
-		LOG_ERR("Could not disable charging dcdc pin");
+		NCLOG_ERR(POWER_MANAGER, TRice0( iD( 7985),"err: Could not disable charging dcdc pin\n"));
 		return err;
 	}
 	/* Wait to give switch time to disable */
@@ -223,13 +224,13 @@ int charging_stop(void)
 
 	if (!device_is_ready(charging_load_dev)) {
 		/* Not ready, do not use */
-		LOG_ERR("CHARGING_LOAD_DEV not ready or proper initialized");
+		NCLOG_ERR(POWER_MANAGER, TRice0( iD( 7084),"err: CHARGING_LOAD_DEV not ready or proper initialized\n"));
 		return -ENODEV;
 	}
 
 	err = gpio_pin_set(charging_load_dev, CHARGING_LOAD_PIN, PIN_LOW);
 	if (err < 0) {
-		LOG_ERR("Could not disable charging load pin");
+		NCLOG_ERR(POWER_MANAGER, TRice0( iD( 4937),"err: Could not disable charging load pin\n"));
 		return err;
 	}
 	atomic_set(&charging_active, false);
@@ -240,7 +241,7 @@ int charging_current_sample_averaged(void)
 {
 	int current_ma = charging_read_analog_channel();
 	if (current_ma < 0) {
-		LOG_ERR("Failed to read solar charging current: %d", current_ma);
+		NCLOG_ERR(POWER_MANAGER, TRice( iD( 4101),"err: Failed to read solar charging current: %d\n", current_ma));
 		return -ENOENT;
 	}
 	uint16_t avg_current_value = approx_moving_average(&i_charg_mov_avg, current_ma);

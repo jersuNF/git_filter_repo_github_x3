@@ -182,6 +182,11 @@ void mark_new_application_as_valid(void)
 static bool event_handler(const struct event_header *eh)
 {
 	if (is_start_fota_event(eh)) {
+		if (!boot_is_img_confirmed()) {
+			LOG_ERR("Current firmware image is not confirmed. Will not start FOTA process.\n");
+			k_oops();
+		}
+
 		struct start_fota_event *ev = cast_start_fota_event(eh);
 
 		/* @todo, the code below needs refactoring */

@@ -2358,7 +2358,9 @@ static int process_upgrade_request(VersionInfoFW *fw_ver_from_server)
 	    fw_ver_from_server->ulApplicationVersion != NF_X25_VERSION_NUMBER &&
 	    block_fota_request == false) {
 		NCLOG_INF(MESSAGING_MODULE, TRice( iD( 7860),"inf: Received new app version from server %i\n", fw_ver_from_server->ulApplicationVersion));
-		if (!reboot_scheduled) {
+		if (!boot_is_img_confirmed()) {
+			LOG_ERR("Current firmware image is not confirmed. Will not start FOTA process.\n");
+		} else if (!reboot_scheduled) {
 			m_fota_attempts++;
 			struct start_fota_event *ev = new_start_fota_event();
 			if (get_and_parse_server_ip_address(ev->host, sizeof(ev->host)) == 0) {

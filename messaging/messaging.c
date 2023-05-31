@@ -1006,6 +1006,9 @@ void messaging_tx_thread_fn(void)
 				}
 				/* Poll request error handler,
                                  * Note! Consider notifying sender, leaving error handling to src */
+				if (err != 0) {
+					LOG_WRN("Failed to send poll request!");
+				}
 			}
 
 			/* SEQ MESSAGES */
@@ -2733,6 +2736,6 @@ static inline bool has_initial_collar_states()
 	return (m_initial_collar_state_flags ==
 				((1 << COLLAR_MODE_FLAG) | (1 << COLLAR_STATUS_FLAG) |
 				 (1 << FENCE_STATUS_FLAG) | (1 << BATTERY_LVL_FLAG)) ?
-			      true :
-			      false);
+			true :
+			false);
 }

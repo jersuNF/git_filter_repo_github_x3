@@ -439,7 +439,7 @@ int stg_config_str_write(stg_config_param_id_t id, const char *str, size_t len)
 		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 5384),"err: STG str write, failed write to storage at id %d with ret: %d\n", (int)id, ret));
 		return ret;
 	}
-	NCLOG_DBG(STORAGE_CONTROLLER, TRice( iD( 7692),"dbg: Read: Id=%d, Length=%d, Data=dynamic_string\n", (int)id, strlen(str), str));
+	NCLOG_DBG(STORAGE_CONTROLLER, TRice( iD( 7692),"dbg: Write: Id=%d, Length=%d, Data=dynamic_string\n", (int)id, len, str));
 	return 0;
 }
 

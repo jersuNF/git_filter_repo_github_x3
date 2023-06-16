@@ -194,6 +194,11 @@ extern uint16_t g_nvs_write_errors;
 static uint16_t m_sent_nvs_errors;
 #endif
 
+#ifdef CONFIG_STG_CONFIG_DEBUG_SEND_WRITE_ERRORS
+extern uint16_t g_nvs_write_errors;
+static uint16_t m_sent_nvs_errors;
+#endif
+
 K_MUTEX_DEFINE(send_binary_mutex);
 K_MUTEX_DEFINE(read_flash_mutex);
 static bool reboot_scheduled = false;

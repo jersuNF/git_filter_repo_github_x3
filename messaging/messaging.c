@@ -48,6 +48,7 @@
 #endif
 
 #include "coredump_header.h"
+#include <sys/util.h>
 
 #define MODULE messaging
 LOG_MODULE_REGISTER(MODULE, CONFIG_MESSAGING_LOG_LEVEL);
@@ -185,8 +186,6 @@ static bool m_confirm_acc_limits, m_confirm_ble_key;
 K_MUTEX_DEFINE(send_binary_mutex);
 K_MUTEX_DEFINE(read_flash_mutex);
 static bool reboot_scheduled = false;
-
-static bool m_send_core_dump = true;
 
 K_MSGQ_DEFINE(ble_cmd_msgq, sizeof(struct ble_cmd_event), CONFIG_MSGQ_BLE_CMD_SIZE,
 	      4 /* Byte alignment */);
@@ -808,75 +807,53 @@ static void log_position_state_machine()
 	}
 }
 /**
- * @brief read out the core dumps from the "coredump_partition" on internal flash and
- * send them to the server in the form of protobuf GenericMessages.
+ * @brief read out the core dumps and send them to the server in the form of protobuf GenericMessages.
  * @return Returns 0 if successfull, otherwise a negative error code.
  */
+#ifdef CONFIG_DEBUG_COREDUMP_BACKEND_NOINIT
+extern struct coredump_log __noinit dump;
 static int coredump_storage_read_send(NofenceMessage *cd_msg)
 {
-	int ret = -1;
-	const uint32_t coredump_partition_address = FLASH_AREA_OFFSET(coredump_partition);
-	if (*(uint32_t *)(coredump_partition_address) != CONFIG_CORE_DUMP_FLASH_MAGIC_FLAG) {
-		return -ENODATA;
+	if (dump.magic_flag != CONFIG_CORE_DUMP_FLASH_MAGIC_FLAG) {
+		return 0;
 	}
-
-	uint32_t address =
-		coredump_partition_address +
-		sizeof(uint32_t); /* offset by the size of CONFIG_CORE_DUMP_FLASH_MAGIC_FLAG */
-
-	struct flash_hdr_t cd_header;
-	memcpy(&cd_header, (void *)address, sizeof(struct flash_hdr_t));
-
-	size_t remaining_words = cd_header.size + sizeof(struct flash_hdr_t) / sizeof(uint32_t);
-	size_t total_chunks = ROUND_UP(remaining_words / sizeof(cd_msg->m.generic_msg.usBuf) /
-					       sizeof(cd_msg->m.generic_msg.usBuf[0]),
-				       1);
-
+	int failure = -EEXIST;
+	size_t remaining_bytes = dump.ptr;
+	size_t bytes_per_element = sizeof(cd_msg->m.generic_msg.usBuf[0]);
+	size_t bytes_per_chunk = sizeof(cd_msg->m.generic_msg.usBuf);
+	size_t total_chunks = ceiling_fraction(remaining_bytes, bytes_per_chunk);
 	uint8_t chunk_id = 0;
-	while (remaining_words > 0) {
+	dump.ptr = 0; /* reset pointer to the beginning of the buffer we want to read from */
+
+	while (remaining_bytes > 0) {
+		size_t bytes2copy = MIN(remaining_bytes, bytes_per_chunk);
+		if (bytes2copy < sizeof(uint32_t)) {
+			NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 4538),"wrn: coredump is not word aligned.\n"));
+		}
+
 		proto_InitHeader(cd_msg);
 		cd_msg->which_m = NofenceMessage_generic_msg_tag;
-		cd_msg->m.generic_msg.has_usTotalChunks = false;
-		if (chunk_id == 0) {
-			cd_msg->m.generic_msg.has_usTotalChunks = true;
-			cd_msg->m.generic_msg.usTotalChunks = total_chunks;
-		}
-
+		cd_msg->m.generic_msg.has_usTotalChunks = true;
+		cd_msg->m.generic_msg.usTotalChunks = total_chunks;
 		cd_msg->m.generic_msg.msgType = GenericMessage_GenMessageType_CORE_DUMP;
-
 		cd_msg->m.generic_msg.usChunkId = chunk_id;
+		cd_msg->m.generic_msg.usBuf_count = ceiling_fraction(bytes2copy, bytes_per_element);
+		memcpy(&cd_msg->m.generic_msg.usBuf[0], &dump.raw_data[dump.ptr], bytes2copy);
 
-		size_t words2copy =
-			MIN(remaining_words, sizeof(cd_msg->m.generic_msg.usBuf) /
-						     sizeof(cd_msg->m.generic_msg.usBuf[0]));
-
-		memcpy(&cd_msg->m.generic_msg.usBuf[0], (void *)address,
-		       words2copy * sizeof(uint32_t));
-
-		remaining_words -= words2copy;
-
-		address += words2copy * sizeof(uint32_t);
-
-		for (int i = 0; i < words2copy; i++) {
-			NCLOG_DBG(MESSAGING_MODULE, TRice( iD( 5766),"dbg: data: %d %u\n", i, cd_msg->m.generic_msg.usBuf[i]));
+		failure = encode_and_send_message(cd_msg);
+		if (failure) {
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 5368),"err: Failed to send core dump, err: %d!\n", failure));
+			return failure;
 		}
-		cd_msg->m.generic_msg.usBuf_count = words2copy;
 
-		ret = encode_and_send_message(cd_msg);
-		if (ret != 0) {
-			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 5368),"err: Failed to send core dump, err: %d!\n", ret));
-			break;
-		}
+		remaining_bytes -= bytes2copy;
+		dump.ptr += bytes2copy;
 		chunk_id++;
 	}
-
-	if (ret == 0) {
-		uint32_t dummy = 0;
-		nrfx_nvmc_words_write(coredump_partition_address, &dummy,
-				      1); /* reset when sending out is complete */
-	}
-	return ret;
+	dump.magic_flag = 0;
+	return failure;
 }
+#endif
 
 /**
  * @brief read out the trice encoded log messages from the dedicated buffer and
@@ -994,13 +971,14 @@ void messaging_tx_thread_fn(void)
 						m_last_poll_req_timestamp_ms = k_uptime_get();
 
 						int ret = 0;
-						if (m_send_core_dump) {
-							ret = coredump_storage_read_send(
-								&Nofence_msg_buffer);
-							if (ret != 0 && ret != -ENODATA) {
-								NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4613),"err: Failed to send stored core dump, %d!\n", ret));
-							}
+#ifdef CONFIG_DEBUG_COREDUMP_BACKEND_NOINIT
+						ret = coredump_storage_read_send(
+							&Nofence_msg_buffer);
+
+						if (ret != 0 && ret != -ENODATA) {
+							NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4613),"err: Failed to send stored core dump, %d!\n", ret));
 						}
+#endif
 						if ((ret == 0 || ret == -ENODATA) &&
 						    m_upload_periodic_logs) {
 							ret = send_trice_logs(&Nofence_msg_buffer);
@@ -2151,9 +2129,6 @@ void process_poll_response(NofenceMessage *proto)
 	atomic_cas(&m_new_mdm_fw_update_state, INSTALLATION_COMPLETE, 0);
 
 	PollMessageResponse *pResp = &proto->m.poll_message_resp;
-	if (pResp->has_bSendCoreDumps) {
-		m_send_core_dump = pResp->bSendCoreDumps;
-	}
 
 	if (pResp->has_bSendPeriodicLogs) {
 		m_upload_periodic_logs = pResp->bSendPeriodicLogs;

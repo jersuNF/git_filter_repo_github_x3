@@ -48,9 +48,9 @@ int fcb_walk_from_entry(fcb_read_cb cb, struct fcb *fcb, struct fcb_entry *start
 			k_free(data);
 			return err;
 		}
-		if (flash_mutex != NULL)
-			k_mutex_unlock(flash_mutex); //shouldn't wait for the
-		// callback to return
+		if (flash_mutex != NULL) {
+			k_mutex_unlock(flash_mutex); //shouldn't wait for the callback to return
+		}
 		err = cb(data, target_entry.fe_data_len);
 		k_free(data);
 

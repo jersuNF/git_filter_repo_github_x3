@@ -107,8 +107,6 @@ static void battery_poll_work_fn()
 	struct pwr_status_event *event = new_pwr_status_event();
 	event->pwr_state = current_state;
 	event->battery_mv = batt_voltage;
-	event->battery_mv_min = battery_get_min();
-	event->battery_mv_max = battery_get_max();
 	EVENT_SUBMIT(event);
 
 	k_work_reschedule(&battery_poll_work, K_MSEC(CONFIG_BATTERY_POLLER_WORK_MSEC));

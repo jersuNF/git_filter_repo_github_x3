@@ -195,9 +195,9 @@ static bool event_handler_impl(const struct event_header *eh)
 		if (ev->pwr_state != PWR_CHARGING) {
 			/* Add battery max/min voltage [centi-voltage] */
 			shared_state.qc_battery.usVbattMax =
-				MAX(shared_state.qc_battery.usVbattMax, ev->battery_mv_max / 10);
+				MAX(shared_state.qc_battery.usVbattMax, ev->battery_mv / 10);
 			shared_state.qc_battery.usVbattMin =
-				MIN(shared_state.qc_battery.usVbattMin, ev->battery_mv_min / 10);
+				MIN(shared_state.qc_battery.usVbattMin, ev->battery_mv / 10);
 		}
 		return false;
 	}

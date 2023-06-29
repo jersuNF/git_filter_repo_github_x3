@@ -40,4 +40,8 @@
  */
 int ble_module_init();
 
+#ifdef CONFIG_TEST
+void unit_test_ble_controller_reset();
+#endif
+
 #endif /*_BLE_CONTROLLER_H_ */

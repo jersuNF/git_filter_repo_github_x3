@@ -274,15 +274,17 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr, int8_t scann
 	/* Copy address into struct */
 	memcpy(&beacon.mac_address, addr, sizeof(bt_addr_le_t));
 
+#if (CONFIG_BEACON_PROCESSOR_LOG_LEVEL >= 4)
 	/* Create string of beacon address */
 	char beacon_str[BT_ADDR_STR_LEN];
 	bt_addr_le_to_str(&beacon.mac_address, beacon_str, sizeof(beacon_str));
-
+#endif
 	int target_beacon = get_beacon_index_by_mac(&beacons, &beacon);
 	/* If beacon doesn't exist (-1), add it to list. */
 	if (target_beacon == -1) {
+#if (CONFIG_BEACON_PROCESSOR_LOG_LEVEL >= 4)
 		LOG_DBG("New beacon detected %s, %d", log_strdup(beacon_str), (uint8_t)m);
-
+#endif
 		/* Populate 1 new entry in beacon history. */
 		beacon.min_dist = (uint8_t)m;
 		beacon.num_measurements = 0;
@@ -292,8 +294,10 @@ int beacon_process_event(uint32_t now_ms, const bt_addr_le_t *addr, int8_t scann
 		/* Add beacon to beacons list */
 		add_to_beacon_list(&beacons, &beacon);
 	} else {
+#if (CONFIG_BEACON_PROCESSOR_LOG_LEVEL >= 4)
 		LOG_DBG("Add measurement (%d) from beacon %s to list", (uint8_t)m,
 			log_strdup(beacon_str));
+#endif
 		add_to_beacon_history(&info, &beacons.beacon_array[target_beacon]);
 	}
 	return 0;

@@ -208,6 +208,15 @@ static void periodic_beacon_scanner_work_fn()
 	}
 }
 
+#ifdef CONFIG_TEST
+void unit_test_ble_controller_reset()
+{
+	k_work_cancel_delayable(&beacon_processor_work);
+	k_work_reschedule(&periodic_beacon_scanner_work, K_NO_WAIT);
+}
+
+#endif
+
 /**
  * @brief Beacon processor work function during beacon scanning.
  */
@@ -639,7 +648,10 @@ static void scan_start(void)
 	int err = bt_le_scan_start(&scan_param, scan_cb);
 	if (err) {
 		LOG_ERR("Start Beacon scanning failed (%d)", err);
-		nf_app_error(ERR_BEACON, err, NULL, 0);
+		/* Be sure not to stall the AMC if we cannot verify beacons */
+		struct ble_beacon_event *event = new_ble_beacon_event();
+		event->status = BEACON_STATUS_OFF;
+		EVENT_SUBMIT(event);
 
 	} else {
 		LOG_INF("Start beacon scanning, Duration[s]:%d, Processing interval[s]:%d",

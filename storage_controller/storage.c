@@ -379,7 +379,9 @@ int stg_clear_partition(flash_partition_t partition)
 
 int stg_read_seq_data(fcb_read_cb cb, uint16_t num_entries)
 {
-	k_mutex_lock(&seq_mutex, K_NO_WAIT);
+	if (k_mutex_lock(&seq_mutex, K_NO_WAIT)) {
+		NCLOG_ERR(STORAGE_CONTROLLER, TRice0("err: locking seq_mutex failed. \n"));
+	}
 	if (seq_mutex.lock_count == 1) {
 		if (fcb_is_empty(&seq_fcb)) {
 			k_mutex_unlock(&seq_mutex);
@@ -409,6 +411,7 @@ int stg_read_seq_data(fcb_read_cb cb, uint16_t num_entries)
 		k_mutex_unlock(&seq_mutex);
 		return err;
 	} else {
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice0( iD( 2874),"wrn: seq_mutex.lock_count != 1 \n"));
 		k_mutex_unlock(&seq_mutex);
 		return -EBUSY;
 	}
@@ -417,6 +420,7 @@ int stg_read_seq_data(fcb_read_cb cb, uint16_t num_entries)
 int stg_read_ano_data(fcb_read_cb cb, bool read_from_start, uint16_t num_entries)
 {
 	if (k_mutex_lock(&ano_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice0( iD( 3634),"wrn: ano_mutex timeout \n"));
 		return -ETIMEDOUT;
 	}
 
@@ -505,6 +509,7 @@ int stg_write_seq_data(uint8_t *data, size_t len)
 		return err;
 	} else {
 		k_mutex_unlock(&seq_mutex);
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice0( iD( 6231),"wrn: seq_mutex timeout\n"));
 		return -ETIMEDOUT;
 	}
 }
@@ -528,6 +533,7 @@ int stg_write_ano_data(const ano_rec_t *ano_rec)
 int stg_write_pasture_data(uint8_t *data, size_t len)
 {
 	if (k_mutex_lock(&pasture_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice0( iD( 1577),"wrn: pasture_mutex timeout\n"));
 		return -ETIMEDOUT;
 	}
 
@@ -597,6 +603,7 @@ uint32_t get_num_entries(flash_partition_t partition)
 	struct k_mutex *mtx = get_mutex(partition);
 
 	if (mtx == NULL || fcb == NULL) {
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice0( iD( 4604),"wrn: partition invalid \n"));
 		return -EINVAL;
 	}
 

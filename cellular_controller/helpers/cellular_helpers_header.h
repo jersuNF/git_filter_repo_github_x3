@@ -73,7 +73,7 @@ struct configs {
 extern struct configs conf;
 extern struct configs conf_listen;
 
-int reset_modem(void);
+int reset_modem();
 int get_ip(char **);
 int send_tcp(char *, size_t);
 int stop_tcp(const bool, bool *);

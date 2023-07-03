@@ -44,6 +44,8 @@ static char urat_args_buffer[STG_CONFIG_URAT_ARG_BUF_SIZE] __attribute__((aligne
 static int server_port;
 static char server_ip[15];
 
+static char used_urat[sizeof("#,#,##")];
+
 /* Connection keep-alive thread structures */
 K_KERNEL_STACK_DEFINE(keep_alive_stack, CONFIG_CELLULAR_KEEP_ALIVE_STACK_SIZE);
 struct k_thread keep_alive_thread;
@@ -67,6 +69,7 @@ static bool waiting_for_msg = false;
 static bool modem_is_ready = false;
 static bool power_level_ok = false;
 static bool fota_in_progress = false;
+static bool switch_rat = false;
 
 static bool enable_mdm_fota = false;
 
@@ -107,6 +110,22 @@ static void give_up_main_soc(void)
 	waiting_for_msg = false;
 	k_sem_give(&close_main_socket_sem);
 	k_sem_give(&connection_state_sem);
+}
+
+static void publish_last_used_urat()
+{
+	int err;
+	memset(used_urat, 0, sizeof(used_urat));
+	err = get_last_used_urat(used_urat, sizeof(used_urat));
+
+	if (!err) {
+		struct urat_args_in_use_event *used_urat_ev = new_urat_args_in_use_event();
+		memcpy(used_urat_ev->urat_in_use, used_urat, sizeof(used_urat));
+		EVENT_SUBMIT(used_urat_ev);
+		LOG_INF("Used URAT command: %s", used_urat);
+	} else {
+		LOG_ERR("Failed to retrieve last used URAT: %d", err);
+	}
 }
 
 void receive_tcp(const struct data *sock_data)
@@ -171,6 +190,9 @@ void listen_sock_poll(void)
 static int start_tcp(void)
 {
 	int ret = modem_nf_wakeup();
+
+	publish_last_used_urat();
+	/* Check if modem was reset */
 	if (ret != 0) {
 		NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 5525),"err: Failed to wake up the modem!\n"));
 		return ret;
@@ -337,7 +359,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return false;
 	} else if (is_urat_args_received_event(eh)) {
 		read_URAT_settings_from_NVS();
-		modem_is_ready = false;
+		switch_rat = true;
 		return false;
 	}
 	return false;
@@ -516,7 +538,11 @@ static void cellular_controller_keep_alive(void *dev)
 				 * fails ungracefully.*/
 				connected = false;
 				fota_in_progress = false;
+
 				ret = reset_modem();
+
+				publish_last_used_urat();
+
 				if (ret == 0) {
 					if (mdm_state == INSTALLATION_COMPLETE) {
 						struct mdm_fw_update_event *ev =
@@ -566,6 +592,10 @@ static void cellular_controller_keep_alive(void *dev)
 						}
 					} else {
 						end_connection(); /* graceful */
+						if (switch_rat) {
+							switch_rat = false;
+							modem_is_ready = false;
+						}
 					}
 				}
 			} else {

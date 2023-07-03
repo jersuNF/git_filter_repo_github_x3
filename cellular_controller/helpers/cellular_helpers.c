@@ -171,7 +171,7 @@ int socket_receive(const struct data *data, char **msg)
 	return 0;
 }
 
-int reset_modem(void)
+int reset_modem()
 {
 	(void)close(conf_listen.ipv4.tcp.sock);
 	(void)close(conf.ipv4.tcp.sock);

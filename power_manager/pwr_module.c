@@ -35,6 +35,9 @@ static const struct device *clock0;
 #define MODULE pwr_module
 #include <logging/log.h>
 
+/* Default arguments for AT+URAT, e.g. 9,7. Will be set upon a manual BLE reset. */
+#define BLE_RESET_URAT_SETTING "9,7"
+
 LOG_MODULE_REGISTER(MODULE, CONFIG_BATTERY_LOG_LEVEL);
 
 static uint32_t extclk_request_flags = 0;
@@ -295,7 +298,7 @@ static bool event_handler(const struct event_header *eh)
 		if (evt->reason == REBOOT_BLE_RESET) {
 			char buf[STG_CONFIG_URAT_ARG_BUF_SIZE];
 			memset(buf,0,sizeof(buf));
-			snprintk(buf, sizeof(buf), "%s", CONFIG_BLE_RESET_URAT_SETTING);
+			snprintk(buf, sizeof(buf), "%s", BLE_RESET_URAT_SETTING);
 
 			err = stg_config_str_write(STG_STR_MODEM_URAT_ARG, buf, sizeof(buf) - 1);
 			if (err != 0) {

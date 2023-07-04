@@ -22,11 +22,22 @@ typedef struct nofence_wdt_modules_t {
 	uint32_t timer_time_seconds;
 } nofence_wdt_modules_t;
 
+/* Watchdog callback work item */
+struct k_work wdt_cb_work;
+
+/* Watchdog callback work context */
+struct wdt_cb_work {
+	struct k_work wdt_work;
+	uint8_t reason; /* Reset reason */
+} m_wdt_cb_work;
+
 static nofence_wdt_modules_t wdt_modules;
 
 static void wdt_timer_cb(struct k_timer *timer);
 
 K_TIMER_DEFINE(wdt_timer, wdt_timer_cb, NULL);
+
+static void wdt_cb_work_fn(struct k_work *work);
 
 static void wdt_timer_cb(struct k_timer *timer)
 {
@@ -34,7 +45,10 @@ static void wdt_timer_cb(struct k_timer *timer)
 		if (wdt_modules.modules[i].active && !wdt_modules.modules[i].kicked) {
 			/* One of the registered timer didn't kick */
 			if (wdt_modules.timer_cb != NULL) {
-				wdt_modules.timer_cb(wdt_modules.modules[i].reason);
+				m_wdt_cb_work.reason = wdt_modules.modules[i].reason;
+				k_work_submit(&m_wdt_cb_work.wdt_work);
+			} else {
+				LOG_ERR("No watchdog callback registered");
 			}
 		}
 		/* reset kicked for next pass */
@@ -52,6 +66,7 @@ void nofence_wdt_init()
 {
 	/* Stop timer in case this init is done several times */
 	k_timer_stop(&wdt_timer);
+	k_work_init(&m_wdt_cb_work.wdt_work, wdt_cb_work_fn);
 	memset(&wdt_modules, 0, sizeof(wdt_modules));
 }
 
@@ -115,4 +130,10 @@ int nofence_wdt_kick(char *module)
 		}
 	}
 	return -EINVAL;
+}
+
+static void wdt_cb_work_fn(struct k_work *work)
+{
+	struct wdt_cb_work *parent = CONTAINER_OF(work, struct wdt_cb_work, wdt_work);
+	wdt_modules.timer_cb(parent->reason);
 }

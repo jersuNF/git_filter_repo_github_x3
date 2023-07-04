@@ -15,9 +15,7 @@
 
 #include "stg_config.h"
 #include "storage.h"
-#include "nf_settings.h"
-
-#define COPY_FROM_EEPROM 0
+#include "nf_version.h"
 
 LOG_MODULE_REGISTER(stg_config, CONFIG_STG_CONFIG_LOG_LEVEL);
 
@@ -35,6 +33,126 @@ static const struct device *mp_device;
 static const struct flash_area *mp_flash_area;
 static struct nvs_fs m_file_system;
 static bool m_initialized = false;
+
+#ifdef CONFIG_STG_CONFIG_DEBUG_SEND_WRITE_ERRORS
+
+uint16_t g_nvs_write_errors;
+#define UPDATE_WRITE_ERRORS(rc)                                                                    \
+	do {                                                                                       \
+		if (rc < 0) {                                                                      \
+			g_nvs_write_errors++;                                                      \
+		}                                                                                  \
+	} while (0)
+#else
+#define UPDATE_WRITE_ERRORS(rc)                                                                    \
+	do {                                                                                       \
+	} while (0)
+
+#endif
+
+#ifdef CONFIG_TEST
+void stg_config_reset_for_unit_tests()
+{
+	mp_device = NULL;
+	mp_flash_area = NULL;
+	m_initialized = false;
+}
+
+struct nvs_fs *stg_config_get_file_system()
+{
+	return &m_file_system;
+}
+
+#endif
+
+/* The following defines, give the NVS keys for FW 2004 production fields
+ * needing to be migrated or moved
+ */
+
+#define STG_U32_DIAGNOSTIC_FLAGS_TODO_UNUSED_2004 25
+#define STG_STR_MODEM_URAT_ARG_2004 26
+#define STG_U16_ANO_START_ID_10002 26
+#define STG_U16_ANO_ID_10002 27
+#define STG_U32_ANO_TIMESTAMP_10002 28
+
+/**
+ * @brief Migrates NVS key/values on version change
+ * @return 0 on success, negative on error
+ */
+
+static int do_migrations()
+{
+	char __aligned(4) buf[32];
+	uint32_t version;
+
+	/* Get the version we were at before rebooting to new */
+	int rc = nvs_read(&m_file_system, (uint16_t)STG_U32_MIGRATED_VERSION, &version,
+			  sizeof(version));
+	if (rc == sizeof(version)) {
+		if (version == NF_X25_VERSION_NUMBER) {
+			/* We have already migrated to the version - we're done */
+			return 0;
+		}
+	} else {
+		NCLOG_WRN(STORAGE_CONTROLLER,TRice( iD( 6482),"Cannot get STG_U32_MIGRATED_VERSION %d\n", rc));
+		/* We cannot deduce the version yet */
+		version = 0;
+	}
+	/*
+	 * If we cannot get the migrated version, we have to deduce if we were a
+	 * 2023 FW 2004 production collar or a staging collar, typically 10002
+	 */
+	if (version == 0) {
+		memset(buf, 0, sizeof(buf));
+		/* String in 2004, U16 ANO-ID in 10004,  */
+		rc = nvs_read(&m_file_system, (uint16_t)STG_STR_MODEM_URAT_ARG_2004, buf,
+			      sizeof(buf));
+		if (rc > 0) {
+			if (rc == sizeof(uint16_t)) {
+				/* some URAT string (9,7) or an ANO ID, if an ANO-ID, we
+				 * know that STG_U32_ANO_TIMESTAMP_10002 is set as well */
+				uint32_t ano_timestamp;
+				int ret = nvs_read(&m_file_system,
+						   (uint16_t)STG_U32_ANO_TIMESTAMP_10002,
+						   &ano_timestamp, sizeof(ano_timestamp));
+				if (ret != sizeof(ano_timestamp)) {
+					version = 2004;
+				} else {
+					version = 10002;
+				}
+			} else {
+				version = 2004;
+			}
+		} else {
+			/* Cannot read ANO/URAT, default to URAT. String will be empty */
+			version = 2004;
+		}
+	}
+	/* Do the actual NVS migration */
+	NCLOG_INF(STORAGE_CONTROLLER,TRice( iD( 6220),"Migrating NVS from %d to %d\n", version, NF_X25_VERSION_NUMBER));
+	if (version == 2004) {
+		/* Must move the URAT to new location, write string + terminating \0 */
+		rc = nvs_write(&m_file_system, STG_STR_MODEM_URAT_ARG, buf, strlen(buf) + 1);
+		if (rc < 0) {
+			NCLOG_ERR(STORAGE_CONTROLLER,TRice( iD( 1638),"Cannot move STG_STR_MODEM_URAT_ARG: %d", rc));
+			return rc;
+		}
+	}
+	/*
+	 * Just leave any ANO parameters, as they are new non-existing keys
+	 * That means that we just skip migration from 10002.
+	 */
+
+	/* Maintainer: Insert new checks here, noting that versions should go upwards only */
+	version = NF_X25_VERSION_NUMBER;
+	rc = nvs_write(&m_file_system, STG_U32_MIGRATED_VERSION, &version, sizeof(version));
+	if (rc != sizeof(version)) {
+		NCLOG_ERR(STORAGE_CONTROLLER,TRice( iD( 5765),"Cannot write STG_U32_MIGRATED_VERSION: %d\n", rc));
+		return rc;
+	}
+
+	return 0;
+}
 
 /**
  * @brief Check whether the Id-data pair identifier is valid.
@@ -79,6 +197,12 @@ int stg_config_init(void)
 		err = nvs_init(&m_file_system, mp_device->name);
 		if (err != 0) {
 			NCLOG_ERR(STORAGE_CONTROLLER, TRice0( iD( 2868),"err: STG Config, failed to initialize NVS storage\n"));
+			return err;
+		}
+
+		err = do_migrations();
+		if (err != 0) {
+			NCLOG_ERR(STORAGE_CONTROLLER, TRice0( iD( 3271),"err: STG Config, failed to migrate\n"));
 			return err;
 		}
 		m_initialized = true;
@@ -130,6 +254,7 @@ int stg_config_u8_write(stg_config_param_id_t id, const uint8_t value)
 
 	ret = nvs_write(&m_file_system, (uint16_t)id, &value, sizeof(uint8_t));
 	if (ret < 0) {
+		UPDATE_WRITE_ERRORS(ret);
 		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 1431),"err: STG u8 write, failed write to storage at id %d\n", (int)id));
 		return ret;
 	}
@@ -181,6 +306,7 @@ int stg_config_u16_write(stg_config_param_id_t id, const uint16_t value)
 
 	ret = nvs_write(&m_file_system, (uint16_t)id, &value, sizeof(uint16_t));
 	if (ret < 0) {
+		UPDATE_WRITE_ERRORS(ret);
 		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 6217),"err: STG u16 write, failed write to storage at id %d\n", (int)id));
 		return ret;
 	}
@@ -232,6 +358,7 @@ int stg_config_u32_write(stg_config_param_id_t id, const uint32_t value)
 
 	ret = nvs_write(&m_file_system, (uint16_t)id, &value, sizeof(uint32_t));
 	if (ret < 0) {
+		UPDATE_WRITE_ERRORS(ret);
 		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 1994),"err: STG u32 write, failed write to storage at id %d\n", (int)id));
 		return ret;
 	}
@@ -239,7 +366,7 @@ int stg_config_u32_write(stg_config_param_id_t id, const uint32_t value)
 	return 0;
 }
 
-int stg_config_str_read(stg_config_param_id_t id, char *str, uint8_t *len)
+int stg_config_str_read(stg_config_param_id_t id, char *buf, size_t bufsize, uint8_t *len)
 {
 	int ret;
 	if (m_initialized != true) {
@@ -249,32 +376,30 @@ int stg_config_str_read(stg_config_param_id_t id, char *str, uint8_t *len)
 
 	ret = is_valid_id(id);
 	if (ret != STG_STR_PARAM_TYPE) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 4449),"wrn: STG str write, invalid id %d, access denied\n", (int)id));
+		LOG_WRN("invalid id (%d), access denied", (int)id);
 		return -ENOMSG;
 	}
 
-	char buff[(id == STG_STR_HOST_PORT) ? STG_CONFIG_HOST_PORT_BUF_LEN : 0];
-	if (sizeof(buff) <= 0) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 6694),"wrn: STG str read, unknown data size %d\n", sizeof(buff)));
-		return -ENOMSG;
-	}
-	memset(buff, 0, sizeof(buff));
-
-	ret = nvs_read(&m_file_system, (uint16_t)id, &buff, sizeof(buff));
-	if (ret == -ENOENT) {
-		/* Return empty string if id-data pair does not exist */
-		strcpy(buff, "\0");
-	} else if ((ret < 0) && (ret != -ENOENT)) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 6568),"err: STG str read, failed read to storage at id %d\n", (int)id));
+	memset(buf, 0, bufsize);
+	ret = nvs_read(&m_file_system, (uint16_t)id, buf, bufsize);
+	if (ret <= 0) {
+		/* Return empty string if id-data pair does not exist or 0 buf size */
 		return ret;
+	} else if (ret > bufsize) {
+		/* The provided buffer was too small */
+		return -ERANGE;
+	} else if (ret == bufsize) {
+		/* If string is not null-terminated, we are unititialized  */
+		if (buf[ret - 1] != '\0') {
+			return -ENODATA;
+		}
 	}
-	memcpy(str, buff, sizeof(buff));
-	*len = strlen(buff);
-	NCLOG_DBG(STORAGE_CONTROLLER, TRice( iD( 6970),"dbg: Read: Id=%d, Length=%d, Data=dynamic_string\n", (int)id, *len, str));
+	*len = strlen(buf);
+	NCLOG_DBG(STORAGE_CONTROLLER, TRice( iD( 6970),"dbg: Read: Id=%d, Length=%d, Data=dynamic_string\n", (int)id, *len, buf));
 	return 0;
 }
 
-int stg_config_str_write(stg_config_param_id_t id, const char *str, const uint8_t len)
+int stg_config_str_write(stg_config_param_id_t id, const char *str, size_t len)
 {
 	int ret;
 	if (m_initialized != true) {
@@ -287,26 +412,28 @@ int stg_config_str_write(stg_config_param_id_t id, const char *str, const uint8_
 		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 6083),"wrn: STG str write, invalid id %d, access denied\n", (int)id));
 		return -ENOMSG;
 	}
-	if ((id == STG_STR_HOST_PORT) && (len > STG_CONFIG_HOST_PORT_BUF_LEN)) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 2411),"wrn: STG str write, incorrect size %d for id %d\n", len, (int)id));
+	/* TODO, make this much more elegant with compile-time checks :-( */
+	size_t max_size;
+	if (id == STG_STR_HOST_PORT) {
+		max_size = STG_CONFIG_HOST_PORT_BUF_LEN;
+	} else if (id == STG_STR_MODEM_URAT_ARG) {
+		max_size = STG_CONFIG_URAT_ARG_BUF_SIZE;
+	} else {
+		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 2265),"err: Invalid string key: %d\n", (int)id));
+		return -EINVAL;
+	}
+	if (len + 1 > max_size) {
 		return -EOVERFLOW;
 	}
 
-	char buff[(id == STG_STR_HOST_PORT) ? STG_CONFIG_HOST_PORT_BUF_LEN : 0];
-	if (sizeof(buff) <= 0) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 4240),"wrn: STG str write, unknown data size %d\n", sizeof(buff)));
-		return -ENOMSG;
-	}
-	memset(buff, 0, sizeof(buff));
-	memcpy(buff, str, sizeof(buff));
-	buff[sizeof(buff) - 1] = '\0'; //Ensure termination
-
-	ret = nvs_write(&m_file_system, (uint16_t)id, buff, sizeof(buff));
+	/* Write the string including the terminating zero to NVS */
+	ret = nvs_write(&m_file_system, (uint16_t)id, str, len + 1);
 	if (ret < 0) {
+		UPDATE_WRITE_ERRORS(ret);
 		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 5430),"err: STG str write, failed write to storage at id %d\n", (int)id));
 		return ret;
 	}
-	NCLOG_DBG(STORAGE_CONTROLLER, TRice( iD( 7692),"dbg: Read: Id=%d, Length=%d, Data=dynamic_string\n", (int)id, strlen(buff), buff));
+	NCLOG_DBG(STORAGE_CONTROLLER, TRice( iD( 7692),"dbg: Read: Id=%d, Length=%d, Data=dynamic_string\n", (int)id, strlen(str), str));
 	return 0;
 }
 
@@ -367,6 +494,7 @@ int stg_config_blob_write(stg_config_param_id_t id, const uint8_t *arr, const ui
 
 	ret = nvs_write(&m_file_system, (uint16_t)id, arr, len);
 	if (ret < 0) {
+		UPDATE_WRITE_ERRORS(ret);
 		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 3146),"err: STG blob write, failed write to storage at id %d\n", (int)id));
 		return ret;
 	}
@@ -434,7 +562,8 @@ int is_valid_id(stg_config_param_id_t param_id)
 		param_type = STG_U32_PARAM_TYPE;
 		break;
 	}
-	case STG_STR_HOST_PORT: {
+	case STG_STR_HOST_PORT:
+	case STG_STR_MODEM_URAT_ARG: {
 		param_type = STG_STR_PARAM_TYPE;
 		break;
 	}
@@ -620,7 +749,8 @@ int copy_eeprom_parameters_to_stg_flash()
 
 		char port_read[STG_CONFIG_HOST_PORT_BUF_LEN];
 		uint8_t port_len = 0;
-		ret = stg_config_str_read(STG_STR_HOST_PORT, port_read, &port_len);
+		ret = stg_config_str_read(STG_STR_HOST_PORT, port_read, sizeof(port_read),
+					  &port_len);
 		if (ret != 0) {
 			success = -1;
 			NCLOG_ERR(STORAGE_CONTROLLER, TRice0( iD( 6594),"err: STG Failed to read host port\n"));

@@ -37,4 +37,7 @@ if STORAGE_CONTROLLER
 	config STG_CONFIG_LOG_LEVEL
 		int "Default log level for STG Config"
 		default 2
+	config STG_CONFIG_DEBUG_SEND_WRITE_ERRORS
+	        bool "Only used for debugging, send write errors in poll"
+	        default true
 endif

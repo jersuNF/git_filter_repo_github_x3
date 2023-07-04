@@ -182,6 +182,12 @@ void messaging_tx_thread_fn(void);
 
 static bool m_transfer_boot_params = true;
 static bool m_confirm_acc_limits, m_confirm_ble_key;
+static bool m_confirm_urat_arg = false;
+
+#ifdef CONFIG_STG_CONFIG_DEBUG_SEND_WRITE_ERRORS
+extern uint16_t g_nvs_write_errors;
+static uint16_t m_sent_nvs_errors;
+#endif
 
 K_MUTEX_DEFINE(send_binary_mutex);
 K_MUTEX_DEFINE(read_flash_mutex);
@@ -505,7 +511,7 @@ void modem_poll_work_fn()
 	/* Attempt to send poll request immediately */
 	ret = set_tx_state_ready(POLL_REQ);
 	if (ret != 0) {
-		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4326),"err: Periodic poll failed, reschedule, error %d\n", ret));
+		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4326),"err: Periodic poll failed, error %d\n", ret));
 	}
 
 	static bool initialized = false;
@@ -991,7 +997,7 @@ void messaging_tx_thread_fn(void)
 				/* Poll request error handler,
                                  * Note! Consider notifying sender, leaving error handling to src */
 				if (err != 0) {
-					NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 2211),"err: Failed to send poll request err: %d\n", err));
+					NCLOG_WRN(MESSAGING_MODULE, TRice( iD( 2211),"wrn: Failed to send poll request err: %d\n", err));
 				}
 			}
 
@@ -1799,6 +1805,33 @@ void build_poll_request(NofenceMessage *poll_req)
 			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 5573),"err: Failed to read ble_sec_key %d\n", err));
 		}
 	}
+	if (m_confirm_urat_arg || m_transfer_boot_params) {
+		char buf[STG_CONFIG_URAT_ARG_BUF_SIZE];
+		uint8_t len;
+		err = stg_config_str_read(STG_STR_MODEM_URAT_ARG, buf, sizeof(buf), &len);
+		if (err == 0) {
+			LOG_HEXDUMP_DBG(buf, sizeof(buf), "URAT_ARG");
+			poll_req->m.poll_message_req.has_xModemUratArg = true;
+			strncpy(poll_req->m.poll_message_req.xModemUratArg, buf,
+				sizeof(poll_req->m.poll_message_req.xModemUratArg) - 1);
+
+		} else {
+			/* No error if there are only 0xFF's in the NVS */
+			if (err != -ENODATA) {
+				LOG_ERR("Failed to read URAT args (%d)", err);
+			} else {
+				LOG_DBG("Failed to read URAT args (%d)", err);
+			}
+		}
+	}
+#ifdef CONFIG_STG_CONFIG_DEBUG_SEND_WRITE_ERRORS
+	/* If there are any NVS write errors, send them until reply */
+	if (g_nvs_write_errors > 0) {
+		poll_req->m.poll_message_req.has_usEepromErrors = true;
+		poll_req->m.poll_message_req.usEepromErrors = g_nvs_write_errors;
+		m_sent_nvs_errors = poll_req->m.poll_message_req.usEepromErrors;
+	}
+#endif
 	/* TODO pshustad, fill GNSSS parameters for MIA M10 */
 	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec =
 		(cached_gnss_mode == GNSSMODE_NOMODE) ? false : true;
@@ -2236,6 +2269,20 @@ void process_poll_response(NofenceMessage *proto)
 		sigma_ev->param.off_animal_value = pResp->usOffAnimalTimeLimitSec;
 		EVENT_SUBMIT(sigma_ev);
 	}
+	m_confirm_urat_arg = false;
+	if (pResp->has_xModemUratArg) {
+		m_confirm_urat_arg = true;
+		char buf[STG_CONFIG_URAT_ARG_BUF_SIZE];
+		memset(buf, 0, sizeof(buf));
+		strncpy(buf, pResp->xModemUratArg, sizeof(buf) - 1);
+		err = stg_config_str_write(STG_STR_MODEM_URAT_ARG, buf, sizeof(buf) - 1);
+		if (err != 0) {
+			LOG_ERR("Error storing URAT to NVS (%d)", err);
+		} else {
+			struct urat_args_received_event *urat_ev = new_urat_args_received_event();
+			EVENT_SUBMIT(urat_ev);
+		}
+	}
 
 	m_confirm_ble_key = false;
 	if (pResp->has_rgubcBleKey) {
@@ -2267,6 +2314,19 @@ void process_poll_response(NofenceMessage *proto)
 			NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 2283),"err: Failed to schedule work\n"));
 		}
 	}
+#ifdef CONFIG_STG_CONFIG_DEBUG_SEND_WRITE_ERRORS
+	/* If we sent NVS errors and there are no new ones, clear errors.
+	 * Otherwise, keep sending
+	 */
+	if (m_sent_nvs_errors > 0) {
+		if (g_nvs_write_errors > m_sent_nvs_errors) {
+			g_nvs_write_errors -= m_sent_nvs_errors;
+		} else {
+			g_nvs_write_errors = 0;
+		}
+	}
+
+#endif
 
 	if (pResp->has_versionInfo) {
 		if (process_upgrade_request(&pResp->versionInfo) == 0) {
@@ -2309,7 +2369,7 @@ void process_poll_response(NofenceMessage *proto)
 static int get_and_parse_server_ip_address(char *buf, size_t size)
 {
 	uint8_t port_length = 0;
-	int ret = stg_config_str_read(STG_STR_HOST_PORT, buf, &port_length);
+	int ret = stg_config_str_read(STG_STR_HOST_PORT, buf, size, &port_length);
 	if (ret != 0) {
 		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 4124),"err: Failed to read host address from ext flash\n"));
 		return ret;

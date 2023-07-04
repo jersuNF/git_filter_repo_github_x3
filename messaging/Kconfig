@@ -16,7 +16,7 @@ if MESSAGING
 
 	config MESSAGING_THREAD_STACK_SIZE
 		int "Size of the message processing thread"
-		default 2688
+		default 3072
 
 	config MESSAGING_THREAD_PRIORITY
 		int "Priority of the message processing thread"

@@ -88,7 +88,7 @@ static int commander_settings_read(enum diagnostics_interface interface, setting
 		//err = eep_read_host_port(&buf[1], sizeof(buf)-1);
 		char port[STG_CONFIG_HOST_PORT_BUF_LEN];
 		uint8_t port_length = 0;
-		err = stg_config_str_read(STG_STR_HOST_PORT, port, &port_length);
+		err = stg_config_str_read(STG_STR_HOST_PORT, port, sizeof(port), &port_length);
 		if (err == 0) {
 			memcpy(&buf[1], port, port_length);
 			commander_send_resp(interface, SETTINGS, READ, DATA, buf,

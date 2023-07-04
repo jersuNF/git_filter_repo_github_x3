@@ -36,8 +36,11 @@ K_MSGQ_DEFINE(msgq, sizeof(struct msg2server), 1, 4);
 struct k_poll_event events[1] = { K_POLL_EVENT_STATIC_INITIALIZER(
 	K_POLL_TYPE_MSGQ_DATA_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY, &msgq, 0) };
 
-char server_address[STG_CONFIG_HOST_PORT_BUF_LEN - 1];
-char server_address_tmp[STG_CONFIG_HOST_PORT_BUF_LEN - 1];
+static char server_address[STG_CONFIG_HOST_PORT_BUF_LEN + 1] __attribute__((aligned(4)));
+/* TODO, no point having the server_address_tmp on the heap, move to stack and test */
+static char server_address_tmp[STG_CONFIG_HOST_PORT_BUF_LEN + 1];
+
+static char urat_args_buffer[STG_CONFIG_URAT_ARG_BUF_SIZE] __attribute__((aligned(4)));
 static int server_port;
 static char server_ip[15];
 
@@ -198,6 +201,21 @@ static int start_tcp(void)
 	return ret;
 }
 
+static void read_URAT_settings_from_NVS(void)
+{
+	uint8_t urat_args_buf_len = 0;
+	int err = stg_config_str_read(STG_STR_MODEM_URAT_ARG, urat_args_buffer,
+				      sizeof(urat_args_buffer), &urat_args_buf_len);
+	if (err != 0) {
+		LOG_WRN("Failed to read URAT settings from NVS!, err:%d", err);
+		return;
+	}
+	if (urat_args_buf_len > sizeof(urat_args_buffer)) {
+		LOG_WRN("Buffer overflow when reading server URAT settings from NVS!");
+	}
+	modem_nf_set_urat_config(urat_args_buffer);
+}
+
 static uint8_t *CharMsgOut = NULL;
 static bool cellular_controller_event_handler(const struct event_header *eh)
 {
@@ -217,7 +235,8 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return false;
 	} else if (is_messaging_host_address_event(eh)) {
 		uint8_t port_length = 0;
-		int ret = stg_config_str_read(STG_STR_HOST_PORT, server_address_tmp, &port_length);
+		int ret = stg_config_str_read(STG_STR_HOST_PORT, server_address_tmp,
+					      sizeof(server_address_tmp), &port_length);
 		if (ret != 0) {
 			NCLOG_WRN(CELLULAR_CONTROLLER, TRice0( iD( 2757),"wrn: Failed to read host address from ext flash\n"));
 		}
@@ -235,6 +254,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		}
 		uint8_t ip_len;
 		ip_len = ptr_port - 1 - &server_address[0];
+		memset(&server_ip[0], 0, sizeof(server_ip));
 		memcpy(&server_ip[0], &server_address[0], ip_len);
 		ret = memcmp(server_address, server_address_tmp, STG_CONFIG_HOST_PORT_BUF_LEN - 1);
 		if (ret != 0) {
@@ -315,6 +335,10 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 			NCLOG_WRN(CELLULAR_CONTROLLER, TRice0( iD( 2451),"wrn: Writing to NVS fail\n"));
 		}
 		return false;
+	} else if (is_urat_args_received_event(eh)) {
+		read_URAT_settings_from_NVS();
+		modem_is_ready = false;
+		return false;
 	}
 	return false;
 }
@@ -327,24 +351,29 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 int8_t cache_server_address(void)
 {
 	uint8_t port_length = 0;
-	int err = stg_config_str_read(STG_STR_HOST_PORT, server_address, &port_length);
+	int err = stg_config_str_read(STG_STR_HOST_PORT, server_address, sizeof(server_address),
+				      &port_length);
 	if (err != 0 || server_address[0] == '\0') {
+		LOG_ERR("Cannot read host/port %d", err);
 		return -1;
 	}
 	char *ptr_port;
 	ptr_port = strchr(server_address, ':') + 1;
 	server_port = atoi(ptr_port);
 	if (server_port <= 0) {
+		LOG_ERR("Cannot read host/port, missing  :");
 		return -1;
 	}
 	uint8_t ip_len;
 	ip_len = ptr_port - 1 - &server_address[0];
+	memset(&server_ip[0], 0, sizeof(server_ip));
 	memcpy(&server_ip[0], &server_address[0], ip_len);
 	if (server_ip[0] != '\0') {
 		//NCLOG_DBG(CELLULAR_CONTROLLER, TRICE_S( iD( 2073),"inf: Host address read from storage: %s : ", &server_ip[0]));
 		NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 1777),"inf: %d\n", server_port));
 		return 0;
 	} else {
+		LOG_WRN("Cannot read host/port,empty string");
 		return -1;
 	}
 }
@@ -604,6 +633,7 @@ int8_t cellular_controller_init(void)
 	}
 	NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 5209),"inf: modem status read: %d\n", g_modem_status_cache));
 	set_modem_status_cb(modem_read_status_nvm, modem_write_status_nvm);
+	read_URAT_settings_from_NVS();
 
 	/* Start connection keep-alive thread */
 	modem_is_ready = false;
@@ -672,3 +702,4 @@ EVENT_SUBSCRIBE(MODULE, free_message_mem_event);
 EVENT_SUBSCRIBE(MODULE, dfu_status_event);
 EVENT_SUBSCRIBE(MODULE, pwr_status_event);
 EVENT_SUBSCRIBE(MODULE, save_modem_status_event);
+EVENT_SUBSCRIBE(MODULE, urat_args_received_event);

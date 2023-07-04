@@ -297,8 +297,8 @@ static bool event_handler(const struct event_header *eh)
 		*/
 		if (evt->reason == REBOOT_BLE_RESET) {
 			char buf[STG_CONFIG_URAT_ARG_BUF_SIZE];
-			memset(buf,0,sizeof(buf));
-			snprintk(buf, sizeof(buf), "%s", BLE_RESET_URAT_SETTING);
+			memset(buf, 0, sizeof(buf));
+			strncpy(buf, BLE_RESET_URAT_SETTING, sizeof(buf) - 1);
 
 			err = stg_config_str_write(STG_STR_MODEM_URAT_ARG, buf, sizeof(buf) - 1);
 			if (err != 0) {

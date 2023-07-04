@@ -120,7 +120,9 @@ static void publish_last_used_urat()
 
 	if (!err) {
 		struct urat_args_in_use_event *used_urat_ev = new_urat_args_in_use_event();
-		memcpy(used_urat_ev->urat_in_use, used_urat, sizeof(used_urat));
+		memset(used_urat_ev->urat_in_use, 0, sizeof(used_urat_ev->urat_in_use));
+		strncpy(used_urat_ev->urat_in_use, used_urat,
+			sizeof(used_urat_ev->urat_in_use) - 1);
 		EVENT_SUBMIT(used_urat_ev);
 		LOG_INF("Used URAT command: %s", used_urat);
 	} else {

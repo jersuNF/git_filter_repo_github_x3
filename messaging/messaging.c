@@ -973,10 +973,12 @@ void messaging_tx_thread_fn(void)
 			     ((k_uptime_get() - m_last_poll_req_timestamp_ms) >= 60000))) {
 				/* For poll requests always check the connection before building the message.
 				 * The message will be disregarded if the modem information is not available. */
-
+				k_sem_reset(&cache_ready_sem);
 				struct check_connection *ev = new_check_connection();
 				EVENT_SUBMIT(ev);
-				err = k_sem_take(&cache_ready_sem, K_SECONDS(60));
+				err = k_sem_take(
+					&cache_ready_sem,
+					K_MINUTES(CONFIG_COLLAR_STATES_CACHE_TIMEOUT_MINUTES));
 				if (err == 0) {
 					err = k_sem_take(&cache_lock_sem, K_SECONDS(1));
 					if (err == 0) {

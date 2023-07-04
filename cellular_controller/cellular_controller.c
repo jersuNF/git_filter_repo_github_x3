@@ -191,7 +191,6 @@ static int start_tcp(void)
 {
 	int ret = modem_nf_wakeup();
 
-	publish_last_used_urat();
 	/* Check if modem was reset */
 	if (ret != 0) {
 		NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 5525),"err: Failed to wake up the modem!\n"));
@@ -541,8 +540,6 @@ static void cellular_controller_keep_alive(void *dev)
 
 				ret = reset_modem();
 
-				publish_last_used_urat();
-
 				if (ret == 0) {
 					if (mdm_state == INSTALLATION_COMPLETE) {
 						struct mdm_fw_update_event *ev =
@@ -591,11 +588,11 @@ static void cellular_controller_keep_alive(void *dev)
 							}
 						}
 					} else {
-						end_connection(); /* graceful */
 						if (switch_rat) {
 							switch_rat = false;
 							modem_is_ready = false;
 						}
+						end_connection(); /* graceful */
 					}
 				}
 			} else {
@@ -612,6 +609,7 @@ static void cellular_controller_keep_alive(void *dev)
 void announce_connection_state(bool state)
 {
 	k_sem_reset(&connection_state_sem);
+	publish_last_used_urat();
 	struct connection_state_event *ev = new_connection_state_event();
 	ev->state = state;
 	EVENT_SUBMIT(ev);

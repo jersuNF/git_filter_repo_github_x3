@@ -287,6 +287,22 @@ static bool event_handler(const struct event_header *eh)
 		struct pwr_reboot_event *evt = cast_pwr_reboot_event(eh);
 
 		int err;
+
+		/* 0V-fix: With the introduction of FW2005 all automatic fallback to 4G RAT was removed.
+		* In case we end up in a situation where we are unable to communicate on 2G, it is possible
+		* to reset the collar over BLE to enable 4G again.
+		*/
+		if (evt->reason == REBOOT_BLE_RESET) {
+			char buf[STG_CONFIG_URAT_ARG_BUF_SIZE];
+			memset(buf,0,sizeof(buf));
+			snprintk(buf, sizeof(buf), "%s", CONFIG_BLE_RESET_URAT_SETTING);
+
+			err = stg_config_str_write(STG_STR_MODEM_URAT_ARG, buf, sizeof(buf) - 1);
+			if (err != 0) {
+				LOG_WRN("Cannot reset URAT argument after BLE reset: %d",err);
+			}
+		}
+
 		if ((evt->reason >= 0) && (evt->reason < REBOOT_REASON_CNT)) {
 			err = stg_config_u8_write(STG_U8_RESET_REASON, (uint8_t)evt->reason);
 		} else {

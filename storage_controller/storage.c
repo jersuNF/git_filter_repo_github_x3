@@ -380,7 +380,7 @@ int stg_clear_partition(flash_partition_t partition)
 int stg_read_seq_data(fcb_read_cb cb, uint16_t num_entries)
 {
 	if (k_mutex_lock(&seq_mutex, K_NO_WAIT)) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice0("err: locking seq_mutex failed. \n"));
+		NCLOG_ERR(STORAGE_CONTROLLER, TRice0( iD( 2883),"err: locking seq_mutex failed. \n"));
 	}
 	if (seq_mutex.lock_count == 1) {
 		if (fcb_is_empty(&seq_fcb)) {

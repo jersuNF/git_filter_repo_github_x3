@@ -116,7 +116,7 @@ static void publish_last_used_urat()
 {
 	int err;
 	memset(used_urat, 0, sizeof(used_urat));
-	err = get_last_used_urat(used_urat, sizeof(used_urat));
+	err = modem_nf_get_last_used_urat(used_urat, sizeof(used_urat));
 
 	if (!err) {
 		struct urat_args_in_use_event *used_urat_ev = new_urat_args_in_use_event();

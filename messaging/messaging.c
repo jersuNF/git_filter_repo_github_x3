@@ -128,6 +128,9 @@ static uint8_t ccid[20] = "\0";
 static char mdm_fw_file_name[sizeof(((PollMessageResponse *)NULL)->xModemFwFileName)] = "\0";
 static char urat_in_use_buf[STG_CONFIG_URAT_ARG_BUF_SIZE] = "\0";
 
+static uint8_t expected_ano_frame, new_ano_in_progress;
+static bool first_ano_frame;
+
 /* Time since the server updated the date time in seconds. */
 static atomic_t server_timestamp_sec = ATOMIC_INIT(0);
 

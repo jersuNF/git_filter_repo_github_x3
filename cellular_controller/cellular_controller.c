@@ -559,7 +559,8 @@ static void cellular_controller_keep_alive(void *dev)
 				enable_mdm_fota = false;
 			}
 			if (cellular_controller_is_ready()) {
-				if (!connected) { //check_ip
+				if (!connected &&
+				    k_sem_take(&close_main_socket_sem, K_NO_WAIT) != 0) { //check_ip
 					// takes place in start_tcp() in this
 					// case.
 					if (fota_in_progress) {

@@ -1035,6 +1035,11 @@ void messaging_tx_thread_fn(void)
 					if (err != 0) {
 						NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 4821),"wrn: Failed to send seq messages\n"));
 					}
+				} else {
+					LOG_WRN("Cached semaphore not ready, dropping poll request!");
+					struct messaging_stop_connection_event *end_connection =
+						new_messaging_stop_connection_event();
+					EVENT_SUBMIT(end_connection);
 				}
 
 				/* FENCE DEFINITION REQUEST */

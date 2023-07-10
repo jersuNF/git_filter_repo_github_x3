@@ -20,14 +20,12 @@
 LOG_MODULE_REGISTER(stg_config, CONFIG_STG_CONFIG_LOG_LEVEL);
 
 /* Config parameter types */
-enum {
-	STG_INVALID_PARAM_TYPE = 0,
-	STG_U8_PARAM_TYPE,
-	STG_U16_PARAM_TYPE,
-	STG_U32_PARAM_TYPE,
-	STG_STR_PARAM_TYPE,
-	STG_BLOB_PARAM_TYPE
-} stg_param_type;
+enum { STG_INVALID_PARAM_TYPE = 0,
+       STG_U8_PARAM_TYPE,
+       STG_U16_PARAM_TYPE,
+       STG_U32_PARAM_TYPE,
+       STG_STR_PARAM_TYPE,
+       STG_BLOB_PARAM_TYPE } stg_param_type;
 
 static const struct device *mp_device;
 static const struct flash_area *mp_flash_area;
@@ -37,15 +35,15 @@ static bool m_initialized = false;
 #ifdef CONFIG_STG_CONFIG_DEBUG_SEND_WRITE_ERRORS
 
 uint16_t g_nvs_write_errors;
-#define UPDATE_WRITE_ERRORS(rc)                                                                    \
-	do {                                                                                       \
-		if (rc < 0) {                                                                      \
-			g_nvs_write_errors++;                                                      \
-		}                                                                                  \
+#define UPDATE_WRITE_ERRORS(rc) \
+	do {                    \
+             if (rc < 0) {      \
+			g_nvs_write_errors++; \
+		     }                        \
 	} while (0)
 #else
-#define UPDATE_WRITE_ERRORS(rc)                                                                    \
-	do {                                                                                       \
+#define UPDATE_WRITE_ERRORS(rc) \
+	do {                    \
 	} while (0)
 
 #endif

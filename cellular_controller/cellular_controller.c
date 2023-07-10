@@ -377,7 +377,7 @@ int8_t cache_server_address(void)
 	int err = stg_config_str_read(STG_STR_HOST_PORT, server_address, sizeof(server_address),
 				      &port_length);
 	if (err != 0 || server_address[0] == '\0') {
-		LOG_ERR("Cannot read host/port %d", err);
+		LOG_ERR("Cannot read host/port %d",err);
 		return -1;
 	}
 	char *ptr_port;

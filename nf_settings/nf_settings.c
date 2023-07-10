@@ -97,7 +97,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
 		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? FenceStatus_FenceStatus_UNKNOWN :
-								    *value;
+							      *value;
 		LOG_INF("Read EEP_FENCE_STATUS %i", *value);
 		break;
 	}
@@ -120,7 +120,7 @@ int eep_uint8_read(eep_uint8_enum_t field, uint8_t *value)
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
 		*value = *value == EEPROM_DEFAULT_VALUE_8_T ? CollarStatus_CollarStatus_UNKNOWN :
-								    *value;
+							      *value;
 		LOG_INF("Read EEP_COLLAR_STATUS %i", *value);
 		break;
 	}
@@ -317,7 +317,7 @@ int eep_uint16_read(eep_uint16_enum_t field, uint16_t *value)
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
 		*value = *value == EEPROM_DEFAULT_VALUE_16_T ? ACC_SIGMA_NOACTIVITY_LIMIT_DEFAULT :
-								     *value;
+							       *value;
 		LOG_INF("Set EEP_ACC_SIGMA_NOACTIVITY_LIMIT to %i", *value);
 		break;
 	}
@@ -329,7 +329,7 @@ int eep_uint16_read(eep_uint16_enum_t field, uint16_t *value)
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
 		*value = *value == EEPROM_DEFAULT_VALUE_16_T ? OFF_ANIMAL_TIME_LIMIT_SEC_DEFAULT :
-								     *value;
+							       *value;
 		LOG_INF("Set EEP_OFF_ANIMAL_TIME_LIMIT_SEC to %i", *value);
 		break;
 	}
@@ -341,7 +341,7 @@ int eep_uint16_read(eep_uint16_enum_t field, uint16_t *value)
 		 */
 		ret = eeprom_read(m_p_device, offset, value, sizeof(*value));
 		*value = *value == EEPROM_DEFAULT_VALUE_16_T ? ACC_SIGMA_SLEEP_LIMIT_DEFAULT :
-								     *value;
+							       *value;
 		LOG_INF("Set EEP_ACC_SIGMA_SLEEP_LIMIT to %i", *value);
 		break;
 	}

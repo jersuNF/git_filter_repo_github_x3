@@ -302,7 +302,7 @@ static bool event_handler(const struct event_header *eh)
 
 			err = stg_config_str_write(STG_STR_MODEM_URAT_ARG, buf, sizeof(buf) - 1);
 			if (err != 0) {
-				LOG_WRN("Cannot reset URAT argument after BLE reset: %d", err);
+				LOG_WRN("Cannot reset URAT argument after BLE reset: %d",err);
 			}
 		}
 

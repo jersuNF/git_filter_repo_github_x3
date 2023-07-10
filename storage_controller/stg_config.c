@@ -94,7 +94,7 @@ static int do_migrations()
 			return 0;
 		}
 	} else {
-		NCLOG_WRN(STORAGE_CONTROLLER,TRice( iD( 6482),"Cannot get STG_U32_MIGRATED_VERSION %d\n", rc));
+		NCLOG_WRN(STORAGE_CONTROLLER,TRice( iD( 4136), "wrn: Cannot get STG_U32_MIGRATED_VERSION. version == 0 and rc: %d\n", rc));
 		/* We cannot deduce the version yet */
 		version = 0;
 	}
@@ -118,23 +118,25 @@ static int do_migrations()
 				if (ret != sizeof(ano_timestamp)) {
 					version = 2004;
 				} else {
+					NCLOG_WRN(STORAGE_CONTROLLER,TRice( iD( 7931), "wrn: Failed to read STG_U32_ANO_TIMESTAMP_10002, default to version == 10002 and ret: %d\n", ret));
 					version = 10002;
 				}
 			} else {
 				version = 2004;
 			}
 		} else {
+			NCLOG_WRN(STORAGE_CONTROLLER,TRice( iD( 2542), "wrn: Failed to read STG_STR_MODEM_URAT_ARG_2004,default to version == 2004 and rc: %d\n", rc));
 			/* Cannot read ANO/URAT, default to URAT. String will be empty */
 			version = 2004;
 		}
 	}
 	/* Do the actual NVS migration */
-	NCLOG_INF(STORAGE_CONTROLLER,TRice( iD( 6220),"Migrating NVS from %d to %d\n", version, NF_X25_VERSION_NUMBER));
+	NCLOG_INF(STORAGE_CONTROLLER,TRice( iD( 6220),"inf: Migrating NVS from %d to %d\n", version, NF_X25_VERSION_NUMBER));
 	if (version == 2004) {
 		/* Must move the URAT to new location, write string + terminating \0 */
 		rc = nvs_write(&m_file_system, STG_STR_MODEM_URAT_ARG, buf, strlen(buf) + 1);
 		if (rc < 0) {
-			NCLOG_ERR(STORAGE_CONTROLLER,TRice( iD( 1638),"Cannot move STG_STR_MODEM_URAT_ARG: %d", rc));
+			NCLOG_ERR(STORAGE_CONTROLLER,TRice( iD( 1638),"err: Cannot write STG_STR_MODEM_URAT_ARG: %d\n", rc));
 			return rc;
 		}
 	}
@@ -147,7 +149,7 @@ static int do_migrations()
 	version = NF_X25_VERSION_NUMBER;
 	rc = nvs_write(&m_file_system, STG_U32_MIGRATED_VERSION, &version, sizeof(version));
 	if (rc != sizeof(version)) {
-		NCLOG_ERR(STORAGE_CONTROLLER,TRice( iD( 5765),"Cannot write STG_U32_MIGRATED_VERSION: %d\n", rc));
+		NCLOG_ERR(STORAGE_CONTROLLER,TRice( iD( 5765),"err: Cannot write STG_U32_MIGRATED_VERSION: %d\n", rc));
 		return rc;
 	}
 
@@ -229,6 +231,7 @@ int stg_config_u8_read(stg_config_param_id_t id, uint8_t *value)
 	if (ret == -ENOENT) {
 		/* Return u8 max if id-data pair does not exist */
 		val = UINT8_MAX;
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 6900), "wrn: STG u8 read, id-data pair does not exist at id %d\n", (int)id));
 	} else if ((ret < 0) && (ret != -ENOENT)) {
 		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 5382),"err: STG u8 read, failed to read storage at id %d\n", (int)id));
 		return ret;
@@ -281,6 +284,7 @@ int stg_config_u16_read(stg_config_param_id_t id, uint16_t *value)
 	if (ret == -ENOENT) {
 		/* Return u16 max if id-data pair does not exist */
 		val = UINT16_MAX;
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 1184), "wrn: STG u16 read, id-data pair does not exist at id %d\n", (int)id));
 	} else if ((ret < 0) && (ret != -ENOENT)) {
 		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 7264),"err: STG u16 read, failed to read storage at id %d\n", (int)id));
 		return ret;
@@ -333,6 +337,7 @@ int stg_config_u32_read(stg_config_param_id_t id, uint32_t *value)
 	if (ret == -ENOENT) {
 		/* Return u32 max if id-data pair does not exist */
 		val = UINT32_MAX;
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 3970), "wrn: STG u32 read, id-data pair does not exist at id %d\n", (int)id));
 	} else if ((ret < 0) && (ret != -ENOENT)) {
 		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 1209),"err: STG u32 read, failed to read storage at id %d\n", (int)id));
 		return ret;
@@ -385,6 +390,7 @@ int stg_config_str_read(stg_config_param_id_t id, char *buf, size_t bufsize, uin
 	if (ret <= 0) {
 		/* Return empty string if id-data pair does not exist or 0 buf size */
 		return ret;
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 2155), "wrn: STG string read, id-data pair does not exist at id %d\n", (int)id));
 	} else if (ret > bufsize) {
 		/* The provided buffer was too small */
 		return -ERANGE;
@@ -462,6 +468,7 @@ int stg_config_blob_read(stg_config_param_id_t id, uint8_t *arr, uint8_t *len)
 	if (ret == -ENOENT) {
 		/* Return nothing if blob id-data pair does not exist */
 		return 0;
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 3602),"wrn: STG blob read, id-data pair does not exist at id %d\n", (int)id));
 	} else if ((ret < 0) && (ret != -ENOENT)) {
 		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 3561),"err: STG blob read, failed read to storage at id %d\n", (int)id));
 		return ret;

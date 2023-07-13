@@ -453,7 +453,7 @@ int stg_config_blob_read(stg_config_param_id_t id, uint8_t *arr, uint8_t *len)
 
 	ret = is_valid_id(id);
 	if (ret != STG_BLOB_PARAM_TYPE) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 6733),"wrn: STG blob write, invalid id %d, access denied with ret: %d\n", (int)id, ret));
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 6733),"wrn: STG blob read, invalid id %d, access denied with ret: %d\n", (int)id, ret));
 		return -ENOMSG;
 	}
 

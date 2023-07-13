@@ -180,7 +180,7 @@ int stg_config_init(void)
 
 		err = flash_area_open(flash_area_id, &mp_flash_area);
 		if (err != 0) {
-			NCLOG_ERR(STORAGE_CONTROLLER, TRice0( iD( 1108),"err: STG Config, unable to open flash area\n"));
+			NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 1108),"err: STG Config, unable to open flash area with err: %d\n", err));
 			return err;
 		}
 
@@ -198,13 +198,13 @@ int stg_config_init(void)
 
 		err = nvs_init(&m_file_system, mp_device->name);
 		if (err != 0) {
-			NCLOG_ERR(STORAGE_CONTROLLER, TRice0( iD( 2868),"err: STG Config, failed to initialize NVS storage\n"));
+			NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 2868),"err: STG Config, failed to initialize NVS storage with err: %d\n", err));
 			return err;
 		}
 
 		err = do_migrations();
 		if (err != 0) {
-			NCLOG_ERR(STORAGE_CONTROLLER, TRice0( iD( 3271),"err: STG Config, failed to migrate\n"));
+			NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 3271),"err: STG Config, failed to migrate with err: %d\n", err));
 			return err;
 		}
 		m_initialized = true;
@@ -222,7 +222,7 @@ int stg_config_u8_read(stg_config_param_id_t id, uint8_t *value)
 
 	ret = is_valid_id(id);
 	if (ret != STG_U8_PARAM_TYPE) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 4111),"wrn: STG u8 read, invalid id %d, access denied\n", (int)id));
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 4111),"wrn: STG u8 read, invalid id %d, access denied with ret: %d\n", (int)id, ret));
 		return -ENOMSG;
 	}
 
@@ -233,7 +233,7 @@ int stg_config_u8_read(stg_config_param_id_t id, uint8_t *value)
 		val = UINT8_MAX;
 		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 6900), "wrn: STG u8 read, id-data pair does not exist at id %d\n", (int)id));
 	} else if ((ret < 0) && (ret != -ENOENT)) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 5382),"err: STG u8 read, failed to read storage at id %d\n", (int)id));
+		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 5382),"err: STG u8 read, failed to read storage at id %d with ret: %d \n", (int)id, ret));
 		return ret;
 	}
 	*value = val;
@@ -251,14 +251,14 @@ int stg_config_u8_write(stg_config_param_id_t id, const uint8_t value)
 
 	ret = is_valid_id(id);
 	if (ret != STG_U8_PARAM_TYPE) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 4546),"wrn: STG u8 write, invalid id %d, access denied\n", (int)id));
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 4546),"wrn: STG u8 write, invalid id %d, access denied with ret: %d\n", (int)id, ret));
 		return -ENOMSG;
 	}
 
 	ret = nvs_write(&m_file_system, (uint16_t)id, &value, sizeof(uint8_t));
 	if (ret < 0) {
 		UPDATE_WRITE_ERRORS(ret);
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 1431),"err: STG u8 write, failed write to storage at id %d\n", (int)id));
+		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 5846),"err: STG u8 write, failed write to storage at id %d with ret: %d\n", (int)id, ret));
 		return ret;
 	}
 	NCLOG_DBG(STORAGE_CONTROLLER, TRice( iD( 5313),"dbg: Write: Id=%d, Value=%d\n", (int)id, value));
@@ -275,7 +275,7 @@ int stg_config_u16_read(stg_config_param_id_t id, uint16_t *value)
 
 	ret = is_valid_id(id);
 	if (ret != STG_U16_PARAM_TYPE) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 3242),"wrn: STG u16 read, invalid id %d, access denied\n", (int)id));
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 3242),"wrn: STG u16 read, invalid id %d, access denied with ret: %d\n", (int)id, ret));
 		return -ENOMSG;
 	}
 
@@ -286,7 +286,7 @@ int stg_config_u16_read(stg_config_param_id_t id, uint16_t *value)
 		val = UINT16_MAX;
 		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 1184), "wrn: STG u16 read, id-data pair does not exist at id %d\n", (int)id));
 	} else if ((ret < 0) && (ret != -ENOENT)) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 7264),"err: STG u16 read, failed to read storage at id %d\n", (int)id));
+		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 7264),"err: STG u16 read, failed to read storage at id %d with ret: %d \n", (int)id, ret));
 		return ret;
 	}
 	*value = val;
@@ -304,14 +304,14 @@ int stg_config_u16_write(stg_config_param_id_t id, const uint16_t value)
 
 	ret = is_valid_id(id);
 	if (ret != STG_U16_PARAM_TYPE) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 2364),"wrn: STG u16 write, invalid id %d, access denied\n", (int)id));
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 7098),"wrn: STG u16 write, invalid id %d, access denied with ret: %d\n", (int)id, ret));
 		return -ENOMSG;
 	}
 
 	ret = nvs_write(&m_file_system, (uint16_t)id, &value, sizeof(uint16_t));
 	if (ret < 0) {
 		UPDATE_WRITE_ERRORS(ret);
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 6217),"err: STG u16 write, failed write to storage at id %d\n", (int)id));
+		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 5199),"err: STG u16 write, failed write to storage at id %d with ret: %d\n", (int)id, ret));
 		return ret;
 	}
 	NCLOG_DBG(STORAGE_CONTROLLER, TRice( iD( 4038),"dbg: Write: Id=%d, Value=%d\n", (int)id, value));
@@ -328,7 +328,7 @@ int stg_config_u32_read(stg_config_param_id_t id, uint32_t *value)
 
 	ret = is_valid_id(id);
 	if (ret != STG_U32_PARAM_TYPE) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 3084),"wrn: STG u32 read, invalid id %d, access denied\n", (int)id));
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 4154),"wrn: STG u32 read, invalid id %d, access denied with ret: %d\n", (int)id, ret));
 		return -ENOMSG;
 	}
 
@@ -339,7 +339,7 @@ int stg_config_u32_read(stg_config_param_id_t id, uint32_t *value)
 		val = UINT32_MAX;
 		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 3970), "wrn: STG u32 read, id-data pair does not exist at id %d\n", (int)id));
 	} else if ((ret < 0) && (ret != -ENOENT)) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 1209),"err: STG u32 read, failed to read storage at id %d\n", (int)id));
+		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 1209),"err: STG u32 read, failed to read storage at id %d with ret: %d \n", (int)id, ret));
 		return ret;
 	}
 	*value = val;
@@ -357,14 +357,14 @@ int stg_config_u32_write(stg_config_param_id_t id, const uint32_t value)
 
 	ret = is_valid_id(id);
 	if (ret != STG_U32_PARAM_TYPE) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 2851),"wrn: STG u32 write, invalid id %d, access denied\n", (int)id));
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 7902),"wrn: STG u32 write, invalid id %d, access denied with ret: %d\n", (int)id, ret));
 		return -ENOMSG;
 	}
 
 	ret = nvs_write(&m_file_system, (uint16_t)id, &value, sizeof(uint32_t));
 	if (ret < 0) {
 		UPDATE_WRITE_ERRORS(ret);
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 1994),"err: STG u32 write, failed write to storage at id %d\n", (int)id));
+		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 5468),"err: STG u32 write, failed write to storage at id %d with ret: %d\n", (int)id, ret));
 		return ret;
 	}
 	NCLOG_DBG(STORAGE_CONTROLLER, TRice( iD( 2275),"dbg: Write: Id=%d, Value=%d\n", (int)id, value));
@@ -381,7 +381,7 @@ int stg_config_str_read(stg_config_param_id_t id, char *buf, size_t bufsize, uin
 
 	ret = is_valid_id(id);
 	if (ret != STG_STR_PARAM_TYPE) {
-		LOG_WRN("invalid id (%d), access denied", (int)id);
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 2379), "wrn: invalid id (%d), access denied with ret: %d \n", (int)id, ret));
 		return -ENOMSG;
 	}
 
@@ -389,8 +389,8 @@ int stg_config_str_read(stg_config_param_id_t id, char *buf, size_t bufsize, uin
 	ret = nvs_read(&m_file_system, (uint16_t)id, buf, bufsize);
 	if (ret <= 0) {
 		/* Return empty string if id-data pair does not exist or 0 buf size */
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 2155), "wrn: STG string read, id-data pair does not exist at id %d with ret: %d \n", (int)id, ret));
 		return ret;
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 2155), "wrn: STG string read, id-data pair does not exist at id %d\n", (int)id));
 	} else if (ret > bufsize) {
 		/* The provided buffer was too small */
 		return -ERANGE;
@@ -401,7 +401,7 @@ int stg_config_str_read(stg_config_param_id_t id, char *buf, size_t bufsize, uin
 		}
 	}
 	*len = strlen(buf);
-	NCLOG_DBG(STORAGE_CONTROLLER, TRice( iD( 6970),"dbg: Read: Id=%d, Length=%d, Data=dynamic_string\n", (int)id, *len, buf));
+	NCLOG_DBG(STORAGE_CONTROLLER, TRice( iD( 6970),"dbg: Read: Id=%d, Length=%d, Data=dynamic_string\n", (int)id, *len));
 	return 0;
 }
 
@@ -415,7 +415,7 @@ int stg_config_str_write(stg_config_param_id_t id, const char *str, size_t len)
 
 	ret = is_valid_id(id);
 	if (ret != STG_STR_PARAM_TYPE) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 6083),"wrn: STG str write, invalid id %d, access denied\n", (int)id));
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 7656),"wrn: STG str write, invalid id %d, access denied with ret: %d\n", (int)id, ret));
 		return -ENOMSG;
 	}
 	/* TODO, make this much more elegant with compile-time checks :-( */
@@ -436,7 +436,7 @@ int stg_config_str_write(stg_config_param_id_t id, const char *str, size_t len)
 	ret = nvs_write(&m_file_system, (uint16_t)id, str, len + 1);
 	if (ret < 0) {
 		UPDATE_WRITE_ERRORS(ret);
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 5430),"err: STG str write, failed write to storage at id %d\n", (int)id));
+		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 5384),"err: STG str write, failed write to storage at id %d with ret: %d\n", (int)id, ret));
 		return ret;
 	}
 	NCLOG_DBG(STORAGE_CONTROLLER, TRice( iD( 7692),"dbg: Read: Id=%d, Length=%d, Data=dynamic_string\n", (int)id, strlen(str), str));
@@ -453,7 +453,7 @@ int stg_config_blob_read(stg_config_param_id_t id, uint8_t *arr, uint8_t *len)
 
 	ret = is_valid_id(id);
 	if (ret != STG_BLOB_PARAM_TYPE) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 6409),"wrn: STG blob write, invalid id %d, access denied\n", (int)id));
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 6733),"wrn: STG blob write, invalid id %d, access denied with ret: %d\n", (int)id, ret));
 		return -ENOMSG;
 	}
 
@@ -467,10 +467,10 @@ int stg_config_blob_read(stg_config_param_id_t id, uint8_t *arr, uint8_t *len)
 	ret = nvs_read(&m_file_system, (uint16_t)id, &buff, sizeof(buff));
 	if (ret == -ENOENT) {
 		/* Return nothing if blob id-data pair does not exist */
-		return 0;
 		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 3602),"wrn: STG blob read, id-data pair does not exist at id %d\n", (int)id));
+		return 0;
 	} else if ((ret < 0) && (ret != -ENOENT)) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 3561),"err: STG blob read, failed read to storage at id %d\n", (int)id));
+		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 3561),"err: STG blob read, failed read to storage at id %d with ret: %d \n", (int)id, ret));
 		return ret;
 	}
 	memcpy(arr, buff, sizeof(buff));
@@ -491,7 +491,7 @@ int stg_config_blob_write(stg_config_param_id_t id, const uint8_t *arr, const ui
 
 	ret = is_valid_id(id);
 	if (ret != STG_BLOB_PARAM_TYPE) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 2724),"wrn: STG blob write, invalid id %d, access denied\n", (int)id));
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 7314),"wrn: STG blob write, invalid id %d, access denied with ret: %d\n", (int)id, ret));
 		return -ENOMSG;
 	}
 	if ((id == STG_BLOB_BLE_KEY) && (len > STG_CONFIG_BLE_SEC_KEY_LEN)) {
@@ -502,7 +502,7 @@ int stg_config_blob_write(stg_config_param_id_t id, const uint8_t *arr, const ui
 	ret = nvs_write(&m_file_system, (uint16_t)id, arr, len);
 	if (ret < 0) {
 		UPDATE_WRITE_ERRORS(ret);
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 3146),"err: STG blob write, failed write to storage at id %d\n", (int)id));
+		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 6463),"err: STG blob write, failed write to storage at id %d with ret: %d\n", (int)id, ret));
 		return ret;
 	}
 

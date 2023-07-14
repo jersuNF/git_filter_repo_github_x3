@@ -48,5 +48,12 @@ if CELLULAR_CONTROLLER
         int
         default 7
 
+config DEFAULT_URAT_SETTING
+    string "Default arguments for AT+URAT, e.g. 9,7"
+    default "9"
+
+config DEFAULT_URAT_SETTING_SG
+    string "Default arguments for AT+URAT for SG collars"
+    default "7,9"
 
 endif

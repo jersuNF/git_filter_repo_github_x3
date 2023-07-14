@@ -664,6 +664,21 @@ int8_t cellular_controller_init(void)
 	}
 	NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 5209),"inf: modem status read: %d\n", g_modem_status_cache));
 	set_modem_status_cb(modem_read_status_nvm, modem_write_status_nvm);
+
+	uint16_t pcb_product_type = 0;
+	stg_config_u16_read(STG_U16_PRODUCT_TYPE, &pcb_product_type);
+
+	/* In the case of SG change default settings to allow 4G */
+	int err;
+	if (pcb_product_type == 1) {
+		err = modem_nf_set_default_urat(CONFIG_DEFAULT_URAT_SETTING_SG, sizeof(CONFIG_DEFAULT_URAT_SETTING_SG));
+	} else {
+		err = modem_nf_set_default_urat(CONFIG_DEFAULT_URAT_SETTING, sizeof(CONFIG_DEFAULT_URAT_SETTING));
+	}
+	if (err != 0) {
+		NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 4477),"err: Failed to set default URAT settings!\n"));
+	}
+
 	read_URAT_settings_from_NVS();
 
 	/* Start connection keep-alive thread */

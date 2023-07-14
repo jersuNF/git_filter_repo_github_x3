@@ -671,9 +671,11 @@ int8_t cellular_controller_init(void)
 	/* In the case of SG change default settings to allow 4G */
 	int err;
 	if (pcb_product_type == 1) {
-		err = modem_nf_set_default_urat(CONFIG_DEFAULT_URAT_SETTING_SG, sizeof(CONFIG_DEFAULT_URAT_SETTING_SG));
+		err = modem_nf_set_default_urat(CONFIG_DEFAULT_URAT_SETTING_SG,
+						sizeof(CONFIG_DEFAULT_URAT_SETTING_SG));
 	} else {
-		err = modem_nf_set_default_urat(CONFIG_DEFAULT_URAT_SETTING, sizeof(CONFIG_DEFAULT_URAT_SETTING));
+		err = modem_nf_set_default_urat(CONFIG_DEFAULT_URAT_SETTING,
+						sizeof(CONFIG_DEFAULT_URAT_SETTING));
 	}
 	if (err != 0) {
 		NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 4477),"err: Failed to set default URAT settings!\n"));

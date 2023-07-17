@@ -547,6 +547,8 @@ int is_valid_id(stg_config_param_id_t param_id)
 	case STG_U8_HW_VERSION:
 	case STG_U8_KEEP_MODE:
 	case STG_U8_RESET_REASON:
+	case STG_U8_M_UPLOAD_PERIODIC_LOGS:
+	case STG_U8_M_UPLOAD_CORE_DUMPS:
 	case STG_U8_MODEM_INSTALLING: {
 		param_type = STG_U8_PARAM_TYPE;
 		break;

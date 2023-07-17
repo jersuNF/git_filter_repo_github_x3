@@ -100,8 +100,8 @@ static collar_state_struct_t current_state;
 static gnss_last_fix_struct_t cached_fix;
 
 static bool block_fota_request = false;
-static bool m_upload_periodic_logs = true;
-static bool m_updated_log_levels = false;
+static uint8_t m_upload_periodic_logs = 1;
+static uint8_t m_upload_core_dumps = 1;
 
 /** @brief counts the number of FOTA requests, only reset on success */
 static int m_fota_attempts = 0;
@@ -180,9 +180,14 @@ void messaging_rx_thread_fn(void);
 
 void messaging_tx_thread_fn(void);
 
+// Transfer boot parameters in the first poll request after start up.
 static bool m_transfer_boot_params = true;
+
 static bool m_confirm_acc_limits, m_confirm_ble_key;
 static bool m_confirm_urat_arg = false;
+static bool m_ACK_bSendPeriodicLogs = false;
+static bool m_ACK_bSendCoreDumps = false;
+static bool m_ACK_xLogConfig = false;
 
 #ifdef CONFIG_STG_CONFIG_DEBUG_SEND_WRITE_ERRORS
 extern uint16_t g_nvs_write_errors;
@@ -971,34 +976,36 @@ void messaging_tx_thread_fn(void)
 					k_sem_give(&cache_lock_sem);
 
 					err = encode_and_send_message(&Nofence_msg_buffer);
+					if (err != 0) {
+						NCLOG_WRN(MESSAGING_MODULE, TRice( iD( 2211),"wrn: Failed to send poll request err: %d\n", err));
+					}
 					if (err == 0) {
 						/* Store poll req. timestamp to avoid sending an
                                                  * excessive amount of poll requests */
 						m_last_poll_req_timestamp_ms = k_uptime_get();
 
-						int ret = 0;
 #ifdef CONFIG_DEBUG_COREDUMP_BACKEND_NOINIT
-						ret = coredump_storage_read_send(
-							&Nofence_msg_buffer);
+						if (m_upload_core_dumps == 1) {
+							err = coredump_storage_read_send(
+								&Nofence_msg_buffer);
 
-						if (ret != 0 && ret != -ENODATA) {
-							NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4613),"err: Failed to send stored core dump, %d!\n", ret));
+							if (err != 0 && err != -ENODATA) {
+								NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4613),"err: Failed to send stored core dump, %d!\n", err));
+							}
 						}
 #endif
-						if ((ret == 0 || ret == -ENODATA) &&
-						    m_upload_periodic_logs) {
-							ret = send_trice_logs(&Nofence_msg_buffer);
-							if (ret != 0) {
-								NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 2970),"err: Failed to send Trice logs, %d!\n", ret));
+						// If there was no core dump (-ENODATA) still send trice logs.
+						if ((err == 0 || err == -ENODATA) &&
+						    (m_upload_periodic_logs == 1)) {
+							err = send_trice_logs(&Nofence_msg_buffer);
+							if (err != 0) {
+								NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 2970),"err: Failed to send Trice logs, %d!\n", err));
 							}
 						}
 					}
 				}
 				/* Poll request error handler,
                                  * Note! Consider notifying sender, leaving error handling to src */
-				if (err != 0) {
-					NCLOG_WRN(MESSAGING_MODULE, TRice( iD( 2211),"wrn: Failed to send poll request err: %d\n", err));
-				}
 			}
 
 			/* SEQ MESSAGES */
@@ -1672,12 +1679,27 @@ static void fota_wdt_work_fn(struct k_work *item)
 int messaging_module_init(void)
 {
 	NCLOG_INF(MESSAGING_MODULE, TRice0( iD( 1820),"inf: Initializing messaging module.\n"));
+
+	/* 	Read parameters from the Non Volatile Storage */
 	int err = stg_config_u32_read(STG_U32_UID, &serial_id);
 	if (err != 0) {
 		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7349),"err: Failed to read serial number from storage! %d\n", err));
-		serial_id = 1; /* Fallback if read from storage fails */
+		/* Fallback if read from storage fails */
+		serial_id = 1;
 	}
 
+	err = stg_config_u8_read(STG_U8_M_UPLOAD_PERIODIC_LOGS, &m_upload_periodic_logs);
+	if (err != 0) {
+		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 3442), "err: Error reading m_upload_periodic_logs from ext flash %d\n", err));
+		/* Fallback if read from storage fails */
+		m_upload_periodic_logs = 1;
+	}
+	err = stg_config_u8_read(STG_U8_M_UPLOAD_CORE_DUMPS, &m_upload_core_dumps);
+	if (err != 0) {
+		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 2285), "err: Error reading m_upload_core_dumps from ext flash %d\n", err));
+		/* Fallback if read from storage fails */
+		m_upload_core_dumps = 1;
+	}
 	/* Startup the modem to get the gsm_info ready before the first poll request.*/
 	struct check_connection *ev = new_check_connection();
 	EVENT_SUBMIT(ev);
@@ -1768,6 +1790,23 @@ void build_poll_request(NofenceMessage *poll_req)
 		poll_req->m.poll_message_req.has_usFlashEraseCount = true;
 		poll_req->m.poll_message_req.usFlashEraseCount = current_state.flash_erase_count;
 	}
+
+	// ACK the bSendPeriodicLogs once after it is updated in process_poll_response.
+	// The server may update bSendPeriodicLogs to true or false,
+	// an ACK to either update is signalled by replying with the same value as in the poll response.
+	if (m_ACK_bSendPeriodicLogs) {
+		poll_req->m.poll_message_req.has_bSendPeriodicLogs = true;
+		poll_req->m.poll_message_req.bSendPeriodicLogs = (bool)m_upload_periodic_logs;
+	}
+
+	// ACK the bSendCoreDumps once after it is updated in process_poll_response.
+	// The server may update bSendCoreDumps to true or false,
+	// an ACK to either update is signalled by replying with the same value as in the poll response.
+	if (m_ACK_bSendCoreDumps) {
+		poll_req->m.poll_message_req.has_bSendCoreDumps = true;
+		poll_req->m.poll_message_req.bSendCoreDumps = (bool)m_upload_core_dumps;
+	}
+
 	if (m_confirm_acc_limits || m_transfer_boot_params) {
 		/** @warning Assumes all the activity values are given with the
          *  m_confirm_acc_limits flag set in poll response from server.
@@ -1922,13 +1961,14 @@ void build_poll_request(NofenceMessage *poll_req)
 			NCLOG_WRN(MESSAGING_MODULE, TRice( iD( 4011),"wrn: Could not get modem version info: %d\n", ret));
 		}
 	}
-	if (m_updated_log_levels || m_transfer_boot_params) {
+	if (m_ACK_xLogConfig || m_transfer_boot_params) {
 		poll_req->m.poll_message_req.has_xLogConfig = true;
 		/* loop over each module and return the log level */
 		for (size_t i = 0; i < _eNCLOG_MODULE_MAX; i++) {
 			poll_req->m.poll_message_req.xLogConfig.xModule[i].xLevel =
 				nclog_get_level(i);
 			poll_req->m.poll_message_req.xLogConfig.xModule[i].xName = (eNCLOG_MODULE)i;
+			poll_req->m.poll_message_req.xLogConfig.xModule_count++;
 		}
 	}
 }
@@ -2148,9 +2188,12 @@ void process_poll_response(NofenceMessage *proto)
 {
 	int err;
 
-	/* When we receive a poll reply, we don't want to transfer boot params and log levels */
+	// Transfer boot parameters in the first poll request after start up.
 	m_transfer_boot_params = false;
-	m_updated_log_levels = false;
+	// Disable the ACK by default, it is enabled later if the server wants it.
+	m_ACK_bSendPeriodicLogs = false;
+	m_ACK_bSendCoreDumps = false;
+	m_ACK_xLogConfig = false;
 
 	if (atomic_cas(&m_new_mdm_fw_update_state, MDM_FW_DOWNLOAD_COMPLETE, 0)) {
 		struct messaging_mdm_fw_event *mdm_fw_ver = new_messaging_mdm_fw_event();
@@ -2164,9 +2207,27 @@ void process_poll_response(NofenceMessage *proto)
 	PollMessageResponse *pResp = &proto->m.poll_message_resp;
 
 	if (pResp->has_bSendPeriodicLogs) {
-		m_upload_periodic_logs = pResp->bSendPeriodicLogs;
+		m_ACK_bSendPeriodicLogs = true;
+		m_upload_periodic_logs = (uint8_t)pResp->bSendPeriodicLogs;
+		// If the write to storage fails and the collar reboots with wrong value,
+		// this is corrected by the following poll response after reboot.
+		err = stg_config_u8_write(STG_U8_M_UPLOAD_PERIODIC_LOGS,
+					  (uint8_t)pResp->bSendPeriodicLogs);
+		if (err != 0) {
+			NCLOG_WRN(MESSAGING_MODULE, TRice( iD( 5479), "wrn: Failed writing m_upload_periodic_logs to ext flash %d\n", err));
+		}
 	}
-
+	if (pResp->has_bSendCoreDumps) {
+		m_ACK_bSendCoreDumps = true;
+		m_upload_core_dumps = (uint8_t)pResp->bSendCoreDumps;
+		// If the write to storage fails and the collar reboots with wrong value,
+		// this is corrected by the following poll response after reboot.
+		err = stg_config_u8_write(STG_U8_M_UPLOAD_CORE_DUMPS,
+					  (uint8_t)pResp->bSendCoreDumps);
+		if (err != 0) {
+			NCLOG_WRN(MESSAGING_MODULE, TRice( iD( 1658), "wrn: Failed writing m_upload_core_dumps to ext flash %d\n", err));
+		}
+	}
 	if (pResp->has_xServerIp && strlen(pResp->xServerIp) > 0) {
 		struct messaging_host_address_event *host_add_event =
 			new_messaging_host_address_event();
@@ -2181,7 +2242,7 @@ void process_poll_response(NofenceMessage *proto)
 		flash_erase_event->magic = STORAGE_ERASE_MAGIC;
 		EVENT_SUBMIT(flash_erase_event);
 	}
-	// If we are asked to, reboot
+	/* 	If we are asked to, reboot */
 	if (pResp->has_bReboot && pResp->bReboot) {
 		struct pwr_reboot_event *r_ev = new_pwr_reboot_event();
 		r_ev->reason = REBOOT_SERVER_RESET;
@@ -2352,7 +2413,7 @@ void process_poll_response(NofenceMessage *proto)
 	}
 
 	if (pResp->has_xLogConfig) {
-		m_updated_log_levels = true;
+		m_ACK_xLogConfig = true;
 		for (int i = 0; i < pResp->xLogConfig.xModule_count; i++) {
 			int ret = nclog_set_level((eNCLOG_MODULE)pResp->xLogConfig.xModule[i].xName,
 						  (eNCLOG_LVL)pResp->xLogConfig.xModule[i].xLevel);

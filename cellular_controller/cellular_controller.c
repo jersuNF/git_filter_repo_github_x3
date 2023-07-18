@@ -10,6 +10,7 @@
 #include "selftest.h"
 #include "pwr_event.h"
 #include "stg_config.h"
+#include <assert.h>
 
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define RCV_PRIORITY CONFIG_RECV_THREAD_PRIORITY
@@ -670,6 +671,13 @@ int8_t cellular_controller_init(void)
 
 	/* In the case of SG change default settings to allow 4G */
 	int err;
+
+	_Static_assert(sizeof(CONFIG_DEFAULT_URAT_SETTING_SG) >= sizeof("#") &&
+			       sizeof(CONFIG_DEFAULT_URAT_SETTING_SG) <= sizeof("#,#,#") &&
+			       sizeof(CONFIG_DEFAULT_URAT_SETTING) >= sizeof("#") &&
+			       sizeof(CONFIG_DEFAULT_URAT_SETTING) <= sizeof("#,#,#"),
+		       "Check size of the default values for the URAT command settings!");
+
 	if (pcb_product_type == 1) {
 		err = modem_nf_set_default_urat(CONFIG_DEFAULT_URAT_SETTING_SG,
 						sizeof(CONFIG_DEFAULT_URAT_SETTING_SG));

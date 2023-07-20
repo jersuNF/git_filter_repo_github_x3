@@ -128,9 +128,6 @@ static uint8_t ccid[20] = "\0";
 static char mdm_fw_file_name[sizeof(((PollMessageResponse *)NULL)->xModemFwFileName)] = "\0";
 static char urat_in_use_buf[STG_CONFIG_URAT_ARG_BUF_SIZE] = "\0";
 
-static uint8_t expected_ano_frame, new_ano_in_progress;
-static bool first_ano_frame;
-
 /* Time since the server updated the date time in seconds. */
 static atomic_t server_timestamp_sec = ATOMIC_INIT(0);
 
@@ -1016,72 +1013,68 @@ void messaging_tx_thread_fn(void)
 								}
 							}
 						} else {
-							NCLOG_WRN(MESSAGING_MODULE, TRice( iD( 2211),"wrn: Failed to send poll request err: %d\n", err));
-						}
-						/* Poll request error handler,
-                                 * Note! Consider notifying sender, leaving error handling to src */
-						if (err != 0) {
 							LOG_WRN("Failed to send poll request!");
 						}
-					} else {
-						LOG_WRN("Cached semaphore not ready, dropping poll request!");
-					}
-				}
-
-				/* SEQ MESSAGES */
-				if ((tx_type == SEQ_MSG) && (err == 0) &&
-				    (atomic_get(&m_fota_in_progress) == false)) {
-					/* Sending, all stored seq messages are already proto encoded */
-					err = send_all_stored_messages();
-					/* Seq message error handler,
-                                 * Note! Consider notifying sender, leaving error handling to src */
-					if (err != 0) {
-						NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 4821),"wrn: Failed to send seq messages\n"));
 					}
 				} else {
 					LOG_WRN("Cached semaphore not ready, dropping poll request!");
+					NCLOG_WRN(MESSAGING_MODULE, TRice( iD( 2211),"wrn: Failed to send poll request err: %d\n", err));
 					struct messaging_stop_connection_event *end_connection =
 						new_messaging_stop_connection_event();
 					EVENT_SUBMIT(end_connection);
 				}
-
-				/* FENCE DEFINITION REQUEST */
-				if ((tx_type == FENCE_REQ)) {
-					NofenceMessage fence_req;
-					proto_InitHeader(&fence_req);
-					fence_req.which_m = NofenceMessage_fence_definition_req_tag;
-					fence_req.m.fence_definition_req.ulFenceDefVersion =
-						m_fence_update_req.version;
-					fence_req.m.fence_definition_req.ucFrameNumber =
-						m_fence_update_req.request_frame;
-
-					err = encode_and_send_message(&fence_req);
-					/* Fence def. request error handler,
+				/* Poll request error handler,
                                  * Note! Consider notifying sender, leaving error handling to src */
-					if (err != 0) {
-						NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 4161),"wrn: Failed to send fence update request\n"));
-					}
-				}
-
-				/* Add additional message types here (system diagnostics, ANO data etc).. */
-
-				/* Reset Tx thread */
-				atomic_set(&m_message_tx_type, IDLE);
-
-				if (atomic_get(&m_break_seq_stream_token) == true) {
-					/* consume the token and enforce the poll request */
-					atomic_set(&m_break_seq_stream_token, false);
-					atomic_set(&m_message_tx_type, POLL_REQ);
-					k_sem_give(&sem_release_tx_thread);
-				}
-
-			} else {
-				NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 1455),"wrn: Tx thread semaphore returned unexpectedly\n"));
-				k_sem_reset(&sem_release_tx_thread);
 			}
+
+			/* SEQ MESSAGES */
+			if ((tx_type == SEQ_MSG) && (err == 0) &&
+			    (atomic_get(&m_fota_in_progress) == false)) {
+				/* Sending, all stored seq messages are already proto encoded */
+				err = send_all_stored_messages();
+				/* Seq message error handler,
+                                 * Note! Consider notifying sender, leaving error handling to src */
+				if (err != 0) {
+					NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 4821),"wrn: Failed to send seq messages\n"));
+				}
+			}
+
+			/* FENCE DEFINITION REQUEST */
+			if ((tx_type == FENCE_REQ)) {
+				NofenceMessage fence_req;
+				proto_InitHeader(&fence_req);
+				fence_req.which_m = NofenceMessage_fence_definition_req_tag;
+				fence_req.m.fence_definition_req.ulFenceDefVersion =
+					m_fence_update_req.version;
+				fence_req.m.fence_definition_req.ucFrameNumber =
+					m_fence_update_req.request_frame;
+
+				err = encode_and_send_message(&fence_req);
+				/* Fence def. request error handler,
+                                 * Note! Consider notifying sender, leaving error handling to src */
+				if (err != 0) {
+					NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 4161),"wrn: Failed to send fence update request\n"));
+				}
+			}
+
+			/* Add additional message types here (system diagnostics, ANO data etc).. */
+
+			/* Reset Tx thread */
+			atomic_set(&m_message_tx_type, IDLE);
+
+			if (atomic_get(&m_break_seq_stream_token) == true) {
+				/* consume the token and enforce the poll request */
+				atomic_set(&m_break_seq_stream_token, false);
+				atomic_set(&m_message_tx_type, POLL_REQ);
+				k_sem_give(&sem_release_tx_thread);
+			}
+
+		} else {
+			NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 1455),"wrn: Tx thread semaphore returned unexpectedly\n"));
+			k_sem_reset(&sem_release_tx_thread);
 		}
-		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 7405),"err: Messaging Tx Thread exited unexpectedly\n"));
 	}
+	NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 7405),"err: Messaging Tx Thread exited unexpectedly\n"));
 }
 
 /**
@@ -1736,9 +1729,6 @@ int messaging_module_init(void)
 		/* Fallback if read from storage fails */
 		m_upload_core_dumps = 1;
 	}
-	/* Startup the modem to get the gsm_info ready before the first poll request.*/
-	struct check_connection *ev = new_check_connection();
-	EVENT_SUBMIT(ev);
 
 	k_work_queue_init(&message_q);
 	struct k_work_queue_config cfg = {
@@ -1827,17 +1817,17 @@ void build_poll_request(NofenceMessage *poll_req)
 		poll_req->m.poll_message_req.usFlashEraseCount = current_state.flash_erase_count;
 	}
 
-	// ACK the bSendPeriodicLogs once after it is updated in process_poll_response.
-	// The server may update bSendPeriodicLogs to true or false,
-	// an ACK to either update is signalled by replying with the same value as in the poll response.
+	/* ACK the bSendPeriodicLogs once after it is updated in process_poll_response.
+	   The server may update bSendPeriodicLogs to true or false,
+	   an ACK to either update is signalled by replying with the same value as in the poll response. */
 	if (m_ACK_bSendPeriodicLogs) {
 		poll_req->m.poll_message_req.has_bSendPeriodicLogs = true;
 		poll_req->m.poll_message_req.bSendPeriodicLogs = (bool)m_upload_periodic_logs;
 	}
 
-	// ACK the bSendCoreDumps once after it is updated in process_poll_response.
-	// The server may update bSendCoreDumps to true or false,
-	// an ACK to either update is signalled by replying with the same value as in the poll response.
+	/* ACK the bSendCoreDumps once after it is updated in process_poll_response.
+	   The server may update bSendCoreDumps to true or false,
+	   an ACK to either update is signalled by replying with the same value as in the poll response. */
 	if (m_ACK_bSendCoreDumps) {
 		poll_req->m.poll_message_req.has_bSendCoreDumps = true;
 		poll_req->m.poll_message_req.bSendCoreDumps = (bool)m_upload_core_dumps;
@@ -2211,9 +2201,9 @@ void process_poll_response(NofenceMessage *proto)
 {
 	int err;
 
-	// Transfer boot parameters in the first poll request after start up.
+	/* Transfer boot parameters in the first poll request after start up. */
 	m_transfer_boot_params = false;
-	// Disable the ACK by default, it is enabled later if the server wants it.
+	/* Disable the ACK by default, it is enabled later if the server wants it. */
 	m_ACK_bSendPeriodicLogs = false;
 	m_ACK_bSendCoreDumps = false;
 	m_ACK_xLogConfig = false;
@@ -2232,8 +2222,6 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_bSendPeriodicLogs) {
 		m_ACK_bSendPeriodicLogs = true;
 		m_upload_periodic_logs = (uint8_t)pResp->bSendPeriodicLogs;
-		// If the write to storage fails and the collar reboots with wrong value,
-		// this is corrected by the following poll response after reboot.
 		err = stg_config_u8_write(STG_U8_M_UPLOAD_PERIODIC_LOGS,
 					  (uint8_t)pResp->bSendPeriodicLogs);
 		if (err != 0) {
@@ -2243,8 +2231,6 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_bSendCoreDumps) {
 		m_ACK_bSendCoreDumps = true;
 		m_upload_core_dumps = (uint8_t)pResp->bSendCoreDumps;
-		// If the write to storage fails and the collar reboots with wrong value,
-		// this is corrected by the following poll response after reboot.
 		err = stg_config_u8_write(STG_U8_M_UPLOAD_CORE_DUMPS,
 					  (uint8_t)pResp->bSendCoreDumps);
 		if (err != 0) {
@@ -2756,6 +2742,6 @@ static inline bool has_initial_collar_states()
 	return (m_initial_collar_state_flags ==
 				((1 << COLLAR_MODE_FLAG) | (1 << COLLAR_STATUS_FLAG) |
 				 (1 << FENCE_STATUS_FLAG) | (1 << BATTERY_LVL_FLAG)) ?
-			true :
-			false);
+			      true :
+			      false);
 }

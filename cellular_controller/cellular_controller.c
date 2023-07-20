@@ -193,8 +193,6 @@ void listen_sock_poll(void)
 static int start_tcp(void)
 {
 	int ret = modem_nf_wakeup();
-
-	/* Check if modem was reset */
 	if (ret != 0) {
 		NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 5525),"err: Failed to wake up the modem!\n"));
 		return ret;
@@ -203,8 +201,6 @@ static int start_tcp(void)
 		ret = check_ip();
 		if (ret != 0) {
 			NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 6280),"err: Failed to get ip address!\n"));
-			char *e_msg = "Failed to get ip address!";
-			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
 			return ret;
 		}
 	}
@@ -378,7 +374,7 @@ int8_t cache_server_address(void)
 	int err = stg_config_str_read(STG_STR_HOST_PORT, server_address, sizeof(server_address),
 				      &port_length);
 	if (err != 0 || server_address[0] == '\0') {
-		LOG_ERR("Cannot read host/port %d",err);
+		LOG_ERR("Cannot read host/port %d", err);
 		return -1;
 	}
 	char *ptr_port;

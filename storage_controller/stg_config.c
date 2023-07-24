@@ -439,7 +439,7 @@ int stg_config_str_write(stg_config_param_id_t id, const char *str, size_t len)
 		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 5384),"err: STG str write, failed write to storage at id %d with ret: %d\n", (int)id, ret));
 		return ret;
 	}
-	NCLOG_DBG(STORAGE_CONTROLLER, TRice( iD( 7692),"dbg: Read: Id=%d, Length=%d, Data=dynamic_string\n", (int)id, strlen(str), str));
+	NCLOG_DBG(STORAGE_CONTROLLER, TRice( iD( 7692),"dbg: Read: Id=%d, Length=%d, Data=dynamic_string\n", (int)id, strlen(str)));
 	return 0;
 }
 
@@ -764,7 +764,7 @@ int copy_eeprom_parameters_to_stg_flash()
 			success = -1;
 			NCLOG_ERR(STORAGE_CONTROLLER, TRice0( iD( 6594),"err: STG Failed to read host port\n"));
 		}
-		NCLOG_INF(STORAGE_CONTROLLER, TRice( iD( 6174),"inf: EEPvsSTG(Host port): STG%d = dynamic_string\n", port_len, port_read));
+		NCLOG_INF(STORAGE_CONTROLLER, TRice( iD( 6174),"inf: EEPvsSTG(Host port): STG%d = dynamic_string\n", port_len));
 
 		/* Copy BLE key from the EEPROM to the flash */
 		uint8_t ble_key[EEP_BLE_SEC_KEY_LEN];

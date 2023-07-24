@@ -10,6 +10,7 @@
 #include "selftest.h"
 #include "pwr_event.h"
 #include "stg_config.h"
+#include <assert.h>
 
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define RCV_PRIORITY CONFIG_RECV_THREAD_PRIORITY
@@ -44,6 +45,8 @@ static char urat_args_buffer[STG_CONFIG_URAT_ARG_BUF_SIZE] __attribute__((aligne
 static int server_port;
 static char server_ip[15];
 
+static char used_urat[sizeof("#,#,##")];
+
 /* Connection keep-alive thread structures */
 K_KERNEL_STACK_DEFINE(keep_alive_stack, CONFIG_CELLULAR_KEEP_ALIVE_STACK_SIZE);
 struct k_thread keep_alive_thread;
@@ -67,6 +70,7 @@ static bool waiting_for_msg = false;
 static bool modem_is_ready = false;
 static bool power_level_ok = false;
 static bool fota_in_progress = false;
+static bool switch_rat = false;
 
 static bool enable_mdm_fota = false;
 
@@ -107,6 +111,24 @@ static void give_up_main_soc(void)
 	waiting_for_msg = false;
 	k_sem_give(&close_main_socket_sem);
 	k_sem_give(&connection_state_sem);
+}
+
+static void publish_last_used_urat()
+{
+	int err;
+	memset(used_urat, 0, sizeof(used_urat));
+	err = modem_nf_get_last_used_urat(used_urat, sizeof(used_urat));
+
+	if (!err) {
+		struct urat_args_in_use_event *used_urat_ev = new_urat_args_in_use_event();
+		memset(used_urat_ev->urat_in_use, 0, sizeof(used_urat_ev->urat_in_use));
+		strncpy(used_urat_ev->urat_in_use, used_urat,
+			sizeof(used_urat_ev->urat_in_use) - 1);
+		EVENT_SUBMIT(used_urat_ev);
+		LOG_INF("Used URAT command: %s", used_urat);
+	} else {
+		LOG_ERR("Failed to retrieve last used URAT: %d", err);
+	}
 }
 
 void receive_tcp(const struct data *sock_data)
@@ -179,8 +201,6 @@ static int start_tcp(void)
 		ret = check_ip();
 		if (ret != 0) {
 			NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 6280),"err: Failed to get ip address!\n"));
-			char *e_msg = "Failed to get ip address!";
-			nf_app_error(ERR_MESSAGING, -EIO, e_msg, strlen(e_msg));
 			return ret;
 		}
 	}
@@ -337,7 +357,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return false;
 	} else if (is_urat_args_received_event(eh)) {
 		read_URAT_settings_from_NVS();
-		modem_is_ready = false;
+		switch_rat = true;
 		return false;
 	}
 	return false;
@@ -516,7 +536,9 @@ static void cellular_controller_keep_alive(void *dev)
 				 * fails ungracefully.*/
 				connected = false;
 				fota_in_progress = false;
+
 				ret = reset_modem();
+
 				if (ret == 0) {
 					if (mdm_state == INSTALLATION_COMPLETE) {
 						struct mdm_fw_update_event *ev =
@@ -534,7 +556,8 @@ static void cellular_controller_keep_alive(void *dev)
 				enable_mdm_fota = false;
 			}
 			if (cellular_controller_is_ready()) {
-				if (!connected) { //check_ip
+				if (!connected &&
+				    k_sem_take(&close_main_socket_sem, K_NO_WAIT) != 0) { //check_ip
 					// takes place in start_tcp() in this
 					// case.
 					if (fota_in_progress) {
@@ -565,6 +588,10 @@ static void cellular_controller_keep_alive(void *dev)
 							}
 						}
 					} else {
+						if (switch_rat) {
+							switch_rat = false;
+							modem_is_ready = false;
+						}
 						end_connection(); /* graceful */
 					}
 				}
@@ -582,6 +609,7 @@ static void cellular_controller_keep_alive(void *dev)
 void announce_connection_state(bool state)
 {
 	k_sem_reset(&connection_state_sem);
+	publish_last_used_urat();
 	struct connection_state_event *ev = new_connection_state_event();
 	ev->state = state;
 	EVENT_SUBMIT(ev);
@@ -633,6 +661,30 @@ int8_t cellular_controller_init(void)
 	}
 	NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 5209),"inf: modem status read: %d\n", g_modem_status_cache));
 	set_modem_status_cb(modem_read_status_nvm, modem_write_status_nvm);
+
+	uint16_t pcb_product_type = 0;
+	stg_config_u16_read(STG_U16_PRODUCT_TYPE, &pcb_product_type);
+
+	/* In the case of SG change default settings to allow 4G */
+	int err;
+
+	_Static_assert(sizeof(CONFIG_DEFAULT_URAT_SETTING_SG) >= sizeof("#") &&
+			       sizeof(CONFIG_DEFAULT_URAT_SETTING_SG) <= sizeof("#,#,#") &&
+			       sizeof(CONFIG_DEFAULT_URAT_SETTING) >= sizeof("#") &&
+			       sizeof(CONFIG_DEFAULT_URAT_SETTING) <= sizeof("#,#,#"),
+		       "Check size of the default values for the URAT command settings!");
+
+	if (pcb_product_type == 1) {
+		err = modem_nf_set_default_urat(CONFIG_DEFAULT_URAT_SETTING_SG,
+						sizeof(CONFIG_DEFAULT_URAT_SETTING_SG));
+	} else {
+		err = modem_nf_set_default_urat(CONFIG_DEFAULT_URAT_SETTING,
+						sizeof(CONFIG_DEFAULT_URAT_SETTING));
+	}
+	if (err != 0) {
+		NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 4477),"err: Failed to set default URAT settings!\n"));
+	}
+
 	read_URAT_settings_from_NVS();
 
 	/* Start connection keep-alive thread */

@@ -70,6 +70,9 @@ if MESSAGING
 	config DEFAULT_SEQ_INTERVAL_MINUTES
         int "Default time interval between periodic seq/seq2 messages"
         default 30
+    config COLLAR_STATES_CACHE_TIMEOUT_MINUTES
+            int "Waiting time before dropping a poll request when the new collar states are not ready"
+            default 3
 
 	menu "Message Queues"
 		config MSGQ_BLE_CTRL_SIZE

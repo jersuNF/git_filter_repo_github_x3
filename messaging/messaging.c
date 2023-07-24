@@ -115,6 +115,7 @@ typedef enum {
 	ZAP_COUNT,
 	GNSS_STRUCT,
 	GSM_INFO,
+	MODEM_READY,
 	CACHED_READY_END_OF_LIST
 } cached_and_ready_enum;
 
@@ -125,6 +126,7 @@ static int cached_and_ready_reg[CACHED_READY_END_OF_LIST];
 static int rat, mnc, rssi, min_rssi, max_rssi;
 static uint8_t ccid[20] = "\0";
 static char mdm_fw_file_name[sizeof(((PollMessageResponse *)NULL)->xModemFwFileName)] = "\0";
+static char urat_in_use_buf[STG_CONFIG_URAT_ARG_BUF_SIZE] = "\0";
 
 /* Time since the server updated the date time in seconds. */
 static atomic_t server_timestamp_sec = ATOMIC_INIT(0);
@@ -188,6 +190,11 @@ static bool m_confirm_urat_arg = false;
 static bool m_ACK_bSendPeriodicLogs = false;
 static bool m_ACK_bSendCoreDumps = false;
 static bool m_ACK_xLogConfig = false;
+
+#ifdef CONFIG_STG_CONFIG_DEBUG_SEND_WRITE_ERRORS
+extern uint16_t g_nvs_write_errors;
+static uint16_t m_sent_nvs_errors;
+#endif
 
 #ifdef CONFIG_STG_CONFIG_DEBUG_SEND_WRITE_ERRORS
 extern uint16_t g_nvs_write_errors;
@@ -964,45 +971,57 @@ void messaging_tx_thread_fn(void)
 			if ((tx_type == POLL_REQ) || (m_last_poll_req_timestamp_ms == 0) ||
 			    ((tx_type == SEQ_MSG) &&
 			     ((k_uptime_get() - m_last_poll_req_timestamp_ms) >= 60000))) {
-				if (k_sem_take(&cache_ready_sem, K_SECONDS(60)) != 0) {
-					NCLOG_WRN(MESSAGING_MODULE, TRice0( iD( 6047),"wrn: Cached semaphore not ready, Sending what we have\n"));
-				}
-				k_sem_give(&cache_ready_sem);
-
-				err = k_sem_take(&cache_lock_sem, K_SECONDS(1));
+				/* For poll requests always check the connection before building the message.
+				 * The message will be disregarded if the modem information is not available. */
+				k_sem_reset(&cache_ready_sem);
+				struct check_connection *ev = new_check_connection();
+				EVENT_SUBMIT(ev);
+				err = k_sem_take(
+					&cache_ready_sem,
+					K_MINUTES(CONFIG_COLLAR_STATES_CACHE_TIMEOUT_MINUTES));
 				if (err == 0) {
-					NofenceMessage Nofence_msg_buffer;
-					build_poll_request(&Nofence_msg_buffer);
-					k_sem_give(&cache_lock_sem);
-
-					err = encode_and_send_message(&Nofence_msg_buffer);
-					if (err != 0) {
-						NCLOG_WRN(MESSAGING_MODULE, TRice( iD( 2211),"wrn: Failed to send poll request err: %d\n", err));
-					}
+					err = k_sem_take(&cache_lock_sem, K_SECONDS(1));
 					if (err == 0) {
-						/* Store poll req. timestamp to avoid sending an
+						NofenceMessage Nofence_msg_buffer;
+						build_poll_request(&Nofence_msg_buffer);
+						k_sem_give(&cache_lock_sem);
+
+						err = encode_and_send_message(&Nofence_msg_buffer);
+						if (err == 0) {
+							/* Store poll req. timestamp to avoid sending an
                                                  * excessive amount of poll requests */
-						m_last_poll_req_timestamp_ms = k_uptime_get();
+							m_last_poll_req_timestamp_ms =
+								k_uptime_get();
 
 #ifdef CONFIG_DEBUG_COREDUMP_BACKEND_NOINIT
-						if (m_upload_core_dumps == 1) {
-							err = coredump_storage_read_send(
-								&Nofence_msg_buffer);
+							if (m_upload_core_dumps == 1) {
+								err = coredump_storage_read_send(
+									&Nofence_msg_buffer);
 
-							if (err != 0 && err != -ENODATA) {
-								NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4613),"err: Failed to send stored core dump, %d!\n", err));
+								if (err != 0 && err != -ENODATA) {
+									NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4613),"err: Failed to send stored core dump, %d!\n", err));
+								}
 							}
-						}
 #endif
-						// If there was no core dump (-ENODATA) still send trice logs.
-						if ((err == 0 || err == -ENODATA) &&
-						    (m_upload_periodic_logs == 1)) {
-							err = send_trice_logs(&Nofence_msg_buffer);
-							if (err != 0) {
-								NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 2970),"err: Failed to send Trice logs, %d!\n", err));
+							// If there was no core dump (-ENODATA) still send trice logs.
+							if ((err == 0 || err == -ENODATA) &&
+							    (m_upload_periodic_logs == 1)) {
+								err = send_trice_logs(
+									&Nofence_msg_buffer);
+								if (err != 0) {
+									NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 2970),"err: Failed to send Trice logs, %d!\n", err));
+								}
 							}
+						} else {
+							LOG_WRN("Failed to send poll request!");
 						}
 					}
+				} else {
+					LOG_WRN("Cached semaphore not ready, dropping poll request!");
+					NCLOG_WRN(MESSAGING_MODULE, TRice( iD( 2211),"wrn: Failed to send poll request err: %d\n", err));
+					struct messaging_stop_connection_event *end_connection =
+						new_messaging_stop_connection_event();
+					EVENT_SUBMIT(end_connection);
 				}
 				/* Poll request error handler,
                                  * Note! Consider notifying sender, leaving error handling to src */
@@ -1088,6 +1107,8 @@ static void update_cache_reg(cached_and_ready_enum index)
 		}
 	}
 	k_sem_give(&cache_ready_sem);
+	/* Always de-assert the modem ready bit */
+	cached_and_ready_reg[MODEM_READY] = 0;
 }
 
 /**
@@ -1281,6 +1302,7 @@ static bool event_handler(const struct event_header *eh)
 		struct connection_state_event *ev = cast_connection_state_event(eh);
 		if (ev->state) {
 			k_sem_give(&connection_ready);
+			update_cache_reg(MODEM_READY);
 		} else {
 			k_sem_reset(&connection_ready);
 		}
@@ -1439,6 +1461,12 @@ static bool event_handler(const struct event_header *eh)
 		process_flash_erased();
 		return false;
 	}
+	if (is_urat_args_in_use_event(eh)) {
+		struct urat_args_in_use_event *ev = cast_urat_args_in_use_event(eh);
+		memset(urat_in_use_buf, 0, sizeof(urat_in_use_buf));
+		strncpy(urat_in_use_buf, ev->urat_in_use, sizeof(urat_in_use_buf) - 1);
+		return false;
+	}
 	/* If event is unhandled, unsubscribe. */
 	__ASSERT_NO_MSG(false);
 	return false;
@@ -1510,6 +1538,7 @@ EVENT_SUBSCRIBE(MODULE, mdm_fw_update_event);
 EVENT_SUBSCRIBE(MODULE, gnss_mode_changed_event);
 EVENT_SUBSCRIBE(MODULE, start_ano_download);
 EVENT_SUBSCRIBE(MODULE, flash_erased_event);
+EVENT_SUBSCRIBE(MODULE, urat_args_in_use_event);
 
 /**
  * @brief Process commands recieved on the bluetooth interface, and performs the appropriate
@@ -1700,9 +1729,6 @@ int messaging_module_init(void)
 		/* Fallback if read from storage fails */
 		m_upload_core_dumps = 1;
 	}
-	/* Startup the modem to get the gsm_info ready before the first poll request.*/
-	struct check_connection *ev = new_check_connection();
-	EVENT_SUBMIT(ev);
 
 	k_work_queue_init(&message_q);
 	struct k_work_queue_config cfg = {
@@ -1791,17 +1817,17 @@ void build_poll_request(NofenceMessage *poll_req)
 		poll_req->m.poll_message_req.usFlashEraseCount = current_state.flash_erase_count;
 	}
 
-	// ACK the bSendPeriodicLogs once after it is updated in process_poll_response.
-	// The server may update bSendPeriodicLogs to true or false,
-	// an ACK to either update is signalled by replying with the same value as in the poll response.
+	/* ACK the bSendPeriodicLogs once after it is updated in process_poll_response.
+	   The server may update bSendPeriodicLogs to true or false,
+	   an ACK to either update is signalled by replying with the same value as in the poll response. */
 	if (m_ACK_bSendPeriodicLogs) {
 		poll_req->m.poll_message_req.has_bSendPeriodicLogs = true;
 		poll_req->m.poll_message_req.bSendPeriodicLogs = (bool)m_upload_periodic_logs;
 	}
 
-	// ACK the bSendCoreDumps once after it is updated in process_poll_response.
-	// The server may update bSendCoreDumps to true or false,
-	// an ACK to either update is signalled by replying with the same value as in the poll response.
+	/* ACK the bSendCoreDumps once after it is updated in process_poll_response.
+	   The server may update bSendCoreDumps to true or false,
+	   an ACK to either update is signalled by replying with the same value as in the poll response. */
 	if (m_ACK_bSendCoreDumps) {
 		poll_req->m.poll_message_req.has_bSendCoreDumps = true;
 		poll_req->m.poll_message_req.bSendCoreDumps = (bool)m_upload_core_dumps;
@@ -1844,25 +1870,7 @@ void build_poll_request(NofenceMessage *poll_req)
 			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 5573),"err: Failed to read ble_sec_key %d\n", err));
 		}
 	}
-	if (m_confirm_urat_arg || m_transfer_boot_params) {
-		char buf[STG_CONFIG_URAT_ARG_BUF_SIZE];
-		uint8_t len;
-		err = stg_config_str_read(STG_STR_MODEM_URAT_ARG, buf, sizeof(buf), &len);
-		if (err == 0) {
-			LOG_HEXDUMP_DBG(buf, sizeof(buf), "URAT_ARG");
-			poll_req->m.poll_message_req.has_xModemUratArg = true;
-			strncpy(poll_req->m.poll_message_req.xModemUratArg, buf,
-				sizeof(poll_req->m.poll_message_req.xModemUratArg) - 1);
 
-		} else {
-			/* No error if there are only 0xFF's in the NVS */
-			if (err != -ENODATA) {
-				LOG_ERR("Failed to read URAT args (%d)", err);
-			} else {
-				LOG_DBG("Failed to read URAT args (%d)", err);
-			}
-		}
-	}
 #ifdef CONFIG_STG_CONFIG_DEBUG_SEND_WRITE_ERRORS
 	/* If there are any NVS write errors, send them until reply */
 	if (g_nvs_write_errors > 0) {
@@ -1871,6 +1879,11 @@ void build_poll_request(NofenceMessage *poll_req)
 		m_sent_nvs_errors = poll_req->m.poll_message_req.usEepromErrors;
 	}
 #endif
+
+	poll_req->m.poll_message_req.has_xModemUratArg = true;
+	strncpy(poll_req->m.poll_message_req.xModemUratArg, urat_in_use_buf,
+		sizeof(poll_req->m.poll_message_req.xModemUratArg) - 1);
+
 	/* TODO pshustad, fill GNSSS parameters for MIA M10 */
 	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec =
 		(cached_gnss_mode == GNSSMODE_NOMODE) ? false : true;
@@ -2188,9 +2201,9 @@ void process_poll_response(NofenceMessage *proto)
 {
 	int err;
 
-	// Transfer boot parameters in the first poll request after start up.
+	/* Transfer boot parameters in the first poll request after start up. */
 	m_transfer_boot_params = false;
-	// Disable the ACK by default, it is enabled later if the server wants it.
+	/* Disable the ACK by default, it is enabled later if the server wants it. */
 	m_ACK_bSendPeriodicLogs = false;
 	m_ACK_bSendCoreDumps = false;
 	m_ACK_xLogConfig = false;
@@ -2209,8 +2222,6 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_bSendPeriodicLogs) {
 		m_ACK_bSendPeriodicLogs = true;
 		m_upload_periodic_logs = (uint8_t)pResp->bSendPeriodicLogs;
-		// If the write to storage fails and the collar reboots with wrong value,
-		// this is corrected by the following poll response after reboot.
 		err = stg_config_u8_write(STG_U8_M_UPLOAD_PERIODIC_LOGS,
 					  (uint8_t)pResp->bSendPeriodicLogs);
 		if (err != 0) {
@@ -2220,8 +2231,6 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_bSendCoreDumps) {
 		m_ACK_bSendCoreDumps = true;
 		m_upload_core_dumps = (uint8_t)pResp->bSendCoreDumps;
-		// If the write to storage fails and the collar reboots with wrong value,
-		// this is corrected by the following poll response after reboot.
 		err = stg_config_u8_write(STG_U8_M_UPLOAD_CORE_DUMPS,
 					  (uint8_t)pResp->bSendCoreDumps);
 		if (err != 0) {

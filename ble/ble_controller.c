@@ -33,7 +33,7 @@
 #include "ble_beacon_event.h"
 #include "watchdog_event.h"
 #include "error_event.h"
-#if defined(CONFIG_BOARD_NF_SG25_27O_NRF52840) || defined(CONFIG_BOARD_NF_C25_25G_NRF52840)
+#if defined(CONFIG_BOARD_NF_C25_25G_NRF52840)
 #include "ble_dfu.h"
 #elif CONFIG_BOARD_NATIVE_POSIX
 #else
@@ -790,7 +790,7 @@ int ble_module_init()
 
 	/* Callback to monitor connected/disconnected state */
 	bt_conn_cb_register(&conn_callbacks);
-#if defined(CONFIG_BOARD_NF_SG25_27O_NRF52840) || defined(CONFIG_BOARD_NF_C25_25G_NRF52840)
+#if defined(CONFIG_BOARD_NF_C25_25G_NRF52840)
 	err = bt_dfu_init();
 	if (err < 0) {
 		LOG_ERR("Failed to init ble dfu handler (%d)", err);

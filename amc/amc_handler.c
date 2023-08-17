@@ -462,7 +462,13 @@ void handle_gnss_data_fn(struct k_work *item)
 		k_work_submit_to_queue(&amc_work_q, &handle_corrections_work);
 	} else if (gnss_timeout) {
 		/* GNSS timed out, set zone to NO_ZONE and schedule correction
-		 * work in order to stop correction if already running */
+		 * work in order to stop correction if already running
+		 * Note that a GNSS timeout will be generated if we fail to
+		 * receive data from the GNSS receiver for some time (check
+		 * CONFIG_GNSS_TIMEOUT_SLACK_MS). However, even if the GNSS
+		 * receiver has not time out, "old" GNSS positions will pause
+		 * any warnings, see Reason_WARNPAUSEREASON_MISSGPSDATA
+		 * */
 		fifo_dist_elem_count = 0;
 		fifo_avg_dist_elem_count = 0;
 		zone_set(NO_ZONE);

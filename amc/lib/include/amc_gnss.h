@@ -114,4 +114,7 @@ bool gnss_has_easy_fix(void);
  */
 bool gnss_has_warn_fix(void);
 
+/** @brief: Check that GNSS time is fully resolved */
+bool gnss_is_time_fully_resolved(void);
+
 #endif /* _AMC_GNSS_H_ */

@@ -1141,8 +1141,8 @@ static bool event_handler(const struct event_header *eh)
 			k_sem_give(&cache_lock_sem);
 		}
 
-		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
-			time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
+		if (ev->gnss_data.fully_resolved_unix_timestamp != 0) {
+			time_t gm_time = (time_t)ev->gnss_data.fully_resolved_unix_timestamp;
 			struct tm *tm_time = gmtime(&gm_time);
 
 			/* tm_year is relative to 1900 */

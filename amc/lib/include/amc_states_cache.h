@@ -162,6 +162,7 @@ void restart_force_gnss_to_fix(void);
 
 #ifdef CONFIG_TEST
 void _test_set_firs_time_since_start(bool v);
+void _test_set_has_ever_got_fully_resolved_gnss_time(bool v);
 #endif
 
 #endif /* _AMC_STATES_CACHE_H_ */

@@ -331,7 +331,7 @@ static _Noreturn void publish_gnss_data(void *ctx)
 			struct gnss_data *new_data = new_gnss_data();
 			new_data->gnss_data = gnss_data_buffer;
 			new_data->timed_out = false;
-			NCLOG_DBG(GNSS_CONTROLLER, TRice( iD( 3224),"GNSS data: lon: %d, psmState: 0x%02x, hAcc: %d, numSv: %d, mode: %d, fix: %d \n", gnss_data_buffer.latest.lon, (gnss_data_buffer.latest.pvt_flags >> 2), gnss_data_buffer.latest.h_acc_dm, gnss_data_buffer.latest.num_sv, gnss_data_buffer.latest.mode, gnss_data_buffer.fix_ok));
+			NCLOG_DBG(GNSS_CONTROLLER,TRice( iD( 3224),"GNSS: lon: %d, psmState: 0x%02x, hAcc: %d, numSv: %d, mode: %d, fix: %d valid 0x%02x\n",gnss_data_buffer.latest.lon, (gnss_data_buffer.latest.pvt_flags >> 2),gnss_data_buffer.latest.h_acc_dm, gnss_data_buffer.latest.num_sv, gnss_data_buffer.latest.mode,gnss_data_buffer.fix_ok,gnss_data_buffer.latest.pvt_valid));
 
 			EVENT_SUBMIT(new_data);
 			initialized = true;

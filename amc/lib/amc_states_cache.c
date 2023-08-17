@@ -48,6 +48,7 @@ static CollarStatus current_collar_status = CollarStatus_CollarStatus_UNKNOWN;
 
 /* Variable used to check GNSS mode. */
 static bool first_time_since_start = true;
+static bool has_ever_got_fully_resolved_gnss_time = false;
 static int64_t forcegnsstofix_timestamp = 0;
 
 /* Movement controller variable. */
@@ -66,6 +67,10 @@ static uint16_t zap_pain_cnt = 0;
 void _test_set_firs_time_since_start(bool v)
 {
 	first_time_since_start = v;
+}
+void _test_set_has_ever_got_fully_resolved_gnss_time(bool v)
+{
+	has_ever_got_fully_resolved_gnss_time = v;
 }
 #endif
 
@@ -655,6 +660,7 @@ void restart_force_gnss_to_fix(void)
 void set_sensor_modes(Mode mode, FenceStatus fs, CollarStatus cs, amc_zone_t zone)
 {
 	uint8_t gnss_mode = GNSSMODE_CAUTION;
+	has_ever_got_fully_resolved_gnss_time |= gnss_is_time_fully_resolved();
 
 	if (cs == CollarStatus_Sleep || cs == CollarStatus_OffAnimal ||
 	    fs == FenceStatus_BeaconContact || fs == FenceStatus_BeaconContactNormal) {
@@ -707,7 +713,9 @@ void set_sensor_modes(Mode mode, FenceStatus fs, CollarStatus cs, amc_zone_t zon
 			}
 		} else {
 			/* GPS fix recently, do not check anymore. */
-			first_time_since_start = false;
+			if (gnss_is_time_fully_resolved()) {
+				first_time_since_start = false;
+			}
 		}
 		/* Timeout this function after 1 hour. */
 		uint32_t delta_fix =
@@ -728,6 +736,18 @@ void set_sensor_modes(Mode mode, FenceStatus fs, CollarStatus cs, amc_zone_t zon
 	if (atomic_get(&power_state) == PWR_CRITICAL) {
 		gnss_mode = GNSSMODE_INACTIVE;
 	}
+
+	/* If we are in PSM mode and the GNSS receiver still hasn't delivered
+	 * fullyResolvedTime since MCU boot, we need to keep the receiver
+	 * in continous mode
+	 */
+	if (gnss_mode == GNSSMODE_PSM) {
+		if (!has_ever_got_fully_resolved_gnss_time) {
+			gnss_mode = GNSSMODE_CAUTION;
+		}
+	}
+
+
 
 	/* Send GNSS mode change event from amc_gnss.c */
 	if (gnss_get_mode() != gnss_mode) {

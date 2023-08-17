@@ -40,6 +40,10 @@ if MESSAGING
 		int "Priority of the send to server queue thread"
 		default 3
 
+	config SEND_BINARY_MUTEX_TIMEOUT_MSEC
+	    int "Timeout for how long we want to wait before timing out when another thread is trying to send a message"
+	    default 50
+
 	config CC_ACK_TIMEOUT_SEC
 	    int "Timeout when waiting for ack from cellular controller"
 	    default 3

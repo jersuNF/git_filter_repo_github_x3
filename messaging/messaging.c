@@ -1305,6 +1305,7 @@ static bool event_handler(const struct event_header *eh)
 			update_cache_reg(MODEM_READY);
 		} else {
 			k_sem_reset(&connection_ready);
+			k_sem_reset(&cache_ready_sem);
 		}
 		return false;
 	}
@@ -2101,8 +2102,9 @@ void proto_InitHeader(NofenceMessage *msg)
 int send_binary_message(uint8_t *data, size_t len)
 {
 	/* We can only send 1 message at a time, use mutex. */
-	k_mutex_lock(&send_binary_mutex, K_NO_WAIT);
-	if (send_binary_mutex.lock_count == 1) {
+	if (k_mutex_lock(&send_binary_mutex, K_MSEC(CONFIG_SEND_BINARY_MUTEX_TIMEOUT_MSEC)) == 0) {
+
+		k_sem_reset(&connection_ready);
 		struct check_connection *ev = new_check_connection();
 		EVENT_SUBMIT(ev);
 
@@ -2115,6 +2117,7 @@ int send_binary_message(uint8_t *data, size_t len)
 		uint16_t byteswap_size = BYTESWAP16(len - 2);
 		memcpy(&data[0], &byteswap_size, 2);
 
+		k_sem_reset(&send_out_ack);
 		struct messaging_proto_out_event *msg2send = new_messaging_proto_out_event();
 		msg2send->buf = data;
 		msg2send->len = len;
@@ -2131,7 +2134,6 @@ int send_binary_message(uint8_t *data, size_t len)
 		k_mutex_unlock(&send_binary_mutex);
 		return 0;
 	} else {
-		k_mutex_unlock(&send_binary_mutex);
 		return -EBUSY;
 	}
 }

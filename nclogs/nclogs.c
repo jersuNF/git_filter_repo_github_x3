@@ -6,8 +6,6 @@
 #include <date_time.h>
 #include <messaging_module_events.h>
 
-static callback_fn attempt_flush_cb = NULL;
-
 struct nclog_buffer_t {
 	uint32_t rb_magic_number;
 	struct ring_buf rb_trice;
@@ -23,8 +21,19 @@ static struct nclog_framework_t __noinit nclogs;
 
 int nclogs_write(uint8_t *buf, size_t len)
 {
+	static unsigned counter = 0;
+	size_t available_space = ring_buf_space_get(&nclogs.nclog_buffer.rb_trice);
+	if (available_space <= len) {
+		counter++;
+		return -ENOMEM;
+	}
+	if (counter != 0) {
+		unsigned tmp_counter=counter;
+		counter = 0; /* we need to reset this counter before logging */
+		NCLOG_ERR(UNDEFINED, TRice( iD( 7919),"nclogs_write: Not enough space in buffer. %u logs were discarded", tmp_counter ));
+	}
+	
 	bool overflow = false;
-	static bool flush_attempted = false;
 	uint32_t bytes_written = ring_buf_put(&nclogs.nclog_buffer.rb_trice, buf, len);
 	if (bytes_written < len) {
 		/* Make room for data (discard oldest if buffer is full)*/
@@ -33,19 +42,6 @@ int nclogs_write(uint8_t *buf, size_t len)
 		bytes_written += ring_buf_put(&nclogs.nclog_buffer.rb_trice, &buf[bytes_written],
 					      len - bytes_written);
 		overflow = true;
-	}
-	if (attempt_flush_cb != NULL) {
-		// Check how much of the buffer is used up
-		size_t space_used = ring_buf_size_get(&nclogs.nclog_buffer.rb_trice) * 100 /
-				    ring_buf_capacity_get(&nclogs.nclog_buffer.rb_trice);
-		if (!flush_attempted &&
-		    (space_used) >= CONFIG_NCLOG_BUFFER_USED_UP_THRESHOLD_PERCENTAGE) {
-			flush_attempted = true;
-			attempt_flush_cb();
-		} else if (flush_attempted &&
-			   (space_used) < CONFIG_NCLOG_BUFFER_USED_UP_THRESHOLD_PERCENTAGE) {
-			flush_attempted = false;
-		}
 	}
 	return overflow ? -ENOMEM : 0;
 }
@@ -90,11 +86,6 @@ int nclog_set_level(eNCLOG_MODULE module, eNCLOG_LVL level)
 eNCLOG_LVL nclog_get_level(eNCLOG_MODULE module)
 {
 	return nclogs.level[module];
-}
-
-void register_flush_callback(callback_fn callbackFn)
-{
-	attempt_flush_cb = callbackFn;
 }
 
 void nclogs_module_init()

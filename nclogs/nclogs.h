@@ -5,6 +5,10 @@
 #include "trice.h"
 #include "collar_protocol.h"
 
+/// @brief return amount of available bytes to read out
+/// @return number of bytes. if negative, error.
+int nclog_get_available_bytes();
+
 /// @brief access static nclog_initialized variable
 /// @return return true if nclog is initialized. false otherwise
 bool nclog_is_initialized();

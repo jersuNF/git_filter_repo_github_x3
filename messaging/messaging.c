@@ -882,10 +882,19 @@ int send_trice_logs(NofenceMessage *trice_log_msg)
 {
 	uint8_t chunk_id = 0;
 	int ret;
-	while (chunk_id * sizeof(trice_log_msg->m.generic_msg.usBuf) <= CONFIG_NCLOG_BUFFER_SIZE) {
+	int bytes_available = nclog_get_available_bytes();
+	if (bytes_available < 0) {
+		return -ENODATA;
+	}
+	size_t bytes_per_element = sizeof(trice_log_msg->m.generic_msg.usBuf[0]);
+	size_t bytes_per_chunk = sizeof(trice_log_msg->m.generic_msg.usBuf);
+	uint16_t total_chunks = ceiling_fraction(bytes_available, bytes_per_chunk);
+
+	while (chunk_id * bytes_per_chunk <= CONFIG_NCLOG_BUFFER_SIZE) {
 		proto_InitHeader(trice_log_msg);
 		trice_log_msg->which_m = NofenceMessage_generic_msg_tag;
-		trice_log_msg->m.generic_msg.has_usTotalChunks = false;
+		trice_log_msg->m.generic_msg.has_usTotalChunks = true;
+		trice_log_msg->m.generic_msg.usTotalChunks = total_chunks;
 		trice_log_msg->m.generic_msg.usChunkId = chunk_id;
 
 		trice_log_msg->m.generic_msg.msgType = GenericMessage_GenMessageType_TRICE_LOGS;
@@ -901,8 +910,7 @@ int send_trice_logs(NofenceMessage *trice_log_msg)
 			return ret;
 		} else {
 			trice_log_msg->m.generic_msg.usBuf_count =
-				ret / sizeof(trice_log_msg->m.generic_msg.usBuf[0]) +
-				(ret % sizeof(trice_log_msg->m.generic_msg.usBuf[0]) != 0 ? 1 : 0);
+				ceiling_fraction(ret, bytes_per_element);
 			ret = encode_and_send_message(trice_log_msg);
 			if (ret != 0) {
 				NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7738),"err: Failed to send trice logs, err: %d!\n", ret));

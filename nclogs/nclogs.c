@@ -85,7 +85,13 @@ int nclog_set_level(eNCLOG_MODULE module, eNCLOG_LVL level)
 	}
 	return -EINVAL;
 }
-
+int nclog_get_available_bytes()
+{
+	if (!nclogs_initialized) {
+		return -EACCES;
+	}
+	return ring_buf_size_get(&nclogs.nclog_buffer.rb_trice);
+}
 eNCLOG_LVL nclog_get_level(eNCLOG_MODULE module)
 {
 	return nclogs.level[module];

@@ -164,6 +164,10 @@ static inline int update_pasture_from_stg(void)
 		/* Set pasture/fence to invalid */
 		nf_app_error(ERR_AMC, err, NULL, 0);
 		force_fence_status(FenceStatus_FenceStatus_Invalid);
+		struct update_fence_version *ver = new_update_fence_version();
+		ver->fence_version = 0;
+		ver->total_fences = 0;
+		EVENT_SUBMIT(ver);
 		return err;
 	}
 

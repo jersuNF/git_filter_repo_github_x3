@@ -55,13 +55,13 @@ bool lte_is_ready(void)
 	}
 }
 
-static size_t sendall(int sock, const void *buf, size_t len)
+static ssize_t sendall(int sock, const void *buf, size_t len)
 {
-	size_t to_send = len;
+	ssize_t to_send = (ssize_t)len;
+	/* FIXME (pshustad) Revisit: Timing out after 500 ms for potential several 'send' (!) */
 	k_timer_start(&sendall_timer, K_MSEC(500), K_NO_WAIT);
-	while (len) {
-		size_t out_len = send(sock, buf, len, 0);
-
+	while (len != 0) {
+		ssize_t out_len = send(sock, buf, len, 0);
 		if (out_len < 0) {
 			return out_len;
 		}
@@ -249,7 +249,7 @@ int send_tcp(char *msg, size_t len)
 #endif
 	NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 4151),"inf: Attempting to send %d bytes!\n", len));
 	int ret;
-	ret = (int)sendall(conf.ipv4.tcp.sock, msg, len);
+	ret = sendall(conf.ipv4.tcp.sock, msg, len);
 	if (ret >= 0) {
 		//NCLOG_DBG(CELLULAR_CONTROLLER, TRICE_S( iD( 1339),"dbg: %s TCP: Sent ", conf.ipv4.proto));
 		NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 5840),"dbg: %d bytes\n", ret));

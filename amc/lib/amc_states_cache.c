@@ -747,8 +747,6 @@ void set_sensor_modes(Mode mode, FenceStatus fs, CollarStatus cs, amc_zone_t zon
 		}
 	}
 
-
-
 	/* Send GNSS mode change event from amc_gnss.c */
 	if (gnss_get_mode() != gnss_mode) {
 		gnss_update_mode(gnss_mode);

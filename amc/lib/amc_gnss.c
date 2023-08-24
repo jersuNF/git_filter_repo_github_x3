@@ -282,5 +282,4 @@ bool gnss_is_time_fully_resolved(void)
 	}
 
 	return is_time_resolved;
-
 }

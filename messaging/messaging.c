@@ -2111,7 +2111,6 @@ int send_binary_message(uint8_t *data, size_t len)
 {
 	/* We can only send 1 message at a time, use mutex. */
 	if (k_mutex_lock(&send_binary_mutex, K_MSEC(CONFIG_SEND_BINARY_MUTEX_TIMEOUT_MSEC)) == 0) {
-
 		k_sem_reset(&connection_ready);
 		struct check_connection *ev = new_check_connection();
 		EVENT_SUBMIT(ev);

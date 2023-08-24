@@ -28,11 +28,11 @@ int nclogs_write(uint8_t *buf, size_t len)
 		return -ENOMEM;
 	}
 	if (counter != 0) {
-		unsigned tmp_counter=counter;
+		unsigned tmp_counter = counter;
 		counter = 0; /* we need to reset this counter before logging */
-		NCLOG_ERR(UNDEFINED, TRice( iD( 7919),"err: nclogs_write: Not enough space in buffer. %u logs were discarded", tmp_counter ));
+		NCLOG_ERR(UNDEFINED, TRice( iD( 7919),"err: nclogs_write: Not enough space in buffer. %u logs were discarded \n", tmp_counter ));
 	}
-	
+
 	bool overflow = false;
 	uint32_t bytes_written = ring_buf_put(&nclogs.nclog_buffer.rb_trice, buf, len);
 	if (bytes_written < len) {
@@ -113,9 +113,9 @@ void nclogs_module_init()
 		for (size_t i = 0; i <= _eNCLOG_MODULE_MAX; i++) {
 			nclogs.level[i] = CONFIG_NCLOG_DEFAULT_LEVEL;
 		}
-		NCLOG_INF(UNDEFINED, TRice0( iD( 3161),"inf: Magic number not set. Initializing nclogs module in noinit memory region"));
+		NCLOG_INF(UNDEFINED, TRice0( iD( 3161),"inf: Magic number not set. Initializing nclogs module in noinit memory region \n"));
 	} else {
-		NCLOG_INF(UNDEFINED, TRice0( iD( 1458),"inf: Magic number set. Using existing data stored in noinit memory region"));
+		NCLOG_INF(UNDEFINED, TRice0( iD( 1458),"inf: Magic number set. Using existing data stored in noinit memory region \n"));
 	}
 }
 

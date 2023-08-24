@@ -85,7 +85,7 @@ int socket_connect(struct data *data, struct sockaddr *addr, socklen_t addrlen)
 		return -errno;
 	} else {
 		//NCLOG_DBG(CELLULAR_CONTROLLER, TRICE_S( iD( 7239),"inf: Created TCP socket (%s): ", data->proto));
-		NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 2296),"inf: %d\n", data->tcp.sock));
+		NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 2296),"dbg: %d\n", data->tcp.sock));
 		socket_id = data->tcp.sock;
 	}
 
@@ -181,7 +181,7 @@ int reset_modem()
 		return ret;
 	}
 	ret = socket_listen(&conf_listen.ipv4);
-	NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 2272),"inf: socket_listen() returned %d\n", ret));
+	NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 2272),"dbg: socket_listen() returned %d\n", ret));
 	return ret;
 }
 
@@ -247,7 +247,7 @@ int send_tcp(char *msg, size_t len)
 	}
 	printk("\n");
 #endif
-	NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 4151),"inf: Attempting to send %d bytes!\n", len));
+	NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 4151),"dbg: Attempting to send %d bytes!\n", len));
 	int ret;
 	ret = sendall(conf.ipv4.tcp.sock, msg, len);
 	if (ret >= 0) {

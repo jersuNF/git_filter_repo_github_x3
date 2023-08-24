@@ -577,7 +577,7 @@ _Noreturn void gnss_ano_install_thread_fn(void)
 							    tmbuf.tm_hour, tmbuf.tm_min,
 							    tmbuf.tm_sec, 10);
 				if (ret != 0) {
-					NCLOG_ERR(GNSS_CONTROLLER, TRice(iD(2303), "Cannot set GNSS time %d\n", ret));
+					NCLOG_ERR(GNSS_CONTROLLER, TRice(iD(2303), "err: Cannot set GNSS time %d \n", ret));
 					break;
 				}
 				gnss_receiver_got_time = true;
@@ -588,10 +588,10 @@ _Noreturn void gnss_ano_install_thread_fn(void)
 			if (err == 0) {
 				start_from_flash = false;
 			} else if (err == -ENODATA) {
-				NCLOG_DBG(GNSS_CONTROLLER, trice0(iD(6415), "Reached end of ano partition"));
+				NCLOG_DBG(GNSS_CONTROLLER, trice0(iD(6415), "dbg: Reached end of ano partition \n"));
 				all_ano_installed = true;
 			} else {
-				NCLOG_ERR(GNSS_CONTROLLER, trice0(iD(1454), "Failed to read ano entry from flash!"));
+				NCLOG_ERR(GNSS_CONTROLLER, trice0(iD(1454), "err: Failed to read ano entry from flash! \n"));
 				/* This could happen if the GNSS receiver is in backup mode */
 				/* break the loop and wait for semaphore */
 				break;
@@ -612,7 +612,7 @@ _Noreturn void gnss_ano_install_thread_fn(void)
 		*/
 		ret = k_sem_take(&install_ano_sem, all_ano_installed ? K_FOREVER : K_MINUTES(5));
 		if (ret != 0) {
-			NCLOG_WRN(GNSS_CONTROLLER, trice0(iD(5222), "Retrying ANO install"));
+			NCLOG_WRN(GNSS_CONTROLLER, trice0(iD(5222), "wrn: Retrying ANO install \n"));
 		}
 	}
 }

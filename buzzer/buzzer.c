@@ -551,7 +551,7 @@ void buzzer_sound_event(struct sound_event *eh)
 }
 #endif
 
-void buzzer_play_sounds_based_on(uint8_t soft_reset_reason, int bat_percent)
+void play_welcome_sound(uint8_t soft_reset_reason, int bat_percent)
 {
 	/* The welcome- and battery-sound are played only for user-driven resets*/
 	// REBOOT_UNKNOWN intentionally left out, to avoid scaring animals.

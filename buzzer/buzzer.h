@@ -42,6 +42,10 @@ typedef struct {
 	duration_t s;
 } note_t;
 
+void buzzer_sound_event(struct sound_event *eh);
+
+void buzzer_play_sounds_based_on(uint8_t soft_reset_reason, int bat_percent);
+
 int buzzer_module_init(void);
 
 #endif /* _BUZZER_H_ */

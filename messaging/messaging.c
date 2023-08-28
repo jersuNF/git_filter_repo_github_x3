@@ -882,10 +882,19 @@ int send_trice_logs(NofenceMessage *trice_log_msg)
 {
 	uint8_t chunk_id = 0;
 	int ret;
-	while (chunk_id * sizeof(trice_log_msg->m.generic_msg.usBuf) <= CONFIG_NCLOG_BUFFER_SIZE) {
+	int bytes_available = nclog_get_available_bytes();
+	if (bytes_available < 0) {
+		return -ENODATA;
+	}
+	size_t bytes_per_element = sizeof(trice_log_msg->m.generic_msg.usBuf[0]);
+	size_t bytes_per_chunk = sizeof(trice_log_msg->m.generic_msg.usBuf);
+	uint16_t total_chunks = ceiling_fraction(bytes_available, bytes_per_chunk);
+
+	while (chunk_id * bytes_per_chunk <= CONFIG_NCLOG_BUFFER_SIZE) {
 		proto_InitHeader(trice_log_msg);
 		trice_log_msg->which_m = NofenceMessage_generic_msg_tag;
-		trice_log_msg->m.generic_msg.has_usTotalChunks = false;
+		trice_log_msg->m.generic_msg.has_usTotalChunks = true;
+		trice_log_msg->m.generic_msg.usTotalChunks = total_chunks;
 		trice_log_msg->m.generic_msg.usChunkId = chunk_id;
 
 		trice_log_msg->m.generic_msg.msgType = GenericMessage_GenMessageType_TRICE_LOGS;
@@ -901,8 +910,7 @@ int send_trice_logs(NofenceMessage *trice_log_msg)
 			return ret;
 		} else {
 			trice_log_msg->m.generic_msg.usBuf_count =
-				ret / sizeof(trice_log_msg->m.generic_msg.usBuf[0]) +
-				(ret % sizeof(trice_log_msg->m.generic_msg.usBuf[0]) != 0 ? 1 : 0);
+				ceiling_fraction(ret, bytes_per_element);
 			ret = encode_and_send_message(trice_log_msg);
 			if (ret != 0) {
 				NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7738),"err: Failed to send trice logs, err: %d!\n", ret));
@@ -1141,8 +1149,8 @@ static bool event_handler(const struct event_header *eh)
 			k_sem_give(&cache_lock_sem);
 		}
 
-		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
-			time_t gm_time = (time_t)ev->gnss_data.lastfix.unix_timestamp;
+		if (ev->gnss_data.fully_resolved_unix_timestamp != 0) {
+			time_t gm_time = (time_t)ev->gnss_data.fully_resolved_unix_timestamp;
 			struct tm *tm_time = gmtime(&gm_time);
 
 			/* tm_year is relative to 1900 */
@@ -1305,6 +1313,7 @@ static bool event_handler(const struct event_header *eh)
 			update_cache_reg(MODEM_READY);
 		} else {
 			k_sem_reset(&connection_ready);
+			k_sem_reset(&cache_ready_sem);
 		}
 		return false;
 	}
@@ -2101,8 +2110,8 @@ void proto_InitHeader(NofenceMessage *msg)
 int send_binary_message(uint8_t *data, size_t len)
 {
 	/* We can only send 1 message at a time, use mutex. */
-	k_mutex_lock(&send_binary_mutex, K_NO_WAIT);
-	if (send_binary_mutex.lock_count == 1) {
+	if (k_mutex_lock(&send_binary_mutex, K_MSEC(CONFIG_SEND_BINARY_MUTEX_TIMEOUT_MSEC)) == 0) {
+		k_sem_reset(&connection_ready);
 		struct check_connection *ev = new_check_connection();
 		EVENT_SUBMIT(ev);
 
@@ -2115,6 +2124,7 @@ int send_binary_message(uint8_t *data, size_t len)
 		uint16_t byteswap_size = BYTESWAP16(len - 2);
 		memcpy(&data[0], &byteswap_size, 2);
 
+		k_sem_reset(&send_out_ack);
 		struct messaging_proto_out_event *msg2send = new_messaging_proto_out_event();
 		msg2send->buf = data;
 		msg2send->len = len;
@@ -2131,7 +2141,6 @@ int send_binary_message(uint8_t *data, size_t len)
 		k_mutex_unlock(&send_binary_mutex);
 		return 0;
 	} else {
-		k_mutex_unlock(&send_binary_mutex);
 		return -EBUSY;
 	}
 }

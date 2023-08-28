@@ -6,8 +6,6 @@
 #include <date_time.h>
 #include <messaging_module_events.h>
 
-static callback_fn attempt_flush_cb = NULL;
-
 struct nclog_buffer_t {
 	uint32_t rb_magic_number;
 	struct ring_buf rb_trice;
@@ -20,11 +18,22 @@ struct nclog_framework_t {
 };
 
 static struct nclog_framework_t __noinit nclogs;
-
+static bool nclogs_initialized = false;
 int nclogs_write(uint8_t *buf, size_t len)
 {
+	static unsigned counter = 0;
+	size_t available_space = ring_buf_space_get(&nclogs.nclog_buffer.rb_trice);
+	if (available_space <= len) {
+		counter++;
+		return -ENOMEM;
+	}
+	if (counter != 0) {
+		unsigned tmp_counter = counter;
+		counter = 0; /* we need to reset this counter before logging */
+		NCLOG_ERR(UNDEFINED, TRice( iD( 7919),"err: nclogs_write: Not enough space in buffer. %u logs were discarded \n", tmp_counter ));
+	}
+
 	bool overflow = false;
-	static bool flush_attempted = false;
 	uint32_t bytes_written = ring_buf_put(&nclogs.nclog_buffer.rb_trice, buf, len);
 	if (bytes_written < len) {
 		/* Make room for data (discard oldest if buffer is full)*/
@@ -34,19 +43,6 @@ int nclogs_write(uint8_t *buf, size_t len)
 					      len - bytes_written);
 		overflow = true;
 	}
-	if (attempt_flush_cb != NULL) {
-		// Check how much of the buffer is used up
-		size_t space_used = ring_buf_size_get(&nclogs.nclog_buffer.rb_trice) * 100 /
-				    ring_buf_capacity_get(&nclogs.nclog_buffer.rb_trice);
-		if (!flush_attempted &&
-		    (space_used) >= CONFIG_NCLOG_BUFFER_USED_UP_THRESHOLD_PERCENTAGE) {
-			flush_attempted = true;
-			attempt_flush_cb();
-		} else if (flush_attempted &&
-			   (space_used) < CONFIG_NCLOG_BUFFER_USED_UP_THRESHOLD_PERCENTAGE) {
-			flush_attempted = false;
-		}
-	}
 	return overflow ? -ENOMEM : 0;
 }
 
@@ -54,7 +50,10 @@ int nclogs_read(uint8_t *buf, size_t cnt)
 {
 	return ring_buf_get(&nclogs.nclog_buffer.rb_trice, buf, cnt);
 }
-
+bool nclog_is_initialized()
+{
+	return nclogs_initialized;
+}
 int nclogs_read_with_sucess(int (*callback)(uint8_t *buf, size_t cnt))
 {
 	uint8_t *data = NULL;
@@ -73,7 +72,7 @@ bool nclog_is_enabled(eNCLOG_MODULE module, eNCLOG_LVL level)
 {
 	/* NClogs of greater severity are displayed */
 	if (nclogs.level[module] >= level) {
-		return true;
+		return nclogs_initialized;
 	}
 	return false;
 }
@@ -86,19 +85,24 @@ int nclog_set_level(eNCLOG_MODULE module, eNCLOG_LVL level)
 	}
 	return -EINVAL;
 }
-
+int nclog_get_available_bytes()
+{
+	if (!nclogs_initialized) {
+		return -EACCES;
+	}
+	return ring_buf_size_get(&nclogs.nclog_buffer.rb_trice);
+}
 eNCLOG_LVL nclog_get_level(eNCLOG_MODULE module)
 {
 	return nclogs.level[module];
 }
 
-void register_flush_callback(callback_fn callbackFn)
-{
-	attempt_flush_cb = callbackFn;
-}
-
 void nclogs_module_init()
 {
+	/* IMPORTANT: No logging can happen before the write pointer is updated */
+	trice_set_custom_write(&nclogs_write);
+	nclogs_initialized = true;
+
 	/* Check if buffer has been initialized by using an "unique" number for the build. */
 	if (nclogs.nclog_buffer.rb_magic_number !=
 	    (uint32_t)__TIME__[6] + __TIME__[7] + __TIME__[8] + NF_X25_VERSION_NUMBER) {
@@ -109,9 +113,10 @@ void nclogs_module_init()
 		for (size_t i = 0; i <= _eNCLOG_MODULE_MAX; i++) {
 			nclogs.level[i] = CONFIG_NCLOG_DEFAULT_LEVEL;
 		}
+		NCLOG_INF(UNDEFINED, TRice0( iD( 3161),"inf: Magic number not set. Initializing nclogs module in noinit memory region \n"));
+	} else {
+		NCLOG_INF(UNDEFINED, TRice0( iD( 1458),"inf: Magic number set. Using existing data stored in noinit memory region \n"));
 	}
-
-	trice_set_custom_write(&nclogs_write);
 }
 
 /* We're logging with uptime in milliseconds */

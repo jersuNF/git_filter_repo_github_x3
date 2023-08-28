@@ -37,15 +37,15 @@ static bool m_initialized = false;
 #ifdef CONFIG_STG_CONFIG_DEBUG_SEND_WRITE_ERRORS
 
 uint16_t g_nvs_write_errors;
-#define UPDATE_WRITE_ERRORS(rc) \
-	do {                    \
-             if (rc < 0) {      \
-			g_nvs_write_errors++; \
-		     }                        \
+#define UPDATE_WRITE_ERRORS(rc)                                                                    \
+	do {                                                                                       \
+		if (rc < 0) {                                                                      \
+			g_nvs_write_errors++;                                                      \
+		}                                                                                  \
 	} while (0)
 #else
-#define UPDATE_WRITE_ERRORS(rc) \
-	do {                    \
+#define UPDATE_WRITE_ERRORS(rc)                                                                    \
+	do {                                                                                       \
 	} while (0)
 
 #endif

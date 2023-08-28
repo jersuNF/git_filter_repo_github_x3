@@ -17,6 +17,7 @@ gnss_mode_t gnss_mode = GNSSMODE_NOMODE;
 #define GNSSFIXBIT_DISTINC 7
 #define GNSSFIXBIT_DISTANCE 8
 #define GNSSFIXBIT_HEIGHT 9
+#define GNSSFIXBIT_TIME_FULLY_RESOLVED 10
 
 #define GNSSFIX_ACCEPTED_MASK                                                                      \
 	((1 << GNSSFIXBIT_FIX) | (1 << GNSSFIXBIT_NUMSV) | (1 << GNSSFIXBIT_DOP) |                 \
@@ -29,6 +30,8 @@ gnss_mode_t gnss_mode = GNSSMODE_NOMODE;
 	 (1 << GNSSFIXBIT_ACC) | (1 << GNSSFIXBIT_HEIGHT) | (1 << GNSSFIXBIT_CACC) |               \
 	 (1 << GNSSFIXBIT_SLOPE) | (1 << GNSSFIXBIT_STABILITY) | (1 << GNSSFIXBIT_DISTINC) |       \
 	 (1 << GNSSFIXBIT_DISTANCE))
+
+#define GNSSFIX_TIME_FULLY_RESOLVED_MASK (1 << GNSSFIXBIT_TIME_FULLY_RESOLVED)
 
 static uint32_t gnss_fix_accuracy = 0;
 static uint32_t gnss_fix_accuracy_with_timeout = 0;
@@ -139,6 +142,10 @@ static int gnss_check_accuracy(gnss_t *gnss_data)
 			gnss_fix_accuracy |= (1 << GNSSFIXBIT_CACC);
 		}
 		gnss_fix_accuracy |= (1 << GNSSFIXBIT_HEIGHT);
+
+		if ((gnss_data->latest.pvt_valid & 0x7) == 0x7) {
+			gnss_fix_accuracy |= (1 << GNSSFIXBIT_TIME_FULLY_RESOLVED);
+		}
 
 		gnss_fix_accuracy_with_timeout = gnss_fix_accuracy;
 
@@ -262,4 +269,17 @@ bool gnss_has_warn_fix(void)
 	}
 
 	return has_warn_fix;
+}
+
+bool gnss_is_time_fully_resolved(void)
+{
+	bool is_time_resolved = false;
+	if (k_mutex_lock(&gnss_fix_accuracy_mutex, K_MSEC(100)) == 0) {
+		is_time_resolved = ((gnss_fix_accuracy & GNSSFIX_TIME_FULLY_RESOLVED_MASK) ==
+				    GNSSFIX_TIME_FULLY_RESOLVED_MASK);
+
+		k_mutex_unlock(&gnss_fix_accuracy_mutex);
+	}
+
+	return is_time_resolved;
 }

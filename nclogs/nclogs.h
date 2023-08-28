@@ -5,6 +5,14 @@
 #include "trice.h"
 #include "collar_protocol.h"
 
+/// @brief return amount of available bytes to read out
+/// @return number of bytes. if negative, error.
+int nclog_get_available_bytes();
+
+/// @brief access static nclog_initialized variable
+/// @return return true if nclog is initialized. false otherwise
+bool nclog_is_initialized();
+
 /// @brief Writes data to the ring buffer. When overflowing, the oldest data is discarded.
 /// @param buf pointer to data to be written to buffer
 /// @param len data size in bytes
@@ -101,7 +109,9 @@ void nclogs_module_init(void);
 
 #define NCLOG_ALWAYS(_FUNC)                                                                        \
 	do {                                                                                       \
-		_FUNC;                                                                             \
+		if (nclog_is_initialized()) {                                                      \
+			_FUNC;                                                                     \
+		}                                                                                  \
 	} while (0)
 
 typedef void (*callback_fn)(void);

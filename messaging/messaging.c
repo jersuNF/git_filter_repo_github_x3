@@ -2356,7 +2356,7 @@ void process_poll_response(NofenceMessage *proto)
 		strncpy(buf, pResp->xModemUratArg, sizeof(buf) - 1);
 		err = stg_config_str_write(STG_STR_MODEM_URAT_ARG, buf, sizeof(buf) - 1);
 		if (err != 0) {
-			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7821),"err: Error storing URAT to NVS (%d)", err));
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7821),"err: Error storing URAT to NVS (%d)\n", err));
 		} else {
 			struct urat_args_received_event *urat_ev = new_urat_args_received_event();
 			EVENT_SUBMIT(urat_ev);

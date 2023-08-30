@@ -66,7 +66,9 @@ static uint8_t cached_fences_counter = 0;
 static uint32_t cached_msss = 0;
 static uint32_t cached_ttff = 0;
 
-/** @todo This should be fetched from storage */
+/** @brief: The cached GNSS mode is reflecting the last power mode
+ * reported by the GNSS system, independent of fix
+ */
 static gnss_mode_t cached_gnss_mode = GNSSMODE_NOMODE;
 
 atomic_t cached_batt = ATOMIC_INIT(0);
@@ -97,6 +99,8 @@ typedef struct {
 } collar_state_struct_t;
 
 static collar_state_struct_t current_state;
+
+/* TODO, cached_fix is not used thread-safe, see https://nofence.atlassian.net/browse/FEN-608 */
 static gnss_last_fix_struct_t cached_fix;
 
 static bool block_fota_request = false;
@@ -790,7 +794,7 @@ static void log_position_state_machine()
 		}
 		break;
 	case WAIT_FOR_GNSS_INACTIVE:
-		if (cached_fix.mode == GNSSMODE_INACTIVE) {
+		if (cached_gnss_mode == GNSSMODE_INACTIVE) {
 			/* Do not send position log message inside beacon contact range. */
 			if (current_state.fence_status != FenceStatus_BeaconContact &&
 			    current_state.fence_status != FenceStatus_BeaconContactNormal) {
@@ -806,7 +810,7 @@ static void log_position_state_machine()
 		}
 		break;
 	case WAIT_FOR_FIX: {
-		if (cached_fix.mode != GNSSMODE_INACTIVE) {
+		if (cached_gnss_mode != GNSSMODE_INACTIVE) {
 			if (cached_fix.unix_timestamp > last_pos_timestamp) {
 				store_pos_work_container.pos_type = PositionType_AFTER_BBRAM;
 				ret = k_work_reschedule_for_queue(
@@ -1134,7 +1138,6 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_gnss_data(eh)) {
 		struct gnss_data *ev = cast_gnss_data(eh);
-		cached_gnss_mode = (gnss_mode_t)ev->gnss_data.lastfix.mode;
 
 		/* Update that we received GNSS data regardless of validity. */
 		update_cache_reg(GNSS_STRUCT);
@@ -1146,6 +1149,7 @@ static bool event_handler(const struct event_header *eh)
 			}
 			cached_ttff = ev->gnss_data.latest.ttff;
 			cached_msss = ev->gnss_data.latest.msss;
+
 			k_sem_give(&cache_lock_sem);
 		}
 
@@ -1456,7 +1460,7 @@ static bool event_handler(const struct event_header *eh)
 	}
 	if (is_gnss_mode_changed_event(eh)) {
 		const struct gnss_mode_changed_event *ev = cast_gnss_mode_changed_event(eh);
-		cached_fix.mode = ev->mode;
+		cached_gnss_mode = ev->mode;
 		/* log_position state machine tick */
 		log_position_state_machine();
 		return false;
@@ -1893,22 +1897,42 @@ void build_poll_request(NofenceMessage *poll_req)
 	strncpy(poll_req->m.poll_message_req.xModemUratArg, urat_in_use_buf,
 		sizeof(poll_req->m.poll_message_req.xModemUratArg) - 1);
 
-	/* TODO pshustad, fill GNSSS parameters for MIA M10 */
-	poll_req->m.poll_message_req.has_usGnssOnFixAgeSec =
-		(cached_gnss_mode == GNSSMODE_NOMODE) ? false : true;
-	uint32_t timeSinceFixSec = (cached_msss - cached_fix.msss) / 1000;
-	if (timeSinceFixSec > UINT16_MAX) {
-		timeSinceFixSec = UINT16_MAX;
-	}
-	poll_req->m.poll_message_req.usGnssOnFixAgeSec = timeSinceFixSec;
+	/**
+	 * We follow the legacy behaviour in usGnssTTFFSec and GnssOnFixAgeSec.
+	 * usGnssTTFFSec always reported if GNSS receiver is currently active, even if
+	 * we never had a fix (in case it will be 0)
+	 * usGnssOnFixAgeSec always reported if GNSS receiver is currently active.
+	 */
+	if (cached_gnss_mode == GNSSMODE_NOMODE || cached_gnss_mode == GNSSMODE_INACTIVE) {
+		poll_req->m.poll_message_req.has_usGnssOnFixAgeSec = false;
+		poll_req->m.poll_message_req.has_usGnssTTFFSec = false;
+	} else {
+		poll_req->m.poll_message_req.has_usGnssTTFFSec = true;
+		uint32_t tttff_sec = cached_ttff / 1000;
+		if (tttff_sec > UINT16_MAX) {
+			tttff_sec = UINT16_MAX;
+		}
+		poll_req->m.poll_message_req.usGnssTTFFSec = tttff_sec;
 
-	poll_req->m.poll_message_req.has_usGnssTTFFSec =
-		(cached_gnss_mode == GNSSMODE_NOMODE) ? false : true;
-	uint32_t timeSinceFirstFixSec = cached_ttff / 1000;
-	if (timeSinceFirstFixSec > UINT16_MAX) {
-		timeSinceFirstFixSec = UINT16_MAX;
+		poll_req->m.poll_message_req.has_usGnssOnFixAgeSec = true;
+		/*
+		 * As for legacy: If MSSS is less than the last fix timestamp, either
+		 * the receiver has been reset or we have wrapped around after
+		 * 49.7 days of GNSS being on continously. We ignore the possibility
+		 * of an animal not sleeping for 49.7 days.
+		 */
+		uint32_t timeSinceFixSec;
+		if (cached_msss < cached_fix.msss) {
+			timeSinceFixSec = cached_msss / 1000;
+		} else {
+			timeSinceFixSec = (cached_msss - cached_fix.msss) / 1000;
+		}
+
+		if (timeSinceFixSec > UINT16_MAX) {
+			timeSinceFixSec = UINT16_MAX;
+		}
+		poll_req->m.poll_message_req.usGnssOnFixAgeSec = timeSinceFixSec;
 	}
-	poll_req->m.poll_message_req.usGnssTTFFSec = timeSinceFirstFixSec;
 
 	if (m_transfer_boot_params) {
 		poll_req->m.poll_message_req.has_versionInfo = true;

@@ -127,7 +127,7 @@ static void publish_last_used_urat()
 		EVENT_SUBMIT(used_urat_ev);
 		LOG_INF("Used URAT command: %s", used_urat);
 	} else {
-		LOG_ERR("Failed to retrieve last used URAT: %d", err);
+		NCLOG_ERR(CELLULAR_CONTROLLER, TRice( iD( 7402),"err: Failed to retrieve last used URAT: %d\n", err));
 	}
 }
 
@@ -227,11 +227,11 @@ static void read_URAT_settings_from_NVS(void)
 	int err = stg_config_str_read(STG_STR_MODEM_URAT_ARG, urat_args_buffer,
 				      sizeof(urat_args_buffer), &urat_args_buf_len);
 	if (err != 0) {
-		LOG_WRN("Failed to read URAT settings from NVS!, err:%d", err);
+		NCLOG_WRN(CELLULAR_CONTROLLER, TRice( iD( 5254),"wrn: Failed to read URAT settings from NVS!, err:%d\n", err));
 		return;
 	}
 	if (urat_args_buf_len > sizeof(urat_args_buffer)) {
-		LOG_WRN("Buffer overflow when reading server URAT settings from NVS!");
+		NCLOG_WRN(CELLULAR_CONTROLLER, TRice0( iD( 2520),"wrn: Buffer overflow when reading server URAT settings from NVS!\n"));
 	}
 	modem_nf_set_urat_config(urat_args_buffer);
 }
@@ -264,16 +264,23 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		struct messaging_host_address_event *event = cast_messaging_host_address_event(eh);
 		memcpy(&server_address[0], event->address, sizeof(event->address) - 1);
 		char *ptr_port;
-		ptr_port = strchr(server_address, ':') + 1;
-		server_port = atoi(ptr_port);
+
+		ptr_port = strchr(server_address, ':');
+		if (ptr_port == NULL) {
+			NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 4229),"err: Cannot read host/port, missing ':'\n"));
+			return false;
+		}
+
+		server_port = atoi(ptr_port + 1);
 		if (server_port <= 0) {
 			char *e_msg = "Failed to parse port number from new "
 				      "host address!";
 			nf_app_error(ERR_MESSAGING, -EILSEQ, e_msg, strlen(e_msg));
 			return false;
 		}
+
 		uint8_t ip_len;
-		ip_len = ptr_port - 1 - &server_address[0];
+		ip_len = ptr_port - &server_address[0];
 		memset(&server_ip[0], 0, sizeof(server_ip));
 		memcpy(&server_ip[0], &server_address[0], ip_len);
 		ret = memcmp(server_address, server_address_tmp, STG_CONFIG_HOST_PORT_BUF_LEN - 1);
@@ -374,26 +381,33 @@ int8_t cache_server_address(void)
 	int err = stg_config_str_read(STG_STR_HOST_PORT, server_address, sizeof(server_address),
 				      &port_length);
 	if (err != 0 || server_address[0] == '\0') {
-		LOG_ERR("Cannot read host/port %d", err);
+		NCLOG_ERR(CELLULAR_CONTROLLER, TRice( iD( 1543),"err: Cannot read host/port %d\n", err));
 		return -1;
 	}
+
 	char *ptr_port;
-	ptr_port = strchr(server_address, ':') + 1;
-	server_port = atoi(ptr_port);
-	if (server_port <= 0) {
-		LOG_ERR("Cannot read host/port, missing  :");
+	ptr_port = strchr(server_address, ':');
+	if (ptr_port == NULL) {
+		NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 7656),"err: Cannot read host/port, missing ':'\n"));
 		return -1;
 	}
+
+	server_port = atoi(ptr_port + 1);
+	if (server_port <= 0) {
+		NCLOG_ERR(CELLULAR_CONTROLLER, TRice( iD( 6955),"err: Malformed port number. Err: %d\n", server_port));
+		return -1;
+	}
+
 	uint8_t ip_len;
-	ip_len = ptr_port - 1 - &server_address[0];
+	ip_len = ptr_port - &server_address[0];
 	memset(&server_ip[0], 0, sizeof(server_ip));
 	memcpy(&server_ip[0], &server_address[0], ip_len);
 	if (server_ip[0] != '\0') {
 		//NCLOG_DBG(CELLULAR_CONTROLLER, TRICE_S( iD( 2073),"inf: Host address read from storage: %s : ", &server_ip[0]));
-		NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 1777),"inf: %d\n", server_port));
+		NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 1777),"dbg: %d\n", server_port));
 		return 0;
 	} else {
-		LOG_WRN("Cannot read host/port,empty string");
+		NCLOG_WRN(CELLULAR_CONTROLLER, TRice0( iD( 3476),"wrn: Cannot read host/port, empty string\n"));
 		return -1;
 	}
 }

@@ -415,7 +415,7 @@ int stg_config_str_write(stg_config_param_id_t id, const char *str, size_t len)
 
 	ret = is_valid_id(id);
 	if (ret != STG_STR_PARAM_TYPE) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 7656),"wrn: STG str write, invalid id %d, access denied with ret: %d\n", (int)id, ret));
+		NCLOG_WRN(STORAGE_CONTROLLER, TRice( iD( 7092),"wrn: STG str write, invalid id %d, access denied with ret: %d\n", (int)id, ret));
 		return -ENOMSG;
 	}
 	/* TODO, make this much more elegant with compile-time checks :-( */

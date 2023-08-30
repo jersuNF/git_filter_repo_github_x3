@@ -2356,7 +2356,7 @@ void process_poll_response(NofenceMessage *proto)
 		strncpy(buf, pResp->xModemUratArg, sizeof(buf) - 1);
 		err = stg_config_str_write(STG_STR_MODEM_URAT_ARG, buf, sizeof(buf) - 1);
 		if (err != 0) {
-			LOG_ERR("Error storing URAT to NVS (%d)", err);
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7821),"err: Error storing URAT to NVS (%d)\n", err));
 		} else {
 			struct urat_args_received_event *urat_ev = new_urat_args_received_event();
 			EVENT_SUBMIT(urat_ev);
@@ -2453,11 +2453,13 @@ static int get_and_parse_server_ip_address(char *buf, size_t size)
 		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 4124),"err: Failed to read host address from ext flash\n"));
 		return ret;
 	}
-	char *ptr_colon = strchr(buf, ':');
-	if (ptr_colon == NULL) {
+
+	/* Check if port is present */
+	if (strchr(buf, ':') == NULL) {
+		NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 6136),"err: Server address read from flash does not contain port\n"));
 		return -EINVAL;
 	}
-	*ptr_colon = '\0';
+
 	return 0;
 }
 

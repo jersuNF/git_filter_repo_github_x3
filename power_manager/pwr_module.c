@@ -275,6 +275,18 @@ int pwr_module_reboot_reason(uint8_t *aReason)
 	return err;
 }
 
+#ifdef CONFIG_ZTEST
+void __attribute__((weak)) schedule_system_reboot(void)
+{
+	k_work_reschedule(&power_reboot, K_SECONDS(CONFIG_SHUTDOWN_TIMER_SEC));
+}
+#else
+void schedule_system_reboot(void)
+{
+	k_work_reschedule(&power_reboot, K_SECONDS(CONFIG_SHUTDOWN_TIMER_SEC));
+}
+#endif
+
 /**
  * @brief Main event handler function. 
  * 
@@ -316,7 +328,7 @@ static bool event_handler(const struct event_header *eh)
 		}
 		NCLOG_INF(POWER_MANAGER, TRice( iD( 3557),"inf: Reboot event received, reason:%d\n", evt->reason));
 
-		k_work_reschedule(&power_reboot, K_SECONDS(CONFIG_SHUTDOWN_TIMER_SEC));
+		schedule_system_reboot();
 		return false;
 	}
 	/* If event is unhandled, unsubscribe. */

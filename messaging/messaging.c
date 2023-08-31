@@ -529,15 +529,6 @@ void modem_poll_work_fn()
 	if (ret != 0) {
 		NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 4326),"err: Periodic poll failed, error %d\n", ret));
 	}
-
-	static bool initialized = false;
-	if (!initialized) {
-		initialized = true;
-		ret = k_work_schedule_for_queue(&message_q, &seq_periodic_work, K_MSEC(250));
-		if (ret != 0) {
-			NCLOG_DBG(MESSAGING_MODULE, TRice( iD( 6512),"dbg: Periodic seq failed, reschedule, error %d\n", ret));
-		}
-	}
 }
 
 /**
@@ -1790,6 +1781,13 @@ int messaging_module_init(void)
 	}
 
 	err = k_work_schedule_for_queue(&message_q, &data_request_work, K_NO_WAIT);
+	if (err < 0) {
+		return err;
+	}
+
+	/* Shedule periodic logging of SEQ messages to FLASH */
+	err = k_work_reschedule_for_queue(&message_q, &seq_periodic_work,
+					  K_MINUTES(atomic_get(&seq_period_min)));
 	if (err < 0) {
 		return err;
 	}

@@ -13,7 +13,6 @@ target_include_directories(app PRIVATE
 	./../../events/error_handler/
 	./../../events/storage/
 	./../../events/messaging/
-	${CMAKE_CURRENT_SOURCE_DIR}/../../modules/nclogs/
 	./../../modules/messaging/)
 
 target_sources(app PRIVATE

@@ -7,6 +7,7 @@
 
 #include <zephyr.h>
 #include "event_manager.h"
+#include "pwr_event.h"
 
 enum pwr_requester_module { REQ_EP_MODULE = 0, REQ_SOUND_CONTROLLER = 1, REQ_END_OF_LIST };
 

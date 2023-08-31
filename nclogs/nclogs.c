@@ -20,6 +20,7 @@ struct nclog_framework_t {
 	struct nclog_buffer_t nclog_buffer;
 };
 
+K_MUTEX_DEFINE(nclogs_buffer_mutex);
 static struct nclog_framework_t __noinit nclogs;
 static bool nclogs_initialized = false;
 int nclogs_write(uint8_t *buf, size_t len)
@@ -57,18 +58,46 @@ bool nclog_is_initialized()
 {
 	return nclogs_initialized;
 }
-int nclogs_read_with_sucess(int (*callback)(uint8_t *buf, size_t cnt))
+int nclogs_read_with_callback(logs_read_cb_fn callback, NofenceMessage **msg_buffer)
 {
-	uint8_t *data = NULL;
-
-	uint32_t cnt =
-		ring_buf_get_claim(&nclogs.nclog_buffer.rb_trice, &data, CONFIG_NCLOG_BUFFER_SIZE);
-
-	if (callback(data, cnt) == 0) {
-		return ring_buf_get_finish(&nclogs.nclog_buffer.rb_trice, cnt);
+	if (k_mutex_lock(&nclogs_buffer_mutex, K_SECONDS(1)) != 0) {
+		return -EBUSY;
 	}
 
-	return ring_buf_get_finish(&nclogs.nclog_buffer.rb_trice, 0);
+	if (callback == NULL || !nclogs_initialized) {
+		return -EINVAL;
+	}
+	/*	Read from the ring buffer and copy over to the NofeceMessage buffer provided.
+	*	This routine will make sure that all available data is read out, even if the buffer wraps around.
+	*/
+	uint8_t *src;
+	uint32_t bytes_read;
+	uint32_t total_bytes_read = 0U;
+	uint32_t available_size = sizeof((*msg_buffer)->m.generic_msg.usBuf);
+	uint8_t *data = (uint8_t*) (*msg_buffer)->m.generic_msg.usBuf;
+	do {
+		bytes_read =
+			ring_buf_get_claim(&nclogs.nclog_buffer.rb_trice, &src, available_size);
+		if (data) {
+			memcpy(data, src, bytes_read);
+			data += bytes_read;
+		}
+		total_bytes_read += bytes_read;
+		available_size -= bytes_read;
+	} while (available_size && bytes_read);
+
+	if (total_bytes_read > 0) {
+		int cb_ret = callback(*msg_buffer, total_bytes_read);
+		if (cb_ret == 0) {
+			return ring_buf_get_finish(&nclogs.nclog_buffer.rb_trice, total_bytes_read);
+		} else {
+			ring_buf_get_finish(&nclogs.nclog_buffer.rb_trice, 0);
+			return cb_ret;
+		}
+	} else {
+		return total_bytes_read;
+	}
+	k_mutex_unlock(&nclogs_buffer_mutex);
 }
 
 bool nclog_is_enabled(eNCLOG_MODULE module, eNCLOG_LVL level)

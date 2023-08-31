@@ -1,7 +1,6 @@
 zephyr_include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../events/buzzer
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../modules/nclogs/
     ${CMAKE_CURRENT_SOURCE_DIR}/../../events/error_handler
     ${CMAKE_CURRENT_SOURCE_DIR}/../../events/power_manager/
     ${CMAKE_CURRENT_SOURCE_DIR}/../../modules/power_manager/

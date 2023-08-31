@@ -14,7 +14,6 @@ zephyr_include_directories(
     ./../../lib/fifo/
     ./../../events/error_handler/
     ./../../events/power_manager/
-    ./../../modules/nclogs/
     ./../../events/movement_controller)
 
 target_sources(app PRIVATE 

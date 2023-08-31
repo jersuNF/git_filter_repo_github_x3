@@ -25,10 +25,13 @@ int nclogs_write(uint8_t *buf, size_t len);
 /// @return Number of bytes written to the output buffer.
 int nclogs_read(uint8_t *buf, size_t cnt);
 
-/// @brief Pass data from buffer to callback function. Only free the read data when callback function returns success (0)
-/// @param callback Function that should determine if data should be freed after read or not.
-/// @return
-int nclogs_read_with_sucess(int (*callback)(uint8_t *buf, size_t cnt));
+/** @brief Read data from the ring buffer with a callback function only move the head when the callback is successful
+ @param callback Function that should determine if data should be freed after read or not fn(NofenceMessage *pbuf, uint32_t).
+ @param ppbuf pointer to a pointer to the Nofence message buffer passed to the callback
+ @return
+*/
+int nclogs_read_with_callback(int (*callback)(NofenceMessage *buf, uint32_t bytes_read),
+			      NofenceMessage **msg_buffer);
 
 /// @brief Helper function for determining if a nclog is enabled
 /// @param module
@@ -114,6 +117,5 @@ void nclogs_module_init(void);
 		}                                                                                  \
 	} while (0)
 
-typedef void (*callback_fn)(void);
-void register_flush_callback(callback_fn);
+typedef int (*logs_read_cb_fn)(NofenceMessage *, uint32_t);
 #endif /* _NCLOGS_H_ */

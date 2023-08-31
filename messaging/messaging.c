@@ -891,6 +891,12 @@ static int coredump_storage_read_send(NofenceMessage *cd_msg)
 }
 #endif
 
+static logs_read_cb_fn send_trice_cb(NofenceMessage *trice_log_msg, uint32_t bytes_read)
+{
+	size_t bytes_per_element = sizeof(trice_log_msg->m.generic_msg.usBuf[0]);
+	trice_log_msg->m.generic_msg.usBuf_count = ceiling_fraction(bytes_read, bytes_per_element);
+	return (logs_read_cb_fn)encode_and_send_message(trice_log_msg);
+}
 /**
  * @brief read out the trice encoded log messages from the dedicated buffer and
  * send them to the server in the form of protobuf GenericMessages.
@@ -898,17 +904,21 @@ static int coredump_storage_read_send(NofenceMessage *cd_msg)
  */
 int send_trice_logs(NofenceMessage *trice_log_msg)
 {
-	uint8_t chunk_id = 0;
-	int ret;
 	int bytes_available = nclog_get_available_bytes();
-	if (bytes_available < 0) {
+	if (bytes_available <= 0) {
 		return -ENODATA;
 	}
-	size_t bytes_per_element = sizeof(trice_log_msg->m.generic_msg.usBuf[0]);
-	size_t bytes_per_chunk = sizeof(trice_log_msg->m.generic_msg.usBuf);
-	uint16_t total_chunks = ceiling_fraction(bytes_available, bytes_per_chunk);
+	static uint16_t total_chunks = 0;
+	static uint8_t chunk_id = 0;
 
-	while (chunk_id * bytes_per_chunk <= CONFIG_NCLOG_BUFFER_SIZE) {
+	size_t bytes_per_chunk = sizeof(trice_log_msg->m.generic_msg.usBuf);
+
+	/* only re-calculate total chunks if all chunks was sucessuflly sent last time or if it just rebooted. */
+	if (chunk_id == 0) {
+		total_chunks = ceiling_fraction(bytes_available, bytes_per_chunk);
+	}
+	int ret = -1;
+	while (bytes_per_chunk * chunk_id <= CONFIG_NCLOG_BUFFER_SIZE) {
 		proto_InitHeader(trice_log_msg);
 		trice_log_msg->which_m = NofenceMessage_generic_msg_tag;
 		trice_log_msg->m.generic_msg.has_usTotalChunks = true;
@@ -917,23 +927,17 @@ int send_trice_logs(NofenceMessage *trice_log_msg)
 
 		trice_log_msg->m.generic_msg.msgType = GenericMessage_GenMessageType_TRICE_LOGS;
 
-		ret = nclogs_read((uint8_t *)trice_log_msg->m.generic_msg.usBuf,
-				  sizeof(trice_log_msg->m.generic_msg.usBuf));
+		/* read and try to send one chunk of trice logs. when sending is sucessful the chunk of logs will be flushed from the log buffer. */
+		ret = nclogs_read_with_callback((logs_read_cb_fn)send_trice_cb, &trice_log_msg);
 
-		if (ret == 0) {
-			NCLOG_INF(NCID, TRice0( iD( 5854),"inf: Uploaded all buffered logs! \n"));
-			return 0;
-		} else if (ret < 0) {
+		if (ret != 0) {
 			NCLOG_ERR(NCID, TRice( iD( 7113),"err: Error %d when reading buffered logs! \n", ret));
 			return ret;
-		} else {
-			trice_log_msg->m.generic_msg.usBuf_count =
-				ceiling_fraction(ret, bytes_per_element);
-			ret = encode_and_send_message(trice_log_msg);
-			if (ret != 0) {
-				NCLOG_ERR(NCID, TRice( iD( 7738),"err: Failed to send trice logs, err: %d! \n", ret));
-				return ret;
-			}
+		}
+		if (chunk_id + 1 == total_chunks) {
+			NCLOG_INF(NCID, TRice0( iD( 5854),"inf: Uploaded all buffered logs! \n"));
+			chunk_id = 0; /* reset chunk id now that all log were sent. */
+			return 0;
 		}
 		chunk_id++;
 	}
@@ -1739,7 +1743,6 @@ int messaging_module_init(void)
 		/* Fallback if read from storage fails */
 		serial_id = 1;
 	}
-
 	err = stg_config_u8_read(STG_U8_M_UPLOAD_PERIODIC_LOGS, &m_upload_periodic_logs);
 	if (err != 0) {
 		NCLOG_ERR(NCID, TRice( iD( 3442), "err: Error reading m_upload_periodic_logs from ext flash %d \n", err));

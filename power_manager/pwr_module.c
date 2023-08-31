@@ -13,7 +13,7 @@
 #include <stdlib.h>
 
 #include "pwr_module.h"
-#include "pwr_event.h"
+
 #include "error_event.h"
 #include "battery.h"
 #include "ble_ctrl_event.h"

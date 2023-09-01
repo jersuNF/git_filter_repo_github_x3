@@ -42,6 +42,24 @@ typedef struct {
 	duration_t s;
 } note_t;
 
+/**
+ * @brief used to simplify unit testing,
+ * it allows us to avoid playing the actual SND_WELCOME,
+ * which is too complex to verify note by note.
+ */
+void buzzer_sound_event(struct sound_event *eh);
+
+/**
+ * @brief Play the SND_WELCOME with the buzzer module,
+ * based on the soft reset reason and the battery percentage.
+ *
+ * @param soft_reset_reason 
+ * @param battery_percent 
+ *
+ * @return it's a void function.
+ */
+void play_welcome_sound(uint8_t soft_reset_reason, int bat_percent);
+
 int buzzer_module_init(void);
 
 #endif /* _BUZZER_H_ */

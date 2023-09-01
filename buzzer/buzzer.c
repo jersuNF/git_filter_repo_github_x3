@@ -11,6 +11,7 @@
 #include <drivers/pwm.h>
 #include "melodies.h"
 #include "pwr_module.h"
+#include "pwr_event.h"
 
 #include "error_event.h"
 #include <drivers/gpio.h>
@@ -541,6 +542,39 @@ void play()
 
 	atomic_set(&current_type_signal, SND_READY_FOR_NEXT_TYPE);
 	k_timer_stop(&warn_zone_timeout_timer);
+}
+
+#ifndef CONFIG_TEST
+void buzzer_sound_event(struct sound_event *eh)
+{
+	EVENT_SUBMIT(eh);
+}
+#endif
+
+void play_welcome_sound(uint8_t soft_reset_reason, int bat_percent)
+{
+	/* The welcome- and battery-sound are played only for user-driven resets*/
+	// REBOOT_UNKNOWN intentionally left out, to avoid scaring animals.
+	if (soft_reset_reason == REBOOT_BLE_RESET || soft_reset_reason == REBOOT_SERVER_RESET ||
+	    soft_reset_reason == REBOOT_POWER_ON_RST) {
+		if (bat_percent > CONFIG_BUZZER_WELCOME_THRESHOLD) {
+			if (bat_percent >= 75) {
+				/* Play battery sound. */
+				struct sound_event *short_100_ev = new_sound_event();
+				short_100_ev->type = SND_SHORT_100;
+				buzzer_sound_event(short_100_ev);
+			}
+
+			/* Wait for battery percent to finish, since sound controller
+			 * doesn't queue sounds. */
+			k_sleep(K_MSEC(200));
+
+			/* Play welcome sound. */
+			struct sound_event *welcome_ev = new_sound_event();
+			welcome_ev->type = SND_WELCOME;
+			buzzer_sound_event(welcome_ev);
+		}
+	}
 }
 
 int buzzer_module_init(void)

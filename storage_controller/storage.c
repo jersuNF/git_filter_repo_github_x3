@@ -67,12 +67,8 @@ static struct fcb pasture_fcb;
 static struct flash_sector pasture_sectors[FLASH_PASTURE_NUM_SECTORS];
 K_MUTEX_DEFINE(pasture_mutex);
 
-K_KERNEL_STACK_DEFINE(erase_flash_thread, CONFIG_STORAGE_THREAD_SIZE);
-
 static void erase_flash_fn(struct k_work *item);
-static struct k_work_q erase_q;
-static struct k_work erase_work;
-static bool queue_inited = false;
+static struct k_work_delayable erase_work;
 
 void erase_flash_fn(struct k_work *item)
 {
@@ -273,18 +269,7 @@ int stg_init_storage_controller(void)
 		return err;
 	}
 
-	/* Setup work threads. */
-	if (!queue_inited) {
-		k_work_queue_init(&erase_q);
-		struct k_work_queue_config cfg = {
-			.name = "storage_q",
-		};
-		k_work_queue_start(&erase_q, erase_flash_thread,
-				   K_THREAD_STACK_SIZEOF(erase_flash_thread),
-				   CONFIG_STORAGE_THREAD_PRIORITY, &cfg);
-		k_work_init(&erase_work, erase_flash_fn);
-		queue_inited = true;
-	}
+	k_work_init_delayable(&erase_work, erase_flash_fn);
 
 	return 0;
 }
@@ -669,7 +654,7 @@ static bool event_handler(const struct event_header *eh)
 		struct request_flash_erase_event *ev = cast_request_flash_erase_event(eh);
 
 		if (ev->magic == STORAGE_ERASE_MAGIC) {
-			k_work_submit_to_queue(&erase_q, &erase_work);
+			k_work_reschedule(&erase_work, K_NO_WAIT);
 		}
 		return true;
 	}

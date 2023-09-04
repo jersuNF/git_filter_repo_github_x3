@@ -386,14 +386,14 @@ int stg_read_seq_data(fcb_read_cb cb, uint16_t num_entries)
 		}
 
 		err = fcb_walk_from_entry(cb, &seq_fcb, &start_entry, num_entries, &seq_mutex);
-		/* Update the entry we're currently on. */
-		memcpy(&active_seq_entry, &start_entry, sizeof(struct fcb_entry));
-
 		if (err != 0) {
 			NCLOG_ERR(NCID, TRice0( iD( 6467),"err: Error reading from seq partition. \n"));
 			k_mutex_unlock(&seq_mutex);
 			return err;
 		}
+
+		/* Update the entry we're currently on. */
+		memcpy(&active_seq_entry, &start_entry, sizeof(struct fcb_entry));
 
 		k_mutex_unlock(&seq_mutex);
 		return err;

@@ -49,7 +49,7 @@ if MESSAGING
 	    default 3
 	config APP_FOTA_WDT_MINUTES
 		int "Application wdt for maximum time in minutes FOTA can take (hang workaround)"
-		default 5
+		default 10
 	config APP_FOTA_FAILURES_BEFORE_REBOOT
                 int "Number of consecutive FOTA attempts before the App reboots (hang workaround)"
                 default 10

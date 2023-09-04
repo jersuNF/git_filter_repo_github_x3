@@ -190,7 +190,6 @@ void messaging_tx_thread_fn(void);
 static bool m_transfer_boot_params = true;
 
 static bool m_confirm_acc_limits, m_confirm_ble_key;
-static bool m_confirm_urat_arg = false;
 static bool m_ACK_bSendPeriodicLogs = false;
 static bool m_ACK_bSendCoreDumps = false;
 static bool m_ACK_xLogConfig = false;
@@ -2370,20 +2369,6 @@ void process_poll_response(NofenceMessage *proto)
 		sigma_ev->param.off_animal_value = pResp->usOffAnimalTimeLimitSec;
 		EVENT_SUBMIT(sigma_ev);
 	}
-	m_confirm_urat_arg = false;
-	if (pResp->has_xModemUratArg) {
-		m_confirm_urat_arg = true;
-		char buf[STG_CONFIG_URAT_ARG_BUF_SIZE];
-		memset(buf, 0, sizeof(buf));
-		strncpy(buf, pResp->xModemUratArg, sizeof(buf) - 1);
-		err = stg_config_str_write(STG_STR_MODEM_URAT_ARG, buf, sizeof(buf) - 1);
-		if (err != 0) {
-			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7821),"err: Error storing URAT to NVS (%d)\n", err));
-		} else {
-			struct urat_args_received_event *urat_ev = new_urat_args_received_event();
-			EVENT_SUBMIT(urat_ev);
-		}
-	}
 
 	m_confirm_ble_key = false;
 	if (pResp->has_rgubcBleKey) {
@@ -2432,6 +2417,19 @@ void process_poll_response(NofenceMessage *proto)
 	if (pResp->has_versionInfo) {
 		if (process_upgrade_request(&pResp->versionInfo) == 0) {
 			return;
+		}
+	}
+
+	if (pResp->has_xModemUratArg) {
+		char buf[STG_CONFIG_URAT_ARG_BUF_SIZE];
+		memset(buf, 0, sizeof(buf));
+		strncpy(buf, pResp->xModemUratArg, sizeof(buf) - 1);
+		err = stg_config_str_write(STG_STR_MODEM_URAT_ARG, buf, sizeof(buf) - 1);
+		if (err != 0) {
+			NCLOG_ERR(MESSAGING_MODULE, TRice( iD( 7821),"err: Error storing URAT to NVS (%d)\n", err));
+		} else {
+			struct urat_args_received_event *urat_ev = new_urat_args_received_event();
+			EVENT_SUBMIT(urat_ev);
 		}
 	}
 

@@ -511,8 +511,6 @@ static void cellular_controller_keep_alive(void *dev)
 				switch (mdm_state) {
 				case MDM_FW_DOWNLOAD_COMPLETE:
 					enable_mdm_fota = false;
-					end_connection();
-					goto update_connection_state;
 					break;
 				case INSTALLATION_COMPLETE:
 					modem_is_ready = false;

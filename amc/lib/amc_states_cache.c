@@ -6,6 +6,8 @@
 #include <zephyr.h>
 #include <logging/log.h>
 LOG_MODULE_REGISTER(amc_states, CONFIG_AMC_LIB_LOG_LEVEL);
+/* Required by generate_nclogs.py*/
+#define NCID AMC_MODULE
 
 #include "amc_cache.h"
 #include "amc_states_cache.h"
@@ -116,7 +118,7 @@ void increment_zap_count(void)
 	total_zap_cnt++;
 	err = stg_config_u16_write(STG_U16_ZAP_CNT_TOT, total_zap_cnt);
 	if (err != 0) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 1913),"err: Could not write zap count total, error %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 1913),"err: Could not write zap count total, error %i \n", err));
 		return;
 	}
 
@@ -124,7 +126,7 @@ void increment_zap_count(void)
 	zap_count_day++;
 	err = stg_config_u16_write(STG_U16_ZAP_CNT_DAY, zap_count_day);
 	if (err != 0) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 4365),"err: Could not write zap count day, error %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 4365),"err: Could not write zap count day, error %i \n", err));
 		return;
 	}
 
@@ -140,7 +142,7 @@ void reset_zap_count_day()
 	zap_count_day = 0;
 	int err = stg_config_u16_write(STG_U16_ZAP_CNT_DAY, zap_count_day);
 	if (err != 0) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 6756),"err: Could not reset zap count day, error %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 6756),"err: Could not reset zap count day, error %i \n", err));
 		return;
 	}
 }
@@ -149,19 +151,19 @@ void cache_storage_variables(void)
 {
 	int err = stg_config_u16_read(STG_U16_ZAP_CNT_TOT, &total_zap_cnt);
 	if (err != 0) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 1043),"err: Could not read zap count total, error %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 1043),"err: Could not read zap count total, error %i \n", err));
 		return;
 	}
 
 	err = stg_config_u32_read(STG_U32_WARN_CNT_TOT, &total_warn_cnt);
 	if (err != 0) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 1444),"err: Could not read warn count total, error %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 1444),"err: Could not read warn count total, error %i \n", err));
 		return;
 	}
 
 	err = stg_config_u16_read(STG_U16_ZAP_CNT_DAY, &zap_count_day);
 	if (err != 0) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 3162),"err: Could not read zap count day, error %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 3162),"err: Could not read zap count day, error %i \n", err));
 		return;
 	}
 }
@@ -177,7 +179,7 @@ void increment_warn_count(void)
 
 	int err = stg_config_u32_write(STG_U32_WARN_CNT_TOT, total_warn_cnt);
 	if (err != 0) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 2969),"err: Could not write warn count total, error %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 2969),"err: Could not write warn count total, error %i \n", err));
 		return;
 	}
 }
@@ -189,25 +191,25 @@ static void enter_teach_mode()
 	uint32_t warn_cnt = 0;
 	err = stg_config_u32_read(STG_U32_WARN_CNT_TOT, &warn_cnt);
 	if (err != 0) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 1149),"err: Could not read warn count total, error %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 1149),"err: Could not read warn count total, error %i \n", err));
 	}
 
 	uint16_t zap_cnt = 0;
 	err = stg_config_u16_read(STG_U16_ZAP_CNT_TOT, &zap_cnt);
 	if (err != 0) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 2976),"err: Could not read zap count total, error %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 2976),"err: Could not read zap count total, error %i \n", err));
 	}
 
 	err = stg_config_u8_read(STG_U8_TEACH_MODE_FINISHED, &teach_mode_finished);
 	if (err != 0) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 3338),"err: Could not read teach mode finished, error %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 3338),"err: Could not read teach mode finished, error %i \n", err));
 	}
 	if (teach_mode_finished != 0) {
 		teach_mode_finished = 0;
 
 		err = stg_config_u8_write(STG_U8_TEACH_MODE_FINISHED, teach_mode_finished);
 		if (err != 0) {
-			NCLOG_ERR(AMC_MODULE, TRice( iD( 7499),"err: Could not write teach mode finished, error %i\n", err));
+			NCLOG_ERR(NCID, TRice( iD( 7499),"err: Could not write teach mode finished, error %i \n", err));
 		}
 	}
 	teach_mode_saved_warn_cnt = (uint16_t)warn_cnt;
@@ -222,7 +224,7 @@ void force_teach_mode()
 
 		err = stg_config_u8_write(STG_U8_COLLAR_MODE, (uint8_t)current_mode);
 		if (err != 0) {
-			NCLOG_ERR(AMC_MODULE, TRice( iD( 4889),"err: Could not write to collar mode, error %i \n", err));
+			NCLOG_ERR(NCID, TRice( iD( 4889),"err: Could not write to collar mode, error %i \n", err));
 		}
 
 		enter_teach_mode();
@@ -242,7 +244,7 @@ void init_states_and_variables(void)
 	uint8_t collar_mode = 0;
 	int err = stg_config_u8_read(STG_U8_COLLAR_MODE, &collar_mode);
 	if (err) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 6365),"err: Could not read collar mode %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 6365),"err: Could not read collar mode %i \n", err));
 		collar_mode = Mode_Mode_UNKNOWN;
 	}
 	current_mode = (Mode)collar_mode;
@@ -254,7 +256,7 @@ void init_states_and_variables(void)
 	uint8_t collar_status = 0;
 	err = stg_config_u8_read(STG_U8_COLLAR_STATUS, &collar_status);
 	if (err) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 7618),"err: Could not read collar mode %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 7618),"err: Could not read collar mode %i \n", err));
 		collar_status = CollarStatus_CollarStatus_UNKNOWN;
 	}
 	current_collar_status = (CollarStatus)collar_status;
@@ -263,14 +265,14 @@ void init_states_and_variables(void)
 	uint8_t fence_status = 0;
 	err = stg_config_u8_read(STG_U8_FENCE_STATUS, &fence_status);
 	if (err) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 3880),"err: Could not read fence status, %i!\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 3880),"err: Could not read fence status, %i! \n", err));
 		fence_status = FenceStatus_FenceStatus_UNKNOWN;
 	}
 	current_fence_status = (FenceStatus)fence_status;
 
-	NCLOG_INF(AMC_MODULE, TRice( iD( 7043),"inf: Cached AMC states: Collarmode %i, collarstatus %i, fencestatus %i\n", current_mode, current_fence_status, current_collar_status));
+	NCLOG_INF(NCID, TRice( iD( 7043),"inf: Cached AMC states: Collarmode %i, collarstatus %i, fencestatus %i \n", current_mode, current_fence_status, current_collar_status));
 
-	NCLOG_INF(AMC_MODULE, TRice( iD( 1449),"inf: Cached AMC variables : ZAP_TOTAL %i, WARN_TOTAL %i, ZAP_DAY %i\n", total_zap_cnt, total_warn_cnt, zap_count_day));
+	NCLOG_INF(NCID, TRice( iD( 1449),"inf: Cached AMC variables : ZAP_TOTAL %i, WARN_TOTAL %i, ZAP_DAY %i \n", total_zap_cnt, total_warn_cnt, zap_count_day));
 
 	/* Notify server about different states. */
 	struct update_zap_count *ev_zap = new_update_zap_count();
@@ -305,23 +307,23 @@ Mode calc_mode(void)
 	switch (current_mode) {
 	case Mode_Mode_UNKNOWN:
 		if (fnc_valid_fence()) {
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 2380),"inf: Unknown->Teach\n"));
+			NCLOG_INF(NCID, TRice0( iD( 2380),"inf: Unknown->Teach \n"));
 			new_mode = Mode_Teach;
 		} else if (fnc_valid_def()) {
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 1296),"inf: Unknown->Trace\n"));
+			NCLOG_INF(NCID, TRice0( iD( 1296),"inf: Unknown->Trace \n"));
 			new_mode = Mode_Trace;
 		}
 		break;
 	case Mode_Teach:
 		if (trace_mode_conditions()) {
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 5388),"inf: Teach->Trace\n"));
+			NCLOG_INF(NCID, TRice0( iD( 5388),"inf: Teach->Trace \n"));
 			new_mode = Mode_Trace;
 		} else if (teach_zap_cnt >= _TEACHMODE_ZAP_CNT_HIGHLIM) {
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 6695),"inf: Teach->Trace\n"));
+			NCLOG_INF(NCID, TRice0( iD( 6695),"inf: Teach->Trace \n"));
 			new_mode = Mode_Trace;
 		} else if ((teach_zap_cnt >= TEACHMODE_ZAP_CNT_LOWLIM) &&
 			   ((teach_warn_cnt - teach_zap_cnt) >= _TEACHMODE_WARN_CNT_LOWLIM)) {
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 1375),"inf: Teach->Fence\n"));
+			NCLOG_INF(NCID, TRice0( iD( 1375),"inf: Teach->Fence \n"));
 			/* See https://youtrack.axbit.com/youtrack/issue/NOF-310. */
 			new_mode = Mode_Fence;
 			teach_mode_finished = 1;
@@ -330,30 +332,30 @@ Mode calc_mode(void)
 			 */
 			err = stg_config_u8_write(STG_U8_TEACH_MODE_FINISHED, teach_mode_finished);
 			if (err != 0) {
-				NCLOG_ERR(AMC_MODULE, TRice( iD( 7742),"err: Failed to write to ext flash, id %d, error %d\n", STG_U8_TEACH_MODE_FINISHED, err));
+				NCLOG_ERR(NCID, TRice( iD( 7742),"err: Failed to write to ext flash, id %d, error %d \n", STG_U8_TEACH_MODE_FINISHED, err));
 			}
 		}
 		break;
 	case Mode_Fence:
 		if (trace_mode_conditions()) {
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 1252),"inf: Fence->Trace\n"));
+			NCLOG_INF(NCID, TRice0( iD( 1252),"inf: Fence->Trace \n"));
 			new_mode = Mode_Trace;
 		}
 		break;
 	case Mode_Trace:
 		if (!trace_mode_conditions()) {
 			if (teach_mode_finished) {
-				NCLOG_INF(AMC_MODULE, TRice0( iD( 5471),"inf: Trace->Fence\n"));
+				NCLOG_INF(NCID, TRice0( iD( 5471),"inf: Trace->Fence \n"));
 				new_mode = Mode_Fence;
 			} else {
-				NCLOG_INF(AMC_MODULE, TRice0( iD( 7458),"inf: Trace->Teach\n"));
+				NCLOG_INF(NCID, TRice0( iD( 7458),"inf: Trace->Teach \n"));
 				new_mode = Mode_Teach;
 			}
 		}
 		break;
 	default:
 		new_mode = Mode_Mode_UNKNOWN;
-		NCLOG_INF(AMC_MODULE, TRice0( iD( 6996),"inf: Unknown\n"));
+		NCLOG_INF(NCID, TRice0( iD( 6996),"inf: Unknown \n"));
 		break;
 	}
 
@@ -363,7 +365,7 @@ Mode calc_mode(void)
 
 		err = stg_config_u8_write(STG_U8_COLLAR_MODE, (uint8_t)new_mode);
 		if (err != 0) {
-			NCLOG_ERR(AMC_MODULE, TRice( iD( 4467),"err: Failed to write new collar mode to ext flash, error %i \n", err));
+			NCLOG_ERR(NCID, TRice( iD( 4467),"err: Failed to write new collar mode to ext flash, error %i \n", err));
 		}
 
 		/* Notify server about mode change. */
@@ -402,59 +404,59 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence, enum beacon_status_ty
 	case FenceStatus_FenceStatus_UNKNOWN: {
 		if (beacon_status == BEACON_STATUS_REGION_NEAR) {
 			new_fence_status = FenceStatus_BeaconContact;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 2281),"inf: FenceStatus:Unknown->BeaconContact\n"));
+			NCLOG_INF(NCID, TRice0( iD( 2281),"inf: FenceStatus:Unknown->BeaconContact \n"));
 		} else if (fnc_valid_def()) {
 			new_fence_status = FenceStatus_NotStarted;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 6986),"inf: FenceStatus:Unknown->NotStarted\n"));
+			NCLOG_INF(NCID, TRice0( iD( 6986),"inf: FenceStatus:Unknown->NotStarted \n"));
 		}
 		break;
 	}
 	case FenceStatus_NotStarted: {
 		if (beacon_status == BEACON_STATUS_REGION_NEAR) {
 			new_fence_status = FenceStatus_BeaconContact;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 7684),"inf: FenceStatus:NotStarted->BeaconContact\n"));
+			NCLOG_INF(NCID, TRice0( iD( 7684),"inf: FenceStatus:NotStarted->BeaconContact \n"));
 		} else if (is_inside_fence_relaxed()) {
 			new_fence_status = FenceStatus_FenceStatus_Normal;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 7077),"inf: FenceStatus:NotStarted->Normal\n"));
+			NCLOG_INF(NCID, TRice0( iD( 7077),"inf: FenceStatus:NotStarted->Normal \n"));
 		}
 		break;
 	}
 	case FenceStatus_FenceStatus_Normal: {
 		if (beacon_status == BEACON_STATUS_REGION_NEAR) {
 			new_fence_status = FenceStatus_BeaconContactNormal;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 3939),"inf: FenceStatus:Normal->BeaconContactNormal\n"));
+			NCLOG_INF(NCID, TRice0( iD( 3939),"inf: FenceStatus:Normal->BeaconContactNormal \n"));
 		} else if (maybe_out_of_fence_delta > OUT_OF_FENCE_TIME) {
 			/** Old @todo ? UBX_Poll(UBXID_MON_HW);
 				 * v3.21-7: Poll hardware info (fex. jamming). 
 				 */
 			new_fence_status = FenceStatus_MaybeOutOfFence;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 3031),"inf: FenceStatus:Normal->MaybeOutsideFence\n"));
+			NCLOG_INF(NCID, TRice0( iD( 3031),"inf: FenceStatus:Normal->MaybeOutsideFence \n"));
 		} else if (zap_pain_cnt >= pain_cnt_def_free) {
 			new_fence_status = FenceStatus_Escaped;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 2168),"inf: NFenceStatus:ormal->Escaped\n"));
+			NCLOG_INF(NCID, TRice0( iD( 2168),"inf: NFenceStatus:ormal->Escaped \n"));
 		}
 		break;
 	}
 	case FenceStatus_MaybeOutOfFence: {
 		if (beacon_status == BEACON_STATUS_REGION_NEAR) {
 			new_fence_status = FenceStatus_BeaconContact;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 4366),"inf: FenceStatus:MaybeOutside->BeaconContact\n"));
+			NCLOG_INF(NCID, TRice0( iD( 4366),"inf: FenceStatus:MaybeOutside->BeaconContact \n"));
 		} else if (zap_pain_cnt >= pain_cnt_def_free) {
 			new_fence_status = FenceStatus_Escaped;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 5759),"inf: FenceStatus:MaybeOutside->Escaped\n"));
+			NCLOG_INF(NCID, TRice0( iD( 5759),"inf: FenceStatus:MaybeOutside->Escaped \n"));
 		} else if (maybe_out_of_fence_delta < OUT_OF_FENCE_TIME) {
 			new_fence_status = FenceStatus_FenceStatus_Normal;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 7731),"inf: FenceStatus:MaybeOutside->Normal\n"));
+			NCLOG_INF(NCID, TRice0( iD( 7731),"inf: FenceStatus:MaybeOutside->Normal \n"));
 		}
 		break;
 	}
 	case FenceStatus_Escaped: {
 		if (beacon_status == BEACON_STATUS_REGION_NEAR) {
 			new_fence_status = FenceStatus_BeaconContact;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 1961),"inf: FenceStatus:Escaped->BeaconContact\n"));
+			NCLOG_INF(NCID, TRice0( iD( 1961),"inf: FenceStatus:Escaped->BeaconContact \n"));
 		} else if (is_inside_fence_relaxed()) {
 			new_fence_status = FenceStatus_FenceStatus_Normal;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 2521),"inf: FenceStatus:Escaped->Normal\n"));
+			NCLOG_INF(NCID, TRice0( iD( 2521),"inf: FenceStatus:Escaped->Normal \n"));
 		}
 		break;
 	}
@@ -462,10 +464,10 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence, enum beacon_status_ty
 		if (beacon_status != BEACON_STATUS_REGION_NEAR) {
 			if (fnc_valid_fence()) {
 				new_fence_status = FenceStatus_NotStarted;
-				NCLOG_INF(AMC_MODULE, TRice0( iD( 6133),"inf: FenceStatus:BeaconContact->NotStarted\n"));
+				NCLOG_INF(NCID, TRice0( iD( 6133),"inf: FenceStatus:BeaconContact->NotStarted \n"));
 			} else {
 				new_fence_status = FenceStatus_FenceStatus_UNKNOWN;
-				NCLOG_INF(AMC_MODULE, TRice0( iD( 2667),"inf: FenceStatus:BeaconContact->Unknown\n"));
+				NCLOG_INF(NCID, TRice0( iD( 2667),"inf: FenceStatus:BeaconContact->Unknown \n"));
 			}
 		}
 		break;
@@ -473,21 +475,21 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence, enum beacon_status_ty
 	case FenceStatus_BeaconContactNormal: {
 		if (beacon_status != BEACON_STATUS_REGION_NEAR) {
 			new_fence_status = FenceStatus_FenceStatus_Normal;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 3788),"inf: FenceStatus:BeaconContactNormal->Normal\n"));
+			NCLOG_INF(NCID, TRice0( iD( 3788),"inf: FenceStatus:BeaconContactNormal->Normal \n"));
 		}
 		break;
 	}
 	case FenceStatus_FenceStatus_Invalid: {
-		NCLOG_INF(AMC_MODULE, TRice0( iD( 6028),"inf: FenceStatus:Invalid\n"));
+		NCLOG_INF(NCID, TRice0( iD( 6028),"inf: FenceStatus:Invalid \n"));
 		break;
 	}
 	case FenceStatus_TurnedOffByBLE: {
-		NCLOG_INF(AMC_MODULE, TRice0( iD( 2163),"inf: FenceStatus:Fence turned of by BLE\n"));
+		NCLOG_INF(NCID, TRice0( iD( 2163),"inf: FenceStatus:Fence turned of by BLE \n"));
 		break;
 	}
 	default: {
 		new_fence_status = FenceStatus_FenceStatus_UNKNOWN;
-		NCLOG_INF(AMC_MODULE, TRice0( iD( 4453),"inf: FenceStatus:?->Unknown\n"));
+		NCLOG_INF(NCID, TRice0( iD( 4453),"inf: FenceStatus:?->Unknown \n"));
 		char *msg = "Unknown fence status received.";
 		nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
 		break;
@@ -500,7 +502,7 @@ FenceStatus calc_fence_status(uint32_t maybe_out_of_fence, enum beacon_status_ty
 
 		int err = stg_config_u8_write(STG_U8_FENCE_STATUS, (uint8_t)current_fence_status);
 		if (err != 0) {
-			NCLOG_ERR(AMC_MODULE, TRice( iD( 1493),"err: Failed to write new fence status to ext flash, error %i \n", err));
+			NCLOG_ERR(NCID, TRice( iD( 1493),"err: Failed to write new fence status to ext flash, error %i \n", err));
 		}
 
 		/* Notify server about fence status change. */
@@ -528,14 +530,14 @@ int force_fence_status(FenceStatus new_fence_status)
 
 	if (new_fence_status != current_fence_status) {
 		if ((new_fence_status == FenceStatus_NotStarted) && (fnc_valid_def() != true)) {
-			NCLOG_WRN(AMC_MODULE, TRice0( iD( 3407),"wrn: Unable to force fence status\n"));
+			NCLOG_WRN(NCID, TRice0( iD( 3407),"wrn: Unable to force fence status \n"));
 			return -EACCES;
 		}
 
 		/* Write new fence status to ext flash storage */
 		int err = stg_config_u8_write(STG_U8_FENCE_STATUS, (uint8_t)new_fence_status);
 		if (err != 0) {
-			NCLOG_WRN(AMC_MODULE, TRice( iD( 7258),"wrn: Failed to write new fence status to ext flash, error:%d\n", err));
+			NCLOG_WRN(NCID, TRice( iD( 7258),"wrn: Failed to write new fence status to ext flash, error:%d \n", err));
 			return -EACCES;
 		}
 
@@ -559,39 +561,39 @@ CollarStatus calc_collar_status(void)
 	case CollarStatus_CollarStatus_UNKNOWN: {
 		if (mov_state == STATE_NORMAL) {
 			new_collar_status = CollarStatus_CollarStatus_Normal;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 1373),"inf: CollarStatus:Unknown->Normal\n"));
+			NCLOG_INF(NCID, TRice0( iD( 1373),"inf: CollarStatus:Unknown->Normal \n"));
 		} else if (mov_state == STATE_SLEEP) {
 			new_collar_status = CollarStatus_Sleep;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 6407),"inf: CollarStatus:Unknown->Sleep\n"));
+			NCLOG_INF(NCID, TRice0( iD( 6407),"inf: CollarStatus:Unknown->Sleep \n"));
 		}
 		break;
 	}
 	case CollarStatus_CollarStatus_Normal: {
 		if (mov_state == STATE_SLEEP) {
 			new_collar_status = CollarStatus_Sleep;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 4776),"inf: CollarStatus:Normal->Sleep\n"));
+			NCLOG_INF(NCID, TRice0( iD( 4776),"inf: CollarStatus:Normal->Sleep \n"));
 		} else if (mov_state == STATE_INACTIVE) {
-			NCLOG_WRN(AMC_MODULE, TRice0( iD( 5688),"wrn: CollarStatus:Went directly to inactive in normal\n"));
+			NCLOG_WRN(NCID, TRice0( iD( 5688),"wrn: CollarStatus:Went directly to inactive in normal \n"));
 		}
 		break;
 	}
 	case CollarStatus_Sleep: {
 		if (mov_state == STATE_NORMAL) {
 			new_collar_status = CollarStatus_CollarStatus_Normal;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 7009),"inf: CollarStatus:Sleep->Normal\n"));
+			NCLOG_INF(NCID, TRice0( iD( 7009),"inf: CollarStatus:Sleep->Normal \n"));
 		} else if (mov_state == STATE_INACTIVE) {
 			new_collar_status = CollarStatus_OffAnimal;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 2817),"inf: CollarStatus:Sleep->OffAnimal\n"));
+			NCLOG_INF(NCID, TRice0( iD( 2817),"inf: CollarStatus:Sleep->OffAnimal \n"));
 		}
 		break;
 	}
 	case CollarStatus_OffAnimal: {
 		if (mov_state == STATE_NORMAL) {
 			new_collar_status = CollarStatus_CollarStatus_Normal;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 6375),"inf: CollarStatus:Off->Normal\n"));
+			NCLOG_INF(NCID, TRice0( iD( 6375),"inf: CollarStatus:Off->Normal \n"));
 		} else if (mov_state == STATE_SLEEP) {
 			new_collar_status = CollarStatus_Sleep;
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 3402),"inf: CollarStatus:Off->Sleep\n"));
+			NCLOG_INF(NCID, TRice0( iD( 3402),"inf: CollarStatus:Off->Sleep \n"));
 		}
 		break;
 	}
@@ -599,16 +601,16 @@ CollarStatus calc_collar_status(void)
 		if (atomic_get(&power_state) != PWR_CRITICAL) {
 			if (mov_state == STATE_NORMAL) {
 				new_collar_status = CollarStatus_CollarStatus_Normal;
-				NCLOG_INF(AMC_MODULE, TRice0( iD( 3183),"inf: CollarStatus:PowerOff->Normal\n"));
+				NCLOG_INF(NCID, TRice0( iD( 3183),"inf: CollarStatus:PowerOff->Normal \n"));
 			} else if (mov_state == STATE_SLEEP) {
 				new_collar_status = CollarStatus_Sleep;
-				NCLOG_INF(AMC_MODULE, TRice0( iD( 3866),"inf: CollarStatus:PowerOff->Sleep\n"));
+				NCLOG_INF(NCID, TRice0( iD( 3866),"inf: CollarStatus:PowerOff->Sleep \n"));
 			} else if (mov_state == STATE_INACTIVE) {
 				char *msg = "CollarStatus:Went directly to inactive from powerOff";
 				nf_app_error(ERR_AMC, -EINVAL, msg, strlen(msg));
 			} else {
 				new_collar_status = CollarStatus_CollarStatus_UNKNOWN;
-				NCLOG_INF(AMC_MODULE, TRice0( iD( 7961),"inf: CollarStatus:PowerOff->UNKNOWN\n"));
+				NCLOG_INF(NCID, TRice0( iD( 7961),"inf: CollarStatus:PowerOff->UNKNOWN \n"));
 			}
 		}
 		break;
@@ -625,7 +627,7 @@ CollarStatus calc_collar_status(void)
 	 * Trigged by low battery voltage. */
 	if (atomic_get(&power_state) == PWR_CRITICAL) {
 		new_collar_status = CollarStatus_PowerOff;
-		NCLOG_INF(AMC_MODULE, TRice0( iD( 1035),"inf: CollarStatus:...->PowerOff\n"));
+		NCLOG_INF(NCID, TRice0( iD( 1035),"inf: CollarStatus:...->PowerOff \n"));
 	}
 
 	/* If new status, write to ext flash storage. */
@@ -634,7 +636,7 @@ CollarStatus calc_collar_status(void)
 
 		int err = stg_config_u8_write(STG_U8_COLLAR_STATUS, (uint8_t)current_collar_status);
 		if (err != 0) {
-			NCLOG_ERR(AMC_MODULE, TRice( iD( 4199),"err: Failed to write new collar status to ext flash, error %i \n", err));
+			NCLOG_ERR(NCID, TRice( iD( 4199),"err: Failed to write new collar status to ext flash, error %i \n", err));
 		}
 
 		/* Notify server about collar status change. */

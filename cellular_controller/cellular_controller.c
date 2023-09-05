@@ -20,6 +20,8 @@
 #define MESSAGING_ACK_TIMEOUT CONFIG_MESSAGING_ACK_TIMEOUT_MSEC
 
 LOG_MODULE_REGISTER(cellular_controller, LOG_LEVEL_DBG);
+/* Required by generate_nclogs.py*/
+#define NCID CELLULAR_CONTROLLER
 
 K_SEM_DEFINE(messaging_ack, 0, 1);
 K_SEM_DEFINE(fota_progress_update, 0, 1);
@@ -127,7 +129,7 @@ static void publish_last_used_urat()
 		EVENT_SUBMIT(used_urat_ev);
 		LOG_INF("Used URAT command: %s", used_urat);
 	} else {
-		NCLOG_ERR(CELLULAR_CONTROLLER, TRice( iD( 7402),"err: Failed to retrieve last used URAT: %d\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 7402),"err: Failed to retrieve last used URAT: %d \n", err));
 	}
 }
 
@@ -143,9 +145,9 @@ void receive_tcp(const struct data *sock_data)
 			if (received > 0) {
 				socket_idle_count = 0;
 #if defined(CONFIG_CELLULAR_CONTROLLER_VERBOSE)
-				NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 5207),"inf: socket received %d bytes!\n", received));
+				NCLOG_DBG(NCID, TRice( iD( 5207),"dbg: socket received %d bytes! \n", received));
 #endif
-				NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 6351),"dbg: socket_receive takes semaphore!\n"));
+				NCLOG_DBG(NCID, TRice0( iD( 6351),"dbg: socket_receive takes semaphore! \n"));
 				if (initializing ||
 				    k_sem_take(&messaging_ack, K_MSEC(MESSAGING_ACK_TIMEOUT)) ==
 					    0) {
@@ -156,7 +158,7 @@ void receive_tcp(const struct data *sock_data)
 						new_cellular_proto_in_event();
 					msgIn->buf = pMsgIn;
 					msgIn->len = received;
-					NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 7510),"inf: Submitting msgIn event!\n"));
+					NCLOG_DBG(NCID, TRice0( iD( 7510),"dbg: Submitting msgIn event! \n"));
 					EVENT_SUBMIT(msgIn);
 				} else {
 					char *err_msg = "Missed messaging ack!";
@@ -166,7 +168,7 @@ void receive_tcp(const struct data *sock_data)
 			} else if (received == 0) {
 				socket_idle_count += SOCKET_POLL_INTERVAL;
 				if (socket_idle_count > SOCK_RECV_TIMEOUT) {
-					NCLOG_WRN(CELLULAR_CONTROLLER, TRice0( iD( 6792),"wrn: Socket receive timed out!\n"));
+					NCLOG_WRN(NCID, TRice0( iD( 6792),"wrn: Socket receive timed out! \n"));
 					give_up_main_soc();
 				}
 			} else {
@@ -183,7 +185,7 @@ void listen_sock_poll(void)
 {
 	while (1) {
 		if (k_sem_take(&listen_sem, K_FOREVER) == 0) {
-			NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 5068),"inf: Waking up!\n"));
+			NCLOG_DBG(NCID, TRice0( iD( 5068),"dbg: Waking up! \n"));
 			struct send_poll_request_now *wake_up = new_send_poll_request_now();
 			EVENT_SUBMIT(wake_up);
 		}
@@ -194,13 +196,13 @@ static int start_tcp(void)
 {
 	int ret = modem_nf_wakeup();
 	if (ret != 0) {
-		NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 5525),"err: Failed to wake up the modem!\n"));
+		NCLOG_ERR(NCID, TRice0( iD( 5525),"err: Failed to wake up the modem! \n"));
 		return ret;
 	}
 	if (!fota_in_progress) {
 		ret = check_ip();
 		if (ret != 0) {
-			NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 6280),"err: Failed to get ip address!\n"));
+			NCLOG_ERR(NCID, TRice0( iD( 6280),"err: Failed to get ip address! \n"));
 			return ret;
 		}
 	}
@@ -227,11 +229,11 @@ static void read_URAT_settings_from_NVS(void)
 	int err = stg_config_str_read(STG_STR_MODEM_URAT_ARG, urat_args_buffer,
 				      sizeof(urat_args_buffer), &urat_args_buf_len);
 	if (err != 0) {
-		NCLOG_WRN(CELLULAR_CONTROLLER, TRice( iD( 5254),"wrn: Failed to read URAT settings from NVS!, err:%d\n", err));
+		NCLOG_WRN(NCID, TRice( iD( 5254),"wrn: Failed to read URAT settings from NVS!, err:%d \n", err));
 		return;
 	}
 	if (urat_args_buf_len > sizeof(urat_args_buffer)) {
-		NCLOG_WRN(CELLULAR_CONTROLLER, TRice0( iD( 2520),"wrn: Buffer overflow when reading server URAT settings from NVS!\n"));
+		NCLOG_WRN(NCID, TRice0( iD( 2520),"wrn: Buffer overflow when reading server URAT settings from NVS! \n"));
 	}
 	modem_nf_set_urat_config(urat_args_buffer);
 }
@@ -243,7 +245,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		k_free(pMsgIn);
 		pMsgIn = NULL;
 		k_sem_give(&messaging_ack);
-		NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 7358),"inf: ACK received!\n"));
+		NCLOG_DBG(NCID, TRice0( iD( 7358),"dbg: ACK received! \n"));
 		return false;
 	} else if (is_messaging_stop_connection_event(eh)) {
 		k_free(CharMsgOut);
@@ -258,7 +260,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		int ret = stg_config_str_read(STG_STR_HOST_PORT, server_address_tmp,
 					      sizeof(server_address_tmp), &port_length);
 		if (ret != 0) {
-			NCLOG_WRN(CELLULAR_CONTROLLER, TRice0( iD( 2757),"wrn: Failed to read host address from ext flash\n"));
+			NCLOG_WRN(NCID, TRice0( iD( 2757),"wrn: Failed to read host address from ext flash \n"));
 		}
 
 		struct messaging_host_address_event *event = cast_messaging_host_address_event(eh);
@@ -267,7 +269,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 
 		ptr_port = strchr(server_address, ':');
 		if (ptr_port == NULL) {
-			NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 4229),"err: Cannot read host/port, missing ':'\n"));
+			NCLOG_ERR(NCID, TRice0( iD( 4229),"err: Cannot read host/port, missing ':' \n"));
 			return false;
 		}
 
@@ -285,11 +287,11 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		memcpy(&server_ip[0], &server_address[0], ip_len);
 		ret = memcmp(server_address, server_address_tmp, STG_CONFIG_HOST_PORT_BUF_LEN - 1);
 		if (ret != 0) {
-			NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 4358),"dbg: New host address received!\n"));
+			NCLOG_DBG(NCID, TRice0( iD( 4358),"dbg: New host address received! \n"));
 			ret = stg_config_str_write(STG_STR_HOST_PORT, server_address,
 						   STG_CONFIG_HOST_PORT_BUF_LEN - 1);
 			if (ret != 0) {
-				NCLOG_WRN(CELLULAR_CONTROLLER, TRice0( iD( 2074),"wrn: Failed to write new host address to ext flash!\n"));
+				NCLOG_WRN(NCID, TRice0( iD( 2074),"wrn: Failed to write new host address to ext flash! \n"));
 			}
 		}
 		return false;
@@ -310,12 +312,12 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		struct cellular_ack_event *ack = new_cellular_ack_event();
 		ack->message_sent = false;
 		EVENT_SUBMIT(ack);
-		NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 6079),"inf: Dropping message!\n"));
+		NCLOG_DBG(NCID, TRice0( iD( 6079),"dbg: Dropping message! \n"));
 		return false;
 	} else if (is_messaging_mdm_fw_event(eh)) {
 		struct messaging_mdm_fw_event *ev = cast_messaging_mdm_fw_event(eh);
 		m_ftp_url = ev->buf;
-		//NCLOG_DBG(CELLULAR_CONTROLLER, TRICE_S( iD( 7311),"dbg: %s\n", m_ftp_url));
+		//NCLOG_DBG(NCID, TRICE_S( iD( 7311),"dbg: %s \n", m_ftp_url));
 		enable_mdm_fota = true;
 		announce_connection_state(false);
 		return false;
@@ -349,7 +351,7 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 	} else if (is_pwr_status_event(eh)) {
 		struct pwr_status_event *ev = cast_pwr_status_event(eh);
 		if (ev->pwr_state < PWR_NORMAL && power_level_ok) {
-			NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 2796),"inf: Will power off the modem!\n"));
+			NCLOG_DBG(NCID, TRice0( iD( 2796),"dbg: Will power off the modem! \n"));
 			power_level_ok = false;
 		} else if (ev->pwr_state == PWR_NORMAL) {
 			power_level_ok = true;
@@ -357,9 +359,9 @@ static bool cellular_controller_event_handler(const struct event_header *eh)
 		return false;
 	} else if (is_save_modem_status_event(eh)) {
 		struct save_modem_status_event *ev = cast_save_modem_status_event(eh);
-		NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 3040),"dbg: Writing %d to modem status\n", ev->modem_status));
+		NCLOG_DBG(NCID, TRice( iD( 3040),"dbg: Writing %d to modem status \n", ev->modem_status));
 		if (stg_config_u8_write(STG_U8_MODEM_INSTALLING, ev->modem_status) != 0) {
-			NCLOG_WRN(CELLULAR_CONTROLLER, TRice0( iD( 2451),"wrn: Writing to NVS fail\n"));
+			NCLOG_WRN(NCID, TRice0( iD( 2451),"wrn: Writing to NVS fail \n"));
 		}
 		return false;
 	} else if (is_urat_args_received_event(eh)) {
@@ -381,20 +383,20 @@ int8_t cache_server_address(void)
 	int err = stg_config_str_read(STG_STR_HOST_PORT, server_address, sizeof(server_address),
 				      &port_length);
 	if (err != 0 || server_address[0] == '\0') {
-		NCLOG_ERR(CELLULAR_CONTROLLER, TRice( iD( 1543),"err: Cannot read host/port %d\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 1543),"err: Cannot read host/port %d \n", err));
 		return -1;
 	}
 
 	char *ptr_port;
 	ptr_port = strchr(server_address, ':');
 	if (ptr_port == NULL) {
-		NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 7656),"err: Cannot read host/port, missing ':'\n"));
+		NCLOG_ERR(NCID, TRice0( iD( 7656),"err: Cannot read host/port, missing ':' \n"));
 		return -1;
 	}
 
 	server_port = atoi(ptr_port + 1);
 	if (server_port <= 0) {
-		NCLOG_ERR(CELLULAR_CONTROLLER, TRice( iD( 6955),"err: Malformed port number. Err: %d\n", server_port));
+		NCLOG_ERR(NCID, TRice( iD( 6955),"err: Malformed port number. Err: %d \n", server_port));
 		return -1;
 	}
 
@@ -403,11 +405,11 @@ int8_t cache_server_address(void)
 	memset(&server_ip[0], 0, sizeof(server_ip));
 	memcpy(&server_ip[0], &server_address[0], ip_len);
 	if (server_ip[0] != '\0') {
-		//NCLOG_DBG(CELLULAR_CONTROLLER, TRICE_S( iD( 2073),"inf: Host address read from storage: %s : ", &server_ip[0]));
-		NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 1777),"dbg: %d\n", server_port));
+		//NCLOG_DBG(NCID, TRICE_S( iD( 2073),"inf: Host address read from storage: %s : ", &server_ip[0]));
+		NCLOG_DBG(NCID, TRice( iD( 1777),"dbg: %d \n", server_port));
 		return 0;
 	} else {
-		NCLOG_WRN(CELLULAR_CONTROLLER, TRice0( iD( 3476),"wrn: Cannot read host/port, empty string\n"));
+		NCLOG_WRN(NCID, TRice0( iD( 3476),"wrn: Cannot read host/port, empty string \n"));
 		return -1;
 	}
 }
@@ -416,19 +418,19 @@ static int cellular_controller_connect(void *dev)
 {
 	int ret = lte_init();
 	if (ret != 0) {
-		NCLOG_ERR(CELLULAR_CONTROLLER, TRice( iD( 7204),"err: Failed to start LTE connection. Check network interface! (%d)\n", ret));
+		NCLOG_ERR(NCID, TRice( iD( 7204),"err: Failed to start LTE connection. Check network interface! (%d) \n", ret));
 		nf_app_error(ERR_CELLULAR_CONTROLLER, ret, NULL, 0);
 		goto exit;
 	}
 
-	NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 4575),"inf: Cellular network interface ready!\n"));
+	NCLOG_DBG(NCID, TRice0( iD( 4575),"dbg: Cellular network interface ready! \n"));
 
 	ret = cache_server_address();
 	if (ret != 0) { //172.31.36.11:4321
 		//172.31.33.243:9876
 		strcpy(server_ip, "172.31.36.11");
 		server_port = 4321;
-		NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 6490),"dbg: Default server ip address will be used \n"));
+		NCLOG_DBG(NCID, TRice0( iD( 6490),"dbg: Default server ip address will be used \n"));
 	}
 
 	ret = 0;
@@ -468,17 +470,17 @@ static mdm_fota_status mdm_fota(void)
 	ftp_params.download_timeout_sec = 3600;
 
 	if (!download_complete) {
-		//NCLOG_DBG(CELLULAR_CONTROLLER, TRICE_S( iD( 6928),"inf: Starting FTP download, %s!\n", m_ftp_url));
+		//NCLOG_DBG(NCID, TRICE_S( iD( 6928),"inf: Starting FTP download, %s! \n", m_ftp_url));
 		ret = modem_nf_ftp_fw_download(&ftp_params, m_ftp_url);
 		if (ret == 0) {
 			download_complete = true;
-			NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 2154),"inf: FTP download successful!\n"));
+			NCLOG_DBG(NCID, TRice0( iD( 2154),"dbg: FTP download successful! \n"));
 			struct mdm_fw_update_event *ev = new_mdm_fw_update_event();
 			ev->status = MDM_FW_DOWNLOAD_COMPLETE;
 			EVENT_SUBMIT(ev);
 			return MDM_FW_DOWNLOAD_COMPLETE;
 		} else {
-			NCLOG_WRN(CELLULAR_CONTROLLER, TRice0( iD( 7208),"wrn: FTP download failed!\n"));
+			NCLOG_WRN(NCID, TRice0( iD( 7208),"wrn: FTP download failed! \n"));
 			struct mdm_fw_update_event *ev = new_mdm_fw_update_event();
 			ev->status = DOWNLOAD_FAILED;
 			EVENT_SUBMIT(ev);
@@ -486,13 +488,13 @@ static mdm_fota_status mdm_fota(void)
 		}
 	} else if (!mdm_install_started) {
 		mdm_install_started = true;
-		NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 3552),"inf: Starting modem upgrade!\n"));
+		NCLOG_DBG(NCID, TRice0( iD( 3552),"dbg: Starting modem upgrade! \n"));
 		ret = modem_nf_ftp_fw_install(true);
 		if (ret == 0) {
-			NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 3672),"inf: Modem upgrade successful!\n"));
+			NCLOG_DBG(NCID, TRice0( iD( 3672),"dbg: Modem upgrade successful! \n"));
 			return INSTALLATION_COMPLETE;
 		} else {
-			NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 4897),"err: Modem upgrade failed!\n"));
+			NCLOG_ERR(NCID, TRice0( iD( 4897),"err: Modem upgrade failed! \n"));
 			return INSTALLATION_FAILED;
 		}
 	}
@@ -521,7 +523,7 @@ static void cellular_controller_keep_alive(void *dev)
 					break;
 				default:
 					enable_mdm_fota = false;
-					NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 4225),"inf: Modem FW upgrade was NOT successful!\n"));
+					NCLOG_DBG(NCID, TRice0( iD( 4225),"dbg: Modem FW upgrade was NOT successful! \n"));
 				}
 			}
 
@@ -531,12 +533,12 @@ static void cellular_controller_keep_alive(void *dev)
 				ret = modem_nf_pwr_off();
 				if (ret != 0) {
 					if (ret == -EALREADY) {
-						NCLOG_WRN(CELLULAR_CONTROLLER, TRice0( iD( 5763),"wrn: Modem suspended!\n"));
+						NCLOG_WRN(NCID, TRice0( iD( 5763),"wrn: Modem suspended! \n"));
 					} else {
-						NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 3713),"err: Failed to switch off modem!\n"));
+						NCLOG_ERR(NCID, TRice0( iD( 3713),"err: Failed to switch off modem! \n"));
 					}
 				} else {
-					NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 1054),"inf: Modem switched off!\n"));
+					NCLOG_DBG(NCID, TRice0( iD( 1054),"dbg: Modem switched off! \n"));
 				}
 				goto update_connection_state;
 			}
@@ -576,7 +578,7 @@ static void cellular_controller_keep_alive(void *dev)
 						k_sem_reset(&fota_progress_update);
 						if (k_sem_take(&fota_progress_update,
 							       K_SECONDS(10)) != 0) {
-							NCLOG_WRN(CELLULAR_CONTROLLER, TRice0( iD( 4614),"wrn: FOTA progress missed!\n"));
+							NCLOG_WRN(NCID, TRice0( iD( 4614),"wrn: FOTA progress missed! \n"));
 						}
 					}
 					ret = start_tcp();
@@ -664,14 +666,14 @@ int8_t cellular_controller_init(void)
 	connected = false;
 	const struct device *gsm_dev = bind_modem();
 	if (gsm_dev == NULL) {
-		NCLOG_ERR(CELLULAR_CONTROLLER, TRice( iD( 1286),"err: GSM driver was not found! (%d)\n", -ENODEV));
+		NCLOG_ERR(NCID, TRice( iD( 1286),"err: GSM driver was not found! (%d) \n", -ENODEV));
 		nf_app_error(ERR_CELLULAR_CONTROLLER, -ENODEV, NULL, 0);
 		return -1;
 	}
 	if (stg_config_u8_read(STG_U8_MODEM_INSTALLING, &g_modem_status_cache) != 0) {
-		NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 2156),"err: unhandled error retrieving STG_U8_MODEM_INSTALLING from NVS\n"));
+		NCLOG_ERR(NCID, TRice0( iD( 2156),"err: unhandled error retrieving STG_U8_MODEM_INSTALLING from NVS \n"));
 	}
-	NCLOG_DBG(CELLULAR_CONTROLLER, TRice( iD( 5209),"inf: modem status read: %d\n", g_modem_status_cache));
+	NCLOG_DBG(NCID, TRice( iD( 5209),"dbg: modem status read: %d \n", g_modem_status_cache));
 	set_modem_status_cb(modem_read_status_nvm, modem_write_status_nvm);
 
 	uint16_t pcb_product_type = 0;
@@ -694,7 +696,7 @@ int8_t cellular_controller_init(void)
 						sizeof(CONFIG_DEFAULT_URAT_SETTING));
 	}
 	if (err != 0) {
-		NCLOG_ERR(CELLULAR_CONTROLLER, TRice0( iD( 4477),"err: Failed to set default URAT settings!\n"));
+		NCLOG_ERR(NCID, TRice0( iD( 4477),"err: Failed to set default URAT settings! \n"));
 	}
 
 	read_URAT_settings_from_NVS();
@@ -717,16 +719,16 @@ int8_t cellular_controller_init(void)
  * .*/
 static int send_tcp_q(char *msg, size_t len)
 {
-	NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 7202),"dbg: send_tcp_q start!\n"));
+	NCLOG_DBG(NCID, TRice0( iD( 7202),"dbg: send_tcp_q start! \n"));
 	struct msg2server msgout;
 	msgout.msg = msg;
 	msgout.len = len;
-	NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 4335),"dbg: send_tcp_q allocated msgout!\n"));
+	NCLOG_DBG(NCID, TRice0( iD( 4335),"dbg: send_tcp_q allocated msgout! \n"));
 	while (k_msgq_put(&msgq, &msgout, K_NO_WAIT) != 0) {
 		/* Message queue is full: purge old data & try again */
 		k_msgq_purge(&msgq);
 	}
-	NCLOG_DBG(CELLULAR_CONTROLLER, TRice0( iD( 7713),"dbg: message successfully pushed to queue!\n"));
+	NCLOG_DBG(NCID, TRice0( iD( 7713),"dbg: message successfully pushed to queue! \n"));
 	return 0;
 }
 
@@ -740,7 +742,7 @@ static void send_tcp_fn(void)
 				k_msgq_get(&msgq, &msg_in_q, K_FOREVER);
 				int ret = send_tcp(msg_in_q.msg, msg_in_q.len);
 				if (ret != msg_in_q.len) {
-					NCLOG_WRN(CELLULAR_CONTROLLER, TRice0( iD( 5995),"wrn: Failed to send TCP message!\n"));
+					NCLOG_WRN(NCID, TRice0( iD( 5995),"wrn: Failed to send TCP message! \n"));
 					struct messaging_stop_connection_event *end_connection =
 						new_messaging_stop_connection_event();
 					EVENT_SUBMIT(end_connection);

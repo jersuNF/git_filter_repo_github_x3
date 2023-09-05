@@ -39,6 +39,8 @@ static const struct device *clock0;
 #define BLE_RESET_URAT_SETTING "9,7"
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BATTERY_LOG_LEVEL);
+/* Required by generate_nclogs.py*/
+#define NCID POWER_MANAGER
 
 static uint32_t extclk_request_flags = 0;
 
@@ -120,7 +122,7 @@ static void charging_poll_work_fn()
 {
 	int charging_current_avg = charging_current_sample_averaged();
 	if (charging_current_avg < 0) {
-		NCLOG_ERR(POWER_MANAGER, TRice( iD( 3010),"err: Failed to fetch charging data %d\n", charging_current_avg));
+		NCLOG_ERR(NCID, TRice( iD( 3010),"err: Failed to fetch charging data %d \n", charging_current_avg));
 		char *msg = "Unable fetch charging data";
 		nf_app_error(ERR_PWR_MODULE, charging_current_avg, msg, strlen(msg));
 		return;
@@ -161,7 +163,7 @@ int pwr_module_init(void)
 	err = charging_setup();
 	err = charging_init_module();
 	if (err) {
-		NCLOG_ERR(POWER_MANAGER, TRice( iD( 2543),"err: Failed to init charging module %d\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 2543),"err: Failed to init charging module %d \n", err));
 		char *e_msg = "Failed to configure or setup charging";
 		nf_app_error(ERR_PWR_MODULE, err, e_msg, strlen(e_msg));
 		return err;
@@ -201,7 +203,7 @@ int log_and_fetch_battery_voltage(void)
 {
 	int batt_mV = battery_sample_averaged();
 	if (batt_mV < 0) {
-		NCLOG_ERR(POWER_MANAGER, TRice( iD( 5886),"err: Failed to read battery voltage: %d\n", batt_mV));
+		NCLOG_ERR(NCID, TRice( iD( 5886),"err: Failed to read battery voltage: %d \n", batt_mV));
 		return -ENOENT;
 	}
 
@@ -212,7 +214,7 @@ int log_and_fetch_battery_voltage(void)
 	event->param.battery = batt_soc;
 	EVENT_SUBMIT(event);
 
-	NCLOG_DBG(POWER_MANAGER, TRice( iD( 5279),"dbg: Voltage: %d mV; State Of Charge: %u precent\n", batt_mV, batt_soc));
+	NCLOG_DBG(NCID, TRice( iD( 5279),"dbg: Voltage: %d mV; State Of Charge: %u precent \n", batt_mV, batt_soc));
 
 	return batt_mV;
 }
@@ -249,7 +251,7 @@ int fetch_battery_percent(void)
 {
 	int batt_mV = battery_sample_averaged();
 	if (batt_mV < 0) {
-		NCLOG_ERR(POWER_MANAGER, TRice( iD( 4014),"err: Failed to read battery voltage: %d\n", batt_mV));
+		NCLOG_ERR(NCID, TRice( iD( 4014),"err: Failed to read battery voltage: %d \n", batt_mV));
 		return -ENOENT;
 	}
 	return battery_level_soc(batt_mV);
@@ -261,14 +263,14 @@ int pwr_module_reboot_reason(uint8_t *aReason)
 	if (m_my_reboot_reason == REBOOT_REASON_CNT) {
 		err = stg_config_u8_read(STG_U8_RESET_REASON, &m_my_reboot_reason);
 		if (err != 0) {
-			NCLOG_ERR(POWER_MANAGER, TRice0( iD( 4590),"err: Unable to read reboot reason from stg flash\n"));
+			NCLOG_ERR(NCID, TRice0( iD( 4590),"err: Unable to read reboot reason from stg flash \n"));
 			m_my_reboot_reason = REBOOT_UNKNOWN;
 		}
 
 		/* Set reboot reason in eeprom to REBOOT_UNKNOWN after read in 
 		 * case of enexpected reboot */
 		if (stg_config_u8_write(STG_U8_RESET_REASON, REBOOT_UNKNOWN) != 0) {
-			NCLOG_ERR(POWER_MANAGER, TRice0( iD( 4259),"err: Unable to reset reboot reason in stg flash!\n"));
+			NCLOG_ERR(NCID, TRice0( iD( 4259),"err: Unable to reset reboot reason in stg flash! \n"));
 		}
 	}
 	*aReason = m_my_reboot_reason;
@@ -324,9 +326,9 @@ static bool event_handler(const struct event_header *eh)
 			err = stg_config_u8_write(STG_U8_RESET_REASON, (uint8_t)REBOOT_UNKNOWN);
 		}
 		if (err != 0) {
-			NCLOG_ERR(POWER_MANAGER, TRice( iD( 4499),"err: Failed to write reboot reason to ext flash, err:%d\n", err));
+			NCLOG_ERR(NCID, TRice( iD( 4499),"err: Failed to write reboot reason to ext flash, err:%d \n", err));
 		}
-		NCLOG_INF(POWER_MANAGER, TRice( iD( 3557),"inf: Reboot event received, reason:%d\n", evt->reason));
+		NCLOG_INF(NCID, TRice( iD( 3557),"inf: Reboot event received, reason:%d \n", evt->reason));
 
 		schedule_system_reboot();
 		return false;

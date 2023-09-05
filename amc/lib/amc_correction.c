@@ -6,6 +6,8 @@
 #include <zephyr.h>
 #include <logging/log.h>
 LOG_MODULE_REGISTER(amc_correction, CONFIG_AMC_LIB_LOG_LEVEL);
+/* Required by generate_nclogs.py*/
+#define NCID AMC_MODULE
 
 #include "amc_correction.h"
 #include "amc_states_cache.h"
@@ -128,14 +130,14 @@ static void buzzer_update_fn()
 						zap_eval_doing = true;
 						zap_timestamp = k_uptime_get_32();
 						increment_zap_count();
-						NCLOG_INF(AMC_MODULE, TRice0( iD( 6862),"inf: AMC notified EP to zap!\n"));
+						NCLOG_INF(NCID, TRice0( iD( 6862),"inf: AMC notified EP to zap! \n"));
 
 						struct amc_zapped_now_event *ev =
 							new_amc_zapped_now_event();
 						ev->fence_dist = atomic_get(&last_mean_dist);
 						EVENT_SUBMIT(ev);
 					} else {
-						NCLOG_ERR(AMC_MODULE, TRice0( iD( 1682),"err: EP trigger \n" "ack missed!"));
+						NCLOG_ERR(NCID, TRice0( iD( 1682),"err: EP trigger \n" "ack missed!"));
 					}
 				}
 				queueZap = false;
@@ -201,7 +203,7 @@ static void correction_start(int16_t mean_dist)
 			 *  g_i16_WarnStartWayP[0] = GPS()->X;
 			 *  g_i16_WarnStartWayP[1] = GPS()->Y;
 			 */
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 6150),"inf: Correction started.\n"));
+			NCLOG_INF(NCID, TRice0( iD( 6150),"inf: Correction started. \n"));
 		}
 		if (!correction_warn_on) {
 			start_buzzer_updates();
@@ -220,7 +222,7 @@ static void correction_start(int16_t mean_dist)
 			EVENT_SUBMIT(ev);
 
 			increment_warn_count();
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 4160),"inf: Warn zone counter++ and told buzzer to enter WARN\n"));
+			NCLOG_INF(NCID, TRice0( iD( 4160),"inf: Warn zone counter++ and told buzzer to enter WARN \n"));
 		}
 		correction_started = 1;
 		correction_warn_on = 1;
@@ -246,7 +248,7 @@ static void correction_end(void)
 		 */
 		correction_started = 0;
 
-		NCLOG_INF(AMC_MODULE, TRice0( iD( 2501),"inf: Ended correction.\n"));
+		NCLOG_INF(NCID, TRice0( iD( 2501),"inf: Ended correction. \n"));
 	}
 }
 
@@ -276,7 +278,7 @@ static void correction_pause(Reason reason, int16_t mean_dist)
 	/* Everytime we pause, we set the previous distace to 0. */
 	prev_dist_change = 0;
 
-	NCLOG_INF(AMC_MODULE, TRice( iD( 4624),"inf: Paused correction warning due to reason %i.\n", reason));
+	NCLOG_INF(NCID, TRice( iD( 4624),"inf: Paused correction warning due to reason %i. \n", reason));
 
 	/* [Legacy code] v4.01-0: There was return here before. 
 	 * This became wrong because escaped status did not stop correction, 
@@ -426,18 +428,18 @@ void process_correction(Mode amc_mode, gnss_last_fix_struct_t *gnss, FenceStatus
 	atomic_set(&last_mean_dist, mean_dist);
 
 	if (amc_mode == Mode_Teach || amc_mode == Mode_Fence) {
-		NCLOG_INF(AMC_MODULE, TRice0( iD( 7661),"inf:  amc_mode in teach or fence\n"));
+		NCLOG_INF(NCID, TRice0( iD( 7661),"inf:  amc_mode in teach or fence \n"));
 		if (zone == WARN_ZONE) {
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 6879),"inf:  Zone is warn\n"));
+			NCLOG_INF(NCID, TRice0( iD( 6879),"inf:  Zone is warn \n"));
 			if (gnss->mode == GNSSMODE_MAX) {
-				NCLOG_INF(AMC_MODULE, TRice0( iD( 4197),"inf:  GNSS in max\n"));
+				NCLOG_INF(NCID, TRice0( iD( 4197),"inf:  GNSS in max \n"));
 				if (fs == FenceStatus_FenceStatus_Normal ||
 				    fs == FenceStatus_MaybeOutOfFence) {
-					NCLOG_INF(AMC_MODULE, TRice0( iD( 3342),"inf:  Fs is normal or maybe\n"));
+					NCLOG_INF(NCID, TRice0( iD( 3342),"inf:  Fs is normal or maybe \n"));
 					if (get_active_delta() > 0 || get_correction_status() > 0) {
-						NCLOG_INF(AMC_MODULE, TRice0( iD( 3380),"inf:  activedelta or correctionstat\n"));
+						NCLOG_INF(NCID, TRice0( iD( 3380),"inf:  activedelta or correctionstat \n"));
 						if (gnss_has_warn_fix()) {
-							NCLOG_INF(AMC_MODULE, TRice0( iD( 4670),"inf:  has warn fix\n"));
+							NCLOG_INF(NCID, TRice0( iD( 4670),"inf:  has warn fix \n"));
 							correction_start(mean_dist);
 						}
 					}

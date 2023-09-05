@@ -31,6 +31,8 @@
 
 #define MODULE amc
 LOG_MODULE_REGISTER(MODULE, CONFIG_AMC_LOG_LEVEL);
+/* Required by generate_nclogs.py*/
+#define NCID AMC_MODULE
 
 /* Thread stack area that we use for the calculation process. We add a work
  * item here when we have data available from GNSS. This thread can then use the 
@@ -140,7 +142,7 @@ static inline int update_pasture_from_stg(void)
 	int err;
 	/* Add check for fence status, in case collar has rebooted after invalidation */
 	if (get_fence_status() == FenceStatus_TurnedOffByBLE) {
-		NCLOG_WRN(AMC_MODULE, TRice0( iD( 1929),"wrn: Fence is turned off by BLE\n"));
+		NCLOG_WRN(NCID, TRice0( iD( 1929),"wrn: Fence is turned off by BLE \n"));
 		/* Submit event to reset the cached fence version to 0. */
 		struct update_fence_version *ver = new_update_fence_version();
 		ver->fence_version = 0;
@@ -151,7 +153,7 @@ static inline int update_pasture_from_stg(void)
 
 	err = stg_read_pasture_data(set_pasture_cache);
 	if (err == -ENODATA) {
-		NCLOG_WRN(AMC_MODULE, TRice( iD( 4072),"wrn: No pasture found on external flash. %d\n", err));
+		NCLOG_WRN(NCID, TRice( iD( 4072),"wrn: No pasture found on external flash. %d \n", err));
 		nf_app_warning(ERR_AMC, err, NULL, 0);
 		/* Submit event that we have now begun to use the new fence. */
 		struct update_fence_version *ver = new_update_fence_version();
@@ -160,7 +162,7 @@ static inline int update_pasture_from_stg(void)
 		EVENT_SUBMIT(ver);
 		return 0;
 	} else if (err) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 1605),"err: Error reading the pasture from external flash. %d\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 1605),"err: Error reading the pasture from external flash. %d \n", err));
 		/* Set pasture/fence to invalid */
 		nf_app_error(ERR_AMC, err, NULL, 0);
 		force_fence_status(FenceStatus_FenceStatus_Invalid);
@@ -175,7 +177,7 @@ static inline int update_pasture_from_stg(void)
 	err = k_sem_take(&fence_data_sem, K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	do {
 		if (err) {
-			NCLOG_ERR(AMC_MODULE, TRice( iD( 3432),"err: Error taking pasture semaphore for version check %d\n", err));
+			NCLOG_ERR(NCID, TRice( iD( 3432),"err: Error taking pasture semaphore for version check %d \n", err));
 			nf_app_error(ERR_AMC, err, NULL, 0);
 			break;
 		}
@@ -184,7 +186,7 @@ static inline int update_pasture_from_stg(void)
 		pasture_t *pasture = NULL;
 		get_pasture_cache(&pasture);
 		if (pasture == NULL) {
-			NCLOG_ERR(AMC_MODULE, TRice( iD( 7844),"err: Pasture was not cached correctly. %d\n", -ENODATA));
+			NCLOG_ERR(NCID, TRice( iD( 7844),"err: Pasture was not cached correctly. %d \n", -ENODATA));
 			nf_app_error(ERR_AMC, -ENODATA, NULL, 0);
 			err = -ENODATA;
 			break;
@@ -200,7 +202,7 @@ static inline int update_pasture_from_stg(void)
 			uint8_t keep_mode;
 			err = stg_config_u8_read(STG_U8_KEEP_MODE, &keep_mode);
 			if (err != 0) {
-				NCLOG_ERR(AMC_MODULE, TRice( iD( 7736),"err: Error reading keep mode from storage. %d\n", err));
+				NCLOG_ERR(NCID, TRice( iD( 7736),"err: Error reading keep mode from storage. %d \n", err));
 				nf_app_warning(ERR_AMC, err, NULL, 0);
 
 				keep_mode = 0; //Defaults to 0 in case of read failure
@@ -227,12 +229,12 @@ static inline int update_pasture_from_stg(void)
 		ver->total_fences = pasture->m.ul_total_fences;
 		EVENT_SUBMIT(ver);
 
-		NCLOG_INF(AMC_MODULE, TRice( iD( 6985),"inf: Pasture loaded:FenceVersion=%d,FenceStatus=%d\n", pasture->m.ul_fence_def_version, get_fence_status()));
+		NCLOG_INF(NCID, TRice( iD( 6985),"inf: Pasture loaded:FenceVersion=%d,FenceStatus=%d \n", pasture->m.ul_fence_def_version, get_fence_status()));
 
 		k_sem_give(&fence_data_sem);
 		return 0;
 	} while (0);
-	NCLOG_WRN(AMC_MODULE, TRice0( iD( 7161),"wrn: Failed to update pasture!\n"));
+	NCLOG_WRN(NCID, TRice0( iD( 7161),"wrn: Failed to update pasture! \n"));
 	/* Update fence status to unknown in case of failure */
 	force_fence_status(FenceStatus_FenceStatus_Invalid);
 	k_sem_give(&fence_data_sem);
@@ -248,13 +250,13 @@ void handle_new_fence_fn(struct k_work *item)
 	if (get_fence_status() == FenceStatus_TurnedOffByBLE) {
 		err = force_fence_status(FenceStatus_FenceStatus_UNKNOWN);
 		if (err != 0) {
-			NCLOG_ERR(AMC_MODULE, TRice( iD( 3841),"err: Set fence status to UNKNOWN failed %d\n", err));
+			NCLOG_ERR(NCID, TRice( iD( 3841),"err: Set fence status to UNKNOWN failed %d \n", err));
 		}
 	}
 
 	err = update_pasture_from_stg();
 	if (err != 0) {
-		NCLOG_WRN(AMC_MODULE, TRice( iD( 4980),"wrn: Fence update request denied, error:%d\n", err));
+		NCLOG_WRN(NCID, TRice( iD( 4980),"wrn: Fence update request denied, error:%d \n", err));
 	}
 	k_work_submit_to_queue(&amc_work_q, &handle_states_work);
 	return;
@@ -282,17 +284,17 @@ void handle_states_fn()
 
 	set_sensor_modes(amc_mode, new_fence_status, new_collar_status, cur_zone);
 
-	NCLOG_DBG(AMC_MODULE, TRice( iD( 4653),"dbg: AMC states:CollarMode=%d,CollarStatus=%d,Zone=%d,FenceStatus=%d\n", get_mode(), get_collar_status(), zone_get(), get_fence_status()));
+	NCLOG_DBG(NCID, TRice( iD( 4653),"dbg: AMC states:CollarMode=%d,CollarStatus=%d,Zone=%d,FenceStatus=%d \n", get_mode(), get_collar_status(), zone_get(), get_fence_status()));
 }
 
 void handle_corrections_fn()
 {
 	/* Fetch cached gnss data. */
-	NCLOG_INF(AMC_MODULE, TRice0( iD( 4736),"inf:  handle_corrections_fn\n"));
+	NCLOG_INF(NCID, TRice0( iD( 4736),"inf:  handle_corrections_fn \n"));
 	gnss_t *gnss = NULL;
 	int err = get_gnss_cache(&gnss);
 	if ((err != 0) && (err != -ETIMEDOUT)) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 5404),"err: Could not fetch GNSS cache %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 5404),"err: Could not fetch GNSS cache %i \n", err));
 		return;
 	}
 
@@ -307,14 +309,14 @@ void handle_corrections_fn()
 void handle_gnss_data_fn(struct k_work *item)
 {
 	if (m_fence_update_pending) {
-		NCLOG_DBG(AMC_MODULE, TRice0( iD( 1261),"dbg: AMC GNSS data not processed due to pending fence update\n"));
+		NCLOG_DBG(NCID, TRice0( iD( 1261),"dbg: AMC GNSS data not processed due to pending fence update \n"));
 		goto cleanup;
 	}
 
 	/* Take fence semaphore since we're going to use the cached area. */
 	int err = k_sem_take(&fence_data_sem, K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 1385),"err: Error waiting for fence data semaphore to release. %d\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 1385),"err: Error waiting for fence data semaphore to release. %d \n", err));
 		nf_app_error(ERR_AMC, err, NULL, 0);
 		goto cleanup;
 	}
@@ -331,14 +333,14 @@ void handle_gnss_data_fn(struct k_work *item)
 	bool gnss_timeout = false;
 	err = get_gnss_cache(&gnss);
 	if (err == -ETIMEDOUT) {
-		NCLOG_WRN(AMC_MODULE, TRice0( iD( 6259),"wrn: GNSS data invalid, timed out\n"));
+		NCLOG_WRN(NCID, TRice0( iD( 6259),"wrn: GNSS data invalid, timed out \n"));
 		gnss_timeout = true;
 	} else if (err != 0) {
 		goto cleanup;
 	}
 
-	NCLOG_DBG(AMC_MODULE, TRice0( iD( 3399),"dbg: \n\n--== START ==--\n"));
-	NCLOG_DBG(AMC_MODULE, TRice( iD( 4286),"dbg:  GNSS data: %d, %d, %d, %d, %d\n", gnss->latest.lon, gnss->latest.lat, gnss->latest.pvt_flags, gnss->latest.h_acc_dm, gnss->latest.num_sv));
+	NCLOG_DBG(NCID, TRice0( iD( 3399),"dbg: \n \n--== START ==-- \n"));
+	NCLOG_DBG(NCID, TRice( iD( 4286),"dbg:  GNSS data: %d, %d, %d, %d, %d \n", gnss->latest.lon, gnss->latest.lat, gnss->latest.pvt_flags, gnss->latest.h_acc_dm, gnss->latest.num_sv));
 
 	/* Set local variables used in AMC logic. */
 	int16_t height_delta = INT16_MAX;
@@ -369,7 +371,7 @@ void handle_gnss_data_fn(struct k_work *item)
 		uint8_t fence_index = 0;
 		uint8_t vertex_index = 0;
 		instant_dist = fnc_calc_dist(pos_x, pos_y, &fence_index, &vertex_index);
-		NCLOG_INF(AMC_MODULE, TRice( iD( 3447),"inf:  Calculated distance: %d\n", instant_dist));
+		NCLOG_INF(NCID, TRice( iD( 3447),"inf:  Calculated distance: %d \n", instant_dist));
 
 		/* Reset dist_change since we acquired a new distance. */
 		dist_change = 0;
@@ -381,7 +383,7 @@ void handle_gnss_data_fn(struct k_work *item)
 		  * here. Either add check to has_accepted_fix, or explicit 
 		  * call to gnss_get_mode */
 		if (gnss_has_accepted_fix()) {
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 3367),"inf:  Has accepted fix!\n"));
+			NCLOG_INF(NCID, TRice0( iD( 3367),"inf:  Has accepted fix! \n"));
 
 			/* Accepted position. Fill FIFOs. */
 			fifo_put(gnss->lastfix.h_acc_dm, acc_array, FIFO_ELEMENTS);
@@ -402,7 +404,7 @@ void handle_gnss_data_fn(struct k_work *item)
 				}
 			}
 		} else {
-			NCLOG_INF(AMC_MODULE, TRice0( iD( 1376),"inf:  Does not have accepted fix!\n"));
+			NCLOG_INF(NCID, TRice0( iD( 1376),"inf:  Does not have accepted fix! \n"));
 			fifo_dist_elem_count = 0;
 			fifo_avg_dist_elem_count = 0;
 		}
@@ -420,7 +422,7 @@ void handle_gnss_data_fn(struct k_work *item)
 					fifo_slope(dist_avg_array, FIFO_AVG_DISTANCE_ELEMENTS);
 			}
 		}
-		NCLOG_INF(AMC_MODULE, TRice( iD( 1195),"inf:  mean_dist: %d, dist_change: %d, dist_inc_count: %d, acc_delta: %d, height_delta: %d\n", mean_dist, dist_change, dist_inc_count, acc_delta, height_delta));
+		NCLOG_INF(NCID, TRice( iD( 1195),"inf:  mean_dist: %d, dist_change: %d, dist_inc_count: %d, acc_delta: %d, height_delta: %d \n", mean_dist, dist_change, dist_inc_count, acc_delta, height_delta));
 
 		int16_t dist_incr_slope_lim = 0;
 		uint8_t dist_incr_count = 0;
@@ -488,7 +490,7 @@ cleanup:
 	/* Calculation finished, give semaphore so we can swap memory region
 	 * on next GNSS request. Also notifying we're not using fence data area. */
 	k_sem_give(&fence_data_sem);
-	NCLOG_DBG(AMC_MODULE, TRice0( iD( 6920),"dbg: --== END ==--\n\n\n"));
+	NCLOG_DBG(NCID, TRice0( iD( 6920),"dbg: --== END ==-- \n\n \n"));
 }
 
 int gnss_timeout_reset_fifo()
@@ -540,7 +542,7 @@ static bool event_handler(const struct event_header *eh)
 
 		int err = set_gnss_cache(&event->gnss_data, event->timed_out);
 		if (err) {
-			NCLOG_ERR(AMC_MODULE, TRice( iD( 1058),"err: Could not set gnss cahce. %d\n", err));
+			NCLOG_ERR(NCID, TRice( iD( 1058),"err: Could not set gnss cahce. %d \n", err));
 			nf_app_error(ERR_AMC, err, NULL, 0);
 			return false;
 		}
@@ -589,7 +591,7 @@ static bool event_handler(const struct event_header *eh)
 	if (is_turn_off_fence_event(eh)) {
 		int err = force_fence_status(FenceStatus_TurnedOffByBLE);
 		if (err != 0) {
-			NCLOG_ERR(AMC_MODULE, TRice( iD( 1685),"err: Turn off fence over BLE failed %d\n", err));
+			NCLOG_ERR(NCID, TRice( iD( 1685),"err: Turn off fence over BLE failed %d \n", err));
 		}
 		/* Update fence version to set valid fence advertised to false */
 		struct update_fence_version *ver = new_update_fence_version();

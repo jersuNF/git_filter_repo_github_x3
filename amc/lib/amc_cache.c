@@ -12,6 +12,8 @@
 #include "embedded.pb.h"
 
 LOG_MODULE_REGISTER(amc_cache, CONFIG_AMC_LIB_LOG_LEVEL);
+/* Required by generate_nclogs.py*/
+#define NCID AMC_MODULE
 
 K_SEM_DEFINE(fence_data_sem, 1, 1);
 K_SEM_DEFINE(gnss_data_sem, 1, 1);
@@ -39,7 +41,7 @@ static pasture_t pasture_cache;
 int get_pasture_cache(pasture_t **pasture)
 {
 	if (pasture_cache.m.ul_total_fences == 0) {
-		NCLOG_WRN(AMC_MODULE, TRice0( iD( 7076),"wrn: Switching to \'No pasture\'!\n"));
+		NCLOG_WRN(NCID, TRice0( iD( 7076),"wrn: Switching to \'No pasture\'! \n"));
 	}
 
 	*pasture = &pasture_cache;
@@ -53,7 +55,7 @@ int set_pasture_cache(uint8_t *pasture, size_t len)
 	}
 	int err = k_sem_take(&fence_data_sem, K_SECONDS(CONFIG_FENCE_CACHE_TIMEOUT_SEC));
 	if (err) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 3132),"err: Error semaphore for fence cache %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 3132),"err: Error semaphore for fence cache %i \n", err));
 		return err;
 	}
 
@@ -78,7 +80,7 @@ int set_gnss_cache(gnss_t *gnss, const bool timed_out)
          */
 	int err = k_sem_take(&gnss_data_sem, K_NO_WAIT);
 	if (err) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 7797),"err: Consumer still swapping previous GNSS data. %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 7797),"err: Consumer still swapping previous GNSS data. %i \n", err));
 		return err;
 	}
 
@@ -103,7 +105,7 @@ int get_gnss_cache(gnss_t **gnss)
 	int err = 0;
 	err = k_sem_take(&gnss_data_sem, K_SECONDS(CONFIG_GNSS_CACHE_TIMEOUT_SEC));
 	if (err) {
-		NCLOG_ERR(AMC_MODULE, TRice( iD( 6797),"err: Error semaphore for gnss cache %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 6797),"err: Error semaphore for gnss cache %i \n", err));
 		return err;
 	}
 

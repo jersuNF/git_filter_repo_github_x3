@@ -57,7 +57,7 @@ void nclogs_module_init(void);
  */
 #define NCLOG_DBG(MODULE, _FUNC)                                                                   \
 	do {                                                                                       \
-		if (nclog_is_enabled(eNCLOG_MODULE_##MODULE, eNCLOG_LVL_DBG)) {                    \
+		if (nclog_is_enabled(CONCAT(eNCLOG_MODULE_, MODULE), eNCLOG_LVL_DBG)) {            \
 			_FUNC;                                                                     \
 		}                                                                                  \
 	} while (0)
@@ -67,7 +67,7 @@ void nclogs_module_init(void);
  */
 #define NCLOG_INF(MODULE, _FUNC)                                                                   \
 	do {                                                                                       \
-		if (nclog_is_enabled(eNCLOG_MODULE_##MODULE, eNCLOG_LVL_INF)) {                    \
+		if (nclog_is_enabled(CONCAT(eNCLOG_MODULE_, MODULE), eNCLOG_LVL_INF)) {            \
 			_FUNC;                                                                     \
 		}                                                                                  \
 	} while (0)
@@ -78,7 +78,7 @@ void nclogs_module_init(void);
  */
 #define NCLOG_WRN(MODULE, _FUNC)                                                                   \
 	do {                                                                                       \
-		if (nclog_is_enabled(eNCLOG_MODULE_##MODULE, eNCLOG_LVL_WRN)) {                    \
+		if (nclog_is_enabled(CONCAT(eNCLOG_MODULE_, MODULE), eNCLOG_LVL_WRN)) {            \
 			_FUNC;                                                                     \
 		}                                                                                  \
 	} while (0)
@@ -90,7 +90,7 @@ void nclogs_module_init(void);
  */
 #define NCLOG_ERR(MODULE, _FUNC)                                                                   \
 	do {                                                                                       \
-		if (nclog_is_enabled(eNCLOG_MODULE_##MODULE, eNCLOG_LVL_ERR)) {                    \
+		if (nclog_is_enabled(CONCAT(eNCLOG_MODULE_, MODULE), eNCLOG_LVL_ERR)) {            \
 			_FUNC;                                                                     \
 		}                                                                                  \
 	} while (0)
@@ -102,7 +102,7 @@ void nclogs_module_init(void);
  */
 #define NCLOG_FAT(MODULE, _FUNC)                                                                   \
 	do {                                                                                       \
-		if (nclog_is_enabled(eNCLOG_MODULE_##MODULE, eNCLOG_LVL_FAT)) {                    \
+		if (nclog_is_enabled(CONCAT(eNCLOG_MODULE_, MODULE), eNCLOG_LVL_FAT)) {            \
 			_FUNC;                                                                     \
 		}                                                                                  \
 	} while (0)

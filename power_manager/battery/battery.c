@@ -23,6 +23,8 @@
 #include <logging/log.h>
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BATTERY_LOG_LEVEL);
+/* Required by generate_nclogs.py*/
+#define NCID POWER_MANAGER
 
 #define VBATT DT_PATH(vbatt)
 #define ADC_DEVICE_EMUL DT_LABEL(DT_INST(0, zephyr_adc_emul))
@@ -116,7 +118,7 @@ static int divider_setup(void)
 
 #if DT_NODE_HAS_STATUS(VBATT, okay)
 	if (!device_is_ready(ddp->adc)) {
-		NCLOG_ERR(POWER_MANAGER, TRice0( iD( 2646),"err: ADC device is not ready dynamic_string\n"));
+		NCLOG_ERR(NCID, TRice0( iD( 2646),"err: ADC device is not ready dynamic_string \n"));
 		return -ENOENT;
 	}
 #else
@@ -127,7 +129,7 @@ static int divider_setup(void)
 
 	ddp->adc = device_get_binding(iocp->label);
 	if (ddp->adc == NULL) {
-		NCLOG_ERR(POWER_MANAGER, TRice0( iD( 1535),"err: Failed to get ADC dynamic_string\n"));
+		NCLOG_ERR(NCID, TRice0( iD( 1535),"err: Failed to get ADC dynamic_string \n"));
 		return -ENOENT;
 	}
 
@@ -135,12 +137,12 @@ static int divider_setup(void)
 	if (gcp->label) {
 		ddp->gpio = device_get_binding(gcp->label);
 		if (ddp->gpio == NULL) {
-			NCLOG_ERR(POWER_MANAGER, TRice0( iD( 7120),"err: Failed to get GPIO dynamic_string\n"));
+			NCLOG_ERR(NCID, TRice0( iD( 7120),"err: Failed to get GPIO dynamic_string \n"));
 			return -ENOENT;
 		}
 		err = gpio_pin_configure(ddp->gpio, gcp->pin, GPIO_OUTPUT_INACTIVE | gcp->flags);
 		if (err != 0) {
-			NCLOG_ERR(POWER_MANAGER, TRice( iD( 1295),"err: Failed to control feed dynamic_string.%u: %d\n", gcp->pin, err));
+			NCLOG_ERR(NCID, TRice( iD( 1295),"err: Failed to control feed dynamic_string.%u: %d \n", gcp->pin, err));
 			return err;
 		}
 	}
@@ -178,7 +180,7 @@ static int divider_setup(void)
 #endif /* CONFIG_ADC_var */
 
 	err = adc_channel_setup(ddp->adc, accp);
-	NCLOG_INF(POWER_MANAGER, TRice( iD( 4871),"inf: Setup battery sense on AIN_%u\n", iocp->channel));
+	NCLOG_INF(NCID, TRice( iD( 4871),"inf: Setup battery sense on AIN_%u \n", iocp->channel));
 
 	return err;
 }
@@ -198,7 +200,7 @@ int battery_setup(void)
 {
 	int err = divider_setup();
 	battery_ok = (err == 0);
-	NCLOG_INF(POWER_MANAGER, TRice0( iD( 7947),"inf: Battery divider setup dynamic_string\n"));
+	NCLOG_INF(NCID, TRice0( iD( 7947),"inf: Battery divider setup dynamic_string \n"));
 	init_battery_moving_average();
 
 	return err;
@@ -263,7 +265,7 @@ int battery_sample_averaged(void)
 {
 	int batt_mV = battery_sample();
 	if (batt_mV < 0) {
-		NCLOG_ERR(POWER_MANAGER, TRice( iD( 1920),"err: Failed to read battery voltage: %d\n", batt_mV));
+		NCLOG_ERR(NCID, TRice( iD( 1920),"err: Failed to read battery voltage: %d \n", batt_mV));
 		return -ENOENT;
 	}
 

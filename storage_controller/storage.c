@@ -38,6 +38,8 @@
 #include <logging/log.h>
 #define MODULE storage_controller
 LOG_MODULE_REGISTER(MODULE, CONFIG_STORAGE_CONTROLLER_LOG_LEVEL);
+/* Required by generate_nclogs.py*/
+#define NCID STORAGE_CONTROLLER
 
 /* Seq partition. */
 static const struct flash_area *seq_area;
@@ -72,7 +74,7 @@ static struct k_work_delayable erase_work;
 
 void erase_flash_fn(struct k_work *item)
 {
-	NCLOG_INF(STORAGE_CONTROLLER, TRice0( iD( 7729),"inf: Erasing all flash partitions!\n"));
+	NCLOG_INF(NCID, TRice0( iD( 7729),"inf: Erasing all flash partitions! \n"));
 	int err = stg_clear_partition(STG_PARTITION_SEQ);
 	if (err) {
 		return;
@@ -113,7 +115,7 @@ struct fcb *get_fcb(flash_partition_t partition)
 	} else if (partition == STG_PARTITION_SYSTEM_DIAG) {
 		fcb = &system_diag_fcb;
 	} else {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice0( iD( 6873),"err: Invalid partition given.\n"));
+		NCLOG_ERR(NCID, TRice0( iD( 6873),"err: Invalid partition given. \n"));
 		return NULL;
 	}
 	return fcb;
@@ -136,7 +138,7 @@ struct k_mutex *get_mutex(flash_partition_t partition)
 	} else if (partition == STG_PARTITION_SYSTEM_DIAG) {
 		return &system_diag_mutex;
 	}
-	NCLOG_ERR(STORAGE_CONTROLLER, TRice0( iD( 6556),"err: Invalid partition given.\n"));
+	NCLOG_ERR(NCID, TRice0( iD( 6556),"err: Invalid partition given. \n"));
 	return NULL;
 }
 
@@ -172,24 +174,24 @@ static inline int init_fcb_on_partition(flash_partition_t partition)
 		area = system_diag_area;
 		sector_ptr = system_diag_sectors;
 	} else {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 6412),"err: Invalid partition given. %d\n", -EINVAL));
+		NCLOG_ERR(NCID, TRice( iD( 6412),"err: Invalid partition given. %d \n", -EINVAL));
 		return -EINVAL;
 	}
 
 	err = flash_area_open(area_id, &area);
 	if (err) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 6773),"err: Error opening flash area for partition %d, err %d\n", partition, err));
+		NCLOG_ERR(NCID, TRice( iD( 6773),"err: Error opening flash area for partition %d, err %d \n", partition, err));
 		return err;
 	}
 
-	NCLOG_DBG(STORAGE_CONTROLLER, TRice( iD( 6657),"dbg: FCB Init: Partition%d, AreaID%d, FaID%d, FaOff%d, FaSize%d\n", partition, area_id, (uint8_t)area->fa_id, (int)area->fa_off, (int)area->fa_size));
+	NCLOG_DBG(NCID, TRice( iD( 6657),"dbg: FCB Init: Partition%d, AreaID%d, FaID%d, FaOff%d, FaSize%d \n", partition, area_id, (uint8_t)area->fa_id, (int)area->fa_off, (int)area->fa_size));
 
 	/* Check if area has a flash device available. */
 	dev = device_get_binding(area->fa_dev_name);
 	flash_area_close(area);
 
 	if (dev == NULL) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 1557),"err: Could not get device for partition %d.\n", partition));
+		NCLOG_ERR(NCID, TRice( iD( 1557),"err: Could not get device for partition %d. \n", partition));
 		return -ENODEV;
 	}
 
@@ -214,7 +216,7 @@ static inline int init_fcb_on_partition(flash_partition_t partition)
 	 */
 	err = flash_area_get_sectors(area_id, &sector_cnt, sector_ptr);
 	if (err) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 4764),"err: Unable to setup sectors for partition %d, err %d.\n", partition, err));
+		NCLOG_ERR(NCID, TRice( iD( 4764),"err: Unable to setup sectors for partition %d, err %d. \n", partition, err));
 		return err;
 	}
 
@@ -223,11 +225,11 @@ static inline int init_fcb_on_partition(flash_partition_t partition)
 
 	err = fcb_init(area_id, fcb);
 	if (err) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 7693),"err: Unable to initialize fcb for partition %d, err %d.\n", partition, err));
+		NCLOG_ERR(NCID, TRice( iD( 7693),"err: Unable to initialize fcb for partition %d, err %d. \n", partition, err));
 		return err;
 	}
 
-	NCLOG_INF(STORAGE_CONTROLLER, TRice( iD( 2802),"inf: Setup FCB for partition %d: %d sectors with sizes %db.\n", partition, fcb->f_sector_cnt, fcb->f_sectors[0].fs_size));
+	NCLOG_INF(NCID, TRice( iD( 2802),"inf: Setup FCB for partition %d: %d sectors with sizes %db. \n", partition, fcb->f_sector_cnt, fcb->f_sectors[0].fs_size));
 
 	return err;
 }
@@ -247,25 +249,25 @@ int stg_init_storage_controller(void)
 	 */
 	err = init_fcb_on_partition(STG_PARTITION_SEQ);
 	if (err) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice(iD(3212), "err: STG_PARTITION_SEQ %d\n", err));
+		NCLOG_ERR(NCID, TRice( iD(3212), "err: STG_PARTITION_SEQ %d \n", err));
 		return err;
 	}
 
 	err = init_fcb_on_partition(STG_PARTITION_ANO);
 	if (err) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice(iD(1425), "err: STG_PARTITION_ANO %d\n", err));
+		NCLOG_ERR(NCID, TRice( iD(1425), "err: STG_PARTITION_ANO %d \n", err));
 		return err;
 	}
 
 	err = init_fcb_on_partition(STG_PARTITION_PASTURE);
 	if (err) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice(iD(1487), "err: STG_PARTITION_PASTURE %d\n", err));
+		NCLOG_ERR(NCID, TRice( iD(1487), "err: STG_PARTITION_PASTURE %d \n", err));
 		return err;
 	}
 
 	err = init_fcb_on_partition(STG_PARTITION_SYSTEM_DIAG);
 	if (err) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice(iD(1608), "err: STG_PARTITION_SYSTEM_DIAG %d\n", err));
+		NCLOG_ERR(NCID, TRice( iD(1608), "err: STG_PARTITION_SYSTEM_DIAG %d \n", err));
 		return err;
 	}
 
@@ -296,28 +298,28 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data, size_t le
 	if (err == -ENOSPC) {
 		err = fcb_rotate(fcb);
 		if (err) {
-			NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 2935),"err: Unable to rotate fcb from -ENOSPC, err %d\n", err));
+			NCLOG_ERR(NCID, TRice( iD( 2935),"err: Unable to rotate fcb from -ENOSPC, err %d \n", err));
 			k_free(new_data);
 			return err;
 		}
 		/* Retry appending. */
 		err = fcb_append(fcb, new_len, &loc);
 		if (err) {
-			NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 3696),"err: Unable to recover in appending function, err %d\n", err));
+			NCLOG_ERR(NCID, TRice( iD( 3696),"err: Unable to recover in appending function, err %d \n", err));
 			nf_app_error(ERR_STORAGE_CONTROLLER, -ENOTRECOVERABLE, NULL, 0);
 			k_free(new_data);
 			return err;
 		}
-		NCLOG_INF(STORAGE_CONTROLLER, TRice0( iD( 7014),"inf: Rotated FCB since it's full.\n"));
+		NCLOG_INF(NCID, TRice0( iD( 7014),"inf: Rotated FCB since it's full. \n"));
 	} else if (err) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 3281),"err: Error appending new fcb entry, err %d\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 3281),"err: Error appending new fcb entry, err %d \n", err));
 		k_free(new_data);
 		return err;
 	}
 
 	err = flash_area_write(fcb->fap, FCB_ENTRY_FA_DATA_OFF(loc), new_data, new_len);
 	if (err) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 5041),"err: Error writing to flash area. err %d\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 5041),"err: Error writing to flash area. err %d \n", err));
 		k_free(new_data);
 		return err;
 	}
@@ -325,7 +327,7 @@ int stg_write_to_partition(flash_partition_t partition, uint8_t *data, size_t le
 	/* Finish entry. */
 	err = fcb_append_finish(fcb, &loc);
 	if (err) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 5985),"err: Error finishing new entry. err %d\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 5985),"err: Error finishing new entry. err %d \n", err));
 	}
 	k_free(new_data);
 	return err;
@@ -340,7 +342,7 @@ int stg_clear_partition(flash_partition_t partition)
 	}
 
 	if (k_mutex_lock(mtx, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 6033),"err: Mutex timeout in storage controller when clearing FCB: Partition %i\n", partition));
+		NCLOG_ERR(NCID, TRice( iD( 6033),"err: Mutex timeout in storage controller when clearing FCB: Partition %i \n", partition));
 		return -ETIMEDOUT;
 	}
 
@@ -365,7 +367,7 @@ int stg_clear_partition(flash_partition_t partition)
 int stg_read_seq_data(fcb_read_cb cb, uint16_t num_entries)
 {
 	if (k_mutex_lock(&seq_mutex, K_NO_WAIT)) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice0( iD( 2883),"err: locking seq_mutex failed. \n"));
+		NCLOG_ERR(NCID, TRice0( iD( 2883),"err: locking seq_mutex failed. \n"));
 	}
 	if (seq_mutex.lock_count == 1) {
 		if (fcb_is_empty(&seq_fcb)) {
@@ -388,7 +390,7 @@ int stg_read_seq_data(fcb_read_cb cb, uint16_t num_entries)
 		memcpy(&active_seq_entry, &start_entry, sizeof(struct fcb_entry));
 
 		if (err != 0) {
-			NCLOG_ERR(STORAGE_CONTROLLER, TRice0( iD( 6467),"err: Error reading from seq partition.\n"));
+			NCLOG_ERR(NCID, TRice0( iD( 6467),"err: Error reading from seq partition. \n"));
 			k_mutex_unlock(&seq_mutex);
 			return err;
 		}
@@ -396,7 +398,7 @@ int stg_read_seq_data(fcb_read_cb cb, uint16_t num_entries)
 		k_mutex_unlock(&seq_mutex);
 		return err;
 	} else {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice0( iD( 2874),"wrn: seq_mutex.lock_count != 1 \n"));
+		NCLOG_WRN(NCID, TRice0( iD( 2874),"wrn: seq_mutex.lock_count != 1 \n"));
 		k_mutex_unlock(&seq_mutex);
 		return -EBUSY;
 	}
@@ -405,14 +407,14 @@ int stg_read_seq_data(fcb_read_cb cb, uint16_t num_entries)
 int stg_read_ano_data(fcb_read_cb cb, bool read_from_start, uint16_t num_entries)
 {
 	if (k_mutex_lock(&ano_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice0( iD( 3634),"wrn: ano_mutex timeout \n"));
+		NCLOG_WRN(NCID, TRice0( iD( 3634),"wrn: ano_mutex timeout \n"));
 		return -ETIMEDOUT;
 	}
 
 	int err = 0;
 
 	if (fcb_is_empty(&ano_fcb)) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice0( iD( 1273),"wrn: No ano frames found on partition.\n"));
+		NCLOG_WRN(NCID, TRice0( iD( 1273),"wrn: No ano frames found on partition. \n"));
 		k_mutex_unlock(&ano_mutex);
 		return -ENODATA;
 	}
@@ -488,13 +490,13 @@ int stg_write_seq_data(uint8_t *data, size_t len)
 	    seq_mutex.lock_count <= 1) {
 		int err = stg_write_to_partition(STG_PARTITION_SEQ, data, len);
 		if (err) {
-			NCLOG_ERR(STORAGE_CONTROLLER, TRice0( iD( 6247),"err: Error writing to seq partition.\n"));
+			NCLOG_ERR(NCID, TRice0( iD( 6247),"err: Error writing to seq partition. \n"));
 		}
 		k_mutex_unlock(&seq_mutex);
 		return err;
 	} else {
 		k_mutex_unlock(&seq_mutex);
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice0( iD( 6231),"wrn: seq_mutex timeout\n"));
+		NCLOG_WRN(NCID, TRice0( iD( 6231),"wrn: seq_mutex timeout \n"));
 		return -ETIMEDOUT;
 	}
 }
@@ -508,7 +510,7 @@ int stg_write_ano_data(const ano_rec_t *ano_rec)
 	int err = stg_write_to_partition(STG_PARTITION_ANO, (uint8_t *)ano_rec, sizeof(*ano_rec));
 
 	if (err) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 2444),"err: Error writing to ano partition, err %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 2444),"err: Error writing to ano partition, err %i \n", err));
 	}
 
 	k_mutex_unlock(&ano_mutex);
@@ -518,14 +520,14 @@ int stg_write_ano_data(const ano_rec_t *ano_rec)
 int stg_write_pasture_data(uint8_t *data, size_t len)
 {
 	if (k_mutex_lock(&pasture_mutex, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice0( iD( 1577),"wrn: pasture_mutex timeout\n"));
+		NCLOG_WRN(NCID, TRice0( iD( 1577),"wrn: pasture_mutex timeout \n"));
 		return -ETIMEDOUT;
 	}
 
 	int err = stg_write_to_partition(STG_PARTITION_PASTURE, data, len);
 
 	if (err) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 3296),"err: Error writing to pasture partition %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 3296),"err: Error writing to pasture partition %i \n", err));
 	}
 
 	k_mutex_unlock(&pasture_mutex);
@@ -556,7 +558,7 @@ int stg_read_system_diagnostic_log(fcb_read_cb cb, uint16_t num_entries)
 	err = fcb_walk_from_entry(cb, &system_diag_fcb, &start_entry, num_entries,
 				  &system_diag_mutex);
 	if (err && err != -EINTR) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice0( iD( 6957),"err: Error reading from system diagnostic partition.\n"));
+		NCLOG_ERR(NCID, TRice0( iD( 6957),"err: Error reading from system diagnostic partition. \n"));
 	}
 
 	/* Update the entry we're currently on. */
@@ -575,7 +577,7 @@ int stg_write_system_diagnostic_log(uint8_t *data, size_t len)
 	int err = stg_write_to_partition(STG_PARTITION_SYSTEM_DIAG, data, len);
 
 	if (err) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice( iD( 1561),"err: Error writing to system diagnostic partition %i\n", err));
+		NCLOG_ERR(NCID, TRice( iD( 1561),"err: Error writing to system diagnostic partition %i \n", err));
 	}
 
 	k_mutex_unlock(&system_diag_mutex);
@@ -588,12 +590,12 @@ uint32_t get_num_entries(flash_partition_t partition)
 	struct k_mutex *mtx = get_mutex(partition);
 
 	if (mtx == NULL || fcb == NULL) {
-		NCLOG_WRN(STORAGE_CONTROLLER, TRice0( iD( 4604),"wrn: partition invalid \n"));
+		NCLOG_WRN(NCID, TRice0( iD( 4604),"wrn: partition invalid \n"));
 		return -EINVAL;
 	}
 
 	if (k_mutex_lock(mtx, K_MSEC(CONFIG_MUTEX_READ_WRITE_TIMEOUT))) {
-		NCLOG_ERR(STORAGE_CONTROLLER, TRice0( iD( 3225),"err: Mutex timeout in storage controller when clearing.\n"));
+		NCLOG_ERR(NCID, TRice0( iD( 3225),"err: Mutex timeout in storage controller when clearing. \n"));
 		return -ETIMEDOUT;
 	}
 

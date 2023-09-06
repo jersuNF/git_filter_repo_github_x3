@@ -8,6 +8,9 @@
 #define MODULE charging_module
 #include <logging/log.h>
 LOG_MODULE_REGISTER(MODULE, CONFIG_BATTERY_LOG_LEVEL);
+/* Required by generate_nclogs.py*/
+#define NCID POWER_MANAGER
+
 /* Offload charger start/stop work definitions */
 static struct k_work charger_work_start;
 static struct k_work charger_work_stop;
@@ -18,14 +21,14 @@ static void charging_stop_work_fn(struct k_work *work);
 static void charging_start_work_fn(struct k_work *work)
 {
 	ARG_UNUSED(work);
-	NCLOG_INF(POWER_MANAGER, TRice0( iD( 1226),"inf: Charger: Starting charging\n"));
+	NCLOG_INF(NCID, TRice0( iD( 1226),"inf: Charger: Starting charging \n"));
 	charging_start();
 }
 
 static void charging_stop_work_fn(struct k_work *work)
 {
 	ARG_UNUSED(work);
-	NCLOG_INF(POWER_MANAGER, TRice0( iD( 3182),"inf: Charger: Stopping charging\n"));
+	NCLOG_INF(NCID, TRice0( iD( 3182),"inf: Charger: Stopping charging \n"));
 	charging_stop();
 }
 

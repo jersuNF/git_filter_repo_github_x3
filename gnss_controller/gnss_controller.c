@@ -26,6 +26,8 @@ K_SEM_DEFINE(new_data_sem, 0, 1);
 K_SEM_DEFINE(install_ano_sem, 0, 1);
 K_SEM_DEFINE(ano_thread_cmd_issued_sem, 0, 1);
 #define MODULE gnss_controller
+/* Required by generate_nclogs.py*/
+#define NCID GNSS_CONTROLLER
 
 #define MS_IN_49_DAYS 4233600000
 static _Noreturn void publish_gnss_data(void *ctx);
@@ -100,7 +102,7 @@ static void gnss_thread_fn(void)
 			gnss_mode_t mode = (gnss_mode_t)(msg.arg);
 			if (is_in_ano_install && mode == GNSSMODE_INACTIVE) {
 				/* ANO is in progress. If the mode is backup don't set it until ANO has finished */
-				NCLOG_DBG(GNSS_CONTROLLER, TRice0(iD( 4603),"dbg: ANO in progress. Setting mode to backup when ANO is finished \n"));
+				NCLOG_DBG(NCID, TRice0( iD( 4603),"dbg: ANO in progress. Setting mode to backup when ANO is finished \n"));
 				set_to_backup_when_ano_finished = true;
 				rc = 0;
 			} else {
@@ -110,7 +112,7 @@ static void gnss_thread_fn(void)
 			if (rc == 0) {
 				current_mode = mode;
 			} else {
-				NCLOG_ERR(GNSS_CONTROLLER, TRice( iD( 5785),"err: Failed to set mode %d with %d retries \n", rc, CONFIG_GNSS_CMD_RETRIES));
+				NCLOG_ERR(NCID, TRice( iD( 5785),"err: Failed to set mode %d with %d retries \n", rc, CONFIG_GNSS_CMD_RETRIES));
 				char *msg = "Failed to set GNSS receiver mode";
 				nf_app_error(ERR_GNSS_CONTROLLER, rc, msg, sizeof(*msg));
 			}
@@ -128,7 +130,7 @@ static void gnss_thread_fn(void)
 				set_to_backup_when_ano_finished = true;
 				int rc = gnss_wakeup(gnss_dev);
 				if (rc != 0) {
-					NCLOG_WRN(GNSS_CONTROLLER, TRice(iD(4417), "Cannot wake up the receiver %d \n",rc));
+					NCLOG_WRN(NCID, TRice( iD(4417), "wrn: Cannot wake up the receiver %d \n",rc));
 				}
 			}
 			/* Notify the ANO thread that it can continue */
@@ -140,7 +142,7 @@ static void gnss_thread_fn(void)
 			if (set_to_backup_when_ano_finished) {
 				int rc = gnss_set_backup_mode(gnss_dev);
 				if (rc != 0) {
-					NCLOG_WRN(GNSS_CONTROLLER,TRice(iD( 5946),"Cannot set internal backup mode %d \n", rc));
+					NCLOG_WRN(NCID,TRice( iD( 5946),"wrn: Cannot set internal backup mode %d \n", rc));
 				}
 			}
 			/* Notify the ANO thread that it can continue */
@@ -149,7 +151,7 @@ static void gnss_thread_fn(void)
 		}
 
 		default:
-			NCLOG_ERR(GNSS_CONTROLLER, TRice( iD( 3470),"Unrecognized action %d \n", msg.action));
+			NCLOG_ERR(NCID, TRice( iD( 3470),"err: Unrecognized action %d \n", msg.action));
 		}
 	}
 }
@@ -188,13 +190,13 @@ static int gnss_controller_reset_and_setup_gnss(uint16_t mask)
 {
 	int ret = gnss_wakeup(gnss_dev);
 	if (ret != 0) {
-		NCLOG_ERR(GNSS_CONTROLLER, TRice(iD(6612), "gnss_wakeup failed %d \n", ret));
+		NCLOG_ERR(NCID, TRice( iD(6612), "err: gnss_wakeup failed %d \n", ret));
 		return ret;
 	}
 
 	ret = gnss_reset(gnss_dev, mask, GNSS_RESET_MODE_HW_IMMEDIATELY);
 	if (ret != 0) {
-		NCLOG_ERR(GNSS_CONTROLLER, TRice(iD(1294), "gnss_reset failed %d \n", ret));
+		NCLOG_ERR(NCID, TRice( iD(1294), "err: gnss_reset failed %d \n", ret));
 		return ret;
 	}
 
@@ -202,13 +204,13 @@ static int gnss_controller_reset_and_setup_gnss(uint16_t mask)
 	/* See https://content.u-blox.com/sites/default/files/documents/MIA-M10Q_IntegrationManual_UBX-21028173.pdf 2.1 */
 	ret = gnss_setup(gnss_dev, false);
 	if (ret != 0) {
-		NCLOG_ERR(GNSS_CONTROLLER, TRice(iD(5302), "gnss_setup failed %d \n", ret));
+		NCLOG_ERR(NCID, TRice( iD(5302), "err: gnss_setup failed %d \n", ret));
 		return ret;
 	}
 
 	ret = gnss_set_mode(current_mode, false);
 	if (ret != 0) {
-		NCLOG_ERR(GNSS_CONTROLLER, TRice(iD(3142), "gnss_set_mode %d \n", ret));
+		NCLOG_ERR(NCID, TRice( iD(3142), "err: gnss_set_mode %d \n", ret));
 		return ret;
 	}
 
@@ -222,19 +224,19 @@ int gnss_controller_setup(void)
 
 	ret = gnss_set_data_cb(gnss_dev, gnss_data_update_cb);
 	if (ret != 0) {
-		NCLOG_WRN(GNSS_CONTROLLER, TRice(iD(5900), "Failed to register data CB! %d \n", ret));
+		NCLOG_WRN(NCID, TRice( iD(5900), "wrn: Failed to register data CB! %d \n", ret));
 		return ret;
 	}
 
 	ret = gnss_setup(gnss_dev, false);
 	if (ret != 0) {
-		NCLOG_WRN(GNSS_CONTROLLER, TRice(iD(3789), "gnss_setup failed %d \n", ret));
+		NCLOG_WRN(NCID, TRice( iD(3789), "wrn: gnss_setup failed %d \n", ret));
 		return ret;
 	}
 
 	ret = gnss_set_mode(current_mode, false);
 	if (ret != 0) {
-		NCLOG_ERR(GNSS_CONTROLLER, TRice(iD(7118), "gnss_set_mode %d \n", ret));
+		NCLOG_ERR(NCID, TRice( iD(7118), "err: gnss_set_mode %d \n", ret));
 		return ret;
 	}
 
@@ -244,11 +246,11 @@ int gnss_controller_setup(void)
 	// Query the mia m10 for SW version and HW version and print them.
 	ret = gnss_version_get(gnss_dev, &mia_m10_versions);
 	if (ret != 0) {
-		NCLOG_WRN(GNSS_CONTROLLER,TRice(iD(4558), "wrn: Failed to get version of mia m10! %d \n", ret));
+		NCLOG_WRN(NCID,TRice( iD(4558), "wrn: Failed to get version of mia m10! %d \n", ret));
 		return ret;
 	}
-	// NCLOG_INF(GNSS_CONTROLLER, trice(iD(1177), "The GNSS SW Version:%s",log_strdup(mia_m10_versions.swVersion)));
-	// NCLOG_INF(GNSS_CONTROLLER, trice(iD(4026), "The GNSS Hardware Version:%s",log_strdup(mia_m10_versions.hwVersion)));
+	// NCLOG_INF(NCID, trice( iD(1177), "The GNSS SW Version:%s",log_strdup(mia_m10_versions.swVersion)));
+	// NCLOG_INF(NCID, trice( iD(4026), "The GNSS Hardware Version:%s",log_strdup(mia_m10_versions.hwVersion)));
 
 	return ret;
 }
@@ -286,7 +288,7 @@ int gnss_controller_init(void)
 		if (ret == 0) {
 			break;
 		}
-		NCLOG_INF(GNSS_CONTROLLER, TRice(iD(2616), "RESTART [ iteration=%d, ret=%d ]\n", gnss_reset_count, ret));
+		NCLOG_INF(NCID, TRice( iD(2616), "inf: RESTART [ iteration=%d, ret=%d ] \n", gnss_reset_count, ret));
 	}
 
 #if defined(CONFIG_TEST)
@@ -331,7 +333,7 @@ static _Noreturn void publish_gnss_data(void *ctx)
 			struct gnss_data *new_data = new_gnss_data();
 			new_data->gnss_data = gnss_data_buffer;
 			new_data->timed_out = false;
-			NCLOG_DBG(GNSS_CONTROLLER,TRice( iD( 3224),"GNSS: lon: %d, psmState: 0x%02x, hAcc: %d, numSv: %d, mode: %d, fix: %d valid 0x%02x\n",gnss_data_buffer.latest.lon, (gnss_data_buffer.latest.pvt_flags >> 2),gnss_data_buffer.latest.h_acc_dm, gnss_data_buffer.latest.num_sv, gnss_data_buffer.latest.mode,gnss_data_buffer.fix_ok,gnss_data_buffer.latest.pvt_valid));
+			NCLOG_DBG(NCID,TRice( iD( 3224),"dbg: GNSS: lon: %d, psmState: 0x%02x, hAcc: %d, numSv: %d, mode: %d, fix: %d valid 0x%02x \n",gnss_data_buffer.latest.lon, (gnss_data_buffer.latest.pvt_flags >> 2),gnss_data_buffer.latest.h_acc_dm, gnss_data_buffer.latest.num_sv, gnss_data_buffer.latest.mode,gnss_data_buffer.fix_ok,gnss_data_buffer.latest.pvt_valid));
 
 			EVENT_SUBMIT(new_data);
 			initialized = true;
@@ -360,7 +362,7 @@ static int gnss_set_mode(gnss_mode_t mode, bool wakeup)
 	if (wakeup) {
 		ret = gnss_wakeup(gnss_dev);
 		if (ret != 0) {
-			NCLOG_ERR(GNSS_CONTROLLER, TRice(iD(6081), "gnss_wakeup failed %d \n", ret));
+			NCLOG_ERR(NCID, TRice( iD(6081), "err: gnss_wakeup failed %d \n", ret));
 			return ret;
 		}
 	}
@@ -368,7 +370,7 @@ static int gnss_set_mode(gnss_mode_t mode, bool wakeup)
 	if (mode == GNSSMODE_INACTIVE) {
 		ret = gnss_set_backup_mode(gnss_dev);
 		if (ret != 0) {
-			NCLOG_ERR(GNSS_CONTROLLER, TRice(iD(7764), "err: failed to set GNSS in backup %d \n", ret));
+			NCLOG_ERR(NCID, TRice( iD(7764), "err: failed to set GNSS in backup %d \n", ret));
 			return ret;
 		}
 		current_rate_ms = UINT16_MAX;
@@ -394,10 +396,10 @@ static int gnss_set_mode(gnss_mode_t mode, bool wakeup)
 		rate_ms = GNSSRATE_1000_MS;
 		break;
 	}
-	NCLOG_INF(GNSS_CONTROLLER, TRice(iD(4929), "Setting GNSS mode to %u with rate: %u \n", mode, rate_ms));
+	NCLOG_INF(NCID, TRice( iD(4929), "inf: Setting GNSS mode to %u with rate: %u \n", mode, rate_ms));
 	ret = gnss_set_power_mode(gnss_dev, mode, rate_ms);
 	if (ret != 0) {
-		NCLOG_ERR(GNSS_CONTROLLER, TRice(iD( 6433), "failed to set GNSS to mode %u %d \n", mode, ret));
+		NCLOG_ERR(NCID, TRice( iD( 6433), "err: failed to set GNSS to mode %u %d \n", mode, ret));
 		return ret;
 	}
 
@@ -432,7 +434,7 @@ static bool gnss_controller_event_handler(const struct event_header *eh)
 {
 	if (is_gnss_set_mode_event(eh)) {
 		struct gnss_set_mode_event *ev = cast_gnss_set_mode_event(eh);
-		NCLOG_DBG(GNSS_CONTROLLER, TRice(iD(5295), "MODE = %d old = %d \n", ev->mode, current_mode));
+		NCLOG_DBG(NCID, TRice( iD(5295), "dbg: MODE = %d old = %d \n", ev->mode, current_mode));
 		if (ev->mode != current_mode) {
 			gnss_msgq_t msg;
 			msg.arg = (void *)(ev->mode);
@@ -472,7 +474,7 @@ static void gnss_timed_out(void)
 	/* be much more careful to send reset events than timeouts, as this might stress the GNSS receiver */
 	if (gnss_timeout_count > CONFIG_GNSS_TIMEOUTS_BEFORE_RESET) {
 		gnss_timeout_count = 0;
-		NCLOG_DBG(GNSS_CONTROLLER, TRice(iD(5063), "resets GNSS %d \n", gnss_reset_count));
+		NCLOG_DBG(NCID, TRice( iD(5063), "dbg: resets GNSS %d \n", gnss_reset_count));
 		if (gnss_reset_count < 1) {
 			gnss_reset_count++;
 			gnss_controller_reset_and_setup_gnss(GNSS_RESET_MASK_HOT);
@@ -498,7 +500,7 @@ static inline int read_ano_callback(uint8_t *data, size_t len)
 {
 	int ret = 0;
 	if (len != sizeof(ano_rec_t)) {
-		NCLOG_ERR(GNSS_CONTROLLER, TRice( iD( 7945),"Error reading ano entry from flash was %d expected %d \n", len, sizeof(UBX_MGA_ANO_RAW_t)));
+		NCLOG_ERR(NCID, TRice( iD( 7945),"err: Error reading ano entry from flash was %d expected %d \n", len, sizeof(UBX_MGA_ANO_RAW_t)));
 		return -EINVAL;
 	}
 	memcpy(&_ano_rec, data, sizeof(_ano_rec));
@@ -509,19 +511,19 @@ static inline int read_ano_callback(uint8_t *data, size_t len)
 	/* check that the ano data is from the current day or in the future */
 	int err = stg_config_u16_read(STG_U16_LAST_GOOD_ANO_ID, &last_good_ano_id);
 	if (err) {
-		NCLOG_WRN(GNSS_CONTROLLER, TRice(iD(3989), "Failed to read STG_U16_LAST_GOOD_ANO_ID %d \n", err));
+		NCLOG_WRN(NCID, TRice( iD(3989), "wrn: Failed to read STG_U16_LAST_GOOD_ANO_ID %d \n", err));
 	}
 	if (ano_time_md + SECONDS_IN_12_HOURS >= _ano_unix_time_sec &&
 	    (last_good_ano_id == 0 || last_good_ano_id == 0xFFFF ||
 	     last_good_ano_id == _ano_rec.ano_id)) {
 		ret = gnss_upload_assist_data(gnss_dev, &_ano_rec.raw_ano);
 		if (ret == 0) {
-			NCLOG_DBG(GNSS_CONTROLLER, TRice( iD( 2010),"Installed ano ID=%d,off=%d,time=%d \n", _ano_rec.ano_id, _ano_rec.sequence_id, ano_time_md));
+			NCLOG_DBG(NCID, TRice( iD( 2010),"dbg: Installed ano ID=%d,off=%d,time=%d \n", _ano_rec.ano_id, _ano_rec.sequence_id, ano_time_md));
 		} else {
-			NCLOG_ERR(GNSS_CONTROLLER, TRice(iD(6817), "Failed to install ano %d \n", ret));
+			NCLOG_ERR(NCID, TRice( iD(6817), "err: Failed to install ano %d \n", ret));
 		}
 	} else {
-		NCLOG_DBG(GNSS_CONTROLLER, TRice( iD( 6288),"DROPS ano ID=%d,off=%d,time=%d \n", _ano_rec.ano_id, _ano_rec.sequence_id, ano_time_md));
+		NCLOG_DBG(NCID, TRice( iD( 6288),"dbg: DROPS ano ID=%d,off=%d,time=%d \n", _ano_rec.ano_id, _ano_rec.sequence_id, ano_time_md));
 	}
 	return ret;
 }
@@ -558,7 +560,7 @@ _Noreturn void gnss_ano_install_thread_fn(void)
 			int64_t unix_time_ms = 0;
 			ret = date_time_now(&unix_time_ms);
 			if (ret != 0) {
-				NCLOG_ERR(GNSS_CONTROLLER, TRice(iD(7282), "Cannot get date_time %d \n", ret));
+				NCLOG_ERR(NCID, TRice( iD(7282), "err: Cannot get date_time %d \n", ret));
 				break;
 			}
 
@@ -569,7 +571,7 @@ _Noreturn void gnss_ano_install_thread_fn(void)
 				struct tm tmbuf;
 				time_t t = _ano_unix_time_sec;
 				if (!gmtime_r(&t, &tmbuf)) {
-					NCLOG_ERR(GNSS_CONTROLLER, TRice0(iD(5918), "gmtime_r failed \n"));
+					NCLOG_ERR(NCID, TRice0( iD(5918), "err: gmtime_r failed \n"));
 					break;
 				}
 				ret = gnss_ini_mga_time_utc(gnss_dev, tmbuf.tm_year + 1900,
@@ -577,7 +579,7 @@ _Noreturn void gnss_ano_install_thread_fn(void)
 							    tmbuf.tm_hour, tmbuf.tm_min,
 							    tmbuf.tm_sec, 10);
 				if (ret != 0) {
-					NCLOG_ERR(GNSS_CONTROLLER, TRice(iD(2303), "err: Cannot set GNSS time %d \n", ret));
+					NCLOG_ERR(NCID, TRice( iD(2303), "err: Cannot set GNSS time %d \n", ret));
 					break;
 				}
 				gnss_receiver_got_time = true;
@@ -588,10 +590,10 @@ _Noreturn void gnss_ano_install_thread_fn(void)
 			if (err == 0) {
 				start_from_flash = false;
 			} else if (err == -ENODATA) {
-				NCLOG_DBG(GNSS_CONTROLLER, trice0(iD(6415), "dbg: Reached end of ano partition \n"));
+				NCLOG_DBG(NCID, TRice0( iD(6415), "dbg: Reached end of ano partition \n"));
 				all_ano_installed = true;
 			} else {
-				NCLOG_ERR(GNSS_CONTROLLER, trice0(iD(1454), "err: Failed to read ano entry from flash! \n"));
+				NCLOG_ERR(NCID, TRice0( iD(1454), "err: Failed to read ano entry from flash! \n"));
 				/* This could happen if the GNSS receiver is in backup mode */
 				/* break the loop and wait for semaphore */
 				break;
@@ -612,7 +614,7 @@ _Noreturn void gnss_ano_install_thread_fn(void)
 		*/
 		ret = k_sem_take(&install_ano_sem, all_ano_installed ? K_FOREVER : K_MINUTES(5));
 		if (ret != 0) {
-			NCLOG_WRN(GNSS_CONTROLLER, trice0(iD(5222), "wrn: Retrying ANO install \n"));
+			NCLOG_WRN(NCID, TRice0( iD(5222), "wrn: Retrying ANO install \n"));
 		}
 	}
 }

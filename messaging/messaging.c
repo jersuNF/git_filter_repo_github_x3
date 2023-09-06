@@ -902,7 +902,7 @@ int send_trice_logs(NofenceMessage *trice_log_msg)
 			NCLOG_INF(NCID, TRice0( iD( 5854),"inf: Uploaded all buffered logs! \n"));
 			return 0;
 		} else if (ret < 0) {
-			NCLOG_ERR(NCID, TRice( iD( 7113),"err: Error %d when reading buffered logs! \n", ret));
+			NCLOG_ERR(NCID, TRice( iD( 7113),"err: Error %d when reading buffered logs!", ret));
 			return ret;
 		} else {
 			trice_log_msg->m.generic_msg.usBuf_count =

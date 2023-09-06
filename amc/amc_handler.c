@@ -162,7 +162,7 @@ static inline int update_pasture_from_stg(void)
 		EVENT_SUBMIT(ver);
 		return 0;
 	} else if (err) {
-		NCLOG_ERR(NCID, TRice( iD( 1605),"err: Error reading the pasture from external flash. %d \n", err));
+		NCLOG_ERR(NCID, trice( iD( 1605),"err: Error reading the pasture from external flash. %d \n", err));
 		/* Set pasture/fence to invalid */
 		nf_app_error(ERR_AMC, err, NULL, 0);
 		force_fence_status(FenceStatus_FenceStatus_Invalid);

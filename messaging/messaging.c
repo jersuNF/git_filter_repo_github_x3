@@ -204,6 +204,7 @@ extern uint16_t g_nvs_write_errors;
 static uint16_t m_sent_nvs_errors;
 #endif
 
+K_MUTEX_DEFINE(cached_fix_mutex);
 K_MUTEX_DEFINE(send_binary_mutex);
 K_MUTEX_DEFINE(read_flash_mutex);
 static bool reboot_scheduled = false;
@@ -444,6 +445,7 @@ static int read_and_send_seq_data_cb(uint8_t *data, size_t len)
 static int send_all_stored_messages(void)
 {
 	k_mutex_lock(&read_flash_mutex, K_NO_WAIT);
+	/* todo pshustad, what is the logic by counting the lock_count? */
 	if (read_flash_mutex.lock_count == 1) {
 		/*Read and send out all the seq data if any.*/
 		int err = stg_read_seq_data(read_and_send_seq_data_cb, 0);
@@ -541,7 +543,9 @@ void store_position_message_fn(struct k_work *item)
 	msg.which_m = NofenceMessage_position_msg_tag;
 	// pos msg specifics
 	msg.m.position_msg.eType = container->pos_type;
+	k_mutex_lock(&cached_fix_mutex, K_FOREVER);
 	proto_get_last_known_date_pos(&cached_fix, &msg.m.position_msg.xDatePos);
+	k_mutex_unlock(&cached_fix_mutex);
 
 	int ret = encode_and_store_message(&msg);
 	if (ret != 0) {
@@ -582,7 +586,10 @@ static void log_zap_message_work_fn()
 	msg.which_m = NofenceMessage_client_zap_message_tag;
 	msg.m.client_zap_message.has_sFenceDist = true;
 	msg.m.client_zap_message.sFenceDist = (int16_t)atomic_get(&cached_dist_zap);
+	k_mutex_lock(&cached_fix_mutex, K_FOREVER);
 	proto_get_last_known_date_pos(&cached_fix, &msg.m.client_zap_message.xDatePos);
+	k_mutex_unlock(&cached_fix_mutex);
+
 	msg.m.client_zap_message.ucReaction = 0;
 	msg.m.client_zap_message.usReactionDuration = 0;
 
@@ -610,7 +617,9 @@ static void log_animal_escaped_work_fn()
 	proto_InitHeader(&msg);
 	msg.which_m = NofenceMessage_status_msg_tag;
 	msg.m.status_msg.has_datePos = true;
+	k_mutex_lock(&cached_fix_mutex, K_FOREVER);
 	proto_get_last_known_date_pos(&cached_fix, &msg.m.status_msg.datePos);
+	k_mutex_unlock(&cached_fix_mutex);
 	msg.m.status_msg.eMode = current_state.collar_mode;
 	msg.m.status_msg.eReason = Reason_WARNSTOPREASON_ESCAPED;
 	msg.m.status_msg.eCollarStatus = current_state.collar_status;
@@ -647,8 +656,10 @@ static void log_status_message_fn()
 	NofenceMessage msg;
 	proto_InitHeader(&msg);
 	msg.which_m = NofenceMessage_status_msg_tag;
+	k_mutex_lock(&cached_fix_mutex, K_FOREVER);
 	msg.m.status_msg.has_datePos = proto_has_last_known_date_pos(&cached_fix);
 	proto_get_last_known_date_pos(&cached_fix, &msg.m.status_msg.datePos);
+	k_mutex_unlock(&cached_fix_mutex);
 	msg.m.status_msg.eMode = current_state.collar_mode;
 	msg.m.status_msg.eReason = Reason_NOREASON;
 	msg.m.status_msg.eCollarStatus = current_state.collar_status;
@@ -683,7 +694,9 @@ static void log_warning_work_fn()
 	msg.m.client_warning_message.has_sFenceDist = true;
 	msg.m.client_warning_message.sFenceDist = (int16_t)atomic_get(&cached_dist_warn);
 	msg.m.client_warning_message.usDuration = atomic_get(&cached_warning_duration);
+	k_mutex_lock(&cached_fix_mutex, K_FOREVER);
 	proto_get_last_known_date_pos(&cached_fix, &msg.m.client_zap_message.xDatePos);
+	k_mutex_unlock(&cached_fix_mutex);
 
 	int err = encode_and_store_message(&msg);
 	if (err != 0) {
@@ -705,7 +718,9 @@ static void log_correction_start_work_fn()
 	msg.m.client_correction_start_message.has_sFenceDist = true;
 	msg.m.client_correction_start_message.sFenceDist =
 		(int16_t)atomic_get(&cached_dist_correction_start);
+	k_mutex_lock(&cached_fix_mutex, K_FOREVER);
 	proto_get_last_known_date_pos(&cached_fix, &msg.m.client_correction_start_message.xDatePos);
+	k_mutex_unlock(&cached_fix_mutex);
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
@@ -727,7 +742,9 @@ static void log_correction_end_work_fn()
 	msg.m.client_correction_end_message.has_sFenceDist = true;
 	msg.m.client_correction_end_message.sFenceDist =
 		(int16_t)atomic_get(&cached_dist_correction_end);
+	k_mutex_lock(&cached_fix_mutex, K_FOREVER);
 	proto_get_last_known_date_pos(&cached_fix, &msg.m.client_correction_end_message.xDatePos);
+	k_mutex_unlock(&cached_fix_mutex);
 
 	int err = encode_and_store_message(&msg);
 	if (err) {
@@ -777,9 +794,13 @@ static void log_position_state_machine()
 	static uint64_t last_pos_timestamp = 0;
 	int ret;
 
+	k_mutex_lock(&cached_fix_mutex, K_FOREVER);
+	const uint32_t unix_timestamp = cached_fix.unix_timestamp;
+	k_mutex_unlock(&cached_fix_mutex);
+
 	switch (active_state) {
 	case STARTUP:
-		if (cached_fix.unix_timestamp > 0) {
+		if (unix_timestamp > 0) {
 			active_state = WAIT_FOR_GNSS_INACTIVE;
 		}
 		break;
@@ -794,21 +815,21 @@ static void log_position_state_machine()
 				if (ret < 0) {
 					NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 1196),"err: Failed to send position log msg before GNSS SLEEP!\n"));
 				}
-				last_pos_timestamp = cached_fix.unix_timestamp;
+				last_pos_timestamp = unix_timestamp;
 			}
 			active_state = WAIT_FOR_FIX;
 		}
 		break;
 	case WAIT_FOR_FIX: {
 		if (cached_gnss_mode != GNSSMODE_INACTIVE) {
-			if (cached_fix.unix_timestamp > last_pos_timestamp) {
+			if (unix_timestamp > last_pos_timestamp) {
 				store_pos_work_container.pos_type = PositionType_AFTER_BBRAM;
 				ret = k_work_reschedule_for_queue(
 					&message_q, &store_pos_work_container.work, K_NO_WAIT);
 				if (ret < 0) {
 					NCLOG_ERR(MESSAGING_MODULE, TRice0( iD( 2028),"err: Failed to send position log msg after GNSS wake-up!\n"));
 				}
-				last_pos_timestamp = cached_fix.unix_timestamp;
+				last_pos_timestamp = unix_timestamp;
 				active_state = WAIT_FOR_GNSS_INACTIVE;
 			}
 		}
@@ -1131,17 +1152,13 @@ static bool event_handler(const struct event_header *eh)
 
 		/* Update that we received GNSS data regardless of validity. */
 		update_cache_reg(GNSS_STRUCT);
-
-		/* TODO, review pshustad, might block the event manager for 50 ms ? */
-		if (k_sem_take(&cache_lock_sem, K_MSEC(50)) == 0) {
-			if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
-				cached_fix = ev->gnss_data.lastfix;
-			}
-			cached_ttff = ev->gnss_data.latest.ttff;
-			cached_msss = ev->gnss_data.latest.msss;
-
-			k_sem_give(&cache_lock_sem);
+		if (ev->gnss_data.fix_ok && ev->gnss_data.has_lastfix) {
+			k_mutex_lock(&cached_fix_mutex, K_FOREVER);
+			cached_fix = ev->gnss_data.lastfix;
+			k_mutex_unlock(&cached_fix_mutex);
 		}
+		cached_ttff = ev->gnss_data.latest.ttff;
+		cached_msss = ev->gnss_data.latest.msss;
 
 		if (ev->gnss_data.fully_resolved_unix_timestamp != 0) {
 			time_t gm_time = (time_t)ev->gnss_data.fully_resolved_unix_timestamp;
@@ -1804,8 +1821,10 @@ void build_poll_request(NofenceMessage *poll_req)
 
 	proto_InitHeader(poll_req);
 	poll_req->which_m = NofenceMessage_poll_message_req_tag;
+	k_mutex_lock(&cached_fix_mutex, K_FOREVER);
 	proto_get_last_known_date_pos(&cached_fix, &poll_req->m.poll_message_req.datePos);
 	poll_req->m.poll_message_req.has_datePos = proto_has_last_known_date_pos(&cached_fix);
+	k_mutex_unlock(&cached_fix_mutex);
 	poll_req->m.poll_message_req.eMode = current_state.collar_mode;
 	poll_req->m.poll_message_req.usZapCount = current_state.zap_count;
 	poll_req->m.poll_message_req.eCollarStatus = current_state.collar_status;
@@ -1919,11 +1938,13 @@ void build_poll_request(NofenceMessage *poll_req)
 		 * of an animal not sleeping for 49.7 days.
 		 */
 		uint32_t timeSinceFixSec;
+		k_mutex_lock(&cached_fix_mutex, K_FOREVER);
 		if (cached_msss < cached_fix.msss) {
 			timeSinceFixSec = cached_msss / 1000;
 		} else {
 			timeSinceFixSec = (cached_msss - cached_fix.msss) / 1000;
 		}
+		k_mutex_unlock(&cached_fix_mutex);
 
 		if (timeSinceFixSec > UINT16_MAX) {
 			timeSinceFixSec = UINT16_MAX;

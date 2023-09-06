@@ -190,7 +190,7 @@ static int gnss_controller_reset_and_setup_gnss(uint16_t mask)
 {
 	int ret = gnss_wakeup(gnss_dev);
 	if (ret != 0) {
-		NCLOG_ERR(NCID, TRice( iD(6612), "err: gnss_wakeup failed %d \n", ret));
+		NCLOG_ERR(NCID, TRice( iD(6612), " gnss_wakeup failed %d \n", ret));
 		return ret;
 	}
 

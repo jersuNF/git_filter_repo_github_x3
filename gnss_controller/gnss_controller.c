@@ -474,7 +474,7 @@ static void gnss_timed_out(void)
 	/* be much more careful to send reset events than timeouts, as this might stress the GNSS receiver */
 	if (gnss_timeout_count > CONFIG_GNSS_TIMEOUTS_BEFORE_RESET) {
 		gnss_timeout_count = 0;
-		NCLOG_DBG(NCID, TRice( iD(5063), " dbg: resets GNSS %d \n", gnss_reset_count));
+		NCLOG_DBG(NCID, TRice( iD(5063), "dbg: resets GNSS %d \n", gnss_reset_count));
 		if (gnss_reset_count < 1) {
 			gnss_reset_count++;
 			gnss_controller_reset_and_setup_gnss(GNSS_RESET_MASK_HOT);

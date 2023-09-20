@@ -61,8 +61,6 @@ bool lte_is_ready(void)
 static ssize_t sendall(int sock, const void *buf, size_t len)
 {
 	ssize_t to_send = (ssize_t)len;
-	/* FIXME (pshustad) Revisit: Timing out after 500 ms for potential several 'send' (!) */
-	k_timer_start(&sendall_timer, K_MSEC(500), K_NO_WAIT);
 	while (len != 0) {
 		ssize_t out_len = send(sock, buf, len, 0);
 		if (out_len < 0) {
@@ -70,9 +68,6 @@ static ssize_t sendall(int sock, const void *buf, size_t len)
 		}
 		buf = (const char *)buf + out_len;
 		len -= out_len;
-		if (k_timer_remaining_ticks(&sendall_timer) == 0) {
-			return -ETIMEDOUT;
-		}
 	}
 	return to_send;
 }

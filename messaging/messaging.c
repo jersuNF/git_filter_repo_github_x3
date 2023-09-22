@@ -339,10 +339,6 @@ static int build_seq_message()
 {
 	int err;
 
-	/* Fetch histogram data */
-	struct save_histogram *histogram_snapshot = new_save_histogram();
-	EVENT_SUBMIT(histogram_snapshot);
-
 	collar_histogram histogram;
 	err = k_msgq_get(&histogram_msgq, &histogram, K_SECONDS(10));
 	if (err) {
@@ -489,6 +485,11 @@ static void seq_periodic_fn()
 	int ret;
 	ret = k_work_reschedule_for_queue(&message_q, &seq_periodic_work,
 					  K_MINUTES(atomic_get(&seq_period_min)));
+
+	/* Capture/Reset histogram data */
+	struct save_histogram *histogram_snapshot = new_save_histogram();
+	EVENT_SUBMIT(histogram_snapshot);
+
 	if (ret < 0) {
 		NCLOG_ERR(NCID, TRice0( iD( 7508),"err: Failed to reschedule periodic seq messages! \n"));
 	}

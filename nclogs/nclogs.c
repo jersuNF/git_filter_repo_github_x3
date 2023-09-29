@@ -70,21 +70,26 @@ int nclogs_read_with_callback(logs_read_cb_fn callback, NofenceMessage **msg_buf
 	/*	Read from the ring buffer and copy over to the NofeceMessage buffer provided.
 	*	This routine will make sure that all available data is read out, even if the buffer wraps around.
 	*/
+
 	uint8_t *src;
-	uint32_t bytes_read;
+	uint32_t bytes_read = 0U;
 	uint32_t total_bytes_read = 0U;
 	uint32_t available_size = sizeof((*msg_buffer)->m.generic_msg.usBuf);
 	uint8_t *data = (uint8_t*) (*msg_buffer)->m.generic_msg.usBuf;
+
 	do {
-		bytes_read =
-			ring_buf_get_claim(&nclogs.nclog_buffer.rb_trice, &src, available_size);
+		bytes_read = 0;
+		if (available_size - total_bytes_read > 0) {
+			bytes_read = ring_buf_get_claim(&nclogs.nclog_buffer.rb_trice, &src,
+							available_size - total_bytes_read);
+		}
+		total_bytes_read += bytes_read;
 		if (data) {
 			memcpy(data, src, bytes_read);
 			data += bytes_read;
 		}
-		total_bytes_read += bytes_read;
-		available_size -= bytes_read;
-	} while (available_size && bytes_read);
+
+	} while (bytes_read > 0);
 
 	if (total_bytes_read > 0) {
 		int cb_ret = callback(*msg_buffer, total_bytes_read);

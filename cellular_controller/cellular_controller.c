@@ -3,14 +3,9 @@
 #include "cellular_controller_events.h"
 #include "cellular_helpers_header.h"
 #include "messaging_module_events.h"
-#include <zephyr.h>
 #include "error_event.h"
-#include <modem_nf.h>
 #include "fw_upgrade_events.h"
-#include "selftest.h"
 #include "pwr_event.h"
-#include "stg_config.h"
-#include <assert.h>
 
 #define RCV_THREAD_STACK CONFIG_RECV_THREAD_STACK_SIZE
 #define RCV_PRIORITY CONFIG_RECV_THREAD_PRIORITY
@@ -75,6 +70,72 @@ static bool fota_in_progress = false;
 static bool switch_rat = false;
 
 static bool enable_mdm_fota = false;
+static APP_BMEM bool connected;
+
+#ifdef CONFIG_ZTEST
+void set_waiting_for_msg(bool val)
+{
+	waiting_for_msg = val;
+}
+bool get_waiting_for_msg(void)
+{
+	return waiting_for_msg;
+}
+
+void set_connected(bool val)
+{
+	connected = val;
+}
+bool get_connected(void)
+{
+	return connected;
+}
+
+void set_modem_is_ready(bool val)
+{
+	modem_is_ready = val;
+}
+bool get_modem_is_ready(void)
+{
+	return modem_is_ready;
+}
+
+bool get_power_level_ok(void)
+{
+	return power_level_ok;
+}
+void set_power_level_ok(bool val)
+{
+	power_level_ok = val;
+}
+
+bool get_fota_in_progress(void)
+{
+	return fota_in_progress;
+}
+void set_fota_in_progress(bool val)
+{
+	fota_in_progress = val;
+}
+
+void set_switch_rat(bool val)
+{
+	switch_rat = val;
+}
+bool get_switch_rat(void)
+{
+	return switch_rat;
+}
+
+void set_enable_mdm_fota(bool val)
+{
+	enable_mdm_fota = val;
+}
+bool get_enable_mdm_fota(void)
+{
+	return enable_mdm_fota;
+}
+#endif
 
 APP_DMEM struct configs conf = {
 	.ipv4 = {
@@ -103,7 +164,6 @@ extern struct k_sem listen_sem;
 K_THREAD_DEFINE(listen_recv_tid, RCV_THREAD_STACK, listen_sock_poll, NULL, NULL, NULL,
 		K_PRIO_COOP(RCV_PRIORITY), 0, 0);
 
-static APP_BMEM bool connected;
 static uint8_t *pMsgIn = NULL;
 static float socket_idle_count;
 static char *m_ftp_url = NULL;
@@ -458,10 +518,36 @@ static void end_connection(void)
 	}
 }
 
+#ifdef CONFIG_ZTEST
+static bool download_complete = false;
+static bool mdm_install_started = false;
+
+void set_download_complete(bool val)
+{
+	download_complete = val;
+}
+bool get_download_complete(void)
+{
+	return download_complete;
+}
+
+void set_mdm_install_started(bool val)
+{
+	mdm_install_started = val;
+}
+bool get_mdm_install_started(void)
+{
+	return mdm_install_started;
+}
+
+#endif
+
 static mdm_fota_status mdm_fota(void)
 {
+#ifndef CONFIG_ZTEST
 	static bool download_complete = false;
 	static bool mdm_install_started = false;
+#endif
 	int ret = INSTALLATION_FAILED;
 	struct modem_nf_uftp_params ftp_params;
 	ftp_params.ftp_server = "172.31.45.52";
@@ -622,7 +708,6 @@ static void cellular_controller_keep_alive(void *dev)
 
 void announce_connection_state(bool state)
 {
-	k_sem_reset(&connection_state_sem);
 	publish_last_used_urat();
 	struct connection_state_event *ev = new_connection_state_event();
 	ev->state = state;

@@ -7,6 +7,7 @@
 
 #include <zephyr.h>
 #include "event_manager.h"
+#include "stg_config.h"
 
 typedef struct {
 	int16_t x;

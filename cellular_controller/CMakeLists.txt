@@ -7,7 +7,7 @@ zephyr_include_directories(
         ./../../events/error_handler/
         ./../../events/power_manager/
         ../../include
-        ./../../modules/nf_settings/include)
+        )
 
 target_sources(app PRIVATE
         cellular_controller.c

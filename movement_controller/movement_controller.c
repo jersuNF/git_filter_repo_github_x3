@@ -9,7 +9,6 @@
 
 #include "movement_controller.h"
 #include "movement_events.h"
-#include "stg_config.h"
 #include "nf_fifo.h"
 #include "trigonometry.h"
 
